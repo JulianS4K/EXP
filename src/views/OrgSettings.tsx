@@ -340,6 +340,12 @@ export default function OrgSettings() {
             Limit flags
           </button>
           <button
+            onClick={() => navigate(`/orgs/${org.id}/activity`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Activity
+          </button>
+          <button
             onClick={() => navigate(`/orgs/${org.id}/seat-maps`)}
             className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
           >

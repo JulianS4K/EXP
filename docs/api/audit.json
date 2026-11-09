@@ -1,0 +1,179 @@
+{
+  "file": "audit",
+  "name": "Audit log",
+  "order": 66.3,
+  "description": "The organization's audit log: who changed what, when and from where, for the changes public-sector buyers ask about. Inventory (events, ticket types, quotas, promo codes, holds), money (refunds, refund-request decisions, fee changes, comps, voids, order edits, door sales voided or refunded, cash paid-outs and drawer counts, gift cards, offline donations, payouts, promoter payouts, settlements) and access (members, invite approval, API keys and their scopes, OAuth apps, role API permissions), plus every export of fans, the hashed audience, donations, price disclosures, attendees and this log. Each row names the actor: `kind` is user, api_key (`ref` is the key's id, never its secret), oauth_app (`ref` is the app's client id), service (Exos itself) or cron; `user_id` is the member (for a key, the member who created it) and `role` their role then. `changes` lists only the fields that changed, as {field: [old, new]} ([null, value] when set from nothing); long text shows as its length and objects as \"(changed)\". It never holds card data, a buyer's email or phone, a secret or a code. `source` is dashboard, api, door, pos, webhook or system, and `request_id` ties together the rows one API request made. Rows are never edited or deleted, and are kept for the life of the organization. Read-only; door scans are in the check-in endpoints.",
+  "endpoints": [
+    {
+      "id": "list-audit",
+      "method": "GET",
+      "path": "/v1/audit",
+      "summary": "Audit log",
+      "description": "The key's organization's audit rows, newest first, paged. Filter by an event, a member (actor_id), an action group or one action, and a time range (`from` inclusive, `to` exclusive). An event or member of another organization matches nothing. Read-only.",
+      "auth": "api_key",
+      "scope": "audit:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "One event's rows.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "actor_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "What one member did (for an API key, the member who created it).",
+          "example": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d"
+        },
+        {
+          "name": "group",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "inventory, money, access or data (exports).",
+          "example": "money"
+        },
+        {
+          "name": "action",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "One action, group.verb.",
+          "example": "refund.issue"
+        },
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Rows at or after this.",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "Rows before this.",
+          "example": "2026-12-01"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, from 1.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200.",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": 88213,
+                "at": "2026-11-09T15:04:22Z",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "action": "refund.issue",
+                "group": "money",
+                "entity": {
+                  "type": "order",
+                  "id": "cs_live_a1B2c3"
+                },
+                "actor": {
+                  "kind": "api_key",
+                  "user_id": "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+                  "ref": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+                  "role": "finance"
+                },
+                "changes": {
+                  "refund_request": [
+                    null,
+                    "7e6d5c4b-3a29-4f18-8e07-d6c5b4a39281"
+                  ],
+                  "scope": [
+                    null,
+                    "order"
+                  ]
+                },
+                "amount_cents": 1500,
+                "currency": "USD",
+                "reason": "Buyer moved",
+                "source": "api",
+                "request_id": "0f9e8d7c-6b5a-4c3d-9e2f-1a0b9c8d7e6f"
+              },
+              {
+                "id": 88207,
+                "at": "2026-11-09T14:58:01Z",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "action": "tier.update",
+                "group": "inventory",
+                "entity": {
+                  "type": "tier",
+                  "id": "c1d2e3f4-a5b6-4c7d-8e9f-0a1b2c3d4e5f"
+                },
+                "actor": {
+                  "kind": "user",
+                  "user_id": "2b3c4d5e-6f70-4a81-92a3-b4c5d6e7f809",
+                  "ref": null,
+                  "role": "owner"
+                },
+                "changes": {
+                  "price": [
+                    40,
+                    45
+                  ]
+                },
+                "amount_cents": null,
+                "currency": null,
+                "reason": null,
+                "source": "dashboard",
+                "request_id": null
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 2,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad page, per_page, date, id, group or action.",
+          "example": {
+            "error": "group must be one of inventory, money, access, data."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks audit:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "audit:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"audit:read\""
+          }
+        }
+      ]
+    }
+  ]
+}

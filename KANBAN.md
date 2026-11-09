@@ -349,6 +349,8 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
 6. Parked: reserved seating, season tickets, box-office card payments (Stripe Terminal) and ticket printing.
 7. Parked: agency payment gateways (e.g. TouchNet) and campus SSO (SAML).
 8. Parked: SOC 2 Type II (about $30–110k, 6–12 months): only when a target bid makes it pass/fail.
+9. ✅ Org audit log (branch `claude/exos-org-audit`, mig 20261109100000): append-only `exos_org_audit` (who, what, when, from where;
+   no card data, buyer emails or phones), Org → Activity with filters and CSV, `GET /v1/audit` (`audit:read`); docs/security.md.
 
 ## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
 

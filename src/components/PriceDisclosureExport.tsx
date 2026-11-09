@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Download, Receipt } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
+import { logExport } from '../lib/orgAuditApi';
 import {
   PRICE_DISCLOSURE_HEADER, priceDisclosureCsvRows, summarizePriceDisclosure,
   type PriceDisclosureRow, type PriceDisclosureSummary,
@@ -33,6 +34,7 @@ export default function PriceDisclosureExport({ eventId, eventTitle }: { eventId
         csvFileName(['price-record', eventTitle]),
         toCsv(PRICE_DISCLOSURE_HEADER, priceDisclosureCsvRows(rows)),
       );
+      void logExport(null, 'price_disclosure', rows.length, eventId); // claude/exos-org-audit
     } catch (err: any) {
       console.warn('exos_price_disclosure_export failed:', err);
       setError(`Could not export: ${err?.message ? String(err.message) : 'unknown error'}`);
