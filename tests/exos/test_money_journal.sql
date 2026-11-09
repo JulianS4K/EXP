@@ -538,13 +538,15 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_checkout_sessions WHERE free_kind = 'comp' AND buyer_email = 'mj-bo@x.com') = 1, 'MJ9 box-office comp';
   -- RSVP and referral reward refs (as their paths mint them).
   INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
-  VALUES (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', NULL, NULL, 'mj-rsvp@x.com', 'active', 'mj-r1', 0, 'rsvp:' || pg_temp.u('rv'), 'vibepass'),
-         (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', NULL, NULL, 'mj-rsvp@x.com', 'active', 'mj-r2', 0, 'rsvp:' || pg_temp.u('rv'), 'vibepass'),
+  VALUES (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', pg_temp.u('o1'), pg_temp.u('o1'), 'mj-rsvp@x.com', 'active', 'mj-r1', 0, 'rsvp:' || pg_temp.u('rv'), 'vibepass'),
+         (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', pg_temp.u('o1'), pg_temp.u('o1'), 'mj-rsvp@x.com', 'active', 'mj-r2', 0, 'rsvp:' || pg_temp.u('rv'), 'vibepass'),
          (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', pg_temp.u('b2'), pg_temp.u('b2'), 'mj-b2@x.com', 'active', 'mj-r3', 0, 'referral_x', 'referral_reward'),
-         (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', NULL, NULL, NULL, 'active', 'mj-r4', 0, 'rsvp:phone', 'vibepass');
+         (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('tf'), 'Free', pg_temp.u('o1'), pg_temp.u('o1'), NULL, 'active', 'mj-r4', 0, 'rsvp:phone', 'vibepass');
   ASSERT (SELECT quantity FROM public.exos_checkout_sessions WHERE free_kind = 'rsvp') = 2, 'MJ9 RSVP: one order of 2';
   ASSERT (SELECT count(*) FROM public.exos_checkout_sessions WHERE free_kind = 'referral') = 1, 'MJ9 referral reward';
   ASSERT (SELECT count(*) FROM public.exos_checkout_sessions WHERE free_kind = 'rsvp') = 1, 'MJ9 no buyer (phone only): no order';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_checkout_sessions WHERE free_kind = 'rsvp' AND buyer_uid = pg_temp.u('o1')),
+    'MJ9 an RSVP parked on the org owner (as prod mints it) is never the owner''s order';
   -- Not for: a paid checkout's tickets, a marketplace ticket, a partner sale, a paid door ticket.
   INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
   VALUES (pg_temp.u('e1'), pg_temp.u('1'), pg_temp.u('t1'), 'GA', pg_temp.u('b1'), pg_temp.u('b1'), 'mj-b1@x.com', 'active', 'mj-n1', 0, 'cs_mj_2', 'stripe'),

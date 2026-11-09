@@ -1076,6 +1076,11 @@ DECLARE v_email text; v_uid uuid; v_owner_email text; v_sid text; v_cur text;
 BEGIN
   v_email := lower(nullif(btrim(coalesce(t.buyer_email, '')), ''));
   v_uid := t.owner_id;
+  -- An RSVP is minted parked on the org owner (exos_rsvp_confirm): its order is
+  -- always the guest's, never the owner's; a phone-only RSVP gets none.
+  IF p_kind = 'rsvp' THEN
+    v_uid := NULL;
+  END IF;
   IF v_uid IS NOT NULL THEN
     SELECT lower(u.email) INTO v_owner_email FROM auth.users u WHERE u.id = v_uid;
     -- A comp parked on the staff member (no account yet) is the recipient's.
