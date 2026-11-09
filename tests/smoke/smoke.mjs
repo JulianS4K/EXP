@@ -694,8 +694,8 @@ await run('event report: no door summary before the migration', async (page) => 
 // checks what they may say); here: the page renders, carries its meta, and the
 // call to action goes to the door or to sign-up.
 const APP_PAGES = [
-  { id: 'door', headline: 'The free door app for any event.', cta: 'Open the door app', to: '/door' },
-  { id: 'events', headline: 'Create an event page and sell tickets.', cta: 'Create your organization', to: '/onboarding' },
+  { id: 'door', headline: 'The free door app for any event, even with no signal.', cta: 'Open the door app', to: '/door' },
+  { id: 'events', headline: 'Create an event page. Ticket sales open at launch.', cta: 'Create your organization', to: '/onboarding' },
   { id: 'promote', headline: 'Get people to your event, and see who brought them.', cta: 'Create your organization', to: '/onboarding' },
   { id: 'money', headline: 'Your sales, settlements and books in one place.', cta: 'Create your organization', to: '/onboarding' },
 ];

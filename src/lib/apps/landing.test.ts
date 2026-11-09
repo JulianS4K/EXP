@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { PRODUCT_FACTS, type ProductFact } from '../hosting/productFacts';
 import { APP_LINKS } from './links';
-import { APP_LANDINGS, PRICING_FACT_IDS, SIGNUP_PATH, appLanding, appLandingAt, landingClaims } from './landing';
+import {
+  APP_LANDINGS, PRICING_FACT_IDS, SIGNUP_PATH, appLanding, appLandingAt, eventsCopy, landingClaims,
+} from './landing';
 
 const byId = new Map(PRODUCT_FACTS.map((f) => [f.id, f]));
 
@@ -24,6 +26,27 @@ describe('app landing pages', () => {
       }
       expect(new Set(a.factIds).size).toBe(a.factIds.length);
     }
+  });
+
+  it('only says "sell tickets" on the Events page once paid checkout is live', () => {
+    const events = appLanding('events');
+    const copy = [events.title, events.description, events.headline];
+    if (byId.get('paid-checkout')!.status !== 'live') {
+      for (const t of copy) expect(t.toLowerCase()).not.toContain('sell tickets');
+    }
+    // Both branches, whatever the registry says today.
+    const withStatus = (status: ProductFact['status']) =>
+      PRODUCT_FACTS.map((f) => (f.id === 'paid-checkout' ? { ...f, status } : f));
+    for (const status of ['at_launch', 'off', 'not_shipped'] as const) {
+      for (const t of Object.values(eventsCopy(withStatus(status)))) expect(t.toLowerCase()).not.toContain('sell tickets');
+    }
+    expect(eventsCopy(withStatus('live')).headline).toBe('Create an event page and sell tickets.');
+  });
+
+  it('shows the pricing facts on every page, labelled coming at launch while they are', () => {
+    const pricing = landingClaims(PRICING_FACT_IDS);
+    expect(pricing.map((c) => c.id)).toEqual([...PRICING_FACT_IDS]);
+    for (const c of pricing) expect(c.atLaunch).toBe(byId.get(c.id)!.status === 'at_launch');
   });
 
   it('sends the door page to /door and the others to sign-up', () => {

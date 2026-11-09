@@ -241,8 +241,8 @@ await check('transfer a ticket', async (page, run) => {
 
 // ── Apps suite landing pages (public, signed out) ─────────────────────────
 for (const [id, headline, device] of [
-  ['door', 'The free door app for any event.', 'iPhone 13'],
-  ['events', 'Create an event page and sell tickets.', 'Desktop Chrome'],
+  ['door', 'The free door app for any event, even with no signal.', 'iPhone 13'],
+  ['events', 'Create an event page. Ticket sales open at launch.', 'Desktop Chrome'],
   ['promote', 'Get people to your event, and see who brought them.', 'iPhone 13'],
   ['money', 'Your sales, settlements and books in one place.', 'Desktop Chrome'],
 ]) {

@@ -46,6 +46,28 @@ export interface AppLanding {
   cta: { to: string; label: string };
 }
 
+/**
+ * The Events page's title, description and headline. Paid ticket sales are the
+ * `paid-checkout` fact; until it is live the page says sales open at launch
+ * instead of "sell tickets", so the copy follows the registry.
+ */
+export function eventsCopy(facts: readonly ProductFact[] = PRODUCT_FACTS): Pick<AppLanding, 'title' | 'description' | 'headline'> {
+  const live = facts.find((f) => f.id === 'paid-checkout')?.status === 'live';
+  return live
+    ? {
+      title: 'Exos Events: create an event page and sell tickets',
+      description: 'Create an event page and sell tickets with all-in prices, presales, tables and guest lists.',
+      headline: 'Create an event page and sell tickets.',
+    }
+    : {
+      title: 'Exos Events: event pages with all-in prices',
+      description:
+        'Create an event page with all-in prices, presales, tables, guest lists and a waitlist. ' +
+        'Paid ticket sales open at launch.',
+      headline: 'Create an event page. Ticket sales open at launch.',
+    };
+}
+
 export const APP_LANDINGS: readonly AppLanding[] = [
   {
     id: 'door',
@@ -55,7 +77,7 @@ export const APP_LANDINGS: readonly AppLanding[] = [
     description:
       'Check in any event for free, including tickets sold on Eventbrite, Posh, DICE, Shotgun or RA. ' +
       'Import the attendee CSV, then scan or check guests in by name, offline too.',
-    headline: 'The free door app for any event.',
+    headline: 'The free door app for any event, even with no signal.',
     intro:
       'Sell on Eventbrite, Posh, DICE, Shotgun, RA or from a spreadsheet? Import the attendee list and run the door ' +
       'with Exos. Scan their barcodes or check guests in by name, with or without signal.',
@@ -66,10 +88,7 @@ export const APP_LANDINGS: readonly AppLanding[] = [
     id: 'events',
     path: '/apps/events',
     name: 'Events',
-    title: 'Exos Events: create an event page and sell tickets',
-    description:
-      'Create an event page and sell tickets with all-in prices, presales, tables and guest lists.',
-    headline: 'Create an event page and sell tickets.',
+    ...eventsCopy(),
     intro:
       'One page per event, with the ticket types you need, and buyers see the price they pay. ' +
       'Share it anywhere, including Instagram and TikTok.',
@@ -83,13 +102,13 @@ export const APP_LANDINGS: readonly AppLanding[] = [
     id: 'promote',
     path: '/apps/promote',
     name: 'Promote',
-    title: 'Exos Promote: promoter links, share links and ad catalogs',
+    title: 'Exos Promote: promoter links, fan sharing and listings',
     description:
-      'Give promoters tracked links, a link-in-bio page and a leaderboard. Let fans share with their own link, ' +
-      'and export your events as a Meta, TikTok or Google ad catalog.',
+      'Give promoters tracked links, a link-in-bio page and a leaderboard. Let fans share their own link. ' +
+      "Put your events in people's calendars and in AI assistants, or export an ad catalog.",
     headline: 'Get people to your event, and see who brought them.',
     intro:
-      'Give promoters and fans their own links, and put your events in front of more people.',
+      'Give promoters and fans their own links, put your events where people look, and see who brought each ticket.',
     factIds: ['promoters', 'fan-referrals', 'ad-catalogs', 'instagram-checkout', 'storefront-embed', 'calendar-feeds', 'ai-assistants'],
     cta: { to: SIGNUP_PATH, label: 'Create your organization' },
   },
@@ -103,8 +122,8 @@ export const APP_LANDINGS: readonly AppLanding[] = [
       'journal with a CSV export.',
     headline: 'Your sales, settlements and books in one place.',
     intro:
-      'See what you sold, what you took at the door and what you owe the artist, per event and across your ' +
-      'organization.',
+      'See what you sold online and at the door, what you owe the artist, and your books, per event and across ' +
+      'your organization.',
     factIds: ['paid-checkout', 'money-journal', 'invoices-tax', 'booking-settlements', 'walk-up-sales', 'org-audit-log'],
     cta: { to: SIGNUP_PATH, label: 'Create your organization' },
   },
