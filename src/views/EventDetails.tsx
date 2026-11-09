@@ -1600,10 +1600,12 @@ export default function EventDetails() {
                     {venmoPossible(event.currency) ? 'Pay with Venmo / PayPal' : 'Pay with PayPal'}
                   </button>
                 )}
-                {/* Group buy v2 (mig 20261108120000): friends each pay their own seat. */}
-                {stripeEnabled && !soldOut && !paidNotOnSale && !!selectedTier && priceToDisplay > 0 && !seatedSelected && !slotTier
+                {/* Group buy v2 (mig 20261108120000): friends each pay their own seat. Timed
+                    types too, in the picked slot (mig 20261110110000); never reserved seating. */}
+                {stripeEnabled && !soldOut && !paidNotOnSale && !!selectedTier && priceToDisplay > 0 && !seatedSelected
                   && !voucher && (selectedTier.visibility ?? 'public') === 'public' && (
-                  <GroupPayStart eventId={event.id} tierId={selectedTier.id} quantity={quantity} maxPerOrder={maxPerOrder} signedIn={!!user} />
+                  <GroupPayStart eventId={event.id} tierId={selectedTier.id} quantity={quantity} maxPerOrder={maxPerOrder} signedIn={!!user}
+                    needsSlot={slotTier} slotId={slotTier ? slotId : null} />
                 )}
                 </>)}
 
