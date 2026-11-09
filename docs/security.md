@@ -178,7 +178,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
 | `exos_wallet_addon_pass`, `exos_wallet_addon_reissue` (migs 20261108110000, 20261111140000) | OK | Add-on pass holder only; the reissue 5 a day per holder |
-| `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows. Account deletion touches rows keyed by the account's email (transfers' `receiver_email`, promoter email, unclaimed org invites, mail, waitlist) only when `auth.users.email_confirmed_at` is set (mig 20261102160000), so an unconfirmed sign-up with someone else's address can't erase or rewrite theirs; rows keyed by the caller's uid always go |
+| `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows. `exos_follow_org` is throttled per user, 30 a minute (`exos_rate_hit`) and 300 a UTC day (`exos_follow_daily`), before the org is looked up (mig 20261112100000, `/* exos: follow throttle */`). Account deletion touches rows keyed by the account's email (transfers' `receiver_email`, promoter email, unclaimed org invites, mail, waitlist) only when `auth.users.email_confirmed_at` is set (mig 20261102160000), so an unconfirmed sign-up with someone else's address can't erase or rewrite theirs; rows keyed by the caller's uid always go |
 | `exos_set_sales_count`, `exos_import_sales_counts`, `exos_delete_sales_count` (mig 20261030120000) | OK | Sales counts (tickets sold outside Exos): owner / manager / finance of the event's (or row's) org, or admin, looked up from the row (`_exos_sales_count_can`), never from an org id the caller passes. Everything goes through `_exos_sales_count_write` (internal), which validates, merges ticket types (50 at most), caps an event at 20 entries under a per-event advisory lock, and answers `unchanged` for a re-import of the same numbers. Counts and amounts only, no buyer data. Table `exos_sales_counts`: RLS SELECT for owner / manager / finance (and admin), no client INSERT / UPDATE / DELETE grant; `exos_sales_count_totals` is `security_invoker` |
 | `exos_api_sales_count_put`, `exos_api_sales_count_delete` (mig 20261030120000) | Service role | `exos-api` only (the first write routes, `finance:write`). The function resolves the org from the API key's hash and passes it; the RPC refuses an event or row of any other org (`P0002`, answered 404) |
 | `exos_set_event_seating`, `exos_set_seats_blocked`, `exos_seat_reconciliation`, `exos_release_orphan_seats`, `exos_event_seat_status`, `exos_event_seat_roster` (mig 20261030140000) | OK | Reserved seating. Writes: owner / manager of the event's org; seating can't change once a seat is held or sold. Status: any org role; roster: door staff of the event (`exos_can_door_event`). Client-vs-service is told apart by the `role` setting (`_exos_seat_client_call`), since `current_user` inside SECURITY DEFINER is the definer. Tables: `exos_seat_maps` RLS owner / manager write, org staff read; `exos_event_seating` / `_seats` / `_seat_claims` read by org staff, no client writes. `exos_tickets.seat_*` and `exos_ticket_tiers.seated` (and a seated tier's capacity) are server-written by trigger; any ticket insert for a seated tier outside a seat-picker checkout is refused |
@@ -745,9 +745,13 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   newest first with event, member, group and date filters; it names a
   member by email (as `exos_order_edit_log` does), a key by its name, a
   platform admin as "Exos support". `exos_audit_export` (authenticated, the
-  same roles, 30 a minute) records an `export.run` for a CSV the browser
-  built (the log itself, donations, price disclosures, attendees); the org
-  is the one named or the event's, and an event of another org is P0002.
+  same roles, 30 a minute per user and 200 a day per org: its rows can't be
+  deleted, so one member can't flood the log; mig 20261112100000,
+  `/* exos: export daily cap */`, counted under a per-org advisory lock)
+  records an `export.run` for a CSV the browser built (the log itself,
+  donations, price disclosures, attendees); the org is the one named or the
+  event's, and an event of another org is P0002. Past the cap the browser's
+  CSV still downloads (its data was already on screen) but is not logged.
   `GET /v1/audit` (`audit:read`, owner and finance credentials by default,
   never a manager, content or scanner role's) reads the key's org only.
   `exos_event_audit_summary(event)` (authenticated, mig 20261110120000; the
@@ -766,22 +770,39 @@ Three anon RPCs, listed above and in H3. The rest:
   everyone else). `exos_event_follower_notice` gives counts for the
   event's own org (an event of another org, or no caller, is P0002 before
   anything is counted). `exos_org_followers` returns follower rows only for
-  followers with a fan profile in the org (the Fans tab already shows them);
-  the rest are a count, so following never discloses an address.
-  `exos_org_followers_export` is the same rows, rate limited (3 a minute,
-  20 a day per org) and logged as `export.run` (`/* exos: audit export.run */`).
-- **The mail is consent-gated in SQL** (`_exos_follower_skip_reason`): still
-  following, not org staff, an account email, no platform marketing opt-out,
-  not unsubscribed from the org's list. `exos_mail_enqueue` re-checks the
-  opt-out and adds the unsubscribe token and `List-Unsubscribe` header. The
-  recipient is always derived server-side from the follow graph.
+  followers with a fan profile in the org, and never an address (names,
+  since when, email-list state; mig 20261112100000): it is unlogged and
+  pages 500 at a time, so it must not be a way around the export's cap. The
+  rest are a count, so following never discloses an address.
+  `exos_org_followers_export` is the only source of follower addresses: the
+  same rows with the email, rate limited (3 a minute, 20 a day per org) and
+  logged as `export.run` (`/* exos: audit export.run */`).
+- **The mail is consent-gated in SQL**: still following, not org staff, an
+  account email that is confirmed (`auth.users.email_confirmed_at`, mig
+  20261112100000), no platform marketing opt-out, not unsubscribed from the
+  org's list. Checked for the whole org at publish
+  (`_exos_follower_skip_reasons`, one query) and again per follower when the
+  mail is built (`_exos_follower_skip_reason`; `test_follower_fixes.sql` FF1
+  checks the two agree). `exos_mail_enqueue` re-checks the opt-out and adds
+  the unsubscribe token and `List-Unsubscribe` header. The recipient is
+  always derived server-side from the follow graph.
+- **A publish can't be rolled back by its followers.** The trigger (and
+  `exos_announce_to_followers`) only records the notice rows, in ONE
+  `INSERT … SELECT … ON CONFLICT DO NOTHING`; the per-follower work (locks,
+  the slot, building and queueing the mail) runs only in
+  `exos_send_follower_digests`, one follower per subtransaction. Before mig
+  20261112100000 the publish ran it per follower, and `EXCEPTION WHEN
+  others` doesn't catch `query_canceled`, so a big list could hit
+  `statement_timeout` and roll the publish back. FF2 publishes to 5,000
+  followers under `statement_timeout = 2s`.
 - **Once, and at most daily.** `exos_follower_notices` (PK event + follower)
   and `exos_follower_mail_slots` (an upsert that only claims a slot unused
   for 24 hours, under row locks) make it idempotent and race-safe
-  (`tests/exos/race_follower_mail.sh`). The trigger never blocks a publish:
-  errors are a WARNING.
+  (`tests/exos/race_follower_mail.sh`: concurrent publishes and digests).
+  The trigger never blocks a publish: errors are a WARNING.
 - **Tables.** `exos_follower_notices`, `exos_follower_mail_slots`,
-  `exos_follow_tokens`: RLS on, no client grants, service role only.
+  `exos_follow_tokens`, `exos_follow_daily` (the follow throttle's daily
+  count, one row per user): RLS on, no client grants, service role only.
   `exos_neighborhoods`: reference data (no org), anon / authenticated read
   active rows, no client writes.
 - **`exos_announce_to_followers`** is redefined to go through the same

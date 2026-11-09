@@ -14,12 +14,14 @@
 --       calls a minute per network
 --   NB2 follower mail: consent gating (opted out, unsubscribed from the org,
 --       no email, org staff), one mail per (event, follower) across
---       republishing and the announce RPC, the 24-hour limit with batching
+--       republishing and the announce RPC (the publish records notices, the
+--       digest job mails: mig 20261112100000), the 24-hour limit with batching
 --       into one mail, noindex / series dates not announced (un-hiding is),
 --       nothing sent (queued only), the organizer's counts and who may read
 --       them, no cross-org leaks
---   NB3 follower list: only followers with a fan profile are rows, the rest
---       a count, non-fan emails never out; export logs export.run and is
+--   NB3 follower list: only followers with a fan profile are rows (names,
+--       never an address: mig 20261112100000), the rest a count, non-fan
+--       emails never out; export logs export.run and is
 --       rate limited; owner / manager only; cross-org refused
 --   NB4 unfollow: the mail's token unfollows once (count right, waiting
 --       notices skipped), a bad token says nothing, no mail after
@@ -213,9 +215,9 @@ BEGIN
   PERFORM pg_temp.act(NULL);
 END $$;
 INSERT INTO public.exos_mail_prefs (user_id, marketing_opt_out) VALUES (pg_temp.u('f2'), true);
-INSERT INTO public.exos_fans (org_id, email, user_id, source) VALUES
-  (pg_temp.u('A'), 'nb-f1@x.com', pg_temp.u('f1'), 'order'),
-  (pg_temp.u('A'), 'nb-f3@x.com', pg_temp.u('f3'), 'order');
+INSERT INTO public.exos_fans (org_id, email, user_id, source, first_name) VALUES
+  (pg_temp.u('A'), 'nb-f1@x.com', pg_temp.u('f1'), 'order', 'Fee'),
+  (pg_temp.u('A'), 'nb-f3@x.com', pg_temp.u('f3'), 'order', NULL);
 DO $$
 BEGIN
   PERFORM set_config('exos.fan_consent_action', 'on', true);
@@ -253,8 +255,13 @@ BEGIN
   PERFORM pg_temp.act(NULL);
   ASSERT pg_temp.st($q$SELECT public.exos_event_follower_notice(md5('nb:a1')::uuid)$q$) = 'P0002', 'NB2 nobody: not found';
 
-  -- Publish a1: one mail, to f1 only; the rest skipped with their reason.
+  -- Publish a1: the publish only records notices (mig 20261112100000), f1
+  -- pending, the rest skipped with their reason; the digest job mails f1.
   PERFORM pg_temp.publish('a1');
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'follower-new-event') = 0, 'NB2 the publish queues no mail';
+  ASSERT (SELECT status FROM public.exos_follower_notices WHERE event_id = pg_temp.u('a1') AND follower_uid = pg_temp.u('f1')) = 'pending',
+    'NB2 f1 pending until the digest';
+  ASSERT public.exos_send_follower_digests() = 1, 'NB2 the digest queues one mail';
   ASSERT pg_temp.mails('nb-f1@x.com') = 1, 'NB2 f1 mailed once';
   ASSERT pg_temp.mails('nb-f2@x.com') + pg_temp.mails('nb-f3@x.com') + pg_temp.mails('nb-ma@x.com') = 0, 'NB2 no consent, no mail';
   SELECT jsonb_object_agg(n.follower_uid::text, coalesce(n.skip_reason, n.status)) INTO r
@@ -288,6 +295,7 @@ BEGIN
   -- Within 24 hours: a2 and a3 wait, no mail.
   PERFORM pg_temp.publish('a2');
   PERFORM pg_temp.publish('a3');
+  ASSERT public.exos_send_follower_digests() = 0, 'NB2 the digest inside the window';
   ASSERT pg_temp.mails('nb-f1@x.com') = 1, 'NB2 24-hour limit';
   ASSERT (SELECT count(*) FROM public.exos_follower_notices
            WHERE follower_uid = pg_temp.u('f1') AND event_id IN (pg_temp.u('a2'), pg_temp.u('a3')) AND status = 'pending') = 2, 'NB2 waiting';
@@ -304,7 +312,7 @@ BEGIN
   -- Org B is its own window: f1 gets B's mail now, and it names only B.
   PERFORM pg_temp.act(NULL);
   UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('b1');
-  ASSERT pg_temp.mails('nb-f1@x.com') = 2, 'NB2 another org has its own window';
+  ASSERT public.exos_send_follower_digests() = 1 AND pg_temp.mails('nb-f1@x.com') = 2, 'NB2 another org has its own window';
   SELECT * INTO m FROM public.exos_mail WHERE template = 'follower-new-event' AND to_email = 'nb-f1@x.com' AND payload -> 'org' ->> 'id' = pg_temp.u('B')::text;
   ASSERT position(pg_temp.u('A')::text IN m.payload::text) = 0 AND position('NB A' IN m.payload::text) = 0, 'NB2 B''s mail says nothing of A';
 
@@ -314,6 +322,8 @@ BEGIN
    WHERE org_id = pg_temp.u('A') AND follower_uid = pg_temp.u('f1');
   -- Hidden -> listed counts as going live: ah joins the batch.
   UPDATE public.exos_events SET noindex = false WHERE id = pg_temp.u('ah');
+  ASSERT pg_temp.mails('nb-f1@x.com') = 2, 'NB2 un-hiding queues nothing itself';
+  ASSERT public.exos_send_follower_digests() = 1, 'NB2 the digest after the window';
   ASSERT pg_temp.mails('nb-f1@x.com') = 3, 'NB2 after the window: one more mail';
   SELECT * INTO m FROM public.exos_mail WHERE template = 'follower-new-event' AND to_email = 'nb-f1@x.com'
    ORDER BY created_at DESC, (payload -> 'events' -> 0 ->> 'starts_at') DESC LIMIT 1;
@@ -345,18 +355,27 @@ BEGIN
   -- f1 and f3 have fan profiles; f2, f4 and ma are a count only.
   ASSERT (r ->> 'total')::int = 5 AND (r ->> 'listed')::int = 2 AND (r ->> 'not_listed')::int = 3
      AND (r ->> 'gets_new_event_mail')::int = 1, 'NB3 counts ' || (r - 'rows');
-  ASSERT (SELECT array_agg(x ->> 'email' ORDER BY x ->> 'email') FROM jsonb_array_elements(r -> 'rows') x) = ARRAY['nb-f1@x.com', 'nb-f3@x.com'],
+  ASSERT (SELECT array_agg((x ->> 'fan_id')::uuid ORDER BY x ->> 'fan_id') FROM jsonb_array_elements(r -> 'rows') x)
+       = (SELECT array_agg(fa.id ORDER BY fa.id::text) FROM public.exos_fans fa
+           WHERE fa.org_id = pg_temp.u('A') AND fa.user_id IN (pg_temp.u('f1'), pg_temp.u('f3'))),
     'NB3 rows are fans';
-  ASSERT (SELECT x ->> 'email_list' FROM jsonb_array_elements(r -> 'rows') x WHERE x ->> 'email' = 'nb-f3@x.com') = 'unsubscribed'
-     AND NOT (SELECT (x ->> 'gets_new_event_mail')::boolean FROM jsonb_array_elements(r -> 'rows') x WHERE x ->> 'email' = 'nb-f3@x.com'),
+  ASSERT (SELECT x ->> 'first_name' FROM jsonb_array_elements(r -> 'rows') x
+           WHERE (x ->> 'fan_id')::uuid = (SELECT id FROM public.exos_fans WHERE org_id = pg_temp.u('A') AND user_id = pg_temp.u('f1'))) = 'Fee',
+    'NB3 names shown';
+  ASSERT (SELECT x ->> 'email_list' FROM jsonb_array_elements(r -> 'rows') x
+           WHERE (x ->> 'fan_id')::uuid = (SELECT id FROM public.exos_fans WHERE org_id = pg_temp.u('A') AND user_id = pg_temp.u('f3'))) = 'unsubscribed'
+     AND NOT (SELECT (x ->> 'gets_new_event_mail')::boolean FROM jsonb_array_elements(r -> 'rows') x
+               WHERE (x ->> 'fan_id')::uuid = (SELECT id FROM public.exos_fans WHERE org_id = pg_temp.u('A') AND user_id = pg_temp.u('f3'))),
     'NB3 consent shown';
   s := r::text;
-  ASSERT position('nb-f2@x.com' IN s) = 0 AND position('nb-ma@x.com' IN s) = 0 AND position(pg_temp.u('f2')::text IN s) = 0,
-    'NB3 non-fan followers never named';
+  ASSERT position('@' IN s) = 0 AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'rows') x WHERE x ? 'email'),
+    'NB3 the list carries no address (mig 20261112100000)';
+  ASSERT position(pg_temp.u('f2')::text IN s) = 0, 'NB3 non-fan followers never named';
   ASSERT jsonb_array_length(public.exos_org_followers(pg_temp.u('A'), 1, 1) -> 'rows') = 1, 'NB3 paging';
 
   r := public.exos_org_followers_export(pg_temp.u('A'));
   ASSERT (r ->> 'count')::int = 2 AND NOT (r -> 'rows' -> 0) ? 'fan_id', 'NB3 export rows';
+  ASSERT position('nb-f1@x.com' IN r::text) > 0, 'NB3 addresses come from the export';
   ASSERT position('nb-f2@x.com' IN r::text) = 0, 'NB3 export: fans only';
   ASSERT (SELECT count(*) FROM public.exos_org_audit a WHERE a.org_id = pg_temp.u('A') AND a.action = 'export.run'
            AND a.entity_id = 'followers' AND a.actor_uid = pg_temp.u('oa') AND (a.changes -> 'row_count' ->> 1)::int = 2) = 1,
