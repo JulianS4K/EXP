@@ -55,6 +55,11 @@ SELECT pg_temp.u(t), pg_temp.u(ev), pg_temp.u(org), pg_temp.u(tier), 'Seat', o, 
     ('c11','e2','02','d3',pg_temp.u('b3'),NULL,'p2','Cleo'),
     ('c12','e2','02','d3',pg_temp.u('b4'),NULL,'p3','Dev')
   ) v(t, ev, org, tier, o, be, ord, nm);
+-- c09 is parked the way guest checkout parks it: a pending claim-by-email
+-- transfer from the org owner to the guest (_exos_ticket_parked).
+INSERT INTO public.exos_transfers(id, ticket_id, org_id, sender_id, receiver_email, status, event_id)
+VALUES (pg_temp.u('f9'), pg_temp.u('c09'), pg_temp.u('01'), pg_temp.u('a0'), 'guest@x.com', 'pending', pg_temp.u('e1'));
+UPDATE public.exos_tickets SET pending_transfer_id = pg_temp.u('f9') WHERE id = pg_temp.u('c09');
 INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buyer_uid,quantity,amount_cents,status,ticket_ids)
 VALUES ('cs_ms_6', pg_temp.u('e1'), pg_temp.u('d1'), pg_temp.u('01'), pg_temp.u('b5'), 1, 4000, 'fulfilled', ARRAY[pg_temp.u('c06')]);
 -- SMS: the org texts from Twilio; b3 opted in, b4 opted in then out.
@@ -243,14 +248,14 @@ BEGIN
   ASSERT jsonb_array_length(j -> 'spots') = 2, 'M4: 2 spots';
   ASSERT (SELECT count(*) FROM jsonb_array_elements(j -> 'members') m
            WHERE m ->> 'ticketId' = pg_temp.u('c03')::text AND m ->> 'language' = 'es') = 1, 'M4: intake copied to the ticket';
-  -- KNOWN GAP (found 2026-11-09 by the prod-like harness): owner_id is NOT NULL
-  -- (phase-2 schema) and a guest's ticket is parked with the org owner until
-  -- claimed, so _exos_match_user_key's 'email:' fallback never fires: a parked
-  -- guest ticket is keyed as the organizer. Asserted as it is today; key parked
-  -- tickets by their pending transfer's email to fix it.
+  -- A guest's ticket is parked with the org owner until claimed (owner_id is
+  -- NOT NULL): it's keyed by the claim email, not as the organizer (mig
+  -- 20261109110000; found 2026-11-09 by the prod-like harness).
   ASSERT (SELECT count(*) FROM jsonb_array_elements(j -> 'members') m
-           WHERE m ->> 'ticketId' = pg_temp.u('c09')::text AND m ->> 'userKey' = pg_temp.u('a0')::text) = 1,
-    'M4: parked guest ticket keyed as its holder (the org owner)';
+           WHERE m ->> 'ticketId' = pg_temp.u('c09')::text AND m ->> 'userKey' = 'email:guest@x.com') = 1,
+    'M4: parked guest ticket keyed by its claim email';
+  ASSERT (SELECT count(*) FROM jsonb_array_elements(j -> 'members') m WHERE m ->> 'userKey' = pg_temp.u('a0')::text) = 0,
+    'M4: a ticket keyed as the organizer';
   ASSERT (j -> 'blocks') @> jsonb_build_array(jsonb_build_array(pg_temp.u('b5')::text, pg_temp.u('b6')::text)), 'M4: staff block in inputs';
   v := j::text;
   ASSERT position('ms-b' in v) = 0, 'M4: inputs carry an email of an account';
@@ -411,11 +416,10 @@ DO $$
 DECLARE h text;
 BEGIN
   ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'matched-reveal') = 9, 'M6: one mail per member';
-  -- KNOWN GAP (see M4): the parked guest ticket's reveal mail goes to its
-  -- holder, the org owner, not to guest@x.com. Asserted as it is today.
-  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'matched-reveal' AND to_email = 'guest@x.com') = 0
-     AND (SELECT count(*) FROM public.exos_mail WHERE template = 'matched-reveal' AND to_email = 'ms-a0@x.com') = 1,
-    'M6: parked guest ticket mailed to its holder';
+  -- The parked guest ticket's reveal goes to the guest (see M4), not the org owner.
+  ASSERT (SELECT count(*) FROM public.exos_mail WHERE template = 'matched-reveal' AND to_email = 'guest@x.com') = 1
+     AND (SELECT count(*) FROM public.exos_mail WHERE template = 'matched-reveal' AND to_email = 'ms-a0@x.com') = 0,
+    'M6: parked guest ticket mailed to the guest';
   SELECT html INTO h FROM public.exos_mail WHERE template = 'matched-reveal' AND to_email = 'ms-b3@x.com';
   ASSERT position('Bar Due' in h) > 0 AND position('&lt;with&gt;' in h) > 0 AND position('<with>' in h) = 0, 'M6: mail escaped: ' || h;
   ASSERT position('Cleo' in h) = 0 AND position('Finn' in h) > 0, 'M6: mail lists the others';
