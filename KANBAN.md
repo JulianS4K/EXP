@@ -522,7 +522,7 @@ How we build it (techniques):
    the event report's Overview, read-only, aggregated in the browser from `exos_order_money`,
    `exos_marketplace_order_money` and `exos_promoter_commissions` (`src/lib/settlement.ts`); card fees actual when
    recorded, else the estimate; per-order CSV. Disputes are a separate block under it (item 7).
-3. ✅ Minimal double-entry journal (~12 accounts, written by triggers, idempotent on source id) (mig `20261108100000_exos_money_journal`).
+3. ✅ Minimal double-entry journal (25 accounts, written by triggers, idempotent on source id) (mig `20261108100000_exos_money_journal`); completed 2026-11-10 (mig `20261110100000_exos_journal_complete`, branch `claude/exos-journal-2`; not on prod): POS card tenders and card refunds, gift cards (sale = liability, redemption, refund to the card, void / purchase refund), instant payouts and PayPal remittances to the bank, the drawer float and count variance (cash over / short). Not posted: the Exos fee on walk-up cash (operator decision, `docs/journal.md` TODO); Stripe's scheduled payouts (not recorded in Exos).
 4. ✅ Credit notes on refund (mig `20261001100000`, **not applied**): every succeeded refund, full or partial, on
    an invoiced order issues a credit note from a gapless per-org `CN-000001` series, tax share pro rata to the
    invoice; the invoice stays unchanged (`exos_invoice_totals` derives refunded amount and status). Backfills

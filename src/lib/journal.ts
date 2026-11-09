@@ -1,4 +1,4 @@
-// The money journal (mig 20261108100000, docs/journal.md): the chart, the
+// The money journal (migs 20261108100000, 20261110100000; docs/journal.md): the chart, the
 // trial balance, the journal CSV and the sales-tax report by jurisdiction.
 // PURE (no Supabase import, so it unit-tests without a client); the reads
 // live in ./journalApi.ts. Read-only: nothing here posts or changes an entry.
@@ -6,7 +6,7 @@
 import type { CsvCell } from './csv';
 import { centsToDecimal } from './settlement';
 
-export type AccountType = 'asset' | 'liability' | 'revenue' | 'contra_revenue' | 'expense';
+export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'contra_revenue' | 'expense';
 
 export interface JournalAccount {
   code: string;
@@ -21,22 +21,28 @@ export const JOURNAL_ACCOUNTS: readonly JournalAccount[] = [
   { code: 'stripe_clearing', number: 1000, name: 'Cash at Stripe / clearing', type: 'asset', normal: 'debit' },
   { code: 'paypal_receivable', number: 1010, name: 'PayPal balance due from Exos', type: 'asset', normal: 'debit' },
   { code: 'pos_cash_drawer', number: 1020, name: 'POS cash drawer', type: 'asset', normal: 'debit' },
+  { code: 'bank', number: 1030, name: 'Bank (payouts received)', type: 'asset', normal: 'debit' },
+  { code: 'cash_on_hand', number: 1040, name: 'Cash on hand (outside Exos)', type: 'asset', normal: 'debit' },
   { code: 'marketplace_receivable', number: 1100, name: 'Marketplace receivable', type: 'asset', normal: 'debit' },
   { code: 'organizer_payable', number: 2000, name: 'Organizer payable (owed to Exos)', type: 'liability', normal: 'credit' },
   { code: 'sales_tax_payable', number: 2100, name: 'Sales tax payable', type: 'liability', normal: 'credit' },
   { code: 'promoter_commissions_payable', number: 2200, name: 'Promoter commissions payable', type: 'liability', normal: 'credit' },
   { code: 'gift_cards_outstanding', number: 2300, name: 'Gift cards outstanding', type: 'liability', normal: 'credit' },
   { code: 'tips_payable', number: 2400, name: 'Tips payable (POS)', type: 'liability', normal: 'credit' },
+  { code: 'opening_balances', number: 3000, name: 'Opening balances (imported gift cards)', type: 'equity', normal: 'credit' },
   { code: 'ticket_revenue', number: 4000, name: 'Ticket revenue (face)', type: 'revenue', normal: 'credit' },
   { code: 'buyer_fees', number: 4010, name: 'Buyer fees', type: 'revenue', normal: 'credit' },
   { code: 'pos_other_sales', number: 4020, name: 'Bar and merch sales (POS)', type: 'revenue', normal: 'credit' },
   { code: 'donations', number: 4030, name: 'Donations', type: 'revenue', normal: 'credit' },
+  { code: 'gift_card_breakage', number: 4040, name: 'Gift card breakage (voided balances)', type: 'revenue', normal: 'credit' },
   { code: 'refunds', number: 4900, name: 'Refunds', type: 'contra_revenue', normal: 'debit' },
   { code: 'exos_fee', number: 5000, name: 'Exos fee', type: 'expense', normal: 'debit' },
   { code: 'card_fees', number: 5010, name: 'Card processing fees', type: 'expense', normal: 'debit' },
   { code: 'disputes', number: 5020, name: 'Disputes', type: 'expense', normal: 'debit' },
   { code: 'promoter_commissions', number: 5030, name: 'Promoter commissions', type: 'expense', normal: 'debit' },
   { code: 'pos_paid_outs', number: 5040, name: 'Cash paid-outs (POS)', type: 'expense', normal: 'debit' },
+  { code: 'cash_over_short', number: 5050, name: 'Cash over / short (POS)', type: 'expense', normal: 'debit' },
+  { code: 'gift_card_comps', number: 5060, name: 'Gift cards given away', type: 'expense', normal: 'debit' },
 ];
 
 const BY_CODE = new Map(JOURNAL_ACCOUNTS.map((a) => [a.code, a]));
@@ -161,6 +167,12 @@ const SOURCE_LABEL: Record<string, string> = {
   exos_promoter_commissions: 'Promoter commission',
   exos_pos_payments: 'Door sale',
   exos_pos_paid_outs: 'Door cash out',
+  exos_pos_reversals: 'Door card refund',
+  exos_gift_card_ledger: 'Gift card',
+  exos_gift_card_redemptions: 'Gift card redemption',
+  exos_pos_drawer_sessions: 'Cash drawer',
+  exos_org_instant_payouts: 'Instant payout',
+  exos_paypal_org_remittances: 'PayPal remittance',
 };
 
 export function sourceLabel(sourceTable: string): string {

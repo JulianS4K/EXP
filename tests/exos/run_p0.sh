@@ -272,7 +272,8 @@ for m in \
   20261108120000_exos_group_pay \
   20261108130000_exos_claim_alias_fix \
   20261109100000_exos_org_audit \
-  20261109110000_exos_security_hygiene; do
+  20261109110000_exos_security_hygiene \
+  20261110100000_exos_journal_complete; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -504,7 +505,8 @@ for m in \
          20261108120000_exos_group_pay \
          20261108130000_exos_claim_alias_fix \
          20261109100000_exos_org_audit \
-         20261109110000_exos_security_hygiene; do
+         20261109110000_exos_security_hygiene \
+         20261110100000_exos_journal_complete; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -620,6 +622,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_leftovers.sql"
 # claude/exos-money-journal: double-entry journal per org, trial balance, sales tax by jurisdiction, $0 orders for free claims and comps (mig 20261108100000; race: race_money_journal.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_money_journal.sql"
+# claude/exos-journal-2: the journal completed: POS card tenders and card refunds, gift cards (sale, redemption, refund, void), instant payouts and PayPal remittances, the drawer float and count variance; whole-DB trial balance (mig 20261110100000; race: race_money_journal.sh races 5-7, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_journal_complete.sql"
 # claude/exos-group-pay: group buy v2, each friend pays their own seat in a 30-minute window: holds, deadline release, cover the rest, per-seat orders, cross-group / cross-org tokens (mig 20261108120000; race: race_group_pay.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay.sql"
 # claude/exos-harness-full: transfer claims through prod's exos_claim_transfer body (mig 20261108130000: the proof check's alias clashed with its row variable t)
