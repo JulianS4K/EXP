@@ -239,6 +239,20 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'The feed is deployed; Exos has not joined Google\'s events ticketing program.',
   },
   {
+    id: 'neighborhood-pages', audience: 'fan', status: 'live',
+    claim: 'Exos has a page of this week\'s events for each New York neighborhood, such as Bushwick, Williamsburg, Ridgewood and the Lower East Side, at /nyc.',
+    code: ['src/views/NeighborhoodPage.tsx', 'src/views/NeighborhoodsIndex.tsx', 'src/lib/neighborhoods.ts',
+      'supabase/migrations/20261111110000_exos_neighborhoods.sql'],
+    note: 'Live once mig 20261111110000 is applied (scripts/rollout-prod.sh); events need a geocoded venue (exos-geocode).',
+  },
+  {
+    id: 'follower-new-event-email', audience: 'fan', status: 'off',
+    claim: 'Fans who follow an organizer get an email when it announces a new event, at most one a day, with a one-click unfollow link.',
+    code: ['src/lib/followers.ts', 'supabase/functions/_shared/mail-templates.ts',
+      'supabase/migrations/20261111110000_exos_neighborhoods.sql'],
+    note: 'Queued, never sent, until exos-mail-drain runs with Resend (docs/email.md); the hourly batch cron exos-follower-digests-hourly is created inactive.',
+  },
+  {
     id: 'calendar-feeds', audience: 'fan', status: 'live',
     claim: 'Organizer and venue calendars can be subscribed to in Google, Apple or Outlook calendar.',
     code: ['supabase/functions/exos-calendar/index.ts', 'src/lib/calendar.ts'],

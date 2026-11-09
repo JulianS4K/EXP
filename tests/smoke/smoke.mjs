@@ -3,7 +3,7 @@
 // pointed at the mock host, serves it, runs these). No real backend needed.
 import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
-import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables } from './mock.mjs';
+import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const IG = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 340.0.2.23.108 (iPhone15,2; iOS 17_5; en_US; en; scale=3.00; 1179x2556; 624443862)';
 const FB_ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-S918U Build/UP1A; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/126.0.6478.71 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/471.0.0.35.80;]';
@@ -1599,6 +1599,81 @@ await run('event report footer stays hidden for a role that can\'t read the audi
 }, { signedIn: true, mock: ownerMock({ ...reportMock, rpcs: { ...reportMock.rpcs,
   exos_event_audit_summary: () => ({ __status: 403, __body: { code: '42501', message: 'not authorized' } }),
 } }) });
+
+// ── claude/exos-neighborhoods (mig 20261111110000) ─────────────────────────
+await run('neighborhood page: this week in Bushwick, by day, with ItemList JSON-LD', async (page, log) => {
+  await page.goto(BASE + '/nyc/bushwick');
+  await page.getByRole('heading', { name: 'This week in Bushwick' }).waitFor({ timeout: 8000 });
+  await expectText(page, 'Fall Party');
+  await expectText(page, 'Elsewhere · Brooklyn Nights');
+  assert(log.some((l) => l === 'rpc exos_neighborhood_page {"p_slug":"bushwick","p_days":7}'), 'asked for bushwick, 7 days: ' + log.join(' | '));
+  assert((await page.title()) === 'This week in Bushwick | Exos', 'title: ' + (await page.title()));
+  const ld = JSON.parse(await page.locator('#vibepass-jsonld').textContent());
+  assert(ld['@type'] === 'CollectionPage' && ld.mainEntity['@type'] === 'ItemList' && ld.mainEntity.itemListElement[0].item.name === 'Fall Party',
+    'JSON-LD: ' + JSON.stringify(ld).slice(0, 200));
+  assert(await page.getByTestId('missing-coordinates').count() === 0, 'no admin note for a visitor');
+  const og = await page.locator('meta[property="og:title"]').getAttribute('content');
+  assert(og === 'This week in Bushwick', 'og:title ' + og);
+  await page.getByRole('link', { name: 'Fall Party' }).first().click();
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+});
+
+await run('neighborhood page: two weeks, the admin-only count, an unknown neighborhood', async (page, log) => {
+  await page.goto(BASE + '/nyc/bushwick?days=14');
+  await page.getByRole('heading', { name: 'The next 14 days in Bushwick' }).waitFor({ timeout: 8000 });
+  assert(log.some((l) => l.includes('"p_days":14')), 'two weeks asked');
+  await page.getByTestId('missing-coordinates').waitFor({ timeout: 5000 });
+  assert(/Admin: 2 listed events/.test(await page.getByTestId('missing-coordinates').innerText()), 'admin count shown');
+  await page.goto(BASE + '/nyc/nowhere');
+  await expectText(page, "We don't have that neighborhood.");
+}, { mock: { rpcs: { exos_neighborhood_page: (b) => (b.p_slug === 'bushwick'
+  ? { ...NEIGHBORHOOD_PAGE, days: b.p_days, missing_coordinates: 2 } : null) } } });
+
+await run('neighborhoods index lists NYC by borough with counts', async (page, log) => {
+  await page.goto(BASE + '/nyc');
+  await page.getByRole('heading', { name: 'New York, by neighborhood' }).waitFor({ timeout: 8000 });
+  await page.getByRole('heading', { name: 'Queens' }).waitFor({ timeout: 8000 });
+  await expectText(page, '1 this week');
+  assert(log.some((l) => l.startsWith('rpc exos_neighborhoods_list')), 'list asked');
+  await page.getByRole('link', { name: /Bushwick/ }).click();
+  await page.getByRole('heading', { name: 'This week in Bushwick' }).waitFor({ timeout: 8000 });
+});
+
+await run('edit event: "N followers will be notified" before publishing', async (page, log) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const notice = page.getByTestId('follower-notice');
+  await notice.waitFor({ timeout: 8000 });
+  const text = await notice.innerText();
+  assert(text === '3 followers will be notified when you publish.', 'notice: ' + text);
+  assert(log.some((l) => l === `rpc exos_event_follower_notice {"p_event_id":"${EV}"}`), 'asked for this event');
+}, { signedIn: true, mock: ownerMock({
+  tables: { exos_events: [{ ...EVENT_ROW, status: 'draft' }] },
+  rpcs: {
+    exos_event_follower_notice: () => ({ state: 'before', followers: 5, eligible: true, reason: null, will_notify: 3 }),
+    exos_event_publish_blockers: () => [], exos_event_quotas: () => [],
+  },
+}) });
+
+await run('edit event: "Notified N followers" after publishing', async (page) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const notice = page.getByTestId('follower-notice');
+  await notice.waitFor({ timeout: 8000 });
+  const text = await notice.innerText();
+  assert(text === 'Notified 4 followers, 1 more waiting (one email a day per follower).', 'notice: ' + text);
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 9, eligible: true, reason: null, notified: 4, waiting: 1, not_notified: 4 }),
+  exos_event_quotas: () => [],
+} }) });
+
+await run('unfollow link: one click, signed out', async (page, log) => {
+  await page.goto(BASE + '/unfollow?t=' + 'a'.repeat(64));
+  await page.getByRole('heading', { name: 'Stop following this organizer?' }).waitFor({ timeout: 8000 });
+  assert(!log.some((l) => l.includes('exos_unfollow_by_token')), 'nothing on page load (mail scanners)');
+  await page.getByRole('button', { name: 'Unfollow' }).click();
+  await page.getByRole('heading', { name: "You've unfollowed Brooklyn Nights." }).waitFor({ timeout: 8000 });
+  await page.goto(BASE + '/unfollow?t=nope');
+  await page.getByRole('heading', { name: "This unfollow link isn't valid." }).waitFor({ timeout: 8000 });
+});
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

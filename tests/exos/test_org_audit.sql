@@ -108,9 +108,9 @@ BEGIN
                      AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0), 'A0 marker ' || m;
   END LOOP;
   ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
-            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 36, 'A0 36 patched functions';
+            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 37, 'A0 37 patched functions';  -- +1 exos_org_followers_export (mig 20261111110000)
   ASSERT (SELECT count(DISTINCT tgrelid) FROM pg_trigger WHERE tgname IN ('exos_audit_ins_del', 'exos_audit_upd')) = 10, 'A0 ten tables';
-  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 36 patched functions, 10 audited tables';
+  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 37 patched functions, 10 audited tables';
 END $$;
 
 -- A1 -------------------------------------------------------------------------

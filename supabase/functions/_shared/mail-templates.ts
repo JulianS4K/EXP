@@ -693,6 +693,38 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // A followed org published (mig 20261111110000): one mail per follower per
+  // org per 24 hours, with every event waiting (at most 10 listed). Marketing:
+  // the footer's unsubscribe link, plus a one-click unfollow for this org.
+  "follower-new-event": (ctx) => {
+    const o = org(ctx.p);
+    const unfollow = token(ctx.p, "unfollow_token");
+    const events = list(ctx.p, "events").slice(0, 10);
+    if (events.length === 0) throw new PayloadError("events missing");
+    const more = Math.max(0, Math.floor(num(ctx.p, "more", 0)));
+    const items = events.map((e) => {
+      const when = opt(e, "starts_at") ? formatWhen(String(e.starts_at), opt(e, "timezone")) : "";
+      const where = [opt(e, "venue_name"), opt(e, "venue_location")].filter(Boolean).join(", ");
+      const line = [when, where].filter(Boolean).map(esc).join(" · ");
+      return `<li><a href="${href(ctx, `/event/${uuid(e, "id")}`)}">${esc(str(e, "name", "Event"))}</a>${line ? `<br>${line}` : ""}</li>`;
+    }).join("");
+    const total = events.length + more;
+    const first = str(events[0], "name", "Event");
+    return {
+      audience: "buyer",
+      orgName: o.name,
+      subject: total === 1 ? `New from ${o.name}: ${first}` : `${total} new events from ${o.name}`,
+      body:
+        `<p><strong>${esc(o.name)}</strong>, who you follow on Exos, just announced ` +
+        `${total === 1 ? "a new event" : `${total} new events`}:</p>` +
+        `<ul>${items}</ul>` +
+        (more > 0 ? `<p>And ${more} more on their page.</p>` : "") +
+        button(ctx, `/organizer/${o.id}`, `See everything from ${o.name}`) +
+        `<p style="color:#888;font-size:12px">You get this because you follow ${esc(o.name)}. ` +
+        `<a href="${href(ctx, `/unfollow?t=${unfollow}`)}">Unfollow ${esc(o.name)}</a> in one click.</p>`,
+    };
+  },
+
   "org-welcome": (ctx) => {
     const o = org(ctx.p);
     const until = opt(ctx.p, "fee_free_until");

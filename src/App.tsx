@@ -81,6 +81,10 @@ const SeriesEditor = lazy(() => import('./views/SeriesEditor'));
 const SeriesManager = lazy(() => import('./views/SeriesManager'));
 const OrgCollections = lazy(() => import('./views/OrgCollections'));
 const CollectionPage = lazy(() => import('./views/CollectionPage'));
+// claude/exos-neighborhoods (mig 20261111110000): neighborhood pages + the mail's unfollow link.
+const NeighborhoodsIndex = lazy(() => import('./views/NeighborhoodsIndex'));
+const NeighborhoodPage = lazy(() => import('./views/NeighborhoodPage'));
+const Unfollow = lazy(() => import('./views/Unfollow'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
 const OrgOffers = lazy(() => import('./views/OrgOffers'));
@@ -202,6 +206,9 @@ export default function App() {
                     <Route path="/group-pay/seat/:token" element={<GroupPaySeat />} />
                     <Route path="/group-pay/:groupId" element={<GroupPayHost />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/unfollow" element={<Unfollow />} />
+                    <Route path="/nyc" element={<NeighborhoodsIndex />} />
+                    <Route path="/nyc/:neighborhood" element={<NeighborhoodPage />} />
                     <Route path="/offer/:offerId" element={<OfferRespond />} />
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />
                     <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />

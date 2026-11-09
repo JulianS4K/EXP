@@ -139,7 +139,7 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
   get at most 5 manual channels; operator minutes per submission are logged and totalled per event / org (pilot).
 
 **Not built**
-- Neighborhood pages ("this week in Bushwick", Phase 1 item 7c) and follower lists + "new event" email (Phase 1 CRM).
+- Neighborhood pages ("this week in Bushwick", Phase 1 item 7c) and follower lists + "new event" email (Phase 1 CRM): built on `claude/exos-neighborhoods` (mig `20261111110000`, not merged or applied); the email stays queued until the mail drain runs with Resend.
 - Bandsintown (researched 2026-09-28, not started; it fans out to Spotify, Apple Music, Google, YouTube, Shazam).
 - Spotify ticketing partner: no plan yet. Spotify imports concerts only from its listed ticketing partners, which
   include small ones (Posh, Shotgun, Tixr, Humanitix).
@@ -170,7 +170,7 @@ Partner applications (business, no code):
 
 Build:
 - [ ] S4K feed id mapping, then one live S4K-route sale on an event over 150 (opted in to resale): listed, sold, claimed, scanned, paid out.
-- [ ] Neighborhood pages (7c) and follower lists + "new event" email.
+- [x] Neighborhood pages (7c) and follower lists + "new event" email: built on `claude/exos-neighborhoods` (mig `20261111110000`; `/nyc`, `/nyc/<neighborhood>`, Fans → Followers). Left: apply, then turn on `exos-follower-digests-hourly` with the mail drain.
 - [ ] Bandsintown feed in their partner format once the spec arrives (read-only rule: they pull, we never write).
 - [ ] Fix the doc drift above.
 
