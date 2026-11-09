@@ -18,6 +18,7 @@ import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
 import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
 import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
 import { assistantFacts } from './productFacts';
+import { APP_LANDINGS, appLandingAt } from '../apps/landing';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
@@ -318,6 +319,12 @@ export function bioTags(promoterName: string, org: Row, canonicalUrl: string, de
  */
 export function defaultTags(baseUrl: string, page = ''): string {
   const clean = page.replace(/[?#].*$/, '').replace(/^\/+/, '');
+  // An app landing page (/apps/door, …) gets its own title and description
+  // (src/lib/apps/landing.ts), on its canonical path.
+  const app = appLandingAt(clean);
+  if (app) {
+    return tags(`${app.title} | Exos`, app.description, `${baseUrl}/bridge${app.path}`, `${baseUrl}/bridge/icon-512.png`, 'website', false);
+  }
   // req.path arrives still percent-encoded; tags() escapes it for the attribute.
   const url = `${baseUrl}/bridge/${clean}`;
   const title = 'Exos | Live the Moment';
@@ -601,6 +608,9 @@ export async function buildLlmsTxt(
     const own = facts.filter((f) => f.audience === audience);
     if (own.length) lines.push('', `## ${heading}`, '', ...own.map((f) => `- ${f.claim}`));
   }
+  // The apps suite's landing pages: what each one is for, and where it lives.
+  lines.push('', '## Apps for organizers', '');
+  for (const app of APP_LANDINGS) lines.push(`- [Exos ${app.name}](${baseUrl}/bridge${app.path}): ${app.headline}`);
   // Upcoming only, soonest first, filtered and sorted by the database: the
   // view also holds every past event, and an unordered capped read could drop
   // the newest ones.
@@ -630,13 +640,14 @@ export async function buildLlmsTxt(
 }
 
 /**
- * sitemap.xml: every published event that hasn't ended (or, without an end,
- * didn't start more than a day ago) plus every organizer page.
+ * sitemap.xml: the apps suite's landing pages, every published event that
+ * hasn't ended (or, without an end, didn't start more than a day ago) and
+ * every organizer page.
  */
 export async function buildSitemap(read: PublicReader, baseUrl: string, now: Date = new Date()): Promise<string> {
   const cutoff = now.getTime() - 86_400_000;
   const ts = (v: unknown) => (typeof v === 'string' && v ? parseInstant(v) : NaN);
-  const urls: string[] = [];
+  const urls: string[] = APP_LANDINGS.map((app) => `${baseUrl}/bridge${app.path}`);
   for (const ev of await readWithFallback(read, 'id,starts_at,ends_at', ',noindex', null, 5000)) {
     if (ev.noindex === true) continue;
     const end = ts(ev.ends_at);

@@ -103,7 +103,8 @@ a user action, such as a dialog or editor opening, or the door's scan box); `ari
 **Pages covered by axe:** the event page (`/e/:slug` → `/event/:id`, phone and desktop), the cookie banner, the seat
 picker (map, then list with a seat picked), checkout (the guest email dialog; back from Stripe to the confirmation),
 My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, the Door app
-(`/door`, signed out and signed in), and the staff door scanner (`/checkin/:eventId`). The scans run with the browser
+(`/door`, signed out and signed in), the staff door scanner (`/checkin/:eventId`), and the four app landing pages
+(`/apps/door`, `/apps/events`, `/apps/promote`, `/apps/money`). The scans run with the browser
 set to reduced motion.
 
 **Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /

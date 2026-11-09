@@ -689,6 +689,36 @@ await run('event report: no door summary before the migration', async (page) => 
 }, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: {
   exos_event_door_summary: () => ({ __status: 404, __body: { code: 'PGRST202', message: 'Could not find the function' } }) } }) });
 
+// --- Apps suite landing pages (claude/exos-apps-pages) -------------------------
+// Public, signed out. Bullets come from the facts registry (AppLanding.test.tsx
+// checks what they may say); here: the page renders, carries its meta, and the
+// call to action goes to the door or to sign-up.
+const APP_PAGES = [
+  { id: 'door', headline: 'The free door app for any event, even with no signal.', cta: 'Open the door app', to: '/door' },
+  { id: 'events', headline: 'Create an event page. Ticket sales open at launch.', cta: 'Create your organization', to: '/onboarding' },
+  { id: 'promote', headline: 'Get people to your event, and see who brought them.', cta: 'Create your organization', to: '/onboarding' },
+  { id: 'money', headline: 'Your sales, settlements and books in one place.', cta: 'Create your organization', to: '/onboarding' },
+];
+for (const app of APP_PAGES) {
+  await run(`apps: /apps/${app.id} landing page`, async (page) => {
+    await page.goto(BASE + '/apps/' + app.id);
+    await page.getByRole('heading', { level: 1, name: app.headline }).waitFor({ timeout: 8000 });
+    assert(await page.locator('[data-claims="features"] li[data-fact]').count() >= 5, 'feature bullets from the registry');
+    assert(await page.locator('[data-claims] li:not([data-fact])').count() === 0, 'no bullet outside the registry');
+    await expectText(page, 'coming at launch');
+    assert((await page.title()).endsWith(' | Exos') && (await page.title()).startsWith('Exos '), 'title: ' + await page.title());
+    const desc = await page.locator('meta[name="description"]').getAttribute('content');
+    assert(desc && desc.length > 40, 'description: ' + desc);
+    const canonical = await page.locator('link[rel="canonical"]').getAttribute('href');
+    assert(canonical && canonical.endsWith('/bridge/apps/' + app.id), 'canonical: ' + canonical);
+    // The footer links every app (cross-links are a footer, not a menu).
+    const footer = page.locator('footer');
+    for (const other of APP_PAGES) assert(await footer.locator(`a[href$="/apps/${other.id}"]`).count() === 1, 'footer link ' + other.id);
+    await page.getByRole('link', { name: app.cta }).first().click();
+    await page.waitForURL((u) => u.pathname === '/bridge' + app.to, { timeout: 8000 });
+  });
+}
+
 // --- Exos Door (mig 20261013090000) ------------------------------------------
 await run('door app: the pitch and sign-in when signed out', async (page) => {
   await page.goto(BASE + '/door');

@@ -8,6 +8,9 @@ that makes it true.
 - **Where assistants read it:** `/llms.txt` (`buildLlmsTxt` in `src/lib/hosting/seo.ts`, served by `server.ts`),
   under "For ticket buyers" and "For organizers". It is a 404 until `EXOS_AI_DISCOVERY=on` (`docs/hosting.md`, "AI
   discovery"), which the operator turns on at launch.
+- **Where people read it:** the app landing pages (`/apps/door`, `/apps/events`, `/apps/promote`, `/apps/money`)
+  render their feature bullets and prices from the same registry (`src/lib/apps/landing.ts`); `At launch` claims
+  carry "coming at launch", and `src/views/AppLanding.test.tsx` fails if a page states anything else.
 - **What gets said:** only `Live` and `At launch` facts. `Off` and `Not shipped` facts are listed here so we know
   what is missing, and are never in anything an assistant reads.
 - **Kept honest by tests** (`src/lib/hosting/productFacts.test.ts`):
@@ -60,6 +63,7 @@ When a status changes (a switch goes on, a PR merges), change it in `productFact
 | `rotating-barcodes` | Live | organizer | Ticket QR codes change every 30 seconds, so screenshots and forwarded codes do not get in. | `src/lib/barcode.ts`, `supabase/migrations/20261019100000_exos_door_day_keys.sql` |  |
 | `offline-door` | Live | organizer | The door scanner keeps working without signal and syncs when it reconnects. | `src/views/OrganizerCheckIn.tsx`, `src/lib/door/roster.ts` |  |
 | `free-door-app` | Live | organizer | The Exos Door app is free for any event, including tickets sold on Eventbrite, Posh, DICE, Shotgun or RA (import their attendee CSV). | `src/views/DoorApp.tsx`, `src/lib/door/imports.ts`, `supabase/migrations/20261013090000_exos_door_imports.sql` |  |
+| `door-name-checkin` | Live | organizer | Door staff can check guests in by name as well as by scanning, on as many phones as they need. | `src/views/OrganizerCheckIn.tsx`, `src/lib/door/roster.ts`, `src/views/DoorApp.tsx` | An organizer can turn check-in by name off for an event (QR only). |
 | `walkup-questions` | Live | organizer | Walk-up sales at the door ask the same checkout questions as online; staff can skip them to keep the line moving, and every skip is logged. | `src/components/DoorSellPanel.tsx`, `supabase/functions/_shared/pos/walkup.ts`, `supabase/migrations/20261108110000_exos_dice_leftovers.sql` |  |
 | `addon-scan-undo` | Live | organizer | A mistaken add-on scan (a VIP lounge, a merch pickup) can be undone from the scan log, with a reason, by the scanner within 10 minutes or by a manager any time. | `src/lib/addonUndo.ts`, `src/views/OrganizerCheckIn.tsx`, `supabase/migrations/20261108110000_exos_dice_leftovers.sql` |  |
 | `google-events` | Off | organizer | Events appear in Google Search and Maps ticket links. | `supabase/functions/exos-google-feed/index.ts` | The feed is deployed; Exos has not joined Google's events ticketing program. |
