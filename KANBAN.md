@@ -20,7 +20,9 @@
   `EXOS_POS_CARD=on`.
   The first attempt stopped at `20261104100000`: prod's `exos_claim_transfer` already had the locks that
   migration patches in, so the text patch had nothing to match. Fixed in `bda67e8` (the patch is skipped where
-  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4.
+  prod already locks); the rule for next time is `supabase/README.md`, migration rule 4. Since 2026-11-09
+  `tests/exos/run_p0.sh` builds every `*exos*` migration from the phase-1 schema on, as prod was built, so the
+  harness now has prod's claim body (`claude/exos-harness-full`).
 
 - **DB:** every migration on main is applied to prod, through `20261019120000_exos_door_roster_wallet_delta`
   (checked against `schema_migrations`, 2026-11-04). Also applied, ahead of main: `20261021174000` /

@@ -621,7 +621,7 @@ BEGIN
      AND (SELECT receiver_email || ':' || sender_id FROM public.exos_transfers WHERE id = v_tr2)
          = 'b0c7-walkin2@x.com:' || pg_temp.u('a3'), 'W18: a new link, still from the seller';
   -- Once claimed, the ticket is the buyer's: no resend moves it, not even by a manager.
-  UPDATE public.exos_transfers SET status = 'claimed' WHERE id = v_tr2;
+  UPDATE public.exos_transfers SET status = 'completed' WHERE id = v_tr2;   -- claimed
   UPDATE public.exos_tickets SET owner_id = pg_temp.u('a5'), buyer_id = pg_temp.u('a5'), pending_transfer_id = NULL WHERE id = v_t;
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_63, 'b0c7-scanner3@x.com')) = '55000',
     'W18: a manager can''t take a claimed ticket';
@@ -641,7 +641,7 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_65, 'b0c7-fan@x.com')) = '55000',
     'W18: not another sender''s claim link';
   ASSERT (SELECT status FROM public.exos_transfers WHERE id = v_tr2) = 'pending', 'W18: that link is left alone';
-  UPDATE public.exos_transfers SET status = 'claimed' WHERE id = v_tr2;
+  UPDATE public.exos_transfers SET status = 'completed' WHERE id = v_tr2;   -- claimed
   -- A scanned ticket is never sent again, by anyone.
   UPDATE public.exos_tickets SET status = 'used', check_in_at = now() WHERE order_ref = 'pos:' || v_62;
   ASSERT pg_temp.st(format('SELECT public.exos_pos_order_email(%L, %L)', v_62, 'b0c7-fan@x.com')) = '55000', 'W18: scanned';

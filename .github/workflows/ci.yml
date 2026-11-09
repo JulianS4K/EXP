@@ -162,7 +162,7 @@ jobs:
       - name: Exos money-path suite (refund ledger + void contracts)
         run: bash tests/exos/run_money_path.sh exos_money_test
 
-      - name: Exos P0 suite (full checkout chain + vouchers/holds/quota mints)
+      - name: Exos P0 suite (every exos migration in order, as prod was built; then the suites + replay)
         run: bash tests/exos/run_p0.sh exos_p0_test
 
       - name: RLS security (barcode_secret least-privilege)
@@ -182,5 +182,5 @@ jobs:
           bad=$(ls supabase/migrations/*.sql | xargs -n1 basename | grep -vi exos || true)
           if [ -n "$bad" ]; then echo "::error::migration names must contain 'exos': $bad"; exit 1; fi
 
-      - name: Every recent migration is applied and replayed by run_p0.sh
+      - name: Every migration is applied (and each since 20260924215000 replayed) by run_p0.sh
         run: bash scripts/check-migrations.sh
