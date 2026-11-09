@@ -110,6 +110,16 @@ export function walletEligible(
   return !!viewerId && ticket.status === 'active' && !ticket.pendingTransferId && ticket.ownerId === viewerId;
 }
 
+/**
+ * An add-on unit's own entry code (mig 20261108110000) gets wallet buttons
+ * while it can still be used: active (not used, not refunded) and its code is
+ * drawn for this account (exos_my_addon_passes lists the caller's own passes
+ * only; exos_wallet_addon_pass checks the holder again).
+ */
+export function addonWalletEligible(pass: { status?: string | null; barcodeSecret?: string | null }): boolean {
+  return pass.status === 'active' && !!pass.barcodeSecret;
+}
+
 /** A holder-facing sentence for exos-wallet's 409 reasons and other errors. */
 export function walletErrorMessage(reason: string | null | undefined): string {
   switch (reason) {
@@ -121,6 +131,10 @@ export function walletErrorMessage(reason: string | null | undefined): string {
       return "This ticket isn't ready for a wallet yet. Try again in a minute.";
     case 'not your ticket':
       return 'Only the ticket holder can add it to a wallet.';
+    case 'voided':
+      return 'This add-on was refunded and can no longer be added to a wallet.';
+    case 'not your add-on':
+      return 'Only the add-on holder can add it to a wallet.';
     case 'unauthorized':
       return 'Sign in again to add the ticket to your wallet.';
     default:

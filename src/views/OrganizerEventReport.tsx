@@ -44,6 +44,7 @@ import InAppReportPanel from '../components/InAppReportPanel';
 import ChannelSalesPanel from '../components/ChannelSalesPanel';
 import SalesCountsPanel from '../components/SalesCountsPanel';
 import { canSeeMoney } from '../lib/settlement';
+import EventAuditFooter from '../components/EventAuditFooter';
 import RescheduleRefundsPanel from '../components/RescheduleRefundsPanel';
 import ReferralRewardsPanel from '../components/ReferralRewardsPanel';
 import TableAssignmentsPanel from '../components/TableAssignmentsPanel';
@@ -625,6 +626,10 @@ export default function OrganizerEventReport() {
         {/* Price shown vs charged per order (NY ACAL 25.07 / FTC fee rule record). */}
         <PriceDisclosureExport eventId={eventId!} eventTitle={event.title} />
         </>)}
+
+        {/* "N changes since publish" from the org audit log, linking to Org →
+            Activity for this event (owner / manager / finance; mig 20261110120000). */}
+        <EventAuditFooter eventId={event.id} orgId={event.orgId} canView={canSeeMoney(activeRole, isAdmin)} />
 
       </div>
     </motion.div>

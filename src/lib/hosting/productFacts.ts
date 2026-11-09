@@ -128,11 +128,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
   },
   {
     id: 'money-journal', audience: 'organizer', status: 'live',
-    claim: 'Each organizer gets a double-entry money journal of their sales, refunds, fees and door cash, with a trial balance, a journal CSV export and a sales tax report by jurisdiction.',
+    claim: 'Each organizer gets a double-entry money journal of their sales, refunds, fees, gift cards, payouts and door cash, with a trial balance, a journal CSV export and a sales tax report by jurisdiction.',
     code: ['src/lib/journal.ts', 'src/lib/journalApi.ts', 'src/components/finance/JournalPanel.tsx',
       'src/components/finance/SalesTaxTable.tsx', 'src/components/finance/EventSalesTax.tsx',
-      'supabase/functions/exos-api/journal.ts', 'supabase/migrations/20261108100000_exos_money_journal.sql'],
-    note: 'Door cash sales and $0 orders post today; online card sales and refunds post once payments are on (docs/payments-go-live.md).',
+      'supabase/functions/exos-api/journal.ts', 'supabase/migrations/20261108100000_exos_money_journal.sql',
+      'supabase/migrations/20261110100000_exos_journal_complete.sql'],
+    note: 'Door cash sales, the cash drawer, gift cards and $0 orders post today; online card sales, card at the door, refunds and payouts post once payments are on (docs/payments-go-live.md).',
   },
   {
     id: 'api-fee-adjustments', audience: 'organizer', status: 'live',
@@ -148,9 +149,9 @@ export const PRODUCT_FACTS: ProductFact[] = [
   },
   {
     id: 'group-pay', audience: 'fan', status: 'at_launch',
-    claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes and texts each friend a link to pay for their own seat, and can cover whatever is left.',
+    claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes (timed-entry and price-step tickets too, at one slot and one locked price) and texts each friend a link to pay for their own seat, and can cover whatever is left.',
     code: ['src/lib/groupPay.ts', 'src/components/GroupPayStart.tsx', 'src/views/GroupPayHost.tsx', 'src/views/GroupPaySeat.tsx',
-      'supabase/migrations/20261108120000_exos_group_pay.sql'],
+      'supabase/migrations/20261108120000_exos_group_pay.sql', 'supabase/migrations/20261110110000_exos_group_pay_2.sql'],
     note: 'Each friend pays in the normal checkout, so it works once paid checkout is on.',
   },
   {
@@ -264,8 +265,8 @@ export const PRODUCT_FACTS: ProductFact[] = [
     id: 'addon-wallet-passes', audience: 'fan', status: 'off',
     claim: 'An add-on with its own entry code (a VIP lounge, a merch pickup) gets its own Apple Wallet or Google Wallet pass.',
     code: ['supabase/functions/_shared/wallet/addonPass.ts', 'supabase/functions/exos-wallet/index.ts',
-      'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
-    note: 'Built server side (POST /exos-wallet/addon-pass), but wallets are not configured (the same Apple certificate and Google issuer account as wallet-passes), and the ticket page has no add-to-wallet button for add-ons yet. The add-on codes themselves (AddonPassesCard) work at the door today.',
+      'supabase/migrations/20261108110000_exos_dice_leftovers.sql', 'src/components/AddonPassesCard.tsx'],
+    note: 'Built (POST /exos-wallet/addon-pass, and an "Add to … Wallet" button per add-on code on the ticket page), but wallets are not configured (the same Apple certificate and Google issuer account as wallet-passes), so the buttons stay hidden. The add-on codes themselves (AddonPassesCard) work at the door today.',
   },
   {
     id: 'sms', audience: 'organizer', status: 'off',

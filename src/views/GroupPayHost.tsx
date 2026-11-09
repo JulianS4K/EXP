@@ -5,6 +5,8 @@
 // "Pay my seat" through a seat link, "Cover the rest" (one checkout for every
 // unpaid seat; you can then split or transfer them, /split/:sessionId) and
 // "End the group" (unpaid seats back on sale now).
+// Group pay 2 (mig 20261110110000): the host can name each seat ("Sam"; this
+// page only, never the friend's), and sees the slot and the locked price.
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -15,9 +17,10 @@ import { getPublicEvent } from '../lib/events';
 import { startCheckout } from '../lib/checkout';
 import { buyerTierPrice } from '../lib/pricing';
 import { formatCurrency, publicUrl } from '../lib/utils';
+import { slotIdLabel } from '../lib/slots';
 import {
-  cancelGroup, coverableSeats, formatCountdown, friendsPayingNow, getGroup, seatLabel, seatMessage, seatSmsUrl, secondsLeft,
-  type GroupBuy, type SeatState,
+  cancelGroup, coverableSeats, formatCountdown, friendsPayingNow, getGroup, groupSeatPrice, normalizeSeatLabel, seatLabel, seatMessage,
+  seatSmsUrl, secondsLeft, setSeatLabel, SEAT_LABEL_MAX, type GroupBuy, type GroupSeat, type SeatState,
 } from '../lib/groupPay';
 
 const chip: Record<SeatState, string> = {
@@ -53,6 +56,7 @@ export default function GroupPayHost() {
 
   const eventId = g?.eventId;
   const tierId = g?.tierId;
+  const locked = g?.unitPriceCents ?? null;
   useEffect(() => {
     if (!eventId) return undefined;
     let alive = true;
@@ -61,10 +65,11 @@ export default function GroupPayHost() {
       setTitle(ev.title);
       setCurrency(ev.currency || 'USD');
       const tier = ev.ticketTiers?.find((t) => t.id === tierId);
-      if (tier) setPrice(buyerTierPrice(tier));
+      // A price-step type: the price the group locked, not today's step.
+      if (tier) setPrice(groupSeatPrice(tier, locked, buyerTierPrice(tier)));
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [eventId, tierId]);
+  }, [eventId, tierId, locked]);
 
   if (!user) return <Shell><p className="text-slate-500">Sign in with the account that started the group.</p></Shell>;
   if (loadErr) return <Shell><p className="text-red-600 font-bold">{loadErr}</p></Shell>;
@@ -104,7 +109,8 @@ export default function GroupPayHost() {
   return (
     <Shell>
       <p className="text-slate-500 text-sm mb-4">
-        {title}: {g.quantity} seats{price !== null ? ` at ${money(price)} each` : ''}. Each friend pays for their own seat with their link.
+        {title}: {g.quantity} seats{price !== null ? ` at ${money(price)} each` : ''}{g.slotId ? `, entry ${slotIdLabel(g.slotId)}` : ''}.
+        Each friend pays for their own seat with their link.
       </p>
       <div className="border-2 border-slate-900 rounded-2xl p-4 mb-6 flex items-center justify-between gap-3">
         <div>
@@ -122,11 +128,14 @@ export default function GroupPayHost() {
         {g.seats.map((s) => (
           <li key={s.id} className="border border-slate-200 rounded-2xl p-4">
             <div className="flex items-center justify-between gap-3">
-              <p className="font-bold text-slate-900">Seat {s.seatNo}</p>
+              <p className="font-bold text-slate-900">Seat {s.seatNo}{s.label ? <span className="text-slate-500 font-normal">: {s.label}</span> : null}</p>
               <span className={`text-[10px] font-black uppercase tracking-widest rounded-full px-2 py-1 ${chip[s.state]}`}>
                 {s.orderStatus === 'refunded' ? 'Refunded' : seatLabel(s.state)}
               </span>
             </div>
+            <SeatName seat={s} onSaved={(label) => setG((cur) => cur && {
+              ...cur, seats: cur.seats.map((x) => (x.id === s.id ? { ...x, label } : x)),
+            })} />
             {open && (s.state === 'waiting' || s.state === 'paying') && (
               <div className="flex flex-wrap gap-2 mt-3">
                 <a href={seatSmsUrl(message(s.seatNo, s.path))}
@@ -165,6 +174,45 @@ export default function GroupPayHost() {
         the cost with friends afterwards.
       </p>
     </Shell>
+  );
+}
+
+// The host's own name for a seat: saved when the field loses focus (or on
+// Enter). Shown on this page only; the friend's seat page never has it.
+function SeatName({ seat, onSaved }: { seat: GroupSeat; onSaved: (label: string | null) => void }) {
+  const { toast } = useToast();
+  const [value, setValue] = useState(seat.label ?? '');
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { setValue(seat.label ?? ''); }, [seat.label]);
+  const save = async () => {
+    const next = normalizeSeatLabel(value);
+    if (next === (seat.label ?? null)) { setValue(next ?? ''); return; }
+    setSaving(true);
+    try {
+      const stored = await setSeatLabel(seat.id, value);
+      onSaved(stored);
+      setValue(stored ?? '');
+    } catch (e) {
+      toast({ kind: 'error', message: (e as Error).message });
+      setValue(seat.label ?? '');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <input
+      type="text"
+      value={value}
+      maxLength={SEAT_LABEL_MAX}
+      disabled={saving}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => void save()}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      placeholder="Who's this seat for? (only you see this)"
+      aria-label={`Name for seat ${seat.seatNo} (only you see this)`}
+      data-testid={`seat-label-${seat.seatNo}`}
+      className="mt-2 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-slate-900"
+    />
   );
 }
 

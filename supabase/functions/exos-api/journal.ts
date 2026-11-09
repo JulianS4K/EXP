@@ -1,4 +1,4 @@
-// claude/exos-money-journal (mig 20261108100000): the org's double-entry
+// claude/exos-money-journal (mig 20261108100000; completed in 20261110100000): the org's double-entry
 // journal (docs/journal.md, docs/api/journal.json).
 //
 //   GET /v1/journal   finance:read   one row per journal line, oldest first,
@@ -20,16 +20,19 @@ export const JOURNAL_ROUTES = new Set(["list-journal"]);
 
 /** The chart (exos_journal_accounts()); the API filter takes these codes. */
 export const JOURNAL_ACCOUNTS = [
-  "stripe_clearing", "paypal_receivable", "pos_cash_drawer", "marketplace_receivable", "organizer_payable",
-  "sales_tax_payable", "promoter_commissions_payable", "gift_cards_outstanding", "tips_payable", "ticket_revenue",
-  "buyer_fees", "pos_other_sales", "donations", "refunds", "exos_fee", "card_fees", "disputes", "promoter_commissions",
-  "pos_paid_outs",
+  "stripe_clearing", "paypal_receivable", "pos_cash_drawer", "bank", "cash_on_hand", "marketplace_receivable",
+  "organizer_payable", "sales_tax_payable", "promoter_commissions_payable", "gift_cards_outstanding", "tips_payable",
+  "opening_balances", "ticket_revenue", "buyer_fees", "pos_other_sales", "donations", "gift_card_breakage", "refunds",
+  "exos_fee", "card_fees", "disputes", "promoter_commissions", "pos_paid_outs", "cash_over_short", "gift_card_comps",
 ] as const;
 
 /** Where an entry came from (exos_journal_entries.source_table, without the exos_ prefix). */
 export const JOURNAL_SOURCES = [
   "checkout_sessions", "order_refunds", "fee_adjustments", "disputes", "marketplace_orders", "org_payout_lines",
   "promoter_commissions", "pos_payments", "pos_paid_outs",
+  // mig 20261110100000 (claude/exos-journal-2)
+  "pos_reversals", "gift_card_ledger", "gift_card_redemptions", "pos_drawer_sessions", "org_instant_payouts",
+  "paypal_org_remittances",
 ] as const;
 
 const COLS =

@@ -8,7 +8,8 @@ import {
 } from './journal';
 import { toCsv } from './csv';
 
-const MIG = readFileSync(path.resolve(__dirname, '../../supabase/migrations/20261108100000_exos_money_journal.sql'), 'utf8');
+// The chart, the account check and the source check were last redefined here.
+const MIG = readFileSync(path.resolve(__dirname, '../../supabase/migrations/20261110100000_exos_journal_complete.sql'), 'utf8');
 const API = readFileSync(path.resolve(__dirname, '../../supabase/functions/exos-api/journal.ts'), 'utf8');
 
 describe('the chart', () => {
@@ -24,6 +25,15 @@ describe('the chart', () => {
     expect(sqlCodes).toEqual(JOURNAL_ACCOUNTS.map((a) => a.code));
     const api = API.match(/JOURNAL_ACCOUNTS = \[([\s\S]*?)\] as const/)?.[1] ?? '';
     expect([...api.matchAll(/"([a-z_]+)"/g)].map((m) => m[1])).toEqual(JOURNAL_ACCOUNTS.map((a) => a.code));
+  });
+
+  it('matches the source check and the API source filter', () => {
+    const chk = MIG.match(/exos_journal_entries_source_table_check CHECK \(source_table IN \(([^)]+)\)/)?.[1] ?? '';
+    const sql = [...chk.matchAll(/'exos_([a-z_]+)'/g)].map((m) => m[1]);
+    const api = API.match(/JOURNAL_SOURCES = \[([\s\S]*?)\] as const/)?.[1] ?? '';
+    expect(sql.length).toBe(15);
+    expect([...api.matchAll(/"([a-z_]+)"/g)].map((m) => m[1])).toEqual(sql);
+    for (const t of sql) expect(sourceLabel(`exos_${t}`)).not.toBe(t.replace(/_/g, ' '));   // a label of its own
   });
 
   it('has unique codes and numbers, and normal sides that follow the type', () => {
