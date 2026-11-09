@@ -36,7 +36,24 @@ const SETTLE_CSS = `*, *::before, *::after {
 
 async function scan(page, name, advisory) {
   await page.addStyleTag({ content: SETTLE_CSS });
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  // JS animations (motion/react: the ticket card fades in from opacity 0)
+  // ignore CSS. Wait for every Web Animation to finish and for inline
+  // opacity to stop changing (up to 3 s) before judging contrast.
+  await page.evaluate(async () => {
+    const frame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    await Promise.race([
+      Promise.all(document.getAnimations().map((a) => a.finished.catch(() => {}))),
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
+    const snap = () => [...document.querySelectorAll('[style*="opacity"]')].map((el) => getComputedStyle(el).opacity).join(',');
+    let prev = snap();
+    for (let i = 0; i < 60; i++) {
+      await frame(); await frame();
+      const now = snap();
+      if (now === prev) break;
+      prev = now;
+    }
+  });
   const r = await new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE).analyze();
   // An advisory page (a known gap, docs/pci.md) prints its violations as
   // warnings until it's fixed, then moves to the blocking list.
@@ -49,6 +66,13 @@ async function scan(page, name, advisory) {
 
 async function check(name, fn, opts = {}) {
   const ctx = await browser.newContext({ ...devices[opts.device || 'iPhone 13'], reducedMotion: 'reduce' });
+  // Freeze motion from the first paint: a transition already running when
+  // scan() adds SETTLE_CSS keeps running (changing its duration doesn't stop
+  // it), and the live ticket was caught under a half-faded overlay.
+  await ctx.addInitScript((css) => {
+    const add = () => { const s = document.createElement('style'); s.textContent = css; document.documentElement.appendChild(s); };
+    if (document.documentElement) add(); else document.addEventListener('DOMContentLoaded', add, { once: true });
+  }, SETTLE_CSS);
   await ctx.route((u) => !u.href.startsWith('http://localhost') && !u.href.startsWith('https://mock.supabase.test/'), (r) => r.abort());
   await ctx.route('https://mock.supabase.test/**', (r) => handle(r, [], opts.mock));
   // The cookie banner already answered (it has its own scan below).
