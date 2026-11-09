@@ -240,7 +240,10 @@ export async function handleCore(route: ApiRoute, c: CoreCtx): Promise<unknown> 
         }),
       };
     case "undo-check-in":
-      return { data: await write(c, "ticket.undo_check_in", uuidOr404(p.id, "ticket"), { reason: str(c.body.reason) }) };
+      // A ticket id, or an add-on pass id (mig 20261110120000: exos_undo_addon_check_in, the door's rules).
+      return { data: await write(c, "ticket.undo_check_in", uuidOr404(p.id, "ticket"), {
+        reason: str(c.body.reason), device: str(c.body.device),
+      }) };
     case "check-in-order":
       return {
         data: await write(c, "order.check_in", sessionOr404(p.id), {

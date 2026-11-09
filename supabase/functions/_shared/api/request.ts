@@ -68,6 +68,9 @@ export const RPC_STATUS: Record<string, number> = {
   // A reservation line over its price step's remainder (mig 20261107120000):
   // 409 price_step_remaining, as exos-checkout answers it.
   XP410: 409,
+  // A partner reservation missing required checkout answers (mig
+  // 20261110120000): 422 questions_required, nothing held.
+  EXQRQ: 422,
 };
 
 /** A raised SQL error as an HTTP answer, or null for anything unmapped (a 500). */
@@ -80,6 +83,7 @@ export function rpcAnswer(e: unknown): { status: number; body: Record<string, un
   if (code === 'EX422') body.reason = 'not_available';
   if (code === 'EXCAP') Object.assign(body, partnerCapBody(err));
   if (code === 'XP410') Object.assign(body, priceStepBody(err));
+  if (code === 'EXQRQ') Object.assign(body, questionsRequiredBody(err));
   return { status: RPC_STATUS[code], body };
 }
 
@@ -108,6 +112,39 @@ export function priceStepBody(e: unknown): {
     }
   }
   return { reason: 'price_step_remaining', remaining, price_cents: price, ticket_type_id: tier };
+}
+
+export interface MissingAnswer { question_id: string; label: string | null; ticket: number | null }
+
+/**
+ * The 422 body of a partner reservation without the event's required
+ * checkout answers (mig 20261110120000): the SQL puts
+ * [{"question_id", "label", "ticket"}] in the error's DETAIL (labels of that
+ * event's own questions; `ticket` is 1-based, null for an order question).
+ * The partner asks its buyer and reserves again; nothing was held.
+ */
+export function questionsRequiredBody(e: unknown): { reason: 'questions_required'; missing: MissingAnswer[] } {
+  const raw = (e as { details?: unknown } | null)?.details;
+  const missing: MissingAnswer[] = [];
+  if (typeof raw === 'string') {
+    try {
+      const list = JSON.parse(raw) as unknown;
+      if (Array.isArray(list)) {
+        for (const x of list.slice(0, 200)) {
+          const m = (x ?? {}) as { question_id?: unknown; label?: unknown; ticket?: unknown };
+          if (typeof m.question_id !== 'string') continue;
+          missing.push({
+            question_id: m.question_id,
+            label: typeof m.label === 'string' ? m.label : null,
+            ticket: typeof m.ticket === 'number' && Number.isInteger(m.ticket) && m.ticket > 0 ? m.ticket : null,
+          });
+        }
+      }
+    } catch {
+      // Not ours: no list.
+    }
+  }
+  return { reason: 'questions_required', missing };
 }
 
 /**

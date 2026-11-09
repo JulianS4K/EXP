@@ -100,12 +100,34 @@ buyer) all keep them. The buyer can read an order's answers once its tickets are
 | Paid checkout | `exos-checkout` body `answers: { order: {...}, tickets: [{...}] }` |
 | Free claim (signed in) | `exos_claim_free_tickets_answered`; the plain `exos_claim_free_tickets` refuses an event with required questions |
 | Phone RSVP | `exos-rsvp` "info" returns the questions, "start" takes `answers` (one entry per guest incl. plus-ones); a refusal expires the RSVP |
-| Organizer reservations (API) | `answers` on POST /v1/events/:id/organizer-reservations/:token/complete; checked, never required |
+| Organizer reservations (API) | `answers` on POST /v1/events/:id/organizer-reservations (and `/build`, checked only) or on …/:token/complete; checked, hidden questions allowed, never required (mig 20261110120000 added the reserve) |
+| Partner reservations (`/public/…`) | `ticket_reservation[answers]` on the reserve (and `comp[answers]` on comps): checked like checkout, **required ones required** (422 `questions_required`, nothing held); optional ones may come with complete instead. See below |
 | The door | `exos_door_set_ticket_answers` (door staff of the event; per-ticket questions, hidden ones included, nothing required) |
 | Walk-up sales at the door | `exos-pos` `mint_walkup` `answers` (cash, comp and card; mig 20261108110000): see below |
 
-Not covered: comps, box-office and member-pass issues (staff can add answers at the door); partner (`/public/...`)
-reservations.
+Not covered: comps, box-office and member-pass issues (staff can add answers at the door).
+
+### Partner and organizer reservations (mig 20261110120000)
+
+A reservation through the partner contract or an organizer's API credential (docs/partner-sales.md) carries answers in
+its reserve call, `answers: { order: {...}, tickets: [{...}] }`. `tickets[i]` is the i-th ticket of the reservation's
+`order_items` in the order the reservation lists them (ticket types in the event's order).
+
+- `_exos_partner_reserve` checks them once every line is known, before the dry run returns and before any hold
+  (`_exos_reservation_answers_check`, marker `exos: reservation answers check`): the online rules
+  (`_exos_validate_answers_core`), "show only if" included. An invalid answer is 22023 (400, the label of this event's
+  own question only).
+- **Partners** (reserve and comps): the questions checkout asks (hidden ones refused as unknown), and required ones are
+  required: SQLSTATE `EXQRQ` with the missing ones in DETAIL, which exos-api answers as 422 `questions_required` with
+  `missing: [{question_id, label, ticket}]`. Nothing is held, so the partner can ask its buyer before charging.
+  `GET /v1/public/confirms/:id/questions` (`_exos_partner_event_questions`) lists what is asked.
+- **Organizer** reservations: hidden questions too, nothing required (staff, like the door).
+- Stored in the same transaction as the holds (marker `exos: reservation answers record`): `_exos_record_answers`, order
+  ref `po:<reservation>`, source `api`, no buyer; the attach trigger gives the n-th ticket minted at complete (parked
+  on the org owner) the n-th entry. Complete may send answers when the reserve sent none
+  (`_exos_partner_reservation_answers` for a partner's own reservation, `_exos_api_reservation_answers` for the
+  organizer's); one set per reservation, the first sent wins.
+- Tests: `tests/exos/test_leftovers_9.sql` LO1-LO2, `src/lib/leftovers9.test.ts`.
 
 ### Walk-up sales (mig 20261108110000)
 

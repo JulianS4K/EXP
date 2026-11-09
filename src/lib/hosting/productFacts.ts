@@ -264,8 +264,8 @@ export const PRODUCT_FACTS: ProductFact[] = [
     id: 'addon-wallet-passes', audience: 'fan', status: 'off',
     claim: 'An add-on with its own entry code (a VIP lounge, a merch pickup) gets its own Apple Wallet or Google Wallet pass.',
     code: ['supabase/functions/_shared/wallet/addonPass.ts', 'supabase/functions/exos-wallet/index.ts',
-      'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],
-    note: 'Built server side (POST /exos-wallet/addon-pass), but wallets are not configured (the same Apple certificate and Google issuer account as wallet-passes), and the ticket page has no add-to-wallet button for add-ons yet. The add-on codes themselves (AddonPassesCard) work at the door today.',
+      'supabase/migrations/20261108110000_exos_dice_leftovers.sql', 'src/components/AddonPassesCard.tsx'],
+    note: 'Built (POST /exos-wallet/addon-pass, and an "Add to … Wallet" button per add-on code on the ticket page), but wallets are not configured (the same Apple certificate and Google issuer account as wallet-passes), so the buttons stay hidden. The add-on codes themselves (AddonPassesCard) work at the door today.',
   },
   {
     id: 'sms', audience: 'organizer', status: 'off',
