@@ -3,13 +3,17 @@
 // own barcode (a VIP lounge, a merch pickup), signed exactly like a ticket's
 // (lib/barcode signAddonBarcode, 30-second buckets, the day key). Staff scan it
 // at the check-in list for that add-on. Hidden when there are none, offline,
-// or before the migration (exos_my_addon_passes missing).
+// or before the migration (exos_my_addon_passes missing). Each usable unit
+// gets "Add to … Wallet" (a pass of its own, mig 20261108110000) once the
+// wallet probe says that wallet is set up.
 
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { currentBucket, signAddonBarcode } from '../lib/barcode';
 import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { listMyAddonPasses, type AddonPass } from '../lib/addonPasses';
+import { addonWalletEligible } from '../lib/walletButtons';
+import { AddonWalletButtons, useAvailableWallets } from './WalletButtons';
 
 export default function AddonPassesCard({ eventId, ownerId }: { eventId: string; ownerId: string }) {
   const [passes, setPasses] = useState<AddonPass[]>([]);
@@ -50,6 +54,10 @@ export default function AddonPassesCard({ eventId, ownerId }: { eventId: string;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, ownerId]);
 
+  // Wallet buttons per unit (POST /exos-wallet/addon-pass): only once the
+  // session probe says a wallet is set up, as the ticket's buttons.
+  const wallets = useAvailableWallets(passes.some(addonWalletEligible));
+
   if (passes.length === 0) return null;
   return (
     <section className="mt-6 border border-white/10 p-5 space-y-4" aria-labelledby="addon-passes-title" data-testid="addon-passes">
@@ -71,6 +79,15 @@ export default function AddonPassesCard({ eventId, ownerId }: { eventId: string;
             <p className="type text-[10px] text-white/40 uppercase tracking-widest">
               {p.status === 'used' ? 'Scanned in' : p.status === 'voided' ? '' : `Refreshes in ${left}s`}
             </p>
+            {addonWalletEligible(p) && (
+              <AddonWalletButtons
+                passId={p.id}
+                name={`${p.addonName}${p.unitCount > 1 ? ` ${p.unitIndex} of ${p.unitCount}` : ''}`}
+                kinds={wallets.kinds}
+                platform={wallets.platform}
+                onUnavailable={wallets.markUnavailable}
+              />
+            )}
           </li>
         ))}
       </ul>

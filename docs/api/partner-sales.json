@@ -70,6 +70,91 @@
       ]
     },
     {
+      "id": "public-list-questions",
+      "method": "GET",
+      "path": "/v1/public/confirms/:id/questions",
+      "summary": "Checkout questions a reservation answers",
+      "description": "The questions the organizer asks buyers of this event, in order: label, kind (text, long_text, single_choice, multiple_choice, checkbox, number, date, phone, email), options, required, scope (order: once; ticket: per ticket), tier_ids (only for these ticket types; null for all), limits, and parent_question_id / parent_values (asked only when that question's answer is one of these). Send the answers with the reservation (`answers`); required ones are required there. An empty list when the event asks nothing.",
+      "auth": "partner_key",
+      "scope": null,
+      "parameters": [
+        {
+          "name": "shared_key",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Your partner key (dk_live_…). Or send it as the X-Shared-Key header, or as Authorization: Bearer.",
+          "example": "dk_live_4f2a…"
+        },
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id (Opendate calls it the confirm id).",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+            "questions": [
+              {
+                "id": "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e",
+                "label": "Company",
+                "help_text": null,
+                "kind": "text",
+                "options": [],
+                "required": true,
+                "scope": "order",
+                "tier_ids": null,
+                "max_length": 500,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 1,
+                "parent_question_id": null,
+                "parent_values": null
+              },
+              {
+                "id": "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a",
+                "label": "Size",
+                "help_text": null,
+                "kind": "single_choice",
+                "options": [
+                  "S",
+                  "M",
+                  "L"
+                ],
+                "required": true,
+                "scope": "ticket",
+                "tier_ids": null,
+                "max_length": null,
+                "min_choices": null,
+                "max_choices": null,
+                "min_value": null,
+                "max_value": null,
+                "sort_order": 2,
+                "parent_question_id": null,
+                "parent_values": null
+              }
+            ]
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not an event of your organizer, or not published.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
       "id": "public-create-reservation",
       "method": "POST",
       "path": "/v1/public/confirms/:id/ticket_reservations",
@@ -162,6 +247,26 @@
           "required": false,
           "description": "Attendee email.",
           "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's checkout questions (GET /v1/public/confirms/:id/questions): { order: { <question id>: value }, tickets: [{ <question id>: value }, ...] }, one tickets entry per ticket in the order the reservation lists its order_items (the ticket types' order; a one-type reservation is simply ticket 1..n). Checked like Exos checkout: options, lengths, ranges and \"show only if\" conditions. The event's required questions are required here: without them the reservation is refused with 422 questions_required and nothing is held, so ask your buyer before you charge. Stored with the reservation and attached to the tickets at complete.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -251,6 +356,28 @@
           "example": {
             "error": "Members is on presale for members right now; partners can sell it once the presale ends",
             "reason": "not_available"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The event's required checkout questions aren't all answered (reason: questions_required; `missing` lists each question and ticket). Nothing was held.",
+          "example": {
+            "error": "answer the event's required checkout questions (1 unanswered, first: \"Size\")",
+            "reason": "questions_required",
+            "missing": [
+              {
+                "question_id": "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a",
+                "label": "Size",
+                "ticket": 2
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "An answer is invalid (not one of the options, too long, a question this event doesn't ask buyers, answers for more tickets than reserved).",
+          "example": {
+            "error": "checkout question \"Size\" (ticket 1): pick one of the options"
           }
         }
       ],
@@ -629,6 +756,26 @@
           "required": false,
           "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
           "example": 54.0
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's optional checkout questions, when the reserve call sent none (the same shape and checks; answers are kept once per reservation, the first set sent wins).",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -696,6 +843,13 @@
           "description": "Cancelled.",
           "example": {
             "error": "this reservation was cancelled"
+          }
+        },
+        {
+          "status": 400,
+          "description": "An answer is invalid (not one of the options, too long, a question this event doesn't ask buyers, answers for more tickets than reserved).",
+          "example": {
+            "error": "checkout question \"Size\" (ticket 1): pick one of the options"
           }
         }
       ]
@@ -785,6 +939,26 @@
           "required": false,
           "description": "Email the guest their links.",
           "example": true
+        },
+        {
+          "name": "comp[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's checkout questions (GET /v1/public/confirms/:id/questions): { order: { <question id>: value }, tickets: [{ <question id>: value }, ...] }, one tickets entry per ticket in the order the reservation lists its order_items (the ticket types' order; a one-type reservation is simply ticket 1..n). Checked like Exos checkout: options, lengths, ranges and \"show only if\" conditions. The event's required questions are required here: without them the reservation is refused with 422 questions_required and nothing is held, so ask your buyer before you charge. Stored with the reservation and attached to the tickets at complete.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -867,6 +1041,21 @@
           "description": "The Idempotency-Key was already used for another reservation (other lines or event).",
           "example": {
             "error": "this Idempotency-Key was already used for another reservation"
+          }
+        },
+        {
+          "status": 422,
+          "description": "The event's required checkout questions aren't all answered (reason: questions_required; `missing` lists each question and ticket). Nothing was held.",
+          "example": {
+            "error": "answer the event's required checkout questions (1 unanswered, first: \"Size\")",
+            "reason": "questions_required",
+            "missing": [
+              {
+                "question_id": "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a",
+                "label": "Size",
+                "ticket": 2
+              }
+            ]
           }
         }
       ],

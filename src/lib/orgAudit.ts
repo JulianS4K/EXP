@@ -136,3 +136,67 @@ export function auditArgs(orgId: string, f: AuditFilters, before: number | null,
 }
 
 export type ExportKind = 'audit' | 'donations' | 'price_disclosure' | 'attendees';
+
+// ── The event report's footer (claude/exos-leftovers-9, mig 20261110120000) ──
+// exos_event_audit_summary: the event's audit rows after its latest publish
+// (exports left out), for the roles that read the log.
+
+export interface EventAuditSummary {
+  eventId: string;
+  orgId: string;
+  /** The latest event.publish row's time; null when the log has none. */
+  publishedAt: string | null;
+  /** Rows after that publish; null when never published (in the log). */
+  changesSincePublish: number | null;
+  changesTotal: number;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const count = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v
+    : typeof v === 'string' && /^\d{1,9}$/.test(v) ? Number(v) : null;
+
+export function parseEventAuditSummary(raw: unknown): EventAuditSummary | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.event_id !== 'string' || typeof r.org_id !== 'string') return null;
+  return {
+    eventId: r.event_id,
+    orgId: r.org_id,
+    publishedAt: typeof r.published_at === 'string' ? r.published_at : null,
+    changesSincePublish: count(r.changes_since_publish),
+    changesTotal: count(r.changes_total) ?? 0,
+  };
+}
+
+/**
+ * The footer's sentence, or null for nothing to say (never published and no
+ * change logged). `date` formats the publish time (injected: tests and time
+ * zones).
+ */
+export function auditFooterText(s: EventAuditSummary | null, date: (iso: string) => string): string | null {
+  if (!s) return null;
+  const plural = (n: number) => `${n} change${n === 1 ? '' : 's'}`;
+  if (s.publishedAt && s.changesSincePublish !== null) {
+    return `${s.changesSincePublish === 0 ? 'No changes' : plural(s.changesSincePublish)} since publish (${date(s.publishedAt)})`;
+  }
+  if (s.changesTotal > 0) return `${plural(s.changesTotal)} logged`;
+  return null;
+}
+
+/** Org → Activity, filtered to one event. */
+export function activityLink(orgId: string, eventId: string): string {
+  return `/orgs/${encodeURIComponent(orgId)}/activity?event=${encodeURIComponent(eventId)}`;
+}
+
+/** The event filter a link to Org → Activity carries (?event=<uuid>), else null. */
+export function eventFilterFromSearch(search: string): string | null {
+  let v: string | null = null;
+  try {
+    v = new URLSearchParams(search).get('event');
+  } catch {
+    return null;
+  }
+  return v && UUID_RE.test(v) ? v.toLowerCase() : null;
+}

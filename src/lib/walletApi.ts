@@ -156,3 +156,36 @@ export async function fetchGoogleSaveUrl(ticketId: string): Promise<string> {
   if (!isGoogleSaveUrl(body?.save_url)) throw new Error(walletErrorMessage(null));
   return body!.save_url as string;
 }
+
+/** An add-on unit's own entry code as a pass (mig 20261108110000): POST /exos-wallet/addon-pass. */
+async function postAddonPass(addonPassId: string, kind: WalletKind): Promise<Response> {
+  const base = walletBase();
+  if (!base) throw new WalletUnavailableError();
+  const { data } = await supabase.auth.getSession();
+  const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
+  return fetch(`${base}/addon-pass`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(anon ? { apikey: anon } : {}),
+      Authorization: `Bearer ${data.session?.access_token ?? anon}`,
+    },
+    body: JSON.stringify({ addon_pass_id: addonPassId, kind }),
+  });
+}
+
+/** The signed .pkpass of an add-on unit the caller holds. */
+export async function fetchAddonPassApple(addonPassId: string): Promise<Blob> {
+  const res = await postAddonPass(addonPassId, 'apple');
+  if (!res.ok) throw await failure(res);
+  return new Blob([await res.arrayBuffer()], { type: 'application/vnd.apple.pkpass' });
+}
+
+/** Google's "save to wallet" link for an add-on unit the caller holds. */
+export async function fetchAddonPassGoogleUrl(addonPassId: string): Promise<string> {
+  const res = await postAddonPass(addonPassId, 'google');
+  if (!res.ok) throw await failure(res);
+  const body = (await res.json().catch(() => null)) as { save_url?: unknown } | null;
+  if (!isGoogleSaveUrl(body?.save_url)) throw new Error(walletErrorMessage(null));
+  return body!.save_url as string;
+}

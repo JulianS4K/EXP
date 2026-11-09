@@ -1507,7 +1507,8 @@ await run('org activity: the audit log, filters, and its CSV records an export',
   // A filter asks the server again, with the group.
   await page.getByLabel('Kind').selectOption('money');
   await expectText(page, 'Refund: issue');
-  assert(log.some((l) => l.startsWith('rpc exos_org_audit_list') && l.includes('"p_group":"money"')), 'group filter sent');
+  // The money row is on the first page too: wait for the filtered call itself.
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_org_audit_list') && l.includes('"p_group":"money"')), 'group filter sent');
   const { name, text: csv } = await download(page, () => page.getByRole('button', { name: /Export CSV/ }).click());
   assert(name.startsWith('activity-brooklyn-nights-'), 'file name ' + name);
   assert(firstLines(csv)[0].startsWith('id,at,event_id,event,actor_kind'), 'CSV header');
@@ -1524,6 +1525,79 @@ await run('org activity: the audit log, filters, and its CSV records an export',
     next_before: null, actors: [{ uid: UID, label: 'fan@example.com' }],
   }),
   exos_audit_export: () => true,
+} }) });
+
+// ── claude/exos-leftovers-9: "Add to Wallet" for add-on entry codes, and the
+// event report's "N changes since publish" (mig 20261110120000). ──
+const LO9_PASS = '99999999-9999-4999-8999-99999999a0a1';
+const addonWalletMock = (probe) => ownerMock({
+  tables: {
+    exos_tickets: [{
+      id: TICKET, event_id: EV, org_id: ORG, tier_id: null, tier_name: 'GA', buyer_id: UID, owner_id: UID, status: 'active',
+      price_paid: 20, order_ref: null, channel_source: 'direct', promoter_id: null, pending_transfer_id: null, transfer_id: null,
+      voided_at: null, voided_by: null, voided_reason: null, released_at: null, check_in_at: null, last_reissue_at: null,
+      created_at: '2026-09-20T12:00:00Z', updated_at: '2026-09-20T12:00:00Z', attendee_name: null, event: EVENT_ROW,
+    }],
+    exos_ticket_barcode_secrets: [{ ticket_id: TICKET, barcode_secret: 'c2VjcmV0' }],
+    exos_transfers: [], exos_event_saves: [],
+  },
+  rpcs: {
+    exos_my_reschedule_offers: () => [], exos_ticket_access_needs: () => [],
+    exos_my_addon_passes: () => [{ id: LO9_PASS, event_id: EV, addon_id: ADDON, addon_name: 'VIP lounge', unit_index: 1,
+      status: 'active', check_in_at: null, owner_id: UID, barcode_secret: 'c2VjcmV0', event_name: 'Fall Party', starts_at: EVENT_ROW.starts_at }],
+  },
+  fns: {
+    'exos-wallet/pass': () => ({ status: probe, body: probe === 503 ? { error: 'wallet not configured' } : { error: 'not your ticket' } }),
+    'exos-wallet/addon-pass': () => ({ status: 409, body: { error: 'voided' } }),
+  },
+});
+
+await run('add-on wallet button: shown for a usable add-on code when the wallet is set up; asks for that pass', async (page, log) => {
+  await page.goto(BASE + '/ticket/' + TICKET);
+  await page.getByTestId('addon-passes').waitFor({ timeout: 8000 });
+  const btn = page.getByRole('button', { name: 'Add to Apple Wallet: VIP lounge' });
+  await btn.waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /Add to Google Wallet: VIP lounge/ }).count() === 0, 'iPhone gets Apple only');
+  await btn.click();
+  await expectText(page, 'This add-on was refunded');
+  const call = log.find((l) => l.startsWith('fn exos-wallet/addon-pass'));
+  assert(call && call.includes('"addon_pass_id":"' + LO9_PASS + '"') && call.includes('"kind":"apple"'), 'the add-on pass call: ' + call);
+}, { signedIn: true, mock: addonWalletMock(403) });
+
+await run('add-on wallet button stays hidden when exos-wallet is not configured (503)', async (page, log) => {
+  await page.goto(BASE + '/ticket/' + TICKET);
+  await page.getByTestId('addon-passes').waitFor({ timeout: 8000 });
+  await waitFor(seen(log, 'fn exos-wallet/pass'), 'the wallet probe');
+  await page.waitForTimeout(300);
+  assert(await page.getByRole('button', { name: /Add to (Apple|Google) Wallet/ }).count() === 0, 'no wallet button at all');
+  assert(!log.some((l) => l.startsWith('fn exos-wallet/addon-pass')), 'no add-on pass asked for');
+}, { signedIn: true, mock: addonWalletMock(503) });
+
+const AUDIT_SUMMARY = { event_id: EV, org_id: ORG, published_at: '2026-11-01T15:00:00Z', changes_since_publish: 3, changes_total: 5 };
+await run('event report footer: changes since publish, linking to Activity for the event', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  const footer = page.getByTestId('event-audit-footer');
+  await footer.waitFor({ timeout: 8000 });
+  const text = (await footer.innerText()).replace(/\s+/g, ' ');
+  assert(/3 changes since publish \(Nov 1, 2026\)/.test(text), 'footer: ' + text);
+  assert(log.some((l) => l.startsWith('rpc exos_event_audit_summary') && l.includes(EV)), 'asked for this event');
+  await footer.getByRole('link', { name: 'View activity' }).click();
+  await page.getByRole('heading', { name: 'Activity' }).waitFor({ timeout: 8000 });
+  assert(page.url().includes('/orgs/' + ORG + '/activity?event=' + EV), 'url: ' + page.url());
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_org_audit_list') && l.includes('"p_event_id":"' + EV + '"')), 'filtered to the event');
+}, { signedIn: true, mock: ownerMock({ ...reportMock, rpcs: { ...reportMock.rpcs,
+  exos_event_audit_summary: (b) => (b.p_event_id === EV ? AUDIT_SUMMARY : { __status: 403, __body: { code: '42501', message: 'not authorized' } }),
+  exos_org_audit_list: () => ({ rows: [auditRow(8)], next_before: null, actors: [] }),
+} }) });
+
+await run('event report footer stays hidden for a role that can\'t read the audit log (42501)', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  await page.locator('section', { has: page.getByRole('heading', { name: 'Money' }) }).waitFor({ timeout: 8000 });
+  await waitFor(seen(log, 'rpc exos_event_audit_summary'), 'the summary call');
+  await page.waitForTimeout(300);
+  assert(await page.getByTestId('event-audit-footer').count() === 0, 'no footer');
+}, { signedIn: true, mock: ownerMock({ ...reportMock, rpcs: { ...reportMock.rpcs,
+  exos_event_audit_summary: () => ({ __status: 403, __body: { code: '42501', message: 'not authorized' } }),
 } }) });
 
 await browser.close();

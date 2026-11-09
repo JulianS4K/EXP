@@ -4,7 +4,9 @@
 // browser records. Rows and labels: orgAudit.ts.
 
 import { supabase } from './supabase';
-import { auditArgs, type AuditFilters, type AuditPage, type AuditRow, type ExportKind } from './orgAudit';
+import {
+  auditArgs, parseEventAuditSummary, type AuditFilters, type AuditPage, type AuditRow, type EventAuditSummary, type ExportKind,
+} from './orgAudit';
 
 export async function listOrgAudit(orgId: string, f: AuditFilters, before: number | null = null, limit = 100): Promise<AuditPage> {
   const { data, error } = await supabase.rpc('exos_org_audit_list', auditArgs(orgId, f, before, limit));
@@ -40,4 +42,19 @@ export async function logExport(orgId: string | null | undefined, kind: ExportKi
   } catch {
     /* best effort */
   }
+}
+
+/**
+ * The event report's "N changes since publish" (mig 20261110120000). null when
+ * the caller can't read the log (42501: not owner / manager / finance) or the
+ * database predates the function: the footer stays hidden.
+ */
+export async function eventAuditSummary(eventId: string): Promise<EventAuditSummary | null> {
+  const { data, error } = await supabase.rpc('exos_event_audit_summary', { p_event_id: eventId });
+  if (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42501' || code === 'PGRST202' || code === '42883') return null;
+    throw error;
+  }
+  return parseEventAuditSummary(data);
 }

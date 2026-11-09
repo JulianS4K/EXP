@@ -660,6 +660,11 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   is the one named or the event's, and an event of another org is P0002.
   `GET /v1/audit` (`audit:read`, owner and finance credentials by default,
   never a manager, content or scanner role's) reads the key's org only.
+  `exos_event_audit_summary(event)` (authenticated, mig 20261110120000; the
+  event report's "N changes since publish") looks the event up, then checks
+  the same roles against the event's own org: 42501 for anyone else and for
+  an unknown event, before anything is counted. It returns counts and the
+  latest publish time only, never rows.
 - **Out of scope.** Door scans (`exos_checkins` records them) and buyer
   self-service (transfers, refund asks, profile edits).
 
