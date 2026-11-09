@@ -157,20 +157,24 @@ export async function fetchGoogleSaveUrl(ticketId: string): Promise<string> {
   return body!.save_url as string;
 }
 
-/** An add-on unit's own entry code as a pass (mig 20261108110000): POST /exos-wallet/addon-pass. */
-async function postAddonPass(addonPassId: string, kind: WalletKind): Promise<Response> {
+/**
+ * An add-on unit's own entry code as a pass (mig 20261108110000): POST /exos-wallet/addon-pass.
+ * `route` 'addon-reissue' (mig 20261111140000) first moves the code to a new
+ * epoch (the old wallet codes stop working); without a kind it only does that.
+ */
+async function postAddonPass(addonPassId: string, kind: WalletKind | null, route: 'addon-pass' | 'addon-reissue' = 'addon-pass'): Promise<Response> {
   const base = walletBase();
   if (!base) throw new WalletUnavailableError();
   const { data } = await supabase.auth.getSession();
   const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
-  return fetch(`${base}/addon-pass`, {
+  return fetch(`${base}/${route}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(anon ? { apikey: anon } : {}),
       Authorization: `Bearer ${data.session?.access_token ?? anon}`,
     },
-    body: JSON.stringify({ addon_pass_id: addonPassId, kind }),
+    body: JSON.stringify(kind ? { addon_pass_id: addonPassId, kind } : { addon_pass_id: addonPassId }),
   });
 }
 
@@ -188,4 +192,29 @@ export async function fetchAddonPassGoogleUrl(addonPassId: string): Promise<stri
   const body = (await res.json().catch(() => null)) as { save_url?: unknown } | null;
   if (!isGoogleSaveUrl(body?.save_url)) throw new Error(walletErrorMessage(null));
   return body!.save_url as string;
+}
+
+/** Reissue an add-on unit's wallet pass and get the new .pkpass (the old code stops working). */
+export async function reissueAddonPassApple(addonPassId: string): Promise<Blob> {
+  const res = await postAddonPass(addonPassId, 'apple', 'addon-reissue');
+  if (!res.ok) throw await failure(res);
+  return new Blob([await res.arrayBuffer()], { type: 'application/vnd.apple.pkpass' });
+}
+
+/** Reissue an add-on unit's wallet pass and get Google's save link for the new one. */
+export async function reissueAddonPassGoogleUrl(addonPassId: string): Promise<string> {
+  const res = await postAddonPass(addonPassId, 'google', 'addon-reissue');
+  if (!res.ok) throw await failure(res);
+  const body = (await res.json().catch(() => null)) as { save_url?: unknown } | null;
+  if (!isGoogleSaveUrl(body?.save_url)) throw new Error(walletErrorMessage(null));
+  return body!.save_url as string;
+}
+
+/** Reissue only (no wallet named): the holder adds the new pass with the usual buttons. */
+export async function reissueAddonPassOnly(addonPassId: string): Promise<{ codeEpoch: number | null; reissuesLeft: number | null }> {
+  const res = await postAddonPass(addonPassId, null, 'addon-reissue');
+  if (!res.ok) throw await failure(res);
+  const body = (await res.json().catch(() => null)) as { code_epoch?: unknown; reissues_left?: unknown } | null;
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return { codeEpoch: num(body?.code_epoch), reissuesLeft: num(body?.reissues_left) };
 }

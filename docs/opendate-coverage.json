@@ -741,7 +741,7 @@
    "path": "/api/v2/confirms/{confirm_id}/organizer_ticket_reservations/{token}",
    "status": "route",
    "exos": "PUT /v1/events/:id/organizer-reservations/:token",
-   "reason": "Same operation"
+   "reason": "Same operation; also replaces the checkout answers while the reservation is open"
   },
   {
    "category": "organizer_ticket_reservations",
@@ -2013,7 +2013,7 @@
    "path": "/api/v2/public/confirms/{confirm_id}/ticket_reservations/{token}",
    "status": "route",
    "exos": "PUT /v1/public/confirms/:id/ticket_reservations/:token",
-   "reason": "Same path (Opendate spelling)"
+   "reason": "Same path (Opendate spelling); also replaces the checkout answers while the reservation is open"
   },
   {
    "category": "public_ticket_reservations",
@@ -2037,7 +2037,7 @@
    "path": "/api/v2/public/orders",
    "status": "route",
    "exos": "GET /v1/public/orders",
-   "reason": "Same path (Opendate spelling)"
+   "reason": "Same path (Opendate spelling); each ticket adds its checkout answers as custom_field_values (Opendate's ticket field) and answers"
   },
   {
    "category": "public_orders",
@@ -2045,7 +2045,7 @@
    "path": "/api/v2/public/orders/{id}",
    "status": "route",
    "exos": "GET /v1/public/orders/:id",
-   "reason": "Same path (Opendate spelling)"
+   "reason": "Same path (Opendate spelling); each ticket adds its checkout answers as custom_field_values (Opendate's ticket field) and answers"
   },
   {
    "category": "public_orders",

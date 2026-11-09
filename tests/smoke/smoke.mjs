@@ -1620,6 +1620,33 @@ await run('add-on wallet button stays hidden when exos-wallet is not configured 
   assert(!log.some((l) => l.startsWith('fn exos-wallet/addon-pass')), 'no add-on pass asked for');
 }, { signedIn: true, mock: addonWalletMock(503) });
 
+// claude/exos-api-leftovers (mig 20261111140000): "Reissue" for an add-on's
+// wallet pass, offered only for a unit that is in a wallet; it asks again
+// before the old code dies, then calls POST /exos-wallet/addon-reissue.
+const AL_PASS_2 = '99999999-9999-4999-8999-99999999a0a2';
+const addonReissueMock = () => {
+  const m = addonWalletMock(403);
+  const base = { event_id: EV, addon_id: ADDON, addon_name: 'VIP lounge', status: 'active', check_in_at: null, owner_id: UID,
+    barcode_secret: 'c2VjcmV0', event_name: 'Fall Party', starts_at: EVENT_ROW.starts_at };
+  m.rpcs.exos_my_addon_passes = () => [{ ...base, id: LO9_PASS, unit_index: 1, wallet_epoch: 1 },
+                                       { ...base, id: AL_PASS_2, unit_index: 2, wallet_epoch: null }];
+  m.fns['exos-wallet/addon-reissue'] = () => ({ status: 429, body: { error: 'rate-limited', limit: 5, retry_after_seconds: 3600 } });
+  return m;
+};
+await run('add-on wallet reissue: only for a unit in a wallet; asks first; a refused reissue says why', async (page, log) => {
+  await page.goto(BASE + '/ticket/' + TICKET);
+  await page.getByTestId('addon-passes').waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Add to Apple Wallet: VIP lounge 1 of 2' }).waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /^Reissue wallet pass/ }).count() === 1, 'one Reissue: the unit in a wallet');
+  await page.getByRole('button', { name: 'Reissue wallet pass: VIP lounge 1 of 2' }).click();
+  await expectText(page, 'The old wallet code for this add-on will stop working.');
+  assert(!log.some((l) => l.startsWith('fn exos-wallet/addon-reissue')), 'nothing sent before the second tap');
+  await page.getByRole('button', { name: 'Reissue now' }).click();
+  await expectText(page, 'times a day');
+  const call = log.find((l) => l.startsWith('fn exos-wallet/addon-reissue'));
+  assert(call && call.includes('"addon_pass_id":"' + LO9_PASS + '"') && call.includes('"kind":"apple"'), 'the reissue call: ' + call);
+}, { signedIn: true, mock: addonReissueMock() });
+
 const AUDIT_SUMMARY = { event_id: EV, org_id: ORG, published_at: '2026-11-01T15:00:00Z', changes_since_publish: 3, changes_total: 5 };
 await run('event report footer: changes since publish, linking to Activity for the event', async (page, log) => {
   await page.goto(BASE + '/dashboard/event/' + EV);

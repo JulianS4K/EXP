@@ -15,6 +15,8 @@ export interface AddonPass {
   status: 'active' | 'used' | 'voided';
   /** null once voided. */
   barcodeSecret: string | null;
+  /** The wallet code's epoch (mig 20261111140000); null until the unit is added to a wallet. */
+  walletEpoch: number | null;
 }
 
 export function parseAddonPasses(raw: unknown): AddonPass[] {
@@ -30,6 +32,7 @@ export function parseAddonPasses(raw: unknown): AddonPass[] {
       unitCount: 1,
       status: r.status === 'used' || r.status === 'voided' ? r.status : 'active',
       barcodeSecret: typeof r.barcode_secret === 'string' && r.barcode_secret ? r.barcode_secret : null,
+      walletEpoch: typeof r.wallet_epoch === 'number' && Number.isInteger(r.wallet_epoch) && r.wallet_epoch >= 1 ? r.wallet_epoch : null,
     }));
   const counts = new Map<string, number>();
   for (const p of rows) counts.set(`${p.eventId}:${p.addonId ?? p.addonName}`, (counts.get(`${p.eventId}:${p.addonId ?? p.addonName}`) ?? 0) + 1);
