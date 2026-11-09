@@ -86,6 +86,7 @@ const OrgOffers = lazy(() => import('./views/OrgOffers'));
 const OfferEditor = lazy(() => import('./views/OfferEditor'));
 const OrgFinance = lazy(() => import('./views/OrgFinance'));
 const OrgLedger = lazy(() => import('./views/OrgLedger'));
+const OrgActivity = lazy(() => import('./views/OrgActivity')); // claude/exos-org-audit
 const OfferRespond = lazy(() => import('./views/OfferRespond'));
 const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
 const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
@@ -253,6 +254,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
                     <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
                     <Route path="/orgs/:orgId/finance/ledger" element={<OrgLedger />} />
+                    <Route path="/orgs/:orgId/activity" element={<OrgActivity />} />
                     <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
                     <Route path="/orgs/:orgId/memberships" element={<OrgMemberships />} />
                     <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />

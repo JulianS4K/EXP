@@ -1450,6 +1450,44 @@ await run('group pay: the host sees each seat live, texts a link, and covers the
     { id: 's3', seat_no: 3, state: 'waiting', path: '/group-pay/seat/' + 'bb'.repeat(16), paid_at: null, order_status: null },
   ] }) } } });
 
+// claude/exos-org-audit: Org → Activity, the audit log (mig 20261109100000).
+const auditRow = (id, over = {}) => ({
+  id, at: '2026-11-09T15:04:22Z', event_id: EV, event_name: 'Fall Party', actor_uid: UID, actor_kind: 'user', actor_ref: null,
+  actor_role: 'owner', actor_label: 'fan@example.com', action: 'tier.update', group: 'inventory', entity_type: 'tier',
+  entity_id: TIER2, changes: { price: [40, 45] }, amount_cents: null, currency: null, reason: null, source: 'dashboard',
+  request_id: null, ...over,
+});
+await run('org activity: the audit log, filters, and its CSV records an export', async (page, log) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/activity');
+  await page.getByRole('heading', { name: 'Activity' }).waitFor({ timeout: 8000 });
+  const table = page.getByRole('table', { name: 'Audit log' });
+  await table.getByText('Tier: update').waitFor({ timeout: 8000 });
+  const text = (await table.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('price 40 → 45') && text.includes('fan@example.com (owner)'), 'tier row: ' + text);
+  assert(text.includes('Refund: issue') && text.includes('$15.00') && text.includes('API key Box office (finance)') && text.includes('API'),
+    'refund row: ' + text);
+  // A filter asks the server again, with the group.
+  await page.getByLabel('Kind').selectOption('money');
+  await expectText(page, 'Refund: issue');
+  assert(log.some((l) => l.startsWith('rpc exos_org_audit_list') && l.includes('"p_group":"money"')), 'group filter sent');
+  const { name, text: csv } = await download(page, () => page.getByRole('button', { name: /Export CSV/ }).click());
+  assert(name.startsWith('activity-brooklyn-nights-'), 'file name ' + name);
+  assert(firstLines(csv)[0].startsWith('id,at,event_id,event,actor_kind'), 'CSV header');
+  for (let i = 0; i < 20 && !log.some((l) => l.startsWith('rpc exos_audit_export')); i++) await page.waitForTimeout(100);
+  assert(log.some((l) => l.startsWith('rpc exos_audit_export') && l.includes('"p_kind":"audit"')), 'the export logs export.run');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_org_audit_list: (b) => (b.p_org_id !== ORG ? { __status: 403, __body: { code: '42501', message: 'not authorized' } } : {
+    rows: b.p_group === 'money' ? [auditRow(9, { action: 'refund.issue', group: 'money', entity_type: 'order', entity_id: 'cs_1',
+      actor_kind: 'api_key', actor_ref: 'k1', actor_role: 'finance', actor_label: 'API key Box office', changes: { scope: [null, 'order'] },
+      amount_cents: 1500, currency: 'USD', source: 'api' })]
+      : [auditRow(9, { action: 'refund.issue', group: 'money', entity_type: 'order', entity_id: 'cs_1', actor_kind: 'api_key',
+          actor_ref: 'k1', actor_role: 'finance', actor_label: 'API key Box office', changes: { scope: [null, 'order'] },
+          amount_cents: 1500, currency: 'USD', source: 'api' }), auditRow(8)],
+    next_before: null, actors: [{ uid: UID, label: 'fan@example.com' }],
+  }),
+  exos_audit_export: () => true,
+} }) });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

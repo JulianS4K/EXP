@@ -241,6 +241,12 @@ export default function OrgMembers() {
           >
             Limit flags
           </button>
+          <button
+            onClick={() => navigate(`/orgs/${orgId}/activity`)}
+            className="pb-3 text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            Activity
+          </button>
           <span className="pb-3 text-sm font-bold text-slate-300 cursor-default">Billing</span>
         </div>
 

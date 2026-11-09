@@ -21,8 +21,8 @@ Settings → **API permissions** is a role × scope table. The owner ticks boxes
   | Role | Ceiling |
   |---|---|
   | owner | every scope (the owner's set is fixed) |
-  | manager | everything but `org:admin` |
-  | finance | `events:read`, `orders:read`, `refunds:write`, `fans:read`, `tickets:read`, `booking:read`, `finance:read`, `finance:write`, `commerce:read` |
+  | manager | everything but `audit:read` and `org:admin` |
+  | finance | `events:read`, `orders:read`, `refunds:write`, `fans:read`, `tickets:read`, `booking:read`, `finance:read`, `finance:write`, `commerce:read`, `audit:read` |
   | content | `events:read`, `events:write`, `booking:read` (never orders, finance or refunds) |
   | scanner (door) | `events:read`, `tickets:read`, `checkin:write` |
 

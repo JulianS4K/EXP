@@ -26,8 +26,8 @@ grant (`exos_role_token_scopes`, mirrored by `ROLE_SCOPES` and kept equal by `sr
 | Role | The most a token of this member can do |
 |---|---|
 | owner | every scope |
-| manager | everything but `webhooks:*` and `org:admin` |
-| finance | `events:read`, `orders:read`, `tickets:read`, `booking:read`, `finance:read`, `finance:write`, `commerce:read` |
+| manager | everything but `webhooks:*`, `audit:read` and `org:admin` |
+| finance | `events:read`, `orders:read`, `tickets:read`, `booking:read`, `finance:read`, `finance:write`, `commerce:read`, `audit:read` |
 | content | `events:read`, `events:write`, `booking:read` |
 | scanner | `events:read`, `tickets:read`, `checkin:write` |
 

@@ -267,7 +267,8 @@ for m in \
   20261108100000_exos_money_journal \
   20261108110000_exos_dice_leftovers \
   20261108120000_exos_group_pay \
-  20261108130000_exos_claim_alias_fix; do
+  20261108130000_exos_claim_alias_fix \
+  20261109100000_exos_org_audit; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -497,7 +498,8 @@ for m in \
          20261108100000_exos_money_journal \
          20261108110000_exos_dice_leftovers \
          20261108120000_exos_group_pay \
-         20261108130000_exos_claim_alias_fix; do
+         20261108130000_exos_claim_alias_fix \
+         20261109100000_exos_org_audit; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -617,3 +619,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_money_jou
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay.sql"
 # claude/exos-harness-full: transfer claims through prod's exos_claim_transfer body (mig 20261108130000: the proof check's alias clashed with its row variable t)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_claim_alias_fix.sql"
+# claude/exos-org-audit: the org audit log (mig 20261109100000): append-only, RLS, actors (user, API key, OAuth app, service), masking, cross-org, export.run (race: race_org_audit.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_audit.sql"

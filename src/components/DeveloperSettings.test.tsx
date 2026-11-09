@@ -17,7 +17,7 @@ vi.mock('../lib/supabase', () => {
 });
 
 import DeveloperSettings from './DeveloperSettings';
-import { READ_SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
+import { READ_SCOPES, SCOPES } from '../../supabase/functions/_shared/api/scopes.ts';
 
 const key = (id: string, scopes: string[], revoked = false) => ({
   id, name: `Key ${id}`, key_prefix: 'sk_live_0123abcd', scopes,
@@ -55,7 +55,8 @@ describe('DeveloperSettings: API key scopes', () => {
     fireEvent.click(within(box).getByLabelText(/Manage webhooks/));
     fireEvent.click(within(box).getByRole('button', { name: /New key/ }));
     await waitFor(() => expect(h.rpc).toHaveBeenCalledWith('exos_create_api_key', {
-      p_org_id: 'org-1', p_name: null, p_scopes: [...READ_SCOPES, 'webhooks:write'],
+      // In vocabulary order (audit:read comes after webhooks:write, mig 20261109100000).
+      p_org_id: 'org-1', p_name: null, p_scopes: SCOPES.filter((s) => s === 'webhooks:write' || READ_SCOPES.includes(s)),
     }));
     expect(await screen.findByText(/sk_live_a{48}/)).toBeTruthy();
   });

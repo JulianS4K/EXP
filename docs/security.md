@@ -450,7 +450,9 @@ Nothing new is granted to anon. Points to review:
 - **Erasure.** `exos_delete_my_account` deletes the locations of the caller's
   own orders and of guest orders under their **confirmed** email, before any
   email is cleared (marker `exos: buyer location`). There is no other
-  retention sweep for order data to hook into.
+  retention sweep for order data to hook into. Whatever sweep comes later
+  must skip `exos_org_audit` (the org audit log, below): its rows are kept
+  for the life of the org and hold no buyer contact data to erase.
 - **Reports aggregate.** `exos_event_buyer_geo` / `exos_org_buyer_geo`
   (authenticated, owner / manager / finance or platform admin, else 42501)
   and `_exos_buyer_geo` (service role, exos-api `/v1/events/:id/buyer-locations`
@@ -577,6 +579,69 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   (`exos_event_addon_passes`, marker `exos: addon wallet keys`), as for
   tickets. Apple add-on passes are static (no web service): the phone keeps
   showing a refunded pass's code, which the door refuses.
+
+### Org audit log (mig 20261109100000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **One writer, append-only.** `exos_org_audit` has RLS (owner / manager /
+  finance of the org, platform admins) and a SELECT grant only: no client
+  and no service-role write grant. UPDATE, DELETE and TRUNCATE raise in a
+  trigger (55000) for the table owner too. The only writer is `_exos_audit`
+  (definer, `search_path` pinned, service role only; never anon or
+  authenticated). It never raises: a failed write is a WARNING and the action
+  stands, as the journal does. No foreign keys, so deleting an event, a key
+  or the org leaves the log in place.
+- **What a row may hold.** Ids, the changed fields as `{field: [old, new]}`,
+  integer cents and a currency, a short reason. Field names that can carry
+  contact, card, secret or code data (`*email*`, `*phone*`, `*card*`,
+  `*secret*`, `*token*`, `*hash*`, `code`, `address`, …) are dropped before
+  the insert, and a CHECK refuses them (and anything shaped like an email)
+  in `changes` anyway. Text longer than 80 characters is stored as its
+  length, objects as "(changed)", and emails and phone numbers in short text
+  or a reason are masked. A create or delete names a few fields of the row,
+  never the whole row. A voucher's code and reserved email, an API key's
+  hash and prefix, a gift card's code are never logged.
+- **The actor.** `auth.uid()` (a dashboard user, or the key creator
+  `exos_api_write` acts as), or the `p_actor` a definer RPC is given, and the
+  actor's role in the org at the time. exos-api adds `X-Exos-Actor`
+  (`api_key:<id>`, `pat:<id>`, `oauth_app:<client id>`), `X-Exos-Actor-Uid`
+  and `X-Exos-Request-Id` to its PostgREST calls; `_exos_audit_actor` reads
+  them only when the request's role is `service_role`, so a browser (role
+  `authenticated`) can't name an actor or a request. An API key names its
+  creator only when the key belongs to the row's org. No actor: `service`,
+  or `cron` under pg_cron.
+- **Capture.** AFTER row triggers (`_exos_tg_audit_row`, definer) on the
+  tables the browser writes under RLS (`exos_events`, `exos_ticket_tiers`,
+  `exos_quotas`, `exos_quota_tiers`, `exos_vouchers`, `exos_org_memberships`)
+  and on `exos_holds`, `exos_api_keys`, `exos_org_role_scopes` and
+  `exos_order_edits`. Counters and system stamps (`sold`, `tickets_sold`,
+  `used_count`, `last_used_at`, reminders, sync state) never reach the
+  function (the trigger's WHEN). Money and access actions log from inside
+  their definer RPCs (34 marker patches, `/* exos: audit <action> */`):
+  refund claims, refund-ask declines, fee adjustments, comp batches and the
+  comp budget, ticket and printout voids, POS voids / refunds / paid-outs /
+  drawer close and recount, gift card void and reissue, offline donation
+  refunds and deletes, payouts (mark, cancel, instant), promoter settle /
+  payout / cancel, settlements (update, finalize, reopen), member approve /
+  reject, invite approval, OAuth app deletes, voucher issue, price steps,
+  channel prices, and the fans and audience exports. Each call sits on the
+  action's success path, after its replay checks, so a retried or
+  concurrent action logs once (`tests/exos/race_org_audit.sh`).
+  `exos_set_org_comp_budget` and `exos_void_ticket` predate 20260926, so
+  their patches skip with a NOTICE when prod's body lacks the anchor.
+- **Reading it.** `exos_org_audit_list` (authenticated: owner / manager /
+  finance or admin, else 42501 before anything is read) pages the org's rows
+  newest first with event, member, group and date filters; it names a
+  member by email (as `exos_order_edit_log` does), a key by its name, a
+  platform admin as "Exos support". `exos_audit_export` (authenticated, the
+  same roles, 30 a minute) records an `export.run` for a CSV the browser
+  built (the log itself, donations, price disclosures, attendees); the org
+  is the one named or the event's, and an event of another org is P0002.
+  `GET /v1/audit` (`audit:read`, owner and finance credentials by default,
+  never a manager, content or scanner role's) reads the key's org only.
+- **Out of scope.** Door scans (`exos_checkins` records them) and buyer
+  self-service (transfers, refund asks, profile edits).
 
 ### Search path
 ### Search path
