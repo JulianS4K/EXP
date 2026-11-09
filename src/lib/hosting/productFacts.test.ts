@@ -1,9 +1,13 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// addonUndo imports the Supabase client; the window constant is all we need.
+vi.mock('../supabase', () => ({ supabase: {} }));
 import { EXOS_FEE_BPS, FEE_FREE_MONTHS } from '../../../supabase/functions/_shared/platformFee.ts';
 import { PRODUCT_FACTS, assistantFacts, factsTableRows, pricingExample } from './productFacts';
 import { buildLlmsTxt, type PublicReader } from './seo';
+import { ADDON_UNDO_WINDOW_MINUTES } from '../addonUndo';
 
 const root = resolve(__dirname, '../../..');
 
@@ -34,6 +38,11 @@ describe('the AI facts registry', () => {
     expect(claim).toContain(`${EXOS_FEE_BPS / 100}%`);
     expect(claim).toContain('$37.34');
     expect(claim).toContain(`${FEE_FREE_MONTHS} months`);
+  });
+
+  it('states the add-on undo window the door enforces', () => {
+    const claim = PRODUCT_FACTS.find((f) => f.id === 'addon-scan-undo')!.claim;
+    expect(claim).toContain(`within ${ADDON_UNDO_WINDOW_MINUTES} minutes`);
   });
 
   it('matches docs/ai-facts.md', () => {

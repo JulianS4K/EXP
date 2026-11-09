@@ -1053,8 +1053,8 @@ export default function CreateEvent() {
             </div>
 
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Subgenres</label>
-              <input aria-label="Subgenres"
+              <label htmlFor="event-subgenres" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Subgenres</label>
+              <input id="event-subgenres" aria-label="Subgenres"
                 type="text"
                 placeholder={`e.g. Ambient, Techno, Deep House (max ${SUBGENRES_MAX_COUNT}, comma-separated)`}
                 className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1081,8 +1081,8 @@ export default function CreateEvent() {
                 the same artist twice for a back-to-back set if they
                 want. */}
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
-              <input aria-label="Performers"
+              <label htmlFor="event-performers" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Performers</label>
+              <input id="event-performers" aria-label="Performers"
                 type="text"
                 placeholder={`e.g. Skrillex, Boys Noize, Boombox Cartel (max ${PERFORMERS_MAX_COUNT}, comma-separated)`}
                 className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1106,7 +1106,7 @@ export default function CreateEvent() {
                 performers above so each link is tied to a named artist and
                 rendered next to them on the event page. */}
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Artist links (optional)</label>
+              <span className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Artist links (optional)</span>
               <ArtistLinksEditor
                 performers={formData.performers}
                 value={formData.artistLinks}
@@ -1116,13 +1116,13 @@ export default function CreateEvent() {
 
 
             <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Doors Open</label>
+              <label htmlFor="event-doors-open" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Doors Open</label>
               <div className="relative">
                 <CalendarIcon
                   className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none"
                   aria-hidden="true"
                 />
-                <input aria-label="Doors open"
+                <input id="event-doors-open" aria-label="Doors open"
                   type="datetime-local"
                   className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                   value={formData.timing.doorsOpen}
@@ -1166,13 +1166,13 @@ export default function CreateEvent() {
             </div>
 
             <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show Start</label>
+              <label htmlFor="event-show-start" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show Start</label>
               <div className="relative">
                 <CalendarIcon
                   className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none"
                   aria-hidden="true"
                 />
-                <input aria-label="Show start"
+                <input id="event-show-start" aria-label="Show start"
                   required
                   type="datetime-local"
                   className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
@@ -1189,13 +1189,13 @@ export default function CreateEvent() {
             </div>
 
             <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show End</label>
+              <label htmlFor="event-show-end" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Show End</label>
               <div className="relative">
                 <CalendarIcon
                   className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4 pointer-events-none"
                   aria-hidden="true"
                 />
-                <input aria-label="Show end"
+                <input id="event-show-end" aria-label="Show end"
                   type="datetime-local"
                   className="w-full bg-black border border-white/20 py-4 pl-14 pr-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors cursor-pointer"
                   value={formData.timing.endTime}
@@ -1233,10 +1233,10 @@ export default function CreateEvent() {
             </div>
 
             <div className="space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total capacity <span className="text-white/25 normal-case tracking-normal">(optional)</span></label>
+              <label htmlFor="event-total-capacity" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Total capacity <span className="text-white/25 normal-case tracking-normal">(optional)</span></label>
               <div className="relative">
                 <ListOrdered className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4" />
-                <input aria-label="Total capacity"
+                <input id="event-total-capacity" aria-label="Total capacity"
                   type="number"
                   min="1"
                   placeholder="Blank = add up the ticket types"
@@ -1260,12 +1260,15 @@ export default function CreateEvent() {
             </div>
 
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{locOk ? 'Where it happens' : 'Venue'}</label>
+              {/* With the location picker this heads several fields (venue, online link). */}
+              {locOk
+                ? <span className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Where it happens</span>
+                : <label htmlFor="event-venue" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Venue</label>}
               {(() => {
                 const venueInputs = (<>
               <div className="relative">
                 <MapPin className="absolute left-6 top-1/2 -translate-y-1/2 text-white/30 w-4 h-4" aria-hidden="true" />
-                <input aria-label="Venue"
+                <input id="event-venue" aria-label="Venue"
                   required={!onlineOk || needsVenue(formData.online.format)}
                   type="text"
                   maxLength={LOCATION_MAX}
@@ -1342,10 +1345,10 @@ export default function CreateEvent() {
             </div>
 
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event image</label>
+              <label htmlFor="event-image" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Event image</label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="relative border border-dashed border-white/20 p-8 flex flex-col items-center justify-center bg-black/40 hover:bg-black/60 transition-all cursor-pointer group">
-                  <input
+                  <input id="event-image"
                     type="file"
                     accept="image/*"
                     aria-label="Upload event artwork"
@@ -1386,8 +1389,8 @@ export default function CreateEvent() {
             {/* With the store-page columns, the markdown "About" below replaces this. */}
             {!storeOk && (
             <div className="md:col-span-2 space-y-2">
-              <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Description</label>
-              <textarea aria-label="Description"
+              <label htmlFor="event-description" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Description</label>
+              <textarea id="event-description" aria-label="Description"
                 rows={5}
                 maxLength={DESCRIPTION_MAX}
                 placeholder="What should people know? Lineup, dress code, age limit…"
@@ -1465,8 +1468,8 @@ export default function CreateEvent() {
                    )}
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2 md:col-span-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Name</label>
-                         <input aria-label="Ticket type name" 
+                         <label htmlFor={`tier-${tier.id}-name`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Name</label>
+                         <input id={`tier-${tier.id}-name`} aria-label="Ticket type name" 
                            required 
                            type="text"
                            placeholder="e.g. General admission"
@@ -1476,8 +1479,8 @@ export default function CreateEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Price (USD)</label>
-                         <input aria-label="Price (USD)" 
+                         <label htmlFor={`tier-${tier.id}-price`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Price (USD)</label>
+                         <input id={`tier-${tier.id}-price`} aria-label="Price (USD)" 
                            required 
                            type="number"
                            min="0"
@@ -1488,8 +1491,8 @@ export default function CreateEvent() {
                          />
                       </div>
                       <div className="space-y-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{tier.table?.isTable ? 'Tables Available' : 'Quantity Available'}</label>
-                         <input aria-label={tier.table?.isTable ? 'Tables available' : 'Quantity available'} 
+                         <label htmlFor={`tier-${tier.id}-quantity`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">{tier.table?.isTable ? 'Tables Available' : 'Quantity Available'}</label>
+                         <input id={`tier-${tier.id}-quantity`} aria-label={tier.table?.isTable ? 'Tables available' : 'Quantity available'} 
                            required 
                            type="number"
                            min="1"
@@ -1499,8 +1502,8 @@ export default function CreateEvent() {
                          />
                       </div>
                       <div className="space-y-2 md:col-span-2">
-                         <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">What's included <span className="text-white/25 normal-case tracking-normal">(optional)</span></label>
-                         <input aria-label="What's included"
+                         <label htmlFor={`tier-${tier.id}-included`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">What's included <span className="text-white/25 normal-case tracking-normal">(optional)</span></label>
+                         <input id={`tier-${tier.id}-included`} aria-label="What's included"
                            type="text"
                            placeholder="e.g. Entry before 11pm, one drink"
                            className="w-full bg-black border border-white/20 py-3 px-5 text-white font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1556,8 +1559,8 @@ export default function CreateEvent() {
                         </summary>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/10">
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
-                            <select aria-label="Type"
+                            <label htmlFor={`tier-${tier.id}-type`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Type</label>
+                            <select id={`tier-${tier.id}-type`} aria-label="Type"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.ticketType}
                               onChange={(e) => updateTier(tier.id, 'ticketType', e.target.value)}
@@ -1568,8 +1571,8 @@ export default function CreateEvent() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
-                            <select aria-label="Visibility"
+                            <label htmlFor={`tier-${tier.id}-visibility`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Visibility</label>
+                            <select id={`tier-${tier.id}-visibility`} aria-label="Visibility"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.visibility}
                               onChange={(e) => updateTier(tier.id, 'visibility', e.target.value)}
@@ -1579,8 +1582,8 @@ export default function CreateEvent() {
                             </select>
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
-                            <input aria-label="Sales open"
+                            <label htmlFor={`tier-${tier.id}-sales-open`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Open</label>
+                            <input id={`tier-${tier.id}-sales-open`} aria-label="Sales open"
                               type="datetime-local"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.salesStart}
@@ -1588,8 +1591,8 @@ export default function CreateEvent() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
-                            <input aria-label="Sales close"
+                            <label htmlFor={`tier-${tier.id}-sales-close`} className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Sales Close</label>
+                            <input id={`tier-${tier.id}-sales-close`} aria-label="Sales close"
                               type="datetime-local"
                               className="w-full bg-black border border-white/20 py-3 px-5 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
                               value={tier.salesEnd}
@@ -1652,9 +1655,9 @@ export default function CreateEvent() {
            <h3 className="disp text-lg uppercase tracking-wide text-white mb-2">Page colors &amp; short link</h3>
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Color</label>
+                 <label htmlFor="event-primary-color" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Primary Color</label>
                  <div className="flex items-center space-x-3">
-                    <input aria-label="Primary color" 
+                    <input id="event-primary-color" aria-label="Primary color" 
                       type="color"
                       className="w-12 h-12 rounded-xl cursor-pointer border-none p-0 bg-transparent"
                       value={formData.branding.primaryColor}
@@ -1670,9 +1673,9 @@ export default function CreateEvent() {
                  </div>
               </div>
               <div className="space-y-2">
-                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Color</label>
+                 <label htmlFor="event-accent-color" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Accent Color</label>
                  <div className="flex items-center space-x-3">
-                    <input aria-label="Accent color" 
+                    <input id="event-accent-color" aria-label="Accent color" 
                       type="color"
                       className="w-12 h-12 rounded-xl cursor-pointer border-none p-0 bg-transparent"
                       value={formData.branding.accentColor}
@@ -1688,10 +1691,10 @@ export default function CreateEvent() {
                  </div>
               </div>
               <div className="md:col-span-2 space-y-2">
-                 <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Short link</label>
+                 <label htmlFor="event-short-link" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Short link</label>
                  <div className="relative">
                     <span className="absolute left-6 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold font-mono">/e/</span>
-                    <input aria-label="Short link"
+                    <input id="event-short-link" aria-label="Short link"
                       type="text"
                       maxLength={SLUG_MAX}
                       placeholder="Blank = made from the event name"
@@ -1727,8 +1730,8 @@ export default function CreateEvent() {
            
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max tickets per order</label>
-                <input aria-label="Max tickets per order" 
+                <label htmlFor="event-max-tickets-per-order" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max tickets per order</label>
+                <input id="event-max-tickets-per-order" aria-label="Max tickets per order" 
                   type="number"
                   min="1"
                   className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"
@@ -1737,8 +1740,8 @@ export default function CreateEvent() {
                 />
               </div>
               <div className="space-y-2">
-                <label className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max tickets per person</label>
-                <input aria-label="Max tickets per person" 
+                <label htmlFor="event-max-tickets-per-person" className="type text-[11px] text-white/60 uppercase tracking-widest ml-1">Max tickets per person</label>
+                <input id="event-max-tickets-per-person" aria-label="Max tickets per person" 
                   type="number"
                   min="1"
                   className="w-full bg-black border border-white/20 py-4 px-6 text-white font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-colors"

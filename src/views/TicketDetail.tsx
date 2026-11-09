@@ -17,6 +17,7 @@ import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 import { signBarcode, currentBucket } from '../lib/barcode';
 import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import AddToCalendar from '../components/AddToCalendar';
 import WalletButtons from '../components/WalletButtons';
 import { shareEventToStory } from '../lib/poster';
@@ -36,6 +37,7 @@ import TicketSeats from '../components/seating/TicketSeats';
 import TicketPrintedNotice from '../components/TicketPrintedNotice';
 
 export default function TicketDetail() {
+  const motionGate = useMotionGate();
   const { id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -299,9 +301,9 @@ export default function TicketDetail() {
           <AnimatePresence mode="wait">
             <motion.div
               key={currentTicket.id}
-              initial={{ opacity: 0, x: 20 }}
+              initial={motionGate.enter({ opacity: 0, x: 20 })}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              exit={motionGate.leave({ opacity: 0, x: -20 })}
               className="bg-[#111] border border-white/10 shadow-2xl relative overflow-hidden"
             >
               {/* Top Branding Section */}

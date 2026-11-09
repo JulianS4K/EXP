@@ -218,6 +218,11 @@ await check('my tickets', async (page, run) => {
 await check('ticket view', async (page, run) => {
   await page.goto(BASE + '/ticket/' + TICKET);
   await text(page, 'Fall Party');
+  // Reduced motion (this context asks for it): the ticket card's fade-in is
+  // skipped, so nothing is part-transparent the moment it shows up.
+  const faded = await page.evaluate(() => [...document.querySelectorAll('[style*="opacity"]')]
+    .filter((el) => parseFloat(getComputedStyle(el).opacity) < 1).map((el) => el.className.toString().slice(0, 60)));
+  if (faded.length) throw new Error('reduced motion: content still fading in: ' + faded.join(' | '));
   await page.waitForLoadState('networkidle');
   await run();
 }, { signedIn: true, mock: ticketMock });
@@ -248,19 +253,22 @@ await check('door app (signed in)', async (page, run) => {
   await run();
 }, { signedIn: true, mock: ownerMock() });
 
-// Advisory: the staff scanner's small grey labels (slate-300/400 on white,
-// slate-500 on grey) fail contrast; a restyle of the scanner, listed in
-// docs/pci.md as a known gap. Printed, not failed.
+// The staff scanner: the Tickets tab (scan box, counts, scan log, refused
+// scans), then the Guest list tab.
 await check('door scanner (/checkin)', async (page, run) => {
   await page.goto(BASE + '/checkin/' + EV);
   await page.getByPlaceholder('Scan or type a ticket code').or(page.getByText(/^Guest list/).first()).first().waitFor({ timeout: 8000 });
   await page.waitForLoadState('networkidle');
-  await run();
+  await run('tickets');
+  await page.getByRole('tab', { name: /^Guest list/ }).click();
+  await page.getByRole('tab', { name: /^Guest list/, selected: true }).waitFor({ timeout: 5000 });
+  await page.waitForLoadState('networkidle');
+  await run('guest list');
 }, { signedIn: true, mock: ownerMock({ rpcs: {
   exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
-} }), advisory: true });
+} }) });
 
 await browser.close();
 

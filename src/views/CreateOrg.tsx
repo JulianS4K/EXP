@@ -8,6 +8,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { ArrowLeft, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
@@ -22,6 +23,7 @@ const INP =
   'w-full bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue focus:ring-2 focus:ring-tm-blue/15 transition-colors';
 
 export default function CreateOrg() {
+  const motionGate = useMotionGate();
   const { user, openAuthModal } = useAuth();
   const { refresh, setActiveOrg } = useOrganization();
   const { toast } = useToast();
@@ -117,7 +119,7 @@ export default function CreateOrg() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="min-h-screen bg-tm-gray text-slate-900"
     >

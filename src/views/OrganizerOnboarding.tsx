@@ -20,6 +20,7 @@ import type { OrgType } from '../lib/eventLocation';
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import {
   Calendar,
   Check,
@@ -51,6 +52,7 @@ const STEPS: { n: Step; title: string; subtitle: string }[] = [
 const ONBOARDING_DONE_KEY = 'vibepass:onboarded';
 
 export default function OrganizerOnboarding() {
+  const motionGate = useMotionGate();
   const { user, openAuthModal } = useAuth();
   const { activeOrg, orgs, refresh, setActiveOrg } = useOrganization();
   const { toast } = useToast();
@@ -207,7 +209,7 @@ export default function OrganizerOnboarding() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="max-w-2xl mx-auto px-4 py-12"
     >
