@@ -8,8 +8,9 @@ import {
 } from './journal';
 import { toCsv } from './csv';
 
-// The chart, the account check and the source check were last redefined here.
+// The chart and the account check were last redefined here; the source check in SRC_MIG.
 const MIG = readFileSync(path.resolve(__dirname, '../../supabase/migrations/20261110100000_exos_journal_complete.sql'), 'utf8');
+const SRC_MIG = readFileSync(path.resolve(__dirname, '../../supabase/migrations/20261111130000_exos_journal_payouts_tax.sql'), 'utf8');
 const API = readFileSync(path.resolve(__dirname, '../../supabase/functions/exos-api/journal.ts'), 'utf8');
 
 describe('the chart', () => {
@@ -28,10 +29,10 @@ describe('the chart', () => {
   });
 
   it('matches the source check and the API source filter', () => {
-    const chk = MIG.match(/exos_journal_entries_source_table_check CHECK \(source_table IN \(([^)]+)\)/)?.[1] ?? '';
+    const chk = SRC_MIG.match(/exos_journal_entries_source_table_check CHECK \(source_table IN \(([^)]+)\)/)?.[1] ?? '';
     const sql = [...chk.matchAll(/'exos_([a-z_]+)'/g)].map((m) => m[1]);
     const api = API.match(/JOURNAL_SOURCES = \[([\s\S]*?)\] as const/)?.[1] ?? '';
-    expect(sql.length).toBe(15);
+    expect(sql.length).toBe(16);
     expect([...api.matchAll(/"([a-z_]+)"/g)].map((m) => m[1])).toEqual(sql);
     for (const t of sql) expect(sourceLabel(`exos_${t}`)).not.toBe(t.replace(/_/g, ' '));   // a label of its own
   });

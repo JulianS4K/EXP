@@ -82,6 +82,8 @@ DECLARE
   v_got text[]; v_exp text[];
   v_orgs uuid[] := ARRAY[pg_temp.u('A'), pg_temp.u('B')];
   v_t text;
+  v_cut timestamptz;
+  v_per record;
   v_email_re text := '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}';
   v_phones text[] := ARRAY['5550176', '5550177', '555-0176', '555-0177', '(212)', '+1212'];
 BEGIN
@@ -321,7 +323,44 @@ BEGIN
     RAISE EXCEPTION '% I9: gift cards outstanding % <> balances %', p_step, n, m;
   END IF;
 
+  -- I10 sales tax: the tax report's net = the journal's sales tax payable,
+  -- per org, currency and period (all time, then split at the median tax
+  -- entry), and per event; each org through its own reader.
+  FOR r IN SELECT o.org, o.who FROM (VALUES (pg_temp.u('A'), 'fa'), (pg_temp.u('B'), 'ob')) o(org, who) LOOP
+    SELECT e.occurred_at INTO v_cut FROM public.exos_journal_entries e
+     WHERE e.org_id = r.org AND EXISTS (SELECT 1 FROM public.exos_journal_lines l WHERE l.entry_id = e.id AND l.account = 'sales_tax_payable')
+     ORDER BY e.occurred_at OFFSET (SELECT count(*) / 2 FROM public.exos_journal_entries e2
+                                    WHERE e2.org_id = r.org AND EXISTS (SELECT 1 FROM public.exos_journal_lines l2
+                                                                        WHERE l2.entry_id = e2.id AND l2.account = 'sales_tax_payable'))
+     LIMIT 1;
+    PERFORM pg_temp.act(r.who);
+    SET LOCAL ROLE authenticated;
+    FOR v_per IN
+      SELECT NULL::timestamptz AS f, NULL::timestamptz AS t, NULL::uuid AS ev
+      UNION ALL SELECT NULL, v_cut, NULL WHERE v_cut IS NOT NULL
+      UNION ALL SELECT v_cut, NULL, NULL WHERE v_cut IS NOT NULL
+      UNION ALL SELECT NULL, NULL, ev.id FROM public.exos_events ev WHERE ev.org_id = r.org
+    LOOP
+      WITH rep AS (
+        SELECT x ->> 'currency' AS cur, sum((x ->> 'net_tax_cents')::bigint) AS net
+          FROM jsonb_array_elements(public.exos_sales_tax_report(r.org, v_per.f, v_per.t, v_per.ev) -> 'rows') x GROUP BY 1
+      ), jr AS (
+        SELECT tb.currency AS cur, -sum(tb.balance_cents) AS net
+          FROM public.exos_journal_trial_balance(r.org, v_per.f, v_per.t, v_per.ev) tb WHERE tb.account = 'sales_tax_payable' GROUP BY 1
+      )
+      SELECT string_agg(format('%s: report %s, journal %s', coalesce(rep.cur, jr.cur), coalesce(rep.net, 0), coalesce(jr.net, 0)), '; ')
+        INTO v_t
+        FROM rep FULL JOIN jr ON jr.cur = rep.cur
+       WHERE coalesce(rep.net, 0) <> coalesce(jr.net, 0);
+      IF v_t IS NOT NULL THEN
+        RESET ROLE;
+        RAISE EXCEPTION '% I10: org % sales tax report <> journal (from %, to %, event %): %', p_step, r.org, v_per.f, v_per.t, v_per.ev, v_t;
+      END IF;
+    END LOOP;
+    RESET ROLE;
+  END LOOP;
+
   PERFORM set_config('app.uid', coalesce(v_uid, ''), true), set_config('app.jwt', coalesce(v_jwt, ''), true);
-  RAISE NOTICE 'OK  % (invariants I1-I9 hold; % audit rows)', p_step, pg_temp.v('audit_n');
+  RAISE NOTICE 'OK  % (invariants I1-I10 hold; % audit rows)', p_step, pg_temp.v('audit_n');
 END $$;
 

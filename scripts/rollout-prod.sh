@@ -106,6 +106,7 @@ MIGRATIONS=(
   20261110120000_exos_leftovers_9     # claude/exos-leftovers-9: reservation answers (2 patches on _exos_partner_reserve), API add-on undo (2 patches on exos_api_write), event audit summary; no cron; apply before deploying exos-api
   20261111100000_exos_e2e_fixes      # claude/exos-e2e-sim: one audit row per price-step change (patches _exos_tg_audit_row, exos_set_price_steps, _exos_api_price_steps_set); no cron, no deploy needed
   20261111110000_exos_neighborhoods  # claude/exos-neighborhoods: neighborhood pages (anon RPCs), follower new-event mail (trigger on exos_events, queued only), follower list; cron exos-follower-digests-hourly created INACTIVE; redefines exos_announce_to_followers
+  20261111130000_exos_journal_payouts_tax  # claude/exos-journal-3: Stripe scheduled payouts table + journal posting, tax report read from the journal, gift card owed-fee hand-back; 2 marker patches (exos_journal_post_gift_card, _exos_journal_backfill); no cron; backfills at apply; deploy exos-reconcile-stripe after
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

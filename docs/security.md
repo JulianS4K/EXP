@@ -264,6 +264,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
 | `exos_journal_trial_balance`, `exos_sales_tax_report` (mig 20261108100000) | OK | Money journal reads, authenticated: owner / manager / finance of the passed org (`exos_has_org_role`), platform admins, or the service role (exos-api, scoped to the key's org); anyone else `42501`. Every row read is filtered by that org (and the event, when given, must be the org's). Counts and cents only: no buyer email, name or order holder. The writers (`exos_journal_post_*`, `_exos_journal_post`, `_exos_journal_sync`, `_exos_journal_backfill`) are service role only and run from triggers on the money tables |
+| `exos_stripe_org_payouts_record`, `exos_journal_post_stripe_org_payout`, `_exos_journal_gc_refund_fee` (mig 20261111130000) | Service role | `exos-reconcile-stripe` (cron secret) records each connected account's payouts as Stripe lists them (reads only at Stripe); the account must be the org's own connected account (`exos_org_secrets`), a payout id recorded for another org or account is never moved, fields are validated, at most 1,000 a call, status forward only. The posting functions run from triggers; `exos_sales_tax_report` (same readers as above) now reads its amounts from the org's journal lines |
 | `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
 | `exos_staff_clock_in`, `exos_staff_clock_out`, `exos_staff_shift_close`, `exos_staff_shift_report` (mig 20261105120000) | OK | Clock in / out: the caller only, as an active member of the org (the role is kept on the shift). Close a forgotten shift (with a reason) and the report: owner / manager. `exos_staff_shifts`: RLS own rows for members, all for owner / manager, no client writes |
 | `exos_event_in_app_report` (mig 20261105140000) | OK | Checkouts started / paid / tickets / gross per in-app browser (Instagram, Facebook, ...) and per escape source, for one event: owner / manager / finance of the event's org (`exos_has_org_role`, event looked up first; an unknown event and a refused caller are the same 42501). Counts and money only, no buyers. No anon grant. `_exos_in_app_browser_from_ua` (pure) and the insert trigger `_exos_tg_checkout_in_app_browser` (invoker, reads only NEW) have no client grant; the new `exos_checkout_sessions.in_app_browser` column is read under the existing `exos_checkout_sel` RLS (the buyer and the org's owner / manager / finance) |
@@ -549,6 +550,34 @@ RLS as above). Points to review:
   flows and only read here. The gift card ledger's trigger is deferred to
   commit; a failure there is a WARNING too, so it can't fail the commit of
   the sale or refund that wrote the ledger row.
+
+### Journal: Stripe payouts, the tax report, the owed gift card fee (mig 20261111130000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **Reads only at Stripe.** `exos-reconcile-stripe` (cron secret) now also
+  lists each connected account's payouts (`GET /v1/payouts` with the
+  `Stripe-Account` header, the platform's own Connect relationship). It never
+  creates, updates or cancels anything there (`src/lib/payouts/orgPayouts.test.ts`
+  checks the function makes list calls only). `EXOS_RECONCILE_PAYOUTS=off`
+  skips it.
+- **A payout lands only on its own org.** `exos_stripe_org_payouts_record`
+  (definer, service role only) refuses an account that isn't the org's
+  `exos_org_secrets.payments.connectedAccountId` (`42501`), skips a payout id
+  already recorded for another org or account, validates every field
+  (`po_` id, integer amount, currency, status allowlist), takes at most 1,000
+  rows a call and only moves a status forward. Paid / failed / canceled log
+  `payout.stripe_status` (service). `exos_stripe_org_payouts` is RLS on:
+  owner / finance of the org and platform admins read; no client writes.
+- **No double posting.** A payout posts once per payout id (synced, advisory
+  lock); an instant payout Exos sent posts only from
+  `exos_org_instant_payouts`, whichever row is written first
+  (`tests/exos/race_journal_payouts.sh`).
+- **The tax report reads the journal.** `exos_sales_tax_report` keeps its
+  reader check (owner / manager / finance, admins, service role) and its
+  org / event scoping; its amounts now come from the org's own journal
+  lines. The owed-fee hand-back (`_exos_journal_gc_refund_fee`, service
+  role) posts only for an order of the card's org.
 
 ### DICE leftovers (mig 20261108110000)
 

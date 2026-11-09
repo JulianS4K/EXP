@@ -103,14 +103,15 @@ BEGIN
       'promoter.settle', 'promoter.payout_record', 'promoter.payout_cancel', 'settlement.update', 'settlement.finalize',
       'settlement.reopen', 'member.approve', 'member.reject', 'invite.settings', 'oauth_app.delete', 'voucher.issue',
       'tier.price_steps', 'tier.channel_price', 'export.run',
-      'order.group_cover', 'hold.group_cancel'] LOOP  -- the last two: mig 20261110110000 (group pay 2)
+      'order.group_cover', 'hold.group_cancel',  -- these two: mig 20261110110000 (group pay 2)
+      'payout.stripe_status'] LOOP  -- mig 20261111130000 (Stripe's scheduled payouts)
     ASSERT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
                      AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0), 'A0 marker ' || m;
   END LOOP;
   ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
-            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 37, 'A0 37 patched functions';  -- +1 exos_org_followers_export (mig 20261111110000)
+            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 38, 'A0 38 patched functions';  -- +1 exos_org_followers_export (mig 20261111110000), +1 exos_stripe_org_payouts_record (mig 20261111130000)
   ASSERT (SELECT count(DISTINCT tgrelid) FROM pg_trigger WHERE tgname IN ('exos_audit_ins_del', 'exos_audit_upd')) = 10, 'A0 ten tables';
-  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 37 patched functions, 10 audited tables';
+  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 38 patched functions, 10 audited tables';
 END $$;
 
 -- A1 -------------------------------------------------------------------------

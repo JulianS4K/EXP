@@ -2,9 +2,9 @@
 // against the Exos ledger (mig 20261001101000; money audit section 4 #6).
 //
 // Auth: cron secret (x-cron-secret) via the shared requireCronSecret, like
-// exos-reconcile-checkouts. READ-ONLY at Stripe: it lists balance
-// transactions and nothing else. It never creates, updates or refunds
-// anything there.
+// exos-reconcile-checkouts. READ-ONLY at Stripe: it lists the platform's
+// balance transactions and the connected accounts' payouts, and nothing
+// else. It never creates, updates or refunds anything there.
 //
 // Each run:
 //   1. Lists the platform account's balance transactions created in the last
@@ -22,18 +22,36 @@
 //      upserted per (kind, key), open issues inside the checked window that
 //      weren't found are resolved, and the day's run row is written. Running
 //      twice on one day changes nothing but timestamps.
+//   5. (mig 20261111130000) Lists each connected account's payouts to its
+//      bank (GET /v1/payouts with the Stripe-Account header: a read on the
+//      platform's own Connect relationship) created from 14 days before the
+//      window, and records them per org with exos_stripe_org_payouts_record
+//      (the account must be the org's own; upsert on the payout id; status
+//      only moves forward). A paid payout posts Dr bank / Cr Stripe clearing
+//      to the journal, reversed if it fails later. The platform's balance
+//      transactions never carry these: a destination charge's money is paid
+//      out from the connected account. EXOS_RECONCILE_PAYOUTS=off skips it.
+//      A failure here is reported and never fails the reconciliation.
 //
 // Payments are off in prod (no STRIPE_SECRET_KEY): the function answers 503
 // "payments are switched off" and touches nothing.
 //
 // Secrets: CRON_SECRET, STRIPE_SECRET_KEY, SUPABASE_URL +
-// SUPABASE_SERVICE_ROLE_KEY (platform-injected). Optional EXOS_RECONCILE_DAYS.
+// SUPABASE_SERVICE_ROLE_KEY (platform-injected). Optional EXOS_RECONCILE_DAYS,
+// EXOS_RECONCILE_PAYOUTS (off).
 // Deploy with --no-verify-jwt (cron-secret auth). NOT scheduled: the daily
 // line is in docs/payouts.md (a cron change needs operator permission).
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
+import {
+  connectedAccountId,
+  type OrgPayoutRow,
+  orgPayoutRow,
+  payoutCreatedRange,
+  payoutsSyncEnabled,
+} from "../_shared/payouts/orgPayouts.ts";
 import {
   type ExosDisputeRow,
   type ExosPaymentRow,
@@ -56,6 +74,9 @@ const IN_CHUNK = 100;
 // missing Stripe movement (a charge a second before the window, its row a
 // second after), and only issues inside the checked window are resolved.
 const MARGIN_MS = 60 * 60 * 1000;
+// Connected accounts' payouts (step 5): bounded per account and per run.
+const MAX_PAYOUTS_PER_ORG = 1000;
+const PAYOUT_BUDGET_MS = 60_000;
 
 const PAYMENT_COLS =
   "session_id, org_id, payment_intent, charge_id, balance_txn_id, amount_cents, currency, status, stripe_fee_cents, created_at";
@@ -94,6 +115,75 @@ async function readIn<T>(sb: SupabaseClient, table: string, cols: string, col: s
     out.push(...((data ?? []) as T[]));
   }
   return out;
+}
+
+interface PayoutSyncStats {
+  orgs: number;
+  payouts: number;
+  new: number;
+  changed: number;
+  skipped: number;
+  failed_orgs: number;
+  truncated: boolean;
+  skipped_all?: boolean;
+}
+
+/**
+ * Step 5: every connected account's payouts, read from Stripe (list only) and
+ * recorded per org. Never throws: a failure is counted and logged.
+ */
+async function syncOrgPayouts(stripe: Stripe, sb: SupabaseClient, from: string, to: string): Promise<PayoutSyncStats> {
+  const stats: PayoutSyncStats = { orgs: 0, payouts: 0, new: 0, changed: 0, skipped: 0, failed_orgs: 0, truncated: false };
+  if (!payoutsSyncEnabled((k) => Deno.env.get(k))) return { ...stats, skipped_all: true };
+  const started = Date.now();
+  let orgs: { org_id: string; payments: unknown }[];
+  try {
+    orgs = await readAll<{ org_id: string; payments: unknown }>(() =>
+      sb.from("exos_org_secrets").select("org_id, payments").not("payments", "is", null).order("org_id", { ascending: true })
+    );
+  } catch (e) {
+    console.error("exos-reconcile-stripe: reading connected accounts failed", e);
+    return { ...stats, failed_orgs: -1 };
+  }
+  const created = payoutCreatedRange(from, to);
+  for (const o of orgs) {
+    const acct = connectedAccountId(o.payments);
+    if (!acct) continue;
+    if (Date.now() - started > PAYOUT_BUDGET_MS) {
+      stats.truncated = true;
+      break;
+    }
+    stats.orgs++;
+    try {
+      // Read-only: the list call is the only Stripe request made for the account.
+      const rows: OrgPayoutRow[] = [];
+      const list = stripe.payouts.list({ created, limit: 100 }, { stripeAccount: acct });
+      for await (const po of list) {
+        const row = orgPayoutRow(po as unknown as Parameters<typeof orgPayoutRow>[0]);
+        if (row) rows.push(row);
+        if (rows.length >= MAX_PAYOUTS_PER_ORG) {
+          stats.truncated = true;
+          break;
+        }
+      }
+      stats.payouts += rows.length;
+      if (!rows.length) continue;
+      const { data, error } = await sb.rpc("exos_stripe_org_payouts_record", {
+        p_org_id: o.org_id,
+        p_account_id: acct,
+        p_payouts: rows,
+      });
+      if (error) throw new Error(error.message);
+      const r = (data ?? {}) as { new?: number; changed?: number; skipped?: number };
+      stats.new += r.new ?? 0;
+      stats.changed += r.changed ?? 0;
+      stats.skipped += r.skipped ?? 0;
+    } catch (e) {
+      stats.failed_orgs++;
+      console.error(`exos-reconcile-stripe: payouts of org ${o.org_id} failed`, String((e as Error)?.message ?? e).slice(0, 300));
+    }
+  }
+  return stats;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -147,11 +237,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
         .upsert(c.map((t) => ({ ...t, snapshot_at: snapshotAt })), { onConflict: "id" });
       if (error) throw new Error(`snapshot: ${error.message}`);
     }
+    // 5. The connected accounts' payouts (independent of the diff below).
+    const payouts = await syncOrgPayouts(stripe, sb, from, to);
+
     if (truncated) {
       // An incomplete list would report Exos rows as missing in Stripe and
       // resolve issues that aren't fixed: store what was read, record nothing.
       console.error(`exos-reconcile-stripe: stopped at ${txns.length} transactions; run with fewer days`);
-      return json({ ok: false, truncated: true, txns: txns.length, window: { from, to } }, 200);
+      return json({ ok: false, truncated: true, txns: txns.length, window: { from, to }, payouts }, 200);
     }
 
     // 3. Exos rows: the window's, plus whatever the Stripe rows point at.
@@ -196,7 +289,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
     if (recErr) throw new Error(`record: ${recErr.message}`);
 
-    return json({ ok: true, run_day: runDay, window: { from, to }, stats, recorded });
+    return json({ ok: true, run_day: runDay, window: { from, to }, stats, recorded, payouts });
   } catch (e) {
     console.error("exos-reconcile-stripe: run failed", e);
     return json({ error: "reconcile failed", detail: String((e as Error)?.message ?? e).slice(0, 300) }, 500);
