@@ -39,12 +39,15 @@
 --    exos_undo_addon_check_in(pass, event, reason, client_ref?, undone_at?,
 --    device?) mirrors a ticket's undo (exos_undo_check_in: a reason, the
 --    scans removed and kept in an audit row, the pass usable again) with one
---    addition: the scanner who made the pass's last entry may undo it within
---    10 minutes of that scan; anyone else needs an owner or manager. The
---    offline door queues the undo with a client ref and the time it was done;
---    the merge replays it through the same function (the same ref twice is one
---    undo; only scans at or before the undo are removed, so a later entry by
---    another door stands). Logged in exos_addon_pass_undos.
+--    addition: the scanner who made the pass's last entry may undo that one
+--    scan within 10 minutes of it, on the server clock (an online call's undo
+--    time is the server's; a replayed offline undo must also reach the server
+--    within 10 minutes + 1 hour of the scan); anyone else needs an owner or
+--    manager, whose undo removes every scan up to it. The offline door queues
+--    the undo with a client ref and the time it was done; the merge replays it
+--    through the same function (the same ref twice is one undo; only scans at
+--    or before the undo are removed, so a later entry by another door stands).
+--    Logged in exos_addon_pass_undos.
 --
 -- 4. Add-on entry codes in Apple / Google Wallet (item 6).
 --    Apple allows one barcode per pass (the `barcodes` array lists formats of
@@ -318,11 +321,14 @@ BEGIN
   END LOOP;
 END $$;
 
--- Undo an add-on check-in. Owner / manager: any of the pass's scans, with a
--- reason (a ticket's rule). The scanner who made the pass's last entry: that
--- one, within 10 minutes of it. Online: now. Offline merge: p_client_ref +
--- p_undone_at (when the door did it, at most 24 hours ago); only scans at or
--- before that time are removed.
+-- Undo an add-on check-in. Owner / manager: every scan of the pass up to the
+-- undo, with a reason (a ticket's rule). The scanner who made the pass's last
+-- entry: that one scan only, within 10 minutes of it, measured on the server
+-- clock: an online call ignores p_undone_at, and a replayed offline undo is
+-- also bounded by the server clock (10 minutes + 1 hour of sync grace), so a
+-- back-dated undo time can't stretch the window. Offline merge: p_client_ref
+-- + p_undone_at (when the door did it, at most 24 hours ago) orders the undo
+-- against the scans; only scans at or before it are removed.
 CREATE OR REPLACE FUNCTION public.exos_undo_addon_check_in(
   p_pass_id uuid, p_event_id uuid, p_reason text,
   p_client_ref uuid DEFAULT NULL, p_undone_at timestamptz DEFAULT NULL, p_device text DEFAULT NULL)
@@ -333,12 +339,16 @@ DECLARE
   u         public.exos_addon_pass_undos%ROWTYPE;
   c         public.exos_addon_pass_checkins%ROWTYPE;
   v_manager boolean;
-  v_at      timestamptz := coalesce(p_undone_at, clock_timestamp());
+  v_at      timestamptz;
+  v_scan_at timestamptz;
   v_rows    jsonb;
   v_n       int;
   v_next    timestamptz;
   v_info    jsonb;
   v_window  CONSTANT interval := interval '10 minutes';  -- ADDON_UNDO_WINDOW_MINUTES (src/lib/addonUndo.ts)
+  -- How late a scanner's offline undo may reach the server and still count
+  -- (ADDON_UNDO_SYNC_GRACE_MINUTES): the window is checked on the server clock too.
+  v_grace   CONSTANT interval := interval '60 minutes';
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'exos_undo_addon_check_in: not authenticated' USING ERRCODE = '42501';
@@ -377,6 +387,10 @@ BEGIN
   IF ps.status = 'voided' THEN
     RETURN v_info || jsonb_build_object('ok', false, 'reason', 'voided');
   END IF;
+  -- The undo's time: an online scanner's is the server's, whatever was sent;
+  -- an offline replay (a client ref) keeps the door's, to order it.
+  v_at := CASE WHEN v_manager OR p_client_ref IS NOT NULL THEN coalesce(p_undone_at, clock_timestamp())
+               ELSE clock_timestamp() END;
   -- The pass's last entry at or before the undo.
   SELECT * INTO c FROM public.exos_addon_pass_checkins
    WHERE pass_id = ps.id AND direction = 'entry' AND coalesce(offline_scanned_at, scanned_at) <= v_at
@@ -388,14 +402,19 @@ BEGIN
     IF c.scanned_by IS DISTINCT FROM v_uid THEN
       RETURN v_info || jsonb_build_object('ok', false, 'reason', 'needs-manager');
     END IF;
-    IF v_at - coalesce(c.offline_scanned_at, c.scanned_at) > v_window THEN
+    v_scan_at := coalesce(c.offline_scanned_at, c.scanned_at);
+    IF v_at - v_scan_at > v_window OR clock_timestamp() - v_scan_at > v_window + v_grace THEN
       RETURN v_info || jsonb_build_object('ok', false, 'reason', 'undo-window-passed', 'window_minutes', 10);
     END IF;
   END IF;
 
+  -- A scanner removes the one scan the gate checked; an owner / manager every
+  -- scan of the pass up to the undo (a ticket's undo).
   WITH gone AS (
     DELETE FROM public.exos_addon_pass_checkins
-     WHERE pass_id = ps.id AND coalesce(offline_scanned_at, scanned_at) <= v_at RETURNING *
+     WHERE pass_id = ps.id
+       AND CASE WHEN v_manager THEN coalesce(offline_scanned_at, scanned_at) <= v_at ELSE id = c.id END
+    RETURNING *
   )
   SELECT count(*), coalesce(jsonb_agg(to_jsonb(gone) ORDER BY gone.scanned_at), '[]'::jsonb) INTO v_n, v_rows FROM gone;
   INSERT INTO public.exos_addon_pass_undos (org_id, event_id, pass_id, checkins, reason, undone_by, undone_as, client_ref,

@@ -3,9 +3,9 @@
 // A ticket's undo (exos_undo_check_in) is an owner / manager action with a
 // reason. An add-on's entry code is scanned at a side door (a VIP lounge, a
 // merch pickup) where a scanner works alone, so the add-on undo adds one
-// rule: the scanner who made the pass's last entry may undo it within
-// ADDON_UNDO_WINDOW_MINUTES of that scan. Anyone else, or later, needs an
-// owner or manager. A reason is always required and every undo is logged
+// rule: the scanner who made the pass's last entry may undo that one scan
+// within ADDON_UNDO_WINDOW_MINUTES of it (on the server clock). Anyone else,
+// or later, needs an owner or manager, whose undo clears every scan. A reason is always required and every undo is logged
 // (exos_addon_pass_undos, with the scans it removed).
 //
 // Offline, the door queues the undo (a QueuedScan of kind 'addon-undo', with a
@@ -18,6 +18,10 @@ import { newClientRef, type QueuedScan } from './offlineCheckins';
 
 /** The scanner's own window. Same as the SQL (v_window in exos_undo_addon_check_in). */
 export const ADDON_UNDO_WINDOW_MINUTES = 10;
+/** A scanner's undo queued offline must reach the server within the window
+ *  plus this, on the server's clock (v_grace): a back-dated undo time can't
+ *  stretch the window. A scanner's undo removes their one scan only. */
+export const ADDON_UNDO_SYNC_GRACE_MINUTES = 60;
 
 export type AddonUndoAccess = 'allowed' | 'needs-manager' | 'window-passed';
 

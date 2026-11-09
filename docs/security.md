@@ -553,12 +553,18 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
 - **Undo an add-on scan.** `exos_undo_addon_check_in` (authenticated): owner
   / manager / scanner of the pass's org (42501 otherwise, before anything is
   read back), the event in the request, the per-event scanner scope; then an
-  owner / manager any time, or the scanner who made the pass's last entry
-  within 10 minutes of it. A reason is required. The removed scans are kept
-  in `exos_addon_pass_undos` (RLS as the skip log; no client writes). The
-  offline merge passes a client ref (unique: one undo per ref; a ref of
-  another pass is refused) and the time it was done (at most 24 hours ago,
-  never ahead), and only scans at or before that time are removed.
+  owner / manager any time (every scan of the pass up to the undo goes), or
+  the scanner who made the pass's last entry, within 10 minutes of it, and
+  only that one scan goes (the gate and the delete cover the same row). The
+  scanner's window is measured on the server clock: an online call's undo
+  time is the server's whatever was sent, and a replayed offline undo must
+  also reach the server within 10 minutes + 1 hour (`v_grace`) of the scan,
+  so a back-dated `p_undone_at` can't stretch it. A reason is required. The
+  removed scans are kept in `exos_addon_pass_undos` (RLS as the skip log; no
+  client writes). The offline merge passes a client ref (unique: one undo
+  per ref; a ref of another pass is refused) and the time it was done (at
+  most 24 hours ago, never ahead), which only orders the undo against the
+  scans: scans after it stand.
 - **Add-on wallet codes.** `exos_wallet_addon_pass` (authenticated) answers
   the pass's holder only (42501 for anyone else, the pass unnamed), never
   for a voided pass, and returns the derived Apple code and Google TOTP key,
