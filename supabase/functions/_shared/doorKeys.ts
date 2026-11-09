@@ -17,7 +17,8 @@
 // mirrors them and doorKeys.test.ts pins both to the same vectors.
 
 import {
-  appleWalletCode, googleTotpKey, parseWalletCode, totp, totpStep, TOTP_WINDOW, type WalletVerifyResult,
+  appleAddonWalletCode, appleWalletCode, googleTotpKey, parseAddonWalletCode, parseWalletCode, totp, totpStep, TOTP_WINDOW,
+  type WalletVerifyResult,
 } from "./wallet/codes.ts";
 import { fromHex, hmac, sha256, timingSafeEqual, toBase64Url, toHex, utf8 } from "./wallet/bytes.ts";
 
@@ -131,4 +132,43 @@ export async function verifyWalletWithKeys(
     if (timingSafeEqual(await totp(key, s), code.totp)) hit = true;
   }
   return hit ? { ok: true, code } : { ok: false, reason: "signature-mismatch", code };
+}
+
+/** An add-on pass's door keys from its secret (mig 20261108110000: the SQL
+ *  _exos_addon_door_keys): the day keys, plus, once a wallet pass was issued,
+ *  the Apple add-on code's SHA-256, the Google TOTP key and the epoch. */
+export async function addonDoorKeysFromSecret(
+  passId: string,
+  ownerId: string,
+  secret: string,
+  nowMs: number,
+  walletEpoch?: number | null,
+): Promise<DoorKeys> {
+  const out = await doorKeysFromSecret(passId, ownerId, secret, nowMs);
+  if (walletEpoch != null) {
+    out.we = walletEpoch;
+    out.wa = toHex(await sha256(utf8(await appleAddonWalletCode(passId, ownerId, secret, walletEpoch))));
+    out.wg = toHex(await googleTotpKey(passId, ownerId, secret, walletEpoch));
+  }
+  return out;
+}
+
+/** The door's local check of an add-on wallet code (A-…:a|g{epoch}:…) against
+ *  the pass's keys. The server also checks the pass's live epoch and holder. */
+export async function verifyAddonWalletWithKeys(
+  payload: string,
+  keys: DoorKeys | null,
+  opts: { now?: number } = {},
+): Promise<WalletVerifyResult & { noKey?: boolean }> {
+  const code = parseAddonWalletCode(payload);
+  if (!code) return { ok: false, reason: "malformed" };
+  if (!keys || keys.we == null || keys.we !== code.epoch) return { ok: false, reason: "signature-mismatch", code, noKey: keys?.we == null };
+  if (code.kind === "apple") {
+    if (!keys.wa) return { ok: false, reason: "signature-mismatch", code, noKey: true };
+    const got = toHex(await sha256(utf8("A" + payload.trim().slice(1))));
+    return timingSafeEqual(got, keys.wa) ? { ok: true, code } : { ok: false, reason: "signature-mismatch", code };
+  }
+  // Google: the TOTP check is the ticket one (same key derivation, same window).
+  const w = await verifyWalletWithKeys("W-" + payload.trim().slice(2), keys, opts);
+  return { ...w, code };
 }

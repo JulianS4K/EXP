@@ -819,6 +819,10 @@ export const ROUTES: readonly ApiRoute[] = [
   // Existing scopes: orders:read for one order's, finance:read for an event's.
   { id: 'get-order-fee-adjustments', method: 'GET', auth: K, path: '/orders/:id/adjustments', scope: 'orders:read', paged: false },
   { id: 'list-event-fee-adjustments', method: 'GET', auth: K, path: '/events/:id/fee-adjustments', scope: 'finance:read', paged: true },
+  // claude/exos-dice-leftovers (mig 20261108110000, exos-api/feeAdjustments.ts,
+  // docs/api/fee-adjustments.json): record a manual fee change. finance:write,
+  // and an API key whose creator is an owner, manager or finance (in SQL).
+  { id: 'create-order-fee-adjustment', method: 'POST', auth: K, path: '/orders/:id/adjustments', scope: 'finance:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

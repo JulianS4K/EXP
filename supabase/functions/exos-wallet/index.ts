@@ -10,6 +10,10 @@
 //        season pass / flex pack; kind "google" -> { save_url }. The holder's
 //        own active pass only (exos_wallet_season_pass, mig 20261102100000);
 //        a card, not a door code (_shared/wallet/seasonPass.ts)
+//   POST /exos-wallet/addon-pass { addon_pass_id, kind } -> .pkpass / { save_url }
+//        of one add-on unit with its own entry code (exos_wallet_addon_pass, mig
+//        20261108110000): the holder's own pass only; a pass per unit, since
+//        Apple allows one barcode per pass (_shared/wallet/addonPass.ts)
 // Link holder (no account; the ticket's signed live link, mig 20261031130000):
 //   POST /exos-wallet/link-pass { ticket_id, link_key, kind } -> as /pass; the
 //        pass is the ticket owner's, checked in SQL by exos_ticket_link_wallet_issue
@@ -52,6 +56,7 @@ import type { WalletPayload } from "../_shared/wallet/payload.ts";
 import { createPkcs7Signer, type PassSigner } from "../_shared/wallet/pkcs7.ts";
 import { httpDate, notModified, routeWallet } from "../_shared/wallet/routes.ts";
 import { buildSeasonPassAppleJson, type SeasonPassPayload, seasonPassSaveUrl } from "../_shared/wallet/seasonPass.ts";
+import { addonGoogleSaveLink, type AddonWalletPayload, buildAddonAppleJson } from "../_shared/wallet/addonPass.ts";
 
 const FN = "exos-wallet";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -312,6 +317,56 @@ async function seasonPass(req: Request): Promise<Response> {
   }
 }
 
+// ── Holder: an add-on's entry code as a pass of its own ─────────────────
+
+async function addonPass(req: Request): Promise<Response> {
+  // deno-lint-ignore no-explicit-any
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "invalid JSON" }, 400);
+  }
+  const passId = typeof body?.addon_pass_id === "string" ? body.addon_pass_id : "";
+  const kind = body?.kind;
+  if (!UUID_RE.test(passId)) return json({ error: "addon_pass_id required" }, 400);
+  if (kind !== "apple" && kind !== "google") return json({ error: "kind must be apple or google" }, 400);
+  const a = kind === "apple" ? await apple() : null;
+  const g = kind === "google" ? await google() : null;
+  if (!a && !g) return notConfigured();
+
+  const sbUser = userClient(req);
+  const { data: { user } } = await sbUser.auth.getUser();
+  if (!user) return json({ error: "unauthorized" }, 401);
+  // The holder check is in SQL (42501 for anyone else, the pass unnamed).
+  const { data, error } = await sbUser.rpc("exos_wallet_addon_pass", { p_pass_id: passId });
+  if (error) {
+    if (error.code === "42501") return json({ error: "not your add-on" }, 403);
+    await reportError(FN, error, { phase: "addon-pass" });
+    return json({ error: "could not issue the pass" }, 500);
+  }
+  if (!data?.ok) return json({ error: data?.reason ?? "not-available" }, 409);
+  const p = data.payload as AddonWalletPayload;
+  try {
+    if (a) {
+      const { bytes } = await buildPkpass(buildAddonAppleJson(p, a.identity), a.signer);
+      return new Response(bytes as unknown as BodyInit, {
+        status: 200,
+        headers: {
+          "Content-Type": PKPASS_MIME,
+          "Content-Disposition": `attachment; filename="exos-${p.serial}.pkpass"`,
+          "Cache-Control": "no-store",
+          ...CORS,
+        },
+      });
+    }
+    return json({ save_url: await addonGoogleSaveLink(p, { issuerId: g!.issuerId, origins: g!.origins }, g!.signer, fetch), serial: p.serial });
+  } catch (e) {
+    await reportError(FN, e, { phase: `addon-pass-${kind}` });
+    return json({ error: "could not build the pass" }, 502);
+  }
+}
+
 function userClient(req: Request): SupabaseClient {
   return createClient(env("SUPABASE_URL")!, env("SUPABASE_ANON_KEY")!, {
     global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
@@ -405,6 +460,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return await reissue(req);
       case "season-pass":
         return await seasonPass(req);
+      case "addon-pass":
+        return await addonPass(req);
       case "push":
         return await push(req);
       case "not-found":
