@@ -133,8 +133,12 @@
 // attaches it to the order it records (exos_group_attach). A failure gives the
 // seat back to the group, not to sale (exos_group_unclaim). The order is
 // fulfilled only while the seat's hold is live and its own, so a payment after
-// the group's deadline fails and is auto-refunded. No seats, slots, add-ons,
-// gift cards or donations on a group seat; nothing here changes otherwise.
+// the group's deadline fails and is auto-refunded. No seats, add-ons, gift
+// cards or donations on a group seat; nothing here changes otherwise.
+// Group pay 2 (mig 20261110110000): a timed type's group order takes the
+// group's slot (its holds are already on it) and a price-step type's the
+// price each seat locked at the start (exos_group_checkout_ctx), never the
+// current step or anything the client sends.
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
@@ -519,7 +523,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Boundary rule: CAP, an order can't take more than the step has left.
   // Before the migration (no function): the old schedule rule.
   let priceStep: { step_id?: string | null; price_cents?: number; step_remaining?: number | null } | null = null;
-  {
+  // exos: group pay 2 — a group seat pays the price it locked at the start.
+  if (group?.lock) {
+    priceStep = { step_id: group.lock.stepId, price_cents: group.lock.priceCents, step_remaining: null };
+  } else {
     const { data: cp, error: cpErr } = await sb.rpc("exos_tier_current_price", { p_tier_id: tier_id });
     if (cpErr && !["PGRST202", "42883"].includes(String(cpErr.code))) {
       console.error("exos-checkout: price step read failed", cpErr.message);
@@ -946,7 +953,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
     holdId = hid as string;
     // timed entry (mig 20261030150000): the hold also takes the slot places.
-    if (timedSlot) {
+    // exos: group pay 2 — a group's holds are on its slot from the start.
+    if (timedSlot && !group) {
       const { error: slotErr } = await sb.rpc("exos_attach_hold_slot", { p_hold_id: holdId, p_slot_id: timedSlot });
       if (slotErr) {
         await releaseHold(sb, holdId);
@@ -960,7 +968,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // type's steps: the step must still be the current one at this price with
   // room for the order; otherwise the buyer is told the new price (nothing is
   // charged). The Stripe amount below is this price; the webhook mints at it.
-  if (holdId && priceStep?.step_id) {
+  if (holdId && priceStep?.step_id && !group?.lock) {
     const { error: lockErr } = await sb.rpc("exos_hold_lock_price", {
       p_hold_id: holdId, p_step_id: priceStep.step_id, p_price_cents: priceStep.price_cents,
     });
@@ -1453,7 +1461,12 @@ async function recordAnswers(
 // exos: group pay (mig 20261108120000). A body's group_seat / group_cover,
 // checked and resolved to the group's event, type and quantity (written into
 // the body, so everything after prices exactly that). ref null: not a group order.
-type GroupRef = { seat: string | null; cover: string | null };
+// lock: the face price (and step) the seats locked at the start, for a
+// price-step type (mig 20261110110000); null: priced as any order.
+type GroupRef = {
+  seat: string | null; cover: string | null;
+  lock: { priceCents: number; stepId: string | null } | null;
+};
 const GROUP_REASONS: Record<string, string> = {
   XG404: "group_link", XG403: "group_host", XG410: "group_closed", XG411: "group_paid",
   XG409: "seat_taken", XG412: "group_changed", XG400: "group_link",
@@ -1478,14 +1491,22 @@ async function groupCheckout(
   }
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const { data, error } = await sb.rpc("exos_group_checkout_ctx", { p_token: seat, p_group_id: cover, p_buyer: uid });
-  const ctx = data as { event_id?: string; tier_id?: string; quantity?: number } | null;
+  const ctx = data as {
+    event_id?: string; tier_id?: string; quantity?: number;
+    slot_id?: string | null; unit_price_cents?: number | null; price_step_id?: string | null;
+  } | null;
   if (error || !ctx?.event_id || !ctx.tier_id || !ctx.quantity) {
     return { error: { error: error?.message || "this group link isn't valid", reason: groupReason(error?.code) }, status: 409 };
   }
   p.event_id = ctx.event_id;
   p.tier_id = ctx.tier_id;
   p.quantity = ctx.quantity;
-  return { ref: { seat, cover } };
+  // exos: group pay 2 — the group's slot, and the price its seats locked.
+  if (typeof ctx.slot_id === "string" && /^\d{8}T\d{4}$/.test(ctx.slot_id)) p.slot_id = ctx.slot_id;
+  const lock = Number.isInteger(ctx.unit_price_cents) && Number(ctx.unit_price_cents) > 0
+    ? { priceCents: Number(ctx.unit_price_cents), stepId: typeof ctx.price_step_id === "string" ? ctx.price_step_id : null }
+    : null;
+  return { ref: { seat, cover, lock } };
 }
 // The order just recorded takes the claimed seat(s)' holds; an error body if
 // the seat was taken meanwhile.

@@ -1,10 +1,28 @@
 // Group buy v2, "pay separately" (mig 20261108120000): sizes, the countdown,
 // seat states, the host's text and the server's answers.
 import { describe, expect, it, vi } from 'vitest';
-vi.mock('./supabase', () => ({ supabase: {} }));
+// The browser client, as far as these calls go (group pay 2: the start's slot, seat labels).
+const sb = vi.hoisted(() => {
+  const calls: { kind: string; args: unknown[] }[] = [];
+  let next: { data: unknown; error: unknown } = { data: null, error: null };
+  const chain = {
+    update: (...a: unknown[]) => { calls.push({ kind: 'update', args: a }); return chain; },
+    eq: (...a: unknown[]) => { calls.push({ kind: 'eq', args: a }); return chain; },
+    select: (...a: unknown[]) => { calls.push({ kind: 'select', args: a }); return Promise.resolve(next); },
+  };
+  return {
+    calls,
+    answer: (r: { data: unknown; error: unknown }) => { next = r; },
+    client: {
+      rpc: (...a: unknown[]) => { calls.push({ kind: 'rpc', args: a }); return Promise.resolve(next); },
+      from: (...a: unknown[]) => { calls.push({ kind: 'from', args: a }); return chain; },
+    },
+  };
+});
+vi.mock('./supabase', () => ({ supabase: sb.client }));
 import {
-  canStartGroup, coverableSeats, formatCountdown, friendsPayingNow, maxGroupSize, seatLabel, seatMessage, seatPayable,
-  seatSmsUrl, secondsLeft, SEAT_TOKEN_RE, toGroup, toSeatView,
+  canStartGroup, coverableSeats, formatCountdown, friendsPayingNow, groupSeatPrice, maxGroupSize, normalizeSeatLabel, seatLabel,
+  seatMessage, seatPayable, seatSmsUrl, secondsLeft, setSeatLabel, startGroup, SEAT_LABEL_MAX, SEAT_TOKEN_RE, toGroup, toSeatView,
 } from './groupPay';
 
 describe('group size', () => {
@@ -105,5 +123,69 @@ describe('the seat page read', () => {
     expect(gone).toMatchObject({ eventId: '', tierId: '', event: null, state: 'paid' });
     expect(SEAT_TOKEN_RE.test('0123456789abcdef0123456789abcdef')).toBe(true);
     expect(SEAT_TOKEN_RE.test('0123456789ABCDEF0123456789abcdef')).toBe(false);
+  });
+});
+
+// Group pay 2 (mig 20261110110000).
+describe('seat labels (the host page only)', () => {
+  it('stores a trimmed, single-spaced, printable name of at most 40 characters; empty clears it', () => {
+    expect(normalizeSeatLabel('  Sam  ')).toBe('Sam');
+    expect(normalizeSeatLabel('Sam\n  and\tJo')).toBe('Sam and Jo');
+    expect(normalizeSeatLabel('\u0007Sam\u007f')).toBe('Sam');
+    expect(normalizeSeatLabel('   ')).toBeNull();
+    expect(normalizeSeatLabel(null)).toBeNull();
+    expect(normalizeSeatLabel('x'.repeat(60))).toHaveLength(SEAT_LABEL_MAX);
+    expect(normalizeSeatLabel('a'.repeat(39) + ' b')).toBe('a'.repeat(39));
+    expect(Array.from(normalizeSeatLabel('🎉'.repeat(50)) ?? '')).toHaveLength(SEAT_LABEL_MAX);
+  });
+  it('saves through the seat row (RLS: host or admin) and says so when nothing was saved', async () => {
+    sb.calls.length = 0;
+    sb.answer({ data: [{ id: 's1', label: 'Sam' }], error: null });
+    await expect(setSeatLabel('s1', '  Sam ')).resolves.toBe('Sam');
+    expect(sb.calls.map((c) => c.kind)).toEqual(['from', 'update', 'eq', 'select']);
+    expect(sb.calls[0].args).toEqual(['exos_group_buy_seats']);
+    expect(sb.calls[1].args).toEqual([{ label: 'Sam' }]);
+    expect(sb.calls[2].args).toEqual(['id', 's1']);
+    sb.answer({ data: [], error: null });
+    await expect(setSeatLabel('s1', 'Sam')).rejects.toThrow(/only the host/);
+    sb.calls.length = 0;
+    sb.answer({ data: [{ id: 's1', label: null }], error: null });
+    await expect(setSeatLabel('s1', '   ')).resolves.toBeNull();
+    expect(sb.calls[1].args).toEqual([{ label: null }]);
+  });
+  it('reads labels, the slot and the locked price from the host\'s group; the seat page has no labels', () => {
+    const g = toGroup({
+      id: 'g', event_id: 'e', tier_id: 't', quantity: 2, deadline: '2026-11-09T12:30:00Z', status: 'open',
+      slot_id: '20261112T1000', unit_price_cents: 2000,
+      seats: [{ id: 'a', seat_no: 1, state: 'waiting', label: 'Sam', path: '/p' }, { id: 'b', seat_no: 2, state: 'waiting', label: null, path: '/q' }],
+    });
+    expect(g.slotId).toBe('20261112T1000');
+    expect(g.unitPriceCents).toBe(2000);
+    expect(g.seats.map((x) => x.label)).toEqual(['Sam', null]);
+    const v = toSeatView({ seat_no: 1, seats: 2, state: 'waiting', deadline: '2026-11-09T12:30:00Z', event_id: 'e', tier_id: 't',
+      slot_id: '20261112T1000', unit_price_cents: 2000, label: 'Sam' }, 0);
+    expect(v).toMatchObject({ slotId: '20261112T1000', unitPriceCents: 2000 });
+    expect(JSON.stringify(v)).not.toContain('Sam');
+  });
+});
+
+describe('price steps and time slots', () => {
+  it('a seat costs the price the group locked (all-in), else today\'s price', () => {
+    const tier = { exclusiveTaxPercent: 10, passedOnFees: [] };
+    expect(groupSeatPrice(tier, 2000, 33)).toBe(22);
+    expect(groupSeatPrice(tier, null, 33)).toBe(33);
+    expect(groupSeatPrice(tier, 0, 33)).toBe(33);
+  });
+  it('a timed group sends its slot; any other group sends none', async () => {
+    sb.calls.length = 0;
+    sb.answer({ data: { id: 'g', event_id: 'e', tier_id: 't', quantity: 2, deadline: '2026-11-09T12:30:00Z', status: 'open', seats: [] }, error: null });
+    await startGroup('e', 't', 2, '20261112T1000');
+    await startGroup('e', 't', 2);
+    expect(sb.calls.map((c) => c.args)).toEqual([
+      ['exos_group_buy_start', { p_event_id: 'e', p_tier_id: 't', p_quantity: 2, p_slot_id: '20261112T1000' }],
+      ['exos_group_buy_start', { p_event_id: 'e', p_tier_id: 't', p_quantity: 2 }],
+    ]);
+    sb.answer({ data: null, error: { message: 'exos_group_buy_start: only 1 left at this price, and a group pays one price: start the group at the next price' } });
+    await expect(startGroup('e', 't', 2)).rejects.toThrow(/^only 1 left at this price/);
   });
 });

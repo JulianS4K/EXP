@@ -558,9 +558,12 @@ How we build it (techniques):
   at the deadline, `exos-checkout` claims and attaches the seat's hold (`group_seat` / `group_cover`), fulfilment needs
   the hold live and its own (late payments fail and are auto-refunded), unpaid seats return to sale through the
   existing expiry sweep, host can cover the rest; `/group-pay/:groupId`, `/group-pay/seat/:token`, event-page
-  "Pay separately"; `test_group_pay.sql`, `race_group_pay.sh`. Left: expire friends' open Stripe pages at the
-  deadline (today a late payment is refunded, not prevented), seated / timed / price-step types, a group seat with
-  add-ons or a gift card, API / MCP routes, host-side labels for seats. Never a multi-day hold: card authorizations
+  "Pay separately"; `test_group_pay.sql`, `race_group_pay.sh`. **Follow-ups built 2026-11-09** (mig
+  `20261110110000_exos_group_pay_2`, branch `claude/exos-group-pay-2`; not on prod): friends' open Stripe pages are
+  expired by `exos-reconcile-checkouts` once their seat is gone (deadline, cancel, cover, a restart; late-payment
+  refund stays as the backstop), timed types (one slot per group), price-step types (one locked step per group, CAP),
+  host-only seat labels, cover / cancel in the org audit log. Left: API / MCP routes; still refused by design:
+  reserved seating, add-ons / gift cards / donations on a group seat. Never a multi-day hold: card authorizations
   last ~7 days and ticketing can't use Stripe's extended authorization.
 
 ### Distribution

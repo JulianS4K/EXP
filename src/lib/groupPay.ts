@@ -7,9 +7,15 @@
 //
 // v1 ("split with friends", lib/split.ts) is still there: the host pays for
 // everything and friends pay the host back.
+//
+// Group pay 2 (mig 20261110110000): timed types (the whole group takes one
+// slot), price-step types (every seat locks the start's price; friends and
+// the cover pay it) and the host's own names for seats (labels: the host page
+// only, never the friend's seat page).
 
 import { supabase } from './supabase';
 import { smsUrl } from './split';
+import { tierAllInPrice } from './pricing';
 
 /** The most seats a group can have for an event (exos-checkout caps an order at 10). */
 export function maxGroupSize(maxPerOrder?: number | null): number {
@@ -67,11 +73,34 @@ export function seatSmsUrl(body: string): string {
   return smsUrl(null, body);
 }
 
+/** The most characters a seat label holds (exos_group_buy_seats_label_chk). */
+export const SEAT_LABEL_MAX = 40;
+
+/** A host's seat label as stored: trimmed, one space between words, no
+ *  control characters, at most 40 characters; empty means no label. */
+export function normalizeSeatLabel(raw: string | null | undefined): string | null {
+  // eslint-disable-next-line no-control-regex
+  const s = String(raw ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  return Array.from(s).slice(0, SEAT_LABEL_MAX).join('').trim() || null;
+}
+
+/** What a group seat costs the buyer, all-in: the price the group locked at
+ *  the start (a price-step type), else the type's current price. */
+export function groupSeatPrice(tier: Parameters<typeof tierAllInPrice>[0], lockedCents: number | null | undefined, current: number): number {
+  if (typeof lockedCents === 'number' && Number.isInteger(lockedCents) && lockedCents > 0) {
+    return tierAllInPrice(tier, lockedCents / 100);
+  }
+  return current;
+}
+
 // ── API ─────────────────────────────────────────────────────────────────────
 
 export interface GroupSeat {
   id: string;
   seatNo: number;
+  /** The host's name for the seat (host page only). */
+  label: string | null;
   state: SeatState;
   path: string;
   paidAt: string | null;
@@ -87,6 +116,10 @@ export interface GroupBuy {
   status: 'open' | 'closed' | 'cancelled';
   serverNow: string | null;
   fetchedAt: number;
+  /** Timed entry: the slot every seat is on ('YYYYMMDDTHHMM'). */
+  slotId: string | null;
+  /** Price steps: the face price every seat locked, in cents. */
+  unitPriceCents: number | null;
   canCover: boolean;
   counts: { paid: number; paying: number; waiting: number; released: number };
   seats: GroupSeat[];
@@ -114,11 +147,14 @@ export function toGroup(d: any, fetchedAt: number = Date.now()): GroupBuy {
     status: d.status === 'cancelled' ? 'cancelled' : d.status === 'closed' ? 'closed' : 'open',
     serverNow: d.server_now ?? null,
     fetchedAt,
+    slotId: typeof d.slot_id === 'string' ? d.slot_id : null,
+    unitPriceCents: Number.isInteger(d.unit_price_cents) ? Number(d.unit_price_cents) : null,
     canCover: !!d.can_cover,
     counts: { paid: Number(c.paid ?? 0), paying: Number(c.paying ?? 0), waiting: Number(c.waiting ?? 0), released: Number(c.released ?? 0) },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     seats: (d.seats ?? []).map((s: any) => ({
-      id: String(s.id), seatNo: Number(s.seat_no), state: (s.state ?? 'waiting') as SeatState, path: String(s.path ?? ''),
+      id: String(s.id), seatNo: Number(s.seat_no), label: typeof s.label === 'string' && s.label ? s.label : null,
+      state: (s.state ?? 'waiting') as SeatState, path: String(s.path ?? ''),
       paidAt: s.paid_at ?? null, orderStatus: s.order_status ?? null,
     })),
   };
@@ -139,6 +175,8 @@ export interface SeatView {
   open: number;
   eventId: string;
   tierId: string;
+  slotId: string | null;
+  unitPriceCents: number | null;
   event: { name: string; startsAt: string | null; venueName: string | null; imageUrl: string | null; currency: string } | null;
 }
 
@@ -162,6 +200,8 @@ export function toSeatView(d: any, fetchedAt: number = Date.now()): SeatView | n
     // looks nothing up and the seat can't be paid.
     eventId: d.event_id == null ? '' : String(d.event_id),
     tierId: d.tier_id == null ? '' : String(d.tier_id),
+    slotId: typeof d.slot_id === 'string' ? d.slot_id : null,
+    unitPriceCents: Number.isInteger(d.unit_price_cents) ? Number(d.unit_price_cents) : null,
     event: d.event ? {
       name: String(d.event.name ?? ''), startsAt: d.event.starts_at ?? null, venueName: d.event.venue_name ?? null,
       imageUrl: d.event.image_url ?? null, currency: String(d.event.currency || 'USD'),
@@ -179,10 +219,24 @@ export const SEAT_TOKEN_RE = /^[0-9a-f]{32}$/;
 
 const clean = (m?: string) => (m ?? 'Something went wrong').replace(/^exos_group_[a-z_]+: |^exos_create_hold: /, '');
 
-export async function startGroup(eventId: string, tierId: string, quantity: number): Promise<GroupBuy> {
-  const { data, error } = await supabase.rpc('exos_group_buy_start', { p_event_id: eventId, p_tier_id: tierId, p_quantity: quantity });
+/** Start a group; a timed type needs the slot every seat will take. */
+export async function startGroup(eventId: string, tierId: string, quantity: number, slotId?: string | null): Promise<GroupBuy> {
+  const { data, error } = await supabase.rpc('exos_group_buy_start', {
+    p_event_id: eventId, p_tier_id: tierId, p_quantity: quantity,
+    ...(slotId ? { p_slot_id: slotId } : {}),
+  });
   if (error) throw new Error(clean(error.message));
   return toGroup(data);
+}
+
+/** Name a seat (the host, or a platform admin; RLS refuses anyone else).
+ *  Returns the label as stored. */
+export async function setSeatLabel(seatId: string, raw: string): Promise<string | null> {
+  const label = normalizeSeatLabel(raw);
+  const { data, error } = await supabase.from('exos_group_buy_seats').update({ label }).eq('id', seatId).select('id, label');
+  if (error) throw new Error(clean(error.message));
+  if (!Array.isArray(data) || data.length === 0) throw new Error("Couldn't save the name: only the host can name seats.");
+  return label;
 }
 
 export async function getGroup(groupId: string): Promise<GroupBuy> {
