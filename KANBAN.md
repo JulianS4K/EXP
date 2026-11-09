@@ -545,10 +545,16 @@ How we build it (techniques):
     themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
     buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
     (`docs/organizer-guide.md` "Changing the date").
-- ⬜ **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
-  change). v2: each friend pays their own seat within a 30-min group window (N one-seat holds, Exos expires the
-  sessions, unpaid seats return to sale, host can cover the rest). Never a multi-day hold: card authorizations last
-  ~7 days and ticketing can't use Stripe's extended authorization.
+- 🟡 **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
+  change). **v2 built 2026-11-09** (mig `20261108120000_exos_group_pay`, branch `claude/exos-group-pay`; not on prod):
+  each friend pays their own seat within a 30-min group window: N one-seat holds through `exos_create_hold` that end
+  at the deadline, `exos-checkout` claims and attaches the seat's hold (`group_seat` / `group_cover`), fulfilment needs
+  the hold live and its own (late payments fail and are auto-refunded), unpaid seats return to sale through the
+  existing expiry sweep, host can cover the rest; `/group-pay/:groupId`, `/group-pay/seat/:token`, event-page
+  "Pay separately"; `test_group_pay.sql`, `race_group_pay.sh`. Left: expire friends' open Stripe pages at the
+  deadline (today a late payment is refunded, not prevented), seated / timed / price-step types, a group seat with
+  add-ons or a gift card, API / MCP routes, host-side labels for seats. Never a multi-day hold: card authorizations
+  last ~7 days and ticketing can't use Stripe's extended authorization.
 
 ### Distribution
 - ⬜ **Automatiq route** (`docs/marketplace/automatiq.md`): one route per event (direct or Automatiq, never both),

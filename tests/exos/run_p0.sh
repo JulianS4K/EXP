@@ -179,7 +179,8 @@ for m in \
          20261107120000_exos_partner_steps \
          20261107130000_exos_pos_terminal \
          20261108100000_exos_money_journal \
-         20261108110000_exos_dice_leftovers; do
+         20261108110000_exos_dice_leftovers \
+         20261108120000_exos_group_pay; do
   $PSQL -f "$MIG/$m.sql"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -399,7 +400,8 @@ for m in \
          20261107120000_exos_partner_steps \
          20261107130000_exos_pos_terminal \
          20261108100000_exos_money_journal \
-         20261108110000_exos_dice_leftovers; do
+         20261108110000_exos_dice_leftovers \
+         20261108120000_exos_group_pay; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -515,3 +517,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_left
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_partner_steps.sql"
 # claude/exos-money-journal: double-entry journal per org, trial balance, sales tax by jurisdiction, $0 orders for free claims and comps (mig 20261108100000; race: race_money_journal.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_money_journal.sql"
+# claude/exos-group-pay: group buy v2, each friend pays their own seat in a 30-minute window: holds, deadline release, cover the rest, per-seat orders, cross-group / cross-org tokens (mig 20261108120000; race: race_group_pay.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay.sql"

@@ -1384,6 +1384,72 @@ await run('dashboard: the genre filter narrows the event list', async (page) => 
   { ...EVENT_ROW, id: '99999999-9999-4999-8999-999999999992', slug: 'late-jazz', name: 'Late Jazz', genres: ['Jazz'] },
 ] } }) });
 
+// ── Group buy v2, "pay separately" (mig 20261108120000): a friend's seat page
+// and the host's group page, against mocked RPCs. ──
+const SEAT_TOKEN = 'ab'.repeat(16);
+const GROUP = 'c7e00000-0000-4000-8000-000000000001';
+const inMinutes = (m) => new Date(Date.now() + m * 60_000).toISOString();
+const seatView = (over = {}) => ({
+  seat_no: 2, seats: 4, state: 'waiting', mine: false, is_host: false, group_id: null,
+  deadline: inMinutes(24), server_now: new Date().toISOString(), group_status: 'open', paid: 1, open: 3,
+  event_id: EV, tier_id: TIER2,
+  event: { name: 'Fall Party', starts_at: inMinutes(7 * 1440), venue_name: 'Elsewhere', image_url: null, currency: 'USD' },
+  ...over,
+});
+const seatCheckout = {};
+await run('group pay: a friend opens their seat link, sees price and time left, pays as a guest for exactly that seat', async (page, log) => {
+  await stubStripe(page, seatCheckout);
+  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await expectText(page, 'Seat 2 of 4');
+  await expectText(page, '$50.00');
+  await expectText(page, '1 of 4 paid');
+  const t = await page.getByTestId('seat-countdown').innerText();
+  assert(/2[34]:\d\d left to pay/.test(t), 'countdown: ' + t);
+  const body = await page.locator('body').innerText();
+  assert(!body.includes('@') && !/[0-9a-f]{32}/.test(body), 'nothing about other friends on the page');
+  await page.getByLabel('Email for your ticket').fill('friend@example.com');
+  await page.getByRole('button', { name: /Pay for my seat/ }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = seatCheckout.body;
+  assert(b?.group_seat === SEAT_TOKEN && b.quantity === 1 && b.tier_id === TIER2 && b.guest_email === 'friend@example.com', 'one seat, by its link: ' + JSON.stringify(b));
+  assert(b.cancel_url.endsWith('/group-pay/seat/' + SEAT_TOKEN), 'cancel comes back to the seat');
+  assert(log.some((l) => l.startsWith('rpc exos_group_seat_view')), 'read by the token');
+}, { mock: { ...checkoutFn(seatCheckout), rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView() : null) } } });
+
+await run('group pay: a seat a friend is paying for, a released seat, and a bad link', async (page) => {
+  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await expectText(page, 'A friend is paying for this seat right now');
+  assert(await page.getByRole('button', { name: /Pay for my seat/ }).count() === 0, 'no pay button on a taken seat');
+  await page.goto(BASE + '/group-pay/seat/' + 'cd'.repeat(16));
+  await expectText(page, 'time ran out');
+  await page.goto(BASE + '/group-pay/seat/not-a-token');
+  await expectText(page, "isn't valid");
+}, { mock: { rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView({ state: 'paying' })
+  : b.p_token === 'cd'.repeat(16) ? seatView({ state: 'released', group_status: 'closed', deadline: inMinutes(-2) }) : null) } } });
+
+const coverCheckout = {};
+await run('group pay: the host sees each seat live, texts a link, and covers the rest', async (page, log) => {
+  await stubStripe(page, coverCheckout);
+  await page.goto(BASE + '/group-pay/' + GROUP);
+  await expectText(page, '1 of 3 paid');
+  await expectText(page, 'Seat 3');
+  const sms = await page.getByRole('link', { name: 'Text' }).first().getAttribute('href');
+  assert(sms.startsWith('sms:') && decodeURIComponent(sms).includes('/group-pay/seat/' + 'ef'.repeat(16)), 'the text carries the seat link: ' + sms);
+  page.once('dialog', (d) => d.accept());
+  await page.getByRole('button', { name: /Cover the rest: 2 seats/ }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  const b = coverCheckout.body;
+  assert(b?.group_cover === GROUP && b.quantity === 2 && !b.group_seat, 'the cover: ' + JSON.stringify(b));
+  assert(log.some((l) => l.startsWith('rpc exos_group_buy_get')), 'the host read');
+}, { signedIn: true, mock: { ...checkoutFn(coverCheckout), rpcs: { exos_group_buy_get: () => ({
+  id: GROUP, event_id: EV, tier_id: TIER2, quantity: 3, deadline: inMinutes(20), status: 'open', server_now: new Date().toISOString(),
+  can_cover: true, counts: { paid: 1, paying: 1, waiting: 1, released: 0 },
+  seats: [
+    { id: 's1', seat_no: 1, state: 'paid', path: '/group-pay/seat/' + 'aa'.repeat(16), paid_at: new Date().toISOString(), order_status: 'fulfilled' },
+    { id: 's2', seat_no: 2, state: 'paying', path: '/group-pay/seat/' + 'ef'.repeat(16), paid_at: null, order_status: null },
+    { id: 's3', seat_no: 3, state: 'waiting', path: '/group-pay/seat/' + 'bb'.repeat(16), paid_at: null, order_status: null },
+  ] }) } } });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 
