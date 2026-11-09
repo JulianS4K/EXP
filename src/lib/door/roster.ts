@@ -19,12 +19,10 @@
 import { isRegistryFresh } from '../offlineCheckins';
 import { parseNameCheckinMode, type DoorGate, type NameCheckinMode } from './decide';
 import { DEVICE_KEY, isSealed, storageKeys, type DoorCipher, type DoorKV, type SealedBlob, type StorageLike } from './kv';
-import type { DoorCheckinList, ListState } from './lists';
-import { doorKeysFromSecret, type DoorKeys } from '../../../supabase/functions/_shared/doorKeys.ts';
+import { parseListState, type DoorCheckinList, type ListState } from './lists';
+import { doorKeysFromSecret, parseDoorKeys, type DoorKeys } from '../../../supabase/functions/_shared/doorKeys.ts';
 
 export const ROSTER_PAGE_SIZE = 1000;
-/** Safety stop: 1000 pages of 1000 = a million tickets. */
-const MAX_PAGES = 1000;
 /** While the page is open and online, the roster is refreshed this often:
  *  only what changed (exos_event_checkin_roster_since, mig 20261008090000),
  *  with a full pull every ROSTER_FULL_EVERY_MS as a backstop. */
@@ -41,27 +39,8 @@ export const rosterKey = (eventId: string) => `registry_${eventId}`;
 export const marksKey = (eventId: string) => `registry_marks_${eventId}`;
 export const eventKey = (eventId: string) => `registry_event_${eventId}`;
 
-/** Fetch every page of a range-paged read. Pages are requested until one
- *  comes back empty, so a server row cap smaller than `pageSize` (PostgREST
- *  max_rows) can't silently truncate the list. A page larger than asked means
- *  the server ignored the range and returned everything: that's the whole list.
- *  Rows are de-duplicated by `keyOf` (a sale between two pages can shift one). */
-export async function fetchAllPages<T>(
-  fetchPage: (from: number, to: number) => Promise<T[]>,
-  keyOf: (row: T) => string,
-  pageSize: number = ROSTER_PAGE_SIZE,
-): Promise<T[]> {
-  const seen = new Map<string, T>();
-  let from = 0;
-  for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchPage(from, from + pageSize - 1);
-    if (!page || page.length === 0) break;
-    for (const row of page) seen.set(keyOf(row), row);
-    if (page.length > pageSize) break;
-    from += page.length;
-  }
-  return [...seen.values()];
-}
+// The pager moved to lib/pagedRead.ts; re-exported for the door's callers.
+export { fetchAllPages } from '../pagedRead';
 
 export interface DoorRosterEntry {
   used: boolean;
@@ -88,9 +67,40 @@ export interface DoorRosterEntry {
   tierId?: string | null;
   /** Last direction per re-entry list (roster list_state + this device). */
   lists?: ListState;
+  /** An add-on's own entry code (mig 20261107110000), not a ticket. */
+  addon?: boolean;
+  /** The add-on it is for (null: the add-on was deleted). */
+  addonId?: string | null;
 }
 
 export type DoorRoster = Record<string, DoorRosterEntry>;
+
+/**
+ * The event's add-on entry codes (exos_event_addon_passes: door keys, never a
+ * secret) as saved-list entries, keyed by pass id, so the door checks an A-
+ * code offline too. Anything malformed is skipped.
+ */
+export function buildAddonRoster(raw: unknown): DoorRoster {
+  const out: DoorRoster = {};
+  if (!Array.isArray(raw)) return out;
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r.id !== 'string') continue;
+    const name = typeof r.addon_name === 'string' && r.addon_name ? r.addon_name : 'Add-on';
+    const lists = parseListState(r.list_state);
+    out[r.id] = {
+      used: r.status === 'used',
+      voided: r.status === 'voided',
+      name,
+      tier: name,
+      ownerId: typeof r.owner_id === 'string' ? r.owner_id : undefined,
+      doorKeys: parseDoorKeys(r.door_keys),
+      addon: true,
+      addonId: typeof r.addon_id === 'string' ? r.addon_id : null,
+      ...(lists ? { lists } : {}),
+    };
+  }
+  return out;
+}
 
 export interface RosterRow {
   id: string;

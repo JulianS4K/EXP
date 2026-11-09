@@ -131,10 +131,13 @@ export default function Dialog({
 
   if (!open) return null;
 
-  const align = placement === 'sheet' ? 'items-end md:items-center' : 'items-center';
+  const sheet = placement === 'sheet';
+  const align = sheet ? 'items-end md:items-center' : 'items-center';
   return (
     <div
       className={`fixed inset-0 z-50 flex ${align} justify-center p-4`}
+      // A bottom sheet clears the home indicator (viewport-fit=cover).
+      style={sheet ? { paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' } : undefined}
       // mousedown (not click) so a drag that starts inside the panel and
       // ends on the backdrop doesn't close it.
       onMouseDown={(e) => {
@@ -149,7 +152,9 @@ export default function Dialog({
         aria-labelledby={labelledBy}
         aria-describedby={describedBy}
         tabIndex={-1}
-        className={`relative anim-pop-in focus:outline-none ${className}`}
+        // A sheet never grows past the visible viewport (dvh: in-app browsers'
+        // toolbars and the keyboard shrink it), so its button stays reachable.
+        className={`relative anim-pop-in focus:outline-none ${sheet ? 'max-h-[calc(100dvh-2rem)] overflow-y-auto' : ''} ${className}`}
       >
         {children}
       </div>

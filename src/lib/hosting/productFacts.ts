@@ -9,7 +9,7 @@
 // `not_shipped` facts stay out of anything an assistant reads.
 
 import {
-  EXOS_FEE_BPS, FEE_FREE_MONTHS, STRIPE_CARD_FEE, exosFeeCents, stripeFeeCents,
+  EXOS_FEE_BPS, FEE_FREE_MONTHS, FREE_TIER_MAX_CAPACITY, STRIPE_CARD_FEE, exosFeeCents, stripeFeeCents,
 } from '../../../supabase/functions/_shared/platformFee.ts';
 
 export type FactStatus =
@@ -69,10 +69,9 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'Paid checkout needs the Stripe secrets (docs/payments-go-live.md).',
   },
   {
-    id: 'free-tier', audience: 'organizer', status: 'not_shipped',
-    claim: 'Events with a capacity of 150 or less never pay an Exos fee.',
-    code: [],
-    note: 'In the open build stack (mig 20261029090000, #79/#80), not on main.',
+    id: 'free-tier', audience: 'organizer', status: 'at_launch',
+    claim: `Events with a capacity of ${FREE_TIER_MAX_CAPACITY} or less never pay an Exos fee, only card processing.`,
+    code: ['supabase/functions/_shared/platformFee.ts', 'supabase/migrations/20261029090000_exos_free_tier_resale_consent.sql'],
   },
 
   // ---- Selling ------------------------------------------------------------
@@ -145,6 +144,37 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/lib/accessibility.ts'],
   },
 
+  {
+    id: 'booking-settlements', audience: 'organizer', status: 'live',
+    claim: 'Venues can manage holds on a booking calendar, send offers with deal math, and settle shows with the artist.',
+    code: ['src/views/BookingCalendar.tsx', 'src/views/OrgOffers.tsx', 'src/views/SettlementPublic.tsx',
+      'supabase/migrations/20261030100000_exos_booking.sql', 'supabase/migrations/20261031100500_exos_settlements.sql'],
+  },
+  {
+    id: 'memberships', audience: 'organizer', status: 'at_launch',
+    claim: 'Venues can sell season passes, flex packs and memberships that fans redeem for tickets.',
+    code: ['src/views/OrgMemberships.tsx', 'src/views/MyMemberships.tsx',
+      'supabase/migrations/20261030130500_exos_passes_memberships.sql'],
+  },
+  {
+    id: 'seating-timed-entry', audience: 'organizer', status: 'at_launch',
+    claim: 'Events can have reserved seating with a seat picker, or timed entry slots.',
+    code: ['src/views/OrgSeatMaps.tsx', 'src/components/SlotPicker.tsx',
+      'supabase/migrations/20261030140000_exos_seating.sql', 'supabase/migrations/20261030150000_exos_series_timed_entry.sql'],
+  },
+  {
+    id: 'gift-cards', audience: 'fan', status: 'at_launch',
+    claim: 'Organizers can sell gift cards, and buyers can pay with them.',
+    code: ['src/components/OrgGiftCardsPanel.tsx', 'src/views/GiftCardBalance.tsx',
+      'supabase/migrations/20261030130000_exos_gift_cards_giving.sql'],
+  },
+  {
+    id: 'walk-up-sales', audience: 'organizer', status: 'live',
+    claim: 'Door staff can sell walk-up tickets for cash, give comps, and close out a cash drawer at the end of the night.',
+    code: ['src/components/PosDrawersPanel.tsx', 'supabase/functions/exos-pos/index.ts',
+      'supabase/migrations/20261107100000_exos_pos_walkup.sql'],
+  },
+
   // ---- Door ---------------------------------------------------------------
   {
     id: 'rotating-barcodes', audience: 'organizer', status: 'live',
@@ -211,22 +241,28 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'Reads run; writes are a dry run until the org switch and EXOS_EVENTBRITE_WRITES=on.',
   },
   {
-    id: 'booking-settlements', audience: 'organizer', status: 'not_shipped',
-    claim: 'Venues can manage holds, offers, deal math and settlements in Exos.',
-    code: [],
-    note: 'Open build stack (#67, #71, #79/#80).',
+    id: 'alt-payments', audience: 'fan', status: 'off',
+    claim: 'Buyers can pay with PayPal, Venmo or Cash App.',
+    code: ['supabase/functions/exos-paypal/index.ts', 'supabase/migrations/20261031220000_exos_payments_paypal_cashapp_split.sql'],
+    note: 'Needs the PayPal app keys and VITE_PAYPAL_CLIENT_ID (docs/payments-go-live.md), then each org turns it on.',
   },
   {
-    id: 'memberships', audience: 'organizer', status: 'not_shipped',
-    claim: 'Venues can sell season passes, flex packs and memberships.',
-    code: [],
-    note: 'Open build stack (#70, #79/#80).',
+    id: 'card-at-door', audience: 'organizer', status: 'off',
+    claim: 'Door staff can take card payments at the door with a card reader.',
+    code: ['supabase/functions/exos-pos/index.ts', 'supabase/migrations/20261107130000_exos_pos_terminal.sql'],
+    note: 'Off until EXOS_POS_CARD=on.',
   },
   {
-    id: 'alt-payments', audience: 'fan', status: 'not_shipped',
-    claim: 'Buyers can pay with Venmo, PayPal or Cash App.',
-    code: [],
-    note: 'Open build stack (#77, #79/#80).',
+    id: 'dice-import', audience: 'organizer', status: 'off',
+    claim: 'Promoters can import their DICE events, ticket holders and opted-in fans.',
+    code: ['supabase/functions/exos-dice-import/index.ts', 'supabase/migrations/20261106100000_exos_dice_import.sql'],
+    note: 'Never run against a real DICE token; needs EXOS_DICE_IMPORT=on and its cron turned on.',
+  },
+  {
+    id: 'promoter-payouts', audience: 'organizer', status: 'off',
+    claim: 'Promoters are paid their commission straight to their bank through Stripe.',
+    code: ['supabase/functions/exos-promoter-payouts/index.ts'],
+    note: 'Off until EXOS_PROMOTER_TRANSFERS is on.',
   },
 ];
 

@@ -1,0 +1,2402 @@
+{
+  "file": "offers",
+  "name": "Offers",
+  "order": 63,
+  "description": "Offers to acts, after Opendate's v3 offers: one act's deal for a show (flat, versus, plus or door, with bonuses, an expenses cap, merch and a deposit), on a budget that several offers can share (a lineup). Sending emails the agent a link to accept or decline without an account. Offers are drafts until sent; editing what the agent agreed to takes a sent offer back to draft. Webhooks: offer.sent, offer.accepted, offer.declined. Money is in cents. Opendate's /v3_offers paths answer too. Reads need `booking:read`, writes `booking:write`.",
+  "endpoints": [
+    {
+      "id": "list-offers",
+      "method": "GET",
+      "path": "/v1/offers",
+      "summary": "List offers",
+      "description": "Newest first. A sent offer past its expiry reads (and is saved) as expired.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this status.",
+          "enum": [
+            "draft",
+            "sent",
+            "accepted",
+            "declined",
+            "expired",
+            "cancelled"
+          ],
+          "example": "sent"
+        },
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only offers for this show.",
+          "example": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "hold_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only offers made from this hold.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "budget_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only offers on this budget (a lineup).",
+          "example": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "artist_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only offers to this artist.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "The Headliners at Metro",
+                "status": "sent",
+                "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "event_id": null,
+                "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "room_id": null,
+                "dates": [
+                  "2026-11-19"
+                ],
+                "currency": "USD",
+                "artist_id": null,
+                "artist_name": "The Headliners",
+                "act_type": "headliner",
+                "terms": {
+                  "deal_type": "versus",
+                  "guarantee_cents": 100000,
+                  "percentage": 85,
+                  "expenses_cap_cents": 150000,
+                  "promoter_profit_percent": 0,
+                  "bonuses": [
+                    {
+                      "sold": 400,
+                      "amount_cents": 25000
+                    }
+                  ],
+                  "merch_artist_percent": 80,
+                  "deposit_cents": 50000,
+                  "deposit_due_on": "2026-11-01",
+                  "hospitality": "Dinner for 6",
+                  "rider": "Standard club rider"
+                },
+                "pool_share_percent": null,
+                "pool": {
+                  "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "mode": "independent"
+                },
+                "agent": {
+                  "name": "Ann Agent",
+                  "email": "ann@agency.example",
+                  "company": "Agency",
+                  "phone": null
+                },
+                "boilerplate": "Subject to contract.",
+                "notes": "",
+                "template_id": null,
+                "import_id": null,
+                "expires_at": "2026-11-07T15:04:05+00:00",
+                "sent_at": "2026-10-31T15:04:05.120+00:00",
+                "sent_to": "ann@agency.example",
+                "response": null,
+                "history": [
+                  {
+                    "at": "2026-10-31T15:04:05.120+00:00",
+                    "action": "created",
+                    "via": "api"
+                  },
+                  {
+                    "at": "2026-10-31T15:04:05.120+00:00",
+                    "action": "sent",
+                    "to": "ann@agency.example"
+                  }
+                ],
+                "created_via": "api",
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter.",
+          "example": {
+            "error": "status must be one of draft, sent, accepted, declined, expired, cancelled."
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-offer",
+      "method": "POST",
+      "path": "/v1/offers",
+      "summary": "Create an offer",
+      "description": "A draft offer to one act. From a template (template_id: its terms, boilerplate, budget lines and expiry) and/or a hold. A new budget is made unless budget_id joins an existing one; budget { name, capacity, average_price_cents, sell_through_percent, lines: [{ category_key | category_id, kind, label, amount_cents }] } sets it up. For a rented room with rental terms on the hold, a Venue rental line with the fee is added. Opendate's wrapped body ({ v3_offer: {...} }) works too.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "artist_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The act, 1-150 characters. Required on create unless artist_id (or the hold) names one.",
+          "example": "The Headliners"
+        },
+        {
+          "name": "artist_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your artists (GET /v1/artists)."
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 150 characters (Opendate: event_name). Default: the hold title, else the act.",
+          "example": "The Headliners at Metro"
+        },
+        {
+          "name": "act_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Billing.",
+          "enum": [
+            "headliner",
+            "co_headliner",
+            "support",
+            "opener",
+            "other"
+          ],
+          "example": "headliner"
+        },
+        {
+          "name": "dates",
+          "location": "body",
+          "type": "array of strings (date)",
+          "required": false,
+          "description": "Show dates, YYYY-MM-DD, at most 31. From a hold: its active nights.",
+          "example": [
+            "2026-11-19"
+          ]
+        },
+        {
+          "name": "hold_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A hold to make the offer from (Opendate: calendar_event_id): its nights, venue, room, first artist and rental terms. Converting the hold links the offer to the new event.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "The show, once there is one."
+        },
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your venues.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A room of that venue."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Deal terms (all optional on a change, merged into the current terms): { deal_type: flat | versus | plus | door, guarantee_cents, percentage (0-100), expenses_cap_cents (or null), promoter_profit_percent (plus deals), bonuses: [{ sold, amount_cents }] (cumulative, at most 10), merch_artist_percent (or null), deposit_cents, deposit_due_on (YYYY-MM-DD), hospitality, rider }. Opendate spellings dollar_amount (major units) and upside_percentage are read too.",
+          "example": {
+            "deal_type": "versus",
+            "guarantee_cents": 100000,
+            "percentage": 85,
+            "expenses_cap_cents": 150000,
+            "promoter_profit_percent": 0,
+            "bonuses": [
+              {
+                "sold": 400,
+                "amount_cents": 25000
+              }
+            ],
+            "merch_artist_percent": 80,
+            "deposit_cents": 50000,
+            "deposit_due_on": "2026-11-01",
+            "hospitality": "Dinner for 6",
+            "rider": "Standard club rider"
+          }
+        },
+        {
+          "name": "pool_share_percent",
+          "location": "body",
+          "type": "number or null",
+          "required": false,
+          "description": "This act's share of the pool payout when the budget's pool is in pool mode (Opendate: pool_percentage); null = an equal part of what the explicit shares leave."
+        },
+        {
+          "name": "agent",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Who answers: { name, email, company, phone }. The email is where the offer is sent.",
+          "example": {
+            "name": "Ann Agent",
+            "email": "ann@agency.example"
+          }
+        },
+        {
+          "name": "boilerplate",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Conditions shown to the agent and on the PDF, up to 10,000 characters.",
+          "example": "Subject to contract."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Internal, up to 4,000 characters. Never shown to the agent.",
+          "example": ""
+        },
+        {
+          "name": "expires_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "After this a sent offer reads as expired and can no longer be answered.",
+          "example": "2026-11-07T15:00:00Z"
+        },
+        {
+          "name": "budget_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Join this budget (a lineup sharing one budget; Opendate: v3_budget_id). On a change, drafts only. Left out on create: a new budget.",
+          "example": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "template_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "One of your offer templates."
+        },
+        {
+          "name": "budget",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "A new budget for this offer (ignored with budget_id).",
+          "example": {
+            "capacity": 500,
+            "average_price_cents": 2500,
+            "sell_through_percent": 80
+          }
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "sent",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ],
+      "request_example": {
+        "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "template_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "agent": {
+          "name": "Ann Agent",
+          "email": "ann@agency.example"
+        },
+        "terms": {
+          "guarantee_cents": 120000
+        }
+      }
+    },
+    {
+      "id": "get-offer",
+      "method": "GET",
+      "path": "/v1/offers/:id",
+      "summary": "Get an offer",
+      "description": "The offer with its history (never the link token).",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "sent",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-offer",
+      "method": "PATCH",
+      "path": "/v1/offers/:id",
+      "summary": "Update an offer",
+      "description": "Drafts and sent offers take any field; changing what the agent agreed to (terms, dates, act, venue, boilerplate, pool share) on a sent offer takes it back to draft and its link stops working (send it again). Accepted, declined, expired and cancelled offers only take notes and event_id.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "artist_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The act, 1-150 characters. Required on create unless artist_id (or the hold) names one.",
+          "example": "The Headliners"
+        },
+        {
+          "name": "artist_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your artists (GET /v1/artists)."
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 150 characters (Opendate: event_name). Default: the hold title, else the act.",
+          "example": "The Headliners at Metro"
+        },
+        {
+          "name": "act_type",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Billing.",
+          "enum": [
+            "headliner",
+            "co_headliner",
+            "support",
+            "opener",
+            "other"
+          ],
+          "example": "headliner"
+        },
+        {
+          "name": "dates",
+          "location": "body",
+          "type": "array of strings (date)",
+          "required": false,
+          "description": "Show dates, YYYY-MM-DD, at most 31. From a hold: its active nights.",
+          "example": [
+            "2026-11-19"
+          ]
+        },
+        {
+          "name": "hold_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A hold to make the offer from (Opendate: calendar_event_id): its nights, venue, room, first artist and rental terms. Converting the hold links the offer to the new event.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "event_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "The show, once there is one."
+        },
+        {
+          "name": "venue_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "One of your venues.",
+          "example": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID) or null",
+          "required": false,
+          "description": "A room of that venue."
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Deal terms (all optional on a change, merged into the current terms): { deal_type: flat | versus | plus | door, guarantee_cents, percentage (0-100), expenses_cap_cents (or null), promoter_profit_percent (plus deals), bonuses: [{ sold, amount_cents }] (cumulative, at most 10), merch_artist_percent (or null), deposit_cents, deposit_due_on (YYYY-MM-DD), hospitality, rider }. Opendate spellings dollar_amount (major units) and upside_percentage are read too.",
+          "example": {
+            "deal_type": "versus",
+            "guarantee_cents": 100000,
+            "percentage": 85,
+            "expenses_cap_cents": 150000,
+            "promoter_profit_percent": 0,
+            "bonuses": [
+              {
+                "sold": 400,
+                "amount_cents": 25000
+              }
+            ],
+            "merch_artist_percent": 80,
+            "deposit_cents": 50000,
+            "deposit_due_on": "2026-11-01",
+            "hospitality": "Dinner for 6",
+            "rider": "Standard club rider"
+          }
+        },
+        {
+          "name": "pool_share_percent",
+          "location": "body",
+          "type": "number or null",
+          "required": false,
+          "description": "This act's share of the pool payout when the budget's pool is in pool mode (Opendate: pool_percentage); null = an equal part of what the explicit shares leave."
+        },
+        {
+          "name": "agent",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Who answers: { name, email, company, phone }. The email is where the offer is sent.",
+          "example": {
+            "name": "Ann Agent",
+            "email": "ann@agency.example"
+          }
+        },
+        {
+          "name": "boilerplate",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Conditions shown to the agent and on the PDF, up to 10,000 characters.",
+          "example": "Subject to contract."
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Internal, up to 4,000 characters. Never shown to the agent.",
+          "example": ""
+        },
+        {
+          "name": "expires_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "After this a sent offer reads as expired and can no longer be answered.",
+          "example": "2026-11-07T15:00:00Z"
+        },
+        {
+          "name": "budget_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Join this budget (a lineup sharing one budget; Opendate: v3_budget_id). On a change, drafts only. Left out on create: a new budget.",
+          "example": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "sent",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-offer",
+      "method": "DELETE",
+      "path": "/v1/offers/:id",
+      "summary": "Delete a draft offer",
+      "description": "Drafts only (cancel the others). Its budget goes too when no other offer uses it.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-offer",
+      "method": "POST",
+      "path": "/v1/offers/:id/send",
+      "summary": "Send an offer",
+      "description": "Emails the agent (or `to`) the offer with a link to answer it without an account, and emits offer.sent. Each send makes a new link (the old one stops working). The response carries link_path (with the token) once; only its hash is stored. Also /offers/:id/send_offer and /v3_offers/:id/send_offer.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "to",
+          "location": "body",
+          "type": "string (email)",
+          "required": false,
+          "description": "Send here instead of the agent (Opendate: last_sent_to).",
+          "example": "booker@agency.example"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "sent",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "link_path": "/offer/7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b?t=<64 hex characters>"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "accept-offer",
+      "method": "POST",
+      "path": "/v1/offers/:id/accept",
+      "summary": "Record an acceptance",
+      "description": "Records that the agent accepted (e.g. by phone): draft or sent offers. Emits offer.accepted. Agents answering by link use the emailed page instead.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Who accepted.",
+          "example": "Ann Agent"
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 1,000 characters.",
+          "example": ""
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "accepted",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": {
+                "action": "accept",
+                "name": "Ann Agent",
+                "note": null,
+                "at": "2026-10-31T15:04:05.120+00:00",
+                "ip": null,
+                "user_agent": null,
+                "via": "api",
+                "by": null
+              },
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "decline-offer",
+      "method": "POST",
+      "path": "/v1/offers/:id/decline",
+      "summary": "Record a decline",
+      "description": "As accept, for a decline. Emits offer.declined.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Who declined.",
+          "example": "Ann Agent"
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 1,000 characters.",
+          "example": "Routing changed"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "declined",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "cancel-offer",
+      "method": "POST",
+      "path": "/v1/offers/:id/cancel",
+      "summary": "Cancel an offer",
+      "description": "Draft, sent or accepted offers. The link stops working.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Why, for the history.",
+          "example": "Show moved"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "cancelled",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-offer-pdf",
+      "method": "GET",
+      "path": "/v1/offers/:id/pdf",
+      "summary": "Offer PDF",
+      "description": "The offer as a PDF (US Letter): the show, the terms, the conditions and the answer when there is one.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": "%PDF-1.4 …",
+          "content_type": "application/pdf"
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-offer-templates",
+      "method": "GET",
+      "path": "/v1/offer-templates",
+      "summary": "List offer templates",
+      "description": "By name. Also /v3_offer_templates.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Club standard",
+                "currency": "USD",
+                "terms": {
+                  "deal_type": "versus",
+                  "guarantee_cents": 100000,
+                  "percentage": 85,
+                  "expenses_cap_cents": 150000,
+                  "promoter_profit_percent": 0,
+                  "bonuses": [
+                    {
+                      "sold": 400,
+                      "amount_cents": 25000
+                    }
+                  ],
+                  "merch_artist_percent": 80,
+                  "deposit_cents": 50000,
+                  "deposit_due_on": "2026-11-01",
+                  "hospitality": "Dinner for 6",
+                  "rider": "Standard club rider"
+                },
+                "boilerplate": "Subject to contract.",
+                "budget_lines": [
+                  {
+                    "category_key": "production",
+                    "kind": "expense",
+                    "label": "Sound and lights",
+                    "amount_cents": 150000
+                  }
+                ],
+                "capacity": null,
+                "average_price_cents": 2500,
+                "sell_through_percent": 80,
+                "expires_in_days": 7,
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-offer-template",
+      "method": "POST",
+      "path": "/v1/offer-templates",
+      "summary": "Create an offer template",
+      "description": "At most 50 per organization.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-100 characters.",
+          "example": "Club standard"
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217 (default USD).",
+          "example": "USD"
+        },
+        {
+          "name": "terms",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Default deal terms (as on an offer).",
+          "example": {
+            "deal_type": "versus",
+            "guarantee_cents": 100000,
+            "percentage": 85,
+            "expenses_cap_cents": 150000,
+            "promoter_profit_percent": 0,
+            "bonuses": [
+              {
+                "sold": 400,
+                "amount_cents": 25000
+              }
+            ],
+            "merch_artist_percent": 80,
+            "deposit_cents": 50000,
+            "deposit_due_on": "2026-11-01",
+            "hospitality": "Dinner for 6",
+            "rider": "Standard club rider"
+          }
+        },
+        {
+          "name": "boilerplate",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 10,000 characters.",
+          "example": "Subject to contract."
+        },
+        {
+          "name": "budget_lines",
+          "location": "body",
+          "type": "array of objects",
+          "required": false,
+          "description": "Lines copied to a new budget: [{ category_key | category_id, kind, label, amount_cents }], at most 50.",
+          "example": [
+            {
+              "category_key": "production",
+              "kind": "expense",
+              "label": "Sound and lights",
+              "amount_cents": 150000
+            }
+          ]
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Default budget capacity."
+        },
+        {
+          "name": "average_price_cents",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Default average ticket price.",
+          "example": 2500
+        },
+        {
+          "name": "sell_through_percent",
+          "location": "body",
+          "type": "number or null",
+          "required": false,
+          "description": "Default sell-through.",
+          "example": 80
+        },
+        {
+          "name": "expires_in_days",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "An offer made from it expires this many days later (1-365).",
+          "example": 7
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Club standard",
+              "currency": "USD",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "boilerplate": "Subject to contract.",
+              "budget_lines": [
+                {
+                  "category_key": "production",
+                  "kind": "expense",
+                  "label": "Sound and lights",
+                  "amount_cents": 150000
+                }
+              ],
+              "capacity": null,
+              "average_price_cents": 2500,
+              "sell_through_percent": 80,
+              "expires_in_days": 7,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-offer-template",
+      "method": "GET",
+      "path": "/v1/offer-templates/:id",
+      "summary": "Get an offer template",
+      "description": "",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Club standard",
+              "currency": "USD",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "boilerplate": "Subject to contract.",
+              "budget_lines": [
+                {
+                  "category_key": "production",
+                  "kind": "expense",
+                  "label": "Sound and lights",
+                  "amount_cents": 150000
+                }
+              ],
+              "capacity": null,
+              "average_price_cents": 2500,
+              "sell_through_percent": 80,
+              "expires_in_days": 7,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-offer-template",
+      "method": "PATCH",
+      "path": "/v1/offer-templates/:id",
+      "summary": "Update an offer template",
+      "description": "The fields of create; only those sent change.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-100 characters.",
+          "example": "Club standard"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "name": "Club standard",
+              "currency": "USD",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "boilerplate": "Subject to contract.",
+              "budget_lines": [
+                {
+                  "category_key": "production",
+                  "kind": "expense",
+                  "label": "Sound and lights",
+                  "amount_cents": 150000
+                }
+              ],
+              "capacity": null,
+              "average_price_cents": 2500,
+              "sell_through_percent": 80,
+              "expires_in_days": 7,
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-offer-template",
+      "method": "DELETE",
+      "path": "/v1/offer-templates/:id",
+      "summary": "Delete an offer template",
+      "description": "Offers made from it keep their terms.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "apply-offer-template",
+      "method": "POST",
+      "path": "/v1/offer-templates/:id/apply",
+      "summary": "Apply a template to an offer",
+      "description": "Merges the template's terms, boilerplate and expiry into an offer (the same rules as PATCH /v1/offers/:id). Also apply_template.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The template id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "offer_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The offer.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "The Headliners at Metro",
+              "status": "sent",
+              "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event_id": null,
+              "venue_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": null,
+              "dates": [
+                "2026-11-19"
+              ],
+              "currency": "USD",
+              "artist_id": null,
+              "artist_name": "The Headliners",
+              "act_type": "headliner",
+              "terms": {
+                "deal_type": "versus",
+                "guarantee_cents": 100000,
+                "percentage": 85,
+                "expenses_cap_cents": 150000,
+                "promoter_profit_percent": 0,
+                "bonuses": [
+                  {
+                    "sold": 400,
+                    "amount_cents": 25000
+                  }
+                ],
+                "merch_artist_percent": 80,
+                "deposit_cents": 50000,
+                "deposit_due_on": "2026-11-01",
+                "hospitality": "Dinner for 6",
+                "rider": "Standard club rider"
+              },
+              "pool_share_percent": null,
+              "pool": {
+                "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "mode": "independent"
+              },
+              "agent": {
+                "name": "Ann Agent",
+                "email": "ann@agency.example",
+                "company": "Agency",
+                "phone": null
+              },
+              "boilerplate": "Subject to contract.",
+              "notes": "",
+              "template_id": null,
+              "import_id": null,
+              "expires_at": "2026-11-07T15:04:05+00:00",
+              "sent_at": "2026-10-31T15:04:05.120+00:00",
+              "sent_to": "ann@agency.example",
+              "response": null,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "created",
+                  "via": "api"
+                },
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "sent",
+                  "to": "ann@agency.example"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not in this state: e.g. a sent offer can be answered, an accepted one only takes notes and event_id.",
+          "example": {
+            "error": "a accepted offer only takes notes and event_id"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-offer-imports",
+      "method": "GET",
+      "path": "/v1/offer-imports",
+      "summary": "List offer imports",
+      "description": "Newest first.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "file_name": "fall.csv",
+                "status": "partial",
+                "row_count": 3,
+                "created_count": 2,
+                "errors": [
+                  {
+                    "row": 3,
+                    "error": "deal_type must be one of flat, versus, plus, door"
+                  }
+                ],
+                "created_via": "api",
+                "created_at": "2026-10-31T15:04:05.120+00:00",
+                "updated_at": "2026-10-31T15:04:05.120+00:00",
+                "offer_ids": [
+                  "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                ]
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-offer-import",
+      "method": "POST",
+      "path": "/v1/offer-imports",
+      "summary": "Import offers",
+      "description": "Creates draft offers from rows you parsed from a spreadsheet, at most 200: each row is an offer body (as POST /v1/offers, without template_id) plus an optional `group`: rows with the same group share one budget. A bad row is reported in errors; the others are created.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "rows",
+          "location": "body",
+          "type": "array of objects",
+          "required": true,
+          "description": "The offers.",
+          "example": [
+            {
+              "group": "fest",
+              "artist_name": "Fest One",
+              "dates": [
+                "2026-12-05"
+              ],
+              "terms": {
+                "deal_type": "door",
+                "percentage": 70
+              }
+            }
+          ]
+        },
+        {
+          "name": "file_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "For your records, up to 200 characters.",
+          "example": "fall.csv"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "file_name": "fall.csv",
+              "status": "partial",
+              "row_count": 3,
+              "created_count": 2,
+              "errors": [
+                {
+                  "row": 3,
+                  "error": "deal_type must be one of flat, versus, plus, door"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "offer_ids": [
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-offer-import",
+      "method": "GET",
+      "path": "/v1/offer-imports/:id",
+      "summary": "Get an offer import",
+      "description": "With the ids of the offers it made.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The import id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "file_name": "fall.csv",
+              "status": "partial",
+              "row_count": 3,
+              "created_count": 2,
+              "errors": [
+                {
+                  "row": 3,
+                  "error": "deal_type must be one of flat, versus, plus, door"
+                }
+              ],
+              "created_via": "api",
+              "created_at": "2026-10-31T15:04:05.120+00:00",
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "offer_ids": [
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-offer-import",
+      "method": "DELETE",
+      "path": "/v1/offer-imports/:id",
+      "summary": "Delete an offer import",
+      "description": "The record only; the offers stay.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The import id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    }
+  ]
+}

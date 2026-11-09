@@ -1,0 +1,1055 @@
+{
+  "file": "holds",
+  "name": "Holds and calendar",
+  "order": 61,
+  "description": "Holds pencil nights at a venue before a show is confirmed. Each night (a position) sits at a level in its line: the organization's holds on that room (or the whole venue) that date, 1 first. Levels are always 1..N: clearing or converting a night moves the ones behind it up. Lines only ever count your organization's holds, even on a rented or partner venue. Every change sends hold.created, hold.updated or hold.converted webhooks, and hold.updated (reason level_changed) to each other hold whose level moved. Reads need `booking:read`, writes `booking:write`.",
+  "endpoints": [
+    {
+      "id": "list-holds",
+      "method": "GET",
+      "path": "/v1/holds",
+      "summary": "List holds",
+      "description": "Holds by first night, with every night (cleared and converted ones included). The date, venue and room filters match a hold with any night that fits.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (date)",
+          "required": false,
+          "description": "Only holds with a night on or after this date.",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (date)",
+          "required": false,
+          "description": "Only holds with a night on or before this date.",
+          "example": "2026-11-30"
+        },
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only holds with a night at this venue (also `q[venue_id_eq]`).",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "room_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only holds with a night in this room.",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "status",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "active (any night still held), cleared (every night released) or converted (a night became an event, none held).",
+          "enum": [
+            "active",
+            "cleared",
+            "converted"
+          ],
+          "example": "active"
+        },
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only holds whose title contains this (also `title`).",
+          "example": "band"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Rows per page, 1-200 (default 50).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "Band A",
+                "notes": "Agent wants an answer by Friday.",
+                "status": "active",
+                "artist_ids": [],
+                "announce_at": "2026-09-01T15:00:00+00:00",
+                "ticket_forecast": 400,
+                "age_restriction": "21+",
+                "rental": null,
+                "first_date": "2026-11-14",
+                "last_date": "2026-11-15",
+                "created_via": "api",
+                "cleared_at": null,
+                "converted_at": null,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00",
+                "positions": [
+                  {
+                    "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "date": "2026-11-14",
+                    "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "start_time": "20:00",
+                    "is_target": true,
+                    "level": 1,
+                    "status": "active",
+                    "event_id": null,
+                    "cleared_at": null,
+                    "converted_at": null
+                  },
+                  {
+                    "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "date": "2026-11-15",
+                    "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "start_time": "20:00",
+                    "is_target": false,
+                    "level": 2,
+                    "status": "active",
+                    "event_id": null,
+                    "cleared_at": null,
+                    "converted_at": null
+                  }
+                ]
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "from must be a date written YYYY-MM-DD."
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-hold",
+      "method": "POST",
+      "path": "/v1/holds",
+      "summary": "Create a hold",
+      "description": "Holds one or more nights. Each goes to the end of its line unless a level is asked for.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Up to 100 characters.",
+          "example": "Band A"
+        },
+        {
+          "name": "positions",
+          "location": "body",
+          "type": "array of objects",
+          "required": true,
+          "description": "The nights held, 1-30: each { date (YYYY-MM-DD, the venue's local date), venue_id, room_id (or null for the whole venue), level (1-50; left out = the end of the line), start_time (HH:MM, venue-local; the default show time when converted), is_target (true / false) }. A hold holds a room on a date once. Asking for a level that is taken moves the holds at or below it down one.",
+          "example": [
+            {
+              "date": "2026-11-14",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "start_time": "20:00",
+              "is_target": true
+            },
+            {
+              "date": "2026-11-15",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+            }
+          ]
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 2000 characters. Carried to the event as a staff note when a night converts.",
+          "example": "Agent wants an answer by Friday."
+        },
+        {
+          "name": "announce_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "When the show is announced. A time still ahead when a night converts becomes the event's Announce row.",
+          "example": "2026-09-01T15:00:00Z"
+        },
+        {
+          "name": "ticket_forecast",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Expected tickets, 0-1,000,000.",
+          "example": 400
+        },
+        {
+          "name": "age_restriction",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "A label, up to 40 characters.",
+          "example": "21+"
+        },
+        {
+          "name": "artist_ids",
+          "location": "body",
+          "type": "array of strings (UUID)",
+          "required": false,
+          "description": "Up to 20 artist ids (stored; artists arrive with the artists API).",
+          "example": []
+        },
+        {
+          "name": "rental",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Rental terms when you rent the room: { status: requested | confirmed | declined, fee, deposit (major units), currency (ISO 4217, default USD), notes }.",
+          "example": {
+            "status": "requested",
+            "fee": 2500,
+            "deposit": 500,
+            "currency": "USD",
+            "notes": "Bar split TBD"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Band A",
+              "notes": "Agent wants an answer by Friday.",
+              "status": "active",
+              "artist_ids": [],
+              "announce_at": "2026-09-01T15:00:00+00:00",
+              "ticket_forecast": 400,
+              "age_restriction": "21+",
+              "rental": null,
+              "first_date": "2026-11-14",
+              "last_date": "2026-11-15",
+              "created_via": "api",
+              "cleared_at": null,
+              "converted_at": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00",
+              "positions": [
+                {
+                  "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-14",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": true,
+                  "level": 1,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                },
+                {
+                  "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-15",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": false,
+                  "level": 2,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "positions[0].venue_id: venue not found in this organization"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The hold names the same room and date twice, or a line is full (50 holds).",
+          "example": {
+            "error": "This hold already has 2026-11-14 in that room"
+          }
+        }
+      ],
+      "request_example": {
+        "title": "Band A",
+        "positions": [
+          {
+            "date": "2026-11-14",
+            "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+            "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+            "start_time": "20:00",
+            "is_target": true
+          },
+          {
+            "date": "2026-11-15",
+            "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+            "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "get-hold",
+      "method": "GET",
+      "path": "/v1/holds/:id",
+      "summary": "Get a hold",
+      "description": "One hold with every night.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The hold's id. One of another organization answers 404.",
+          "example": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Band A",
+              "notes": "Agent wants an answer by Friday.",
+              "status": "active",
+              "artist_ids": [],
+              "announce_at": "2026-09-01T15:00:00+00:00",
+              "ticket_forecast": 400,
+              "age_restriction": "21+",
+              "rental": null,
+              "first_date": "2026-11-14",
+              "last_date": "2026-11-15",
+              "created_via": "api",
+              "cleared_at": null,
+              "converted_at": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00",
+              "positions": [
+                {
+                  "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-14",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": true,
+                  "level": 1,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                },
+                {
+                  "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-15",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": false,
+                  "level": 2,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such hold in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "hold not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-hold",
+      "method": "PATCH",
+      "path": "/v1/holds/:id",
+      "summary": "Update a hold",
+      "description": "Changes the fields sent. With positions: moves, adds and clears nights in one go.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The hold's id. One of another organization answers 404.",
+          "example": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 100 characters.",
+          "example": "Band A"
+        },
+        {
+          "name": "positions",
+          "location": "body",
+          "type": "array of objects",
+          "required": false,
+          "description": "When sent, the full list of nights the hold keeps: an existing night as { id, level?, start_time?, is_target? } (a new level moves it in its line) or a new night as on create. Active nights left out are cleared, and the holds behind them move up.",
+          "example": [
+            {
+              "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "level": 1
+            },
+            {
+              "date": "2026-11-16",
+              "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+            }
+          ]
+        },
+        {
+          "name": "notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Up to 2000 characters. Carried to the event as a staff note when a night converts.",
+          "example": "Agent wants an answer by Friday."
+        },
+        {
+          "name": "announce_at",
+          "location": "body",
+          "type": "string (ISO 8601) or null",
+          "required": false,
+          "description": "When the show is announced. A time still ahead when a night converts becomes the event's Announce row.",
+          "example": "2026-09-01T15:00:00Z"
+        },
+        {
+          "name": "ticket_forecast",
+          "location": "body",
+          "type": "integer or null",
+          "required": false,
+          "description": "Expected tickets, 0-1,000,000.",
+          "example": 400
+        },
+        {
+          "name": "age_restriction",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "A label, up to 40 characters.",
+          "example": "21+"
+        },
+        {
+          "name": "artist_ids",
+          "location": "body",
+          "type": "array of strings (UUID)",
+          "required": false,
+          "description": "Up to 20 artist ids (stored; artists arrive with the artists API).",
+          "example": []
+        },
+        {
+          "name": "rental",
+          "location": "body",
+          "type": "object or null",
+          "required": false,
+          "description": "Rental terms when you rent the room: { status: requested | confirmed | declined, fee, deposit (major units), currency (ISO 4217, default USD), notes }.",
+          "example": {
+            "status": "requested",
+            "fee": 2500,
+            "deposit": 500,
+            "currency": "USD",
+            "notes": "Bar split TBD"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Band A",
+              "notes": "Agent wants an answer by Friday.",
+              "status": "active",
+              "artist_ids": [],
+              "announce_at": "2026-09-01T15:00:00+00:00",
+              "ticket_forecast": 400,
+              "age_restriction": "21+",
+              "rental": null,
+              "first_date": "2026-11-14",
+              "last_date": "2026-11-15",
+              "created_via": "api",
+              "cleared_at": null,
+              "converted_at": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00",
+              "positions": [
+                {
+                  "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-14",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": true,
+                  "level": 1,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                },
+                {
+                  "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-15",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": false,
+                  "level": 2,
+                  "status": "active",
+                  "event_id": null,
+                  "cleared_at": null,
+                  "converted_at": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "Position 3d40f6b9-1c2d-4e3f-8a9b-0c1d2e3f4a5b is not an active night of this hold"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such hold in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "hold not found"
+          }
+        }
+      ],
+      "request_example": {
+        "title": "Band A (co-headline)",
+        "positions": [
+          {
+            "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+            "level": 1
+          },
+          {
+            "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+          }
+        ]
+      }
+    },
+    {
+      "id": "clear-hold",
+      "method": "POST",
+      "path": "/v1/holds/:id/clear",
+      "summary": "Clear nights",
+      "description": "Releases the nights named, or every active night. A cleared night stays on the hold with cleared_at; the holds behind it move up (level 2 becomes 1). Naming a night that is already cleared changes nothing.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The hold's id. One of another organization answers 404.",
+          "example": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "position_ids",
+          "location": "body",
+          "type": "array of strings (UUID)",
+          "required": false,
+          "description": "The nights to clear (also `hold_position_ids`). Left out: every active night.",
+          "example": [
+            "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "title": "Band A",
+              "notes": "Agent wants an answer by Friday.",
+              "status": "cleared",
+              "artist_ids": [],
+              "announce_at": "2026-09-01T15:00:00+00:00",
+              "ticket_forecast": 400,
+              "age_restriction": "21+",
+              "rental": null,
+              "first_date": "2026-11-14",
+              "last_date": "2026-11-15",
+              "created_via": "api",
+              "cleared_at": "2026-10-29T15:04:05.120+00:00",
+              "converted_at": null,
+              "created_at": "2026-10-29T15:04:05.120+00:00",
+              "updated_at": "2026-10-29T15:04:05.120+00:00",
+              "positions": [
+                {
+                  "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-14",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": true,
+                  "level": 1,
+                  "status": "cleared",
+                  "event_id": null,
+                  "cleared_at": "2026-10-29T15:04:05.120+00:00",
+                  "converted_at": null
+                },
+                {
+                  "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "date": "2026-11-15",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "start_time": "20:00",
+                  "is_target": false,
+                  "level": 2,
+                  "status": "cleared",
+                  "event_id": null,
+                  "cleared_at": "2026-10-29T15:04:05.120+00:00",
+                  "converted_at": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "position_ids must be a list of 1 to 30 position ids."
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such hold in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "hold not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Left out position_ids, and the hold has no active night.",
+          "example": {
+            "error": "This hold has no active nights"
+          }
+        }
+      ],
+      "request_example": {
+        "position_ids": [
+          "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        ]
+      }
+    },
+    {
+      "id": "convert-hold",
+      "method": "POST",
+      "path": "/v1/holds/:id/convert-to-event",
+      "summary": "Convert a night into an event",
+      "description": "Makes one active night a draft event, in one step: the event takes the hold's title, the venue's address and time zone, starts at the night's time in that zone, links the venue, room and hold, and gets one free General Admission ticket type sized to the room (else the venue, else 100). An announce time still ahead becomes its Announce schedule row and the hold's notes its first staff note. The night is marked converted; the hold's other rooms that night are cleared; the holds behind it move up. The hold's other dates stay held. Also at /v1/holds/:id/convert_to_event and /v1/holds/:id/convert_to_confirm.",
+      "auth": "api_key",
+      "scope": "booking:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The hold's id. One of another organization answers 404.",
+          "example": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "position_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The night (also `hold_position_id`). Or send date (and room_id when the hold has several rooms that date).",
+          "example": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "date",
+          "location": "body",
+          "type": "string (date)",
+          "required": false,
+          "description": "The night's date, instead of position_id.",
+          "example": "2026-11-14"
+        },
+        {
+          "name": "room_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "With date: which room.",
+          "example": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "time",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Start, HH:MM in the venue's time zone (default the night's start_time, else 20:00).",
+          "example": "20:00"
+        },
+        {
+          "name": "title",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The event's name (default the hold's title).",
+          "example": "Band A"
+        },
+        {
+          "name": "capacity",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The ticket type's size, 1-1,000,000.",
+          "example": 450
+        },
+        {
+          "name": "clear_holds_on_day",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Also clear every other hold's night at this venue that date, in every room (default false).",
+          "example": false
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "hold": {
+                "id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "title": "Band A",
+                "notes": "Agent wants an answer by Friday.",
+                "status": "active",
+                "artist_ids": [],
+                "announce_at": "2026-09-01T15:00:00+00:00",
+                "ticket_forecast": 400,
+                "age_restriction": "21+",
+                "rental": null,
+                "first_date": "2026-11-14",
+                "last_date": "2026-11-15",
+                "created_via": "api",
+                "cleared_at": null,
+                "converted_at": null,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "updated_at": "2026-10-29T15:04:05.120+00:00",
+                "positions": [
+                  {
+                    "id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "date": "2026-11-14",
+                    "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "start_time": "20:00",
+                    "is_target": true,
+                    "level": 1,
+                    "status": "converted",
+                    "event_id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "cleared_at": null,
+                    "converted_at": "2026-10-29T15:04:05.120+00:00"
+                  },
+                  {
+                    "id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "date": "2026-11-15",
+                    "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "start_time": "20:00",
+                    "is_target": false,
+                    "level": 1,
+                    "status": "active",
+                    "event_id": null,
+                    "cleared_at": null,
+                    "converted_at": null
+                  }
+                ]
+              },
+              "position_id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "event": {
+                "id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "name": "Band A",
+                "slug": null,
+                "status": "draft",
+                "starts_at": "2026-11-15T02:00:00+00:00",
+                "doors_at": null,
+                "ends_at": null,
+                "timezone": "America/Chicago",
+                "currency": "USD",
+                "venue_name": "Lincoln Hall — Main Room",
+                "venue_location": "Chicago, IL",
+                "exos_venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "exos_room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "hold_id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                "tickets_sold": 0,
+                "total_tickets": 450,
+                "created_at": "2026-10-29T15:04:05.120+00:00",
+                "tiers": [
+                  {
+                    "id": "6f9e2b11-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "General Admission",
+                    "description": null,
+                    "price": 0,
+                    "capacity": 450,
+                    "sold": 0,
+                    "ticket_type": "free",
+                    "visibility": "public",
+                    "sales_start": null,
+                    "sales_end": null,
+                    "sort_order": 0
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "position_id (or date) is required"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such hold in the key's organization (or the id is malformed).",
+          "example": {
+            "error": "hold not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The night is not active (already cleared or converted).",
+          "example": {
+            "error": "That night is not an active night of this hold"
+          }
+        }
+      ],
+      "request_example": {
+        "position_id": "3d40f6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+        "time": "20:00"
+      }
+    },
+    {
+      "id": "get-calendar",
+      "method": "GET",
+      "path": "/v1/calendar",
+      "summary": "Calendar",
+      "description": "Every active hold night and every event of the organization between two dates (at most 92 days), events on their local date. A night is challenged when its line has more than one hold, or a show that is not cancelled is booked in the same room (or the whole venue) that date.",
+      "auth": "api_key",
+      "scope": "booking:read",
+      "parameters": [
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (date)",
+          "required": true,
+          "description": "First date, YYYY-MM-DD.",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (date)",
+          "required": true,
+          "description": "Last date, YYYY-MM-DD.",
+          "example": "2026-11-30"
+        },
+        {
+          "name": "venue_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this venue.",
+          "example": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "from": "2026-11-01",
+              "to": "2026-11-30",
+              "holds": [
+                {
+                  "position_id": "3d40f6b2-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "hold_id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "title": "Band A",
+                  "date": "2026-11-15",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "level": 1,
+                  "is_target": false,
+                  "start_time": "20:00",
+                  "holds_in_slot": 2,
+                  "challenged": true
+                }
+              ],
+              "events": [
+                {
+                  "id": "2e5007c1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Band A",
+                  "status": "draft",
+                  "starts_at": "2026-11-15T02:00:00+00:00",
+                  "date": "2026-11-14",
+                  "venue_id": "7a10c3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "room_id": "5b20d4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "hold_id": "4c30e5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks booking:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "booking:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"booking:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "from and to are required, written YYYY-MM-DD."
+          }
+        }
+      ]
+    }
+  ]
+}

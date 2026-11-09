@@ -162,3 +162,40 @@ export function readPrefill(eventId: string): CheckoutPrefill | null {
     return null;
   }
 }
+
+// The same cart on the event page's own URL (?cart=<tierId>:<qty>,<addonId>:<qty>
+// &coupon=CODE), written by the /checkout hand-off next to the stored copy.
+// In-app browsers (Instagram, Facebook) can block sessionStorage; the URL
+// still carries the cart there, and through a reload. The tier comes first.
+export function cartSearchParams(p: CheckoutPrefill): URLSearchParams {
+  const q = new URLSearchParams();
+  const items = [
+    `${p.tierId}:${Math.max(1, Math.min(MAX_QTY, p.quantity))}`,
+    ...Object.entries(p.addons ?? {}).filter(([, n]) => n > 0).map(([id, n]) => `${id}:${Math.min(MAX_QTY, n)}`),
+  ];
+  q.set('cart', items.slice(0, MAX_ITEMS).join(','));
+  if (p.coupon && COUPON_RE.test(p.coupon)) q.set('coupon', p.coupon);
+  return q;
+}
+
+export function prefillFromSearch(search: string): CheckoutPrefill | null {
+  const params = new URLSearchParams(search);
+  const raw = params.get('cart');
+  if (!raw) return null;
+  const items: CheckoutItem[] = [];
+  for (const entry of raw.split(',').slice(0, MAX_ITEMS)) {
+    const [id, qtyStr, extra] = entry.trim().split(':');
+    const qty = Number(qtyStr ?? 1);
+    if (extra !== undefined || !UUID_RE.test(id ?? '') || !Number.isInteger(qty) || qty < 1) continue;
+    items.push({ id: id.toLowerCase(), quantity: Math.min(MAX_QTY, qty) });
+  }
+  if (items.length === 0) return null;
+  const [tier, ...addons] = items;
+  const couponRaw = (params.get('coupon') ?? '').trim();
+  return {
+    tierId: tier.id,
+    quantity: tier.quantity,
+    addons: Object.fromEntries(addons.map((a) => [a.id, a.quantity])),
+    coupon: COUPON_RE.test(couponRaw) ? couponRaw : undefined,
+  };
+}

@@ -62,6 +62,9 @@ export interface SchemaEvent {
   // events point their VirtualLocation at `pageUrl` (the public page).
   format?: AttendanceFormat;
   pageUrl?: string;
+  // schema.org performers: the lineup (Spotify URL as sameAs) or the
+  // free-text names (lib/artists.ts jsonLdPerformers).
+  performers?: { '@type': 'PerformingGroup'; name: string; sameAs?: string }[];
 }
 
 export function applyMeta(input: MetaInput): void {
@@ -77,7 +80,8 @@ export function applyMeta(input: MetaInput): void {
 
   // Open Graph.
   setOrCreateMeta('property', 'og:title', input.title);
-  setOrCreateMeta('property', 'og:type', input.event ? 'event' : 'website');
+  // Always 'website': Open Graph has no 'event' type (the JSON-LD says Event); same as hosting/seo.ts.
+  setOrCreateMeta('property', 'og:type', 'website');
   if (input.description) setOrCreateMeta('property', 'og:description', input.description);
   if (input.imageUrl) setOrCreateMeta('property', 'og:image', input.imageUrl);
   if (input.canonicalUrl) setOrCreateMeta('property', 'og:url', input.canonicalUrl);
@@ -155,6 +159,7 @@ export function buildEventJsonLd(ev: SchemaEvent) {
   if (ev.endDate) out.endDate = ev.endDate;
   if (ev.image) out.image = ev.image;
   if (ev.description) out.description = ev.description;
+  if (ev.performers?.length) out.performer = ev.performers;
   if (ev.organizer) {
     out.organizer = {
       '@type': 'Organization',

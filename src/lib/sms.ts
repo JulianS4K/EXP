@@ -35,7 +35,8 @@ export function segments(text: string): { count: number; unicode: boolean } {
 }
 
 export interface SmsCampaign {
-  id: string; audience: 'org' | 'event_buyers'; eventId: string | null; body: string; status: string;
+  /** staff_report: the weekly channel report text to the org's own number (mig 20261029120000). */
+  id: string; audience: 'org' | 'event_buyers' | 'staff_report'; eventId: string | null; body: string; status: string;
   sendAfter: Date; createdAt: Date; queued: number; skippedCap: number; sent: number; dryRun: number; failed: number;
 }
 
@@ -47,7 +48,7 @@ export function parseOverview(d: any): SmsOverview {
     optedOut: Number(d?.opted_out) || 0,
     provider: d?.provider ?? null,
     campaigns: (Array.isArray(d?.campaigns) ? d.campaigns : []).map((c: any) => ({
-      id: String(c.id), audience: c.audience === 'event_buyers' ? 'event_buyers' : 'org', eventId: c.event_id ?? null,
+      id: String(c.id), audience: c.audience === 'event_buyers' || c.audience === 'staff_report' ? c.audience : 'org', eventId: c.event_id ?? null,
       body: String(c.body ?? ''), status: String(c.status ?? ''), sendAfter: new Date(c.send_after), createdAt: new Date(c.created_at),
       queued: Number(c.queued) || 0, skippedCap: Number(c.skipped_cap) || 0, sent: Number(c.sent) || 0,
       dryRun: Number(c.dry_run) || 0, failed: Number(c.failed) || 0,

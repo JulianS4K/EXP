@@ -1,0 +1,737 @@
+{
+  "file": "tags",
+  "name": "Tags",
+  "order": 36,
+  "description": "The organization's own tags (VIP, Rock nights, Press list...) and where they are applied: events, fans and artists. A tag can be limited to one kind of record (`scope`) and linked to a tag from the canonical library. Filter by tag with tag_id on GET /v1/events and GET /v1/fans. Reads need `events:read`, changes `events:write`; anything about a fan also needs `fans:read` / `fans:write`.",
+  "endpoints": [
+    {
+      "id": "list-tags",
+      "method": "GET",
+      "path": "/v1/tags",
+      "summary": "List tags",
+      "description": "Every tag, by name.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "scope",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only tags usable on this kind of record (unscoped tags included). Opendate's CalendarEvent works for event.",
+          "enum": [
+            "event",
+            "fan",
+            "artist"
+          ],
+          "example": "fan"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+                "name": "VIP",
+                "scope": null,
+                "color": "#7c3aed",
+                "canonical_tag_id": "vip",
+                "created_at": "2026-05-01T10:00:00+00:00",
+                "updated_at": "2026-05-01T10:00:00+00:00"
+              },
+              {
+                "id": "6b8d0f2c-3e5a-4b7d-9f1c-2e4a6b8d0f3c",
+                "name": "Rock nights",
+                "scope": "event",
+                "color": null,
+                "canonical_tag_id": "rock",
+                "created_at": "2026-05-01T10:00:00+00:00",
+                "updated_at": "2026-05-01T10:00:00+00:00"
+              }
+            ]
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad scope.",
+          "example": {
+            "error": "scope must be event, fan or artist."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-tag",
+      "method": "GET",
+      "path": "/v1/tags/{id}",
+      "summary": "Get a tag",
+      "description": "One tag.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Tag id.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "name": "VIP",
+              "scope": null,
+              "color": "#7c3aed",
+              "canonical_tag_id": "vip",
+              "created_at": "2026-05-01T10:00:00+00:00",
+              "updated_at": "2026-05-01T10:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such tag in the key's organization.",
+          "example": {
+            "error": "tag not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-tag",
+      "method": "POST",
+      "path": "/v1/tags",
+      "summary": "Create a tag",
+      "description": "Names are unique per organization and scope, ignoring case (409 otherwise). At most 500 tags. Body may be wrapped as {\"tag\": {...}}.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "1-40 characters. May be left out when canonical_tag_id is given (the canonical name is used).",
+          "example": "VIP"
+        },
+        {
+          "name": "scope",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Limit the tag to one kind of record; null or absent = any.",
+          "enum": [
+            "event",
+            "fan",
+            "artist"
+          ],
+          "example": "fan"
+        },
+        {
+          "name": "color",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "A hex color like #7c3aed.",
+          "example": "#7c3aed"
+        },
+        {
+          "name": "canonical_tag_id",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "A tag from GET /v1/canonical-tags.",
+          "example": "vip"
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "name": "VIP",
+              "scope": null,
+              "color": "#7c3aed",
+              "canonical_tag_id": "vip",
+              "created_at": "2026-05-01T10:00:00+00:00",
+              "updated_at": "2026-05-01T10:00:00+00:00",
+              "items_count": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad name, scope, color or canonical tag.",
+          "example": {
+            "error": "exos_tags: color must look like #1a2b3c"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The name is taken.",
+          "example": {
+            "error": "exos_tags: a tag with this name already exists"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "tag": {
+          "name": "VIP",
+          "color": "#7c3aed",
+          "canonical_tag_id": "vip"
+        }
+      }
+    },
+    {
+      "id": "update-tag",
+      "method": "PATCH",
+      "path": "/v1/tags/{id}",
+      "summary": "Update a tag",
+      "description": "Only the fields given change. A scope can't be set while the tag is on other kinds of records.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Tag id.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "New name.",
+          "example": "VIP guests"
+        },
+        {
+          "name": "scope",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "New scope.",
+          "enum": [
+            "event",
+            "fan",
+            "artist"
+          ]
+        },
+        {
+          "name": "color",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "New color.",
+          "example": "#16a34a"
+        },
+        {
+          "name": "canonical_tag_id",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "New canonical link.",
+          "example": "vip"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "name": "VIP guests",
+              "scope": null,
+              "color": "#16a34a",
+              "canonical_tag_id": "vip",
+              "created_at": "2026-05-01T10:00:00+00:00",
+              "updated_at": "2026-05-01T10:00:00+00:00",
+              "items_count": 12
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such tag in the key's organization.",
+          "example": {
+            "error": "tag not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "tag": {
+          "name": "VIP guests",
+          "color": "#16a34a"
+        }
+      }
+    },
+    {
+      "id": "delete-tag",
+      "method": "DELETE",
+      "path": "/v1/tags/{id}",
+      "summary": "Delete a tag",
+      "description": "Deletes the tag and takes it off every record; signup forms stop applying it.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Tag id.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such tag in the key's organization.",
+          "example": {
+            "error": "tag not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-tagged-items",
+      "method": "GET",
+      "path": "/v1/tagged-items",
+      "summary": "List tagged items",
+      "description": "Where tags are applied, newest first. Without fans:read a key sees only event and artist items.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "taggable_type",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this kind of record (fan needs fans:read).",
+          "enum": [
+            "event",
+            "fan",
+            "artist"
+          ],
+          "example": "fan"
+        },
+        {
+          "name": "taggable_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this record.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "tag_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this tag.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page number, 1-10000 (default 1). A page past the end answers an empty data array.",
+          "default": 1,
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page, 1-200 (default 50).",
+          "default": 50,
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b",
+                "tag_id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+                "taggable_type": "fan",
+                "taggable_id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+                "created_at": "2026-10-20T09:30:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad filter.",
+          "example": {
+            "error": "taggable_type must be event, fan or artist."
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-tagged-item",
+      "method": "GET",
+      "path": "/v1/tagged-items/{id}",
+      "summary": "Get a tagged item",
+      "description": "One tag application. A fan's needs fans:read too.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Tagged item id.",
+          "example": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b",
+              "tag_id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "taggable_type": "fan",
+              "taggable_id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+              "created_at": "2026-10-20T09:30:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such tagged item in the key's organization.",
+          "example": {
+            "error": "tagged item not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-tagged-item",
+      "method": "POST",
+      "path": "/v1/tagged-items",
+      "summary": "Tag a record",
+      "description": "Applies a tag (by id, or by name: a tag of that name is used or created, scoped to the record's kind) to an event, fan or artist of the organization. Tagging twice answers 200 with the existing item; a new one answers 201. At most 50 tags on a record. Body may be wrapped as {\"tagged_item\": {...}}. Tagging a fan also needs `fans:write`; without it the answer is 403 with required_scope fans:write.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "taggable_type",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "event, fan or artist (CalendarEvent is read as event).",
+          "enum": [
+            "event",
+            "fan",
+            "artist"
+          ],
+          "example": "fan"
+        },
+        {
+          "name": "taggable_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The record's id.",
+          "example": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d"
+        },
+        {
+          "name": "tag_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "An existing tag.",
+          "example": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        },
+        {
+          "name": "tag_attributes",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "{ name }: tag by name instead of id.",
+          "example": {
+            "name": "VIP"
+          }
+        }
+      ],
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b",
+              "tag_id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b",
+              "taggable_type": "fan",
+              "taggable_id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+              "created": true
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad type, id, or a tag scoped to another kind of record.",
+          "example": {
+            "error": "exos_tagged_items: this tag is for event records"
+          }
+        },
+        {
+          "status": 404,
+          "description": "The record or tag isn't the organization's.",
+          "example": {
+            "error": "exos_tagged_items: fan not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ],
+      "request_example": {
+        "tagged_item": {
+          "taggable_type": "fan",
+          "taggable_id": "7b1e4c2a-3d5f-4a6b-8c9d-0e1f2a3b4c5d",
+          "tag_id": "5a7c9e1b-2d4f-4a6c-8e0b-1d3f5a7c9e2b"
+        }
+      }
+    },
+    {
+      "id": "delete-tagged-item",
+      "method": "DELETE",
+      "path": "/v1/tagged-items/{id}",
+      "summary": "Untag a record",
+      "description": "Takes the tag off the record (the tag itself stays). Tagging a fan also needs `fans:write`; without it the answer is 403 with required_scope fans:write.",
+      "auth": "api_key",
+      "scope": "events:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Tagged item id.",
+          "example": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9d1f3b5a-7c9e-4d2b-8f4a-6c8e0a2c4e6b",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such tagged item in the key's organization.",
+          "example": {
+            "error": "tagged item not found"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:write\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-canonical-tags",
+      "method": "GET",
+      "path": "/v1/canonical-tags",
+      "summary": "List canonical tags",
+      "description": "Exos's small built-in tag library (genres, audiences, formats, age rules), grouped by category. Link an organization tag to one with canonical_tag_id.",
+      "auth": "api_key",
+      "scope": "events:read",
+      "parameters": [
+        {
+          "name": "q",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Part of the name (q[name_cont] works too).",
+          "example": "rock"
+        },
+        {
+          "name": "category",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this category.",
+          "enum": [
+            "genre",
+            "audience",
+            "format",
+            "access"
+          ],
+          "example": "genre"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "rock",
+                "category": "genre",
+                "name": "Rock"
+              },
+              {
+                "id": "vip",
+                "category": "audience",
+                "name": "VIP"
+              }
+            ]
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks events:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "events:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"events:read\""
+          }
+        }
+      ]
+    }
+  ]
+}

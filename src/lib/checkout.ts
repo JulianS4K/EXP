@@ -8,8 +8,10 @@
 // these and redirects to the returned Stripe-hosted URL.
 
 import { supabase } from './supabase';
+import { rememberProofToken, withProofFragment } from './orderProof';
 import type { Attribution } from './attribution';
 import type { AdIds, MarketingConsent } from './adIds';
+import { currentInAppRecord, type InAppRecord } from './inAppBrowser';
 
 /** Ad click ids / browser ids and consent for the checkout record (lib/adIds.ts). */
 interface CheckoutRecordInput {
@@ -17,10 +19,14 @@ interface CheckoutRecordInput {
   consent?: MarketingConsent;
 }
 
-function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consent?: MarketingConsent } {
+// in_app_browser: which in-app browser (Instagram, ...) the checkout started
+// in, or 'none' (mig 20261105140000). exos-checkout trusts its own reading of
+// the user agent first; this hint adds what only the page can probe.
+export function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consent?: MarketingConsent; in_app_browser: InAppRecord } {
   return {
     ad_ids: input.adIds && Object.keys(input.adIds).length > 0 ? input.adIds : undefined,
     consent: input.consent,
+    in_app_browser: currentInAppRecord(),
   };
 }
 
@@ -50,6 +56,16 @@ export async function startCheckout(input: {
   attribution?: Attribution;
   /** Signed out: pay as a guest; tickets go to this email. */
   guestEmail?: string;
+  /** Reserved seating (mig 20261030140000): the picked seats of a seated tier. */
+  seatIds?: string[];
+  /** Timed entry: the chosen slot ('YYYYMMDDTHHMM', mig 20261030150000). */
+  slotId?: string | null;
+  /** Pay (part of) the order with a gift card (mig 20261030130000). */
+  giftCardCode?: string;
+  /** Add-a-donation to a giving campaign (its own line after tax). */
+  donation?: { campaign_id: string; amount_cents: number };
+  /** Checkout questions' answers ({ order, tickets }, lib/checkoutQuestions.ts). */
+  answers?: unknown;
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -62,10 +78,33 @@ export async function startCheckout(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail?.trim().toLowerCase() || undefined,
+      seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
+      slot_id: input.slotId || undefined,
+      gift_card_code: input.giftCardCode || undefined,
+      donation: input.donation,
+      answers: input.answers,
       ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
+  // A guest's order waits for proof of the email (mig 20261105100000): keep
+  // the browser token for the page they come back to.
+  const proof = data as { session_id?: string; proof_token?: string } | null;
+  rememberProofToken(proof?.session_id, proof?.proof_token);
+  // Free seats are issued straight away (no Stripe): go to My Tickets.
+  const free = data as { free?: boolean; issued?: number } | null;
+  if (free?.free && free.issued) {
+    // The token rides in the fragment too (#pt=): the caller leaves the page
+    // with this URL, and storage may be blocked (in-app browsers).
+    return proof?.proof_token && proof.session_id
+      ? withProofFragment(`/my-tickets?checkout=success&guest=1&session_id=${encodeURIComponent(proof.session_id)}`, proof.proof_token)
+      : `/my-tickets?claimed=${free.issued}`;
+  }
+  // The gift card covered everything: no Stripe page, the tickets are issued.
+  const paid = data as { paid_with_gift_card?: boolean; session_id?: string } | null;
+  if (paid?.paid_with_gift_card) {
+    return withProofFragment(input.successUrl.replace('{CHECKOUT_SESSION_ID}', encodeURIComponent(paid.session_id ?? '')), proof?.proof_token);
+  }
   const url = (data as { url?: string } | null)?.url;
   if (!url) throw new Error('startCheckout: no session url returned');
   return url;
@@ -82,7 +121,14 @@ export async function claimFreeAsGuest(input: {
   cancelUrl: string;
   voucherCode?: string;
   attribution?: Attribution;
-} & CheckoutRecordInput): Promise<{ issued: number; email: string }> {
+  /** Reserved seating: the picked seats of a seated tier. */
+  seatIds?: string[];
+  /** Timed entry: the chosen slot. Signed-in buyers of a free timed ticket
+   *  come this way too (the account wins over guestEmail server-side). */
+  slotId?: string | null;
+  /** Checkout questions' answers ({ order, tickets }). */
+  answers?: unknown;
+} & CheckoutRecordInput): Promise<{ issued: number; email: string; sessionId: string | null }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
       event_id: input.eventId,
@@ -93,13 +139,17 @@ export async function claimFreeAsGuest(input: {
       voucher_code: input.voucherCode || undefined,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       guest_email: input.guestEmail.trim().toLowerCase(),
+      seat_ids: input.seatIds && input.seatIds.length > 0 ? input.seatIds : undefined,
+      slot_id: input.slotId || undefined,
+      answers: input.answers,
       ...recordBody(input),
     },
   });
   if (error) throw await functionError(error, 'Could not send your tickets.');
-  const d = data as { free?: boolean; issued?: number; email?: string } | null;
+  const d = data as { free?: boolean; issued?: number; email?: string; session_id?: string; proof_token?: string } | null;
   if (!d?.free || !d.issued) throw new Error('Could not send your tickets.');
-  return { issued: d.issued, email: d.email ?? input.guestEmail };
+  rememberProofToken(d.session_id, d.proof_token);
+  return { issued: d.issued, email: d.email ?? input.guestEmail, sessionId: d.proof_token ? d.session_id ?? null : null };
 }
 
 /** Create an Embedded Checkout Session (the venue-site iframe mounts it in
@@ -110,6 +160,8 @@ export async function startEmbeddedCheckout(input: {
   quantity: number;
   returnUrl: string;
   attribution?: Attribution;
+  /** Checkout questions' answers ({ order, tickets }). */
+  answers?: unknown;
 } & CheckoutRecordInput): Promise<{ clientSecret: string; sessionId: string }> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -119,6 +171,7 @@ export async function startEmbeddedCheckout(input: {
       quantity: input.quantity,
       return_url: input.returnUrl,
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
+      answers: input.answers,
       ...recordBody(input),
     },
   });

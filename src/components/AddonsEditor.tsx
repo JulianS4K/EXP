@@ -4,9 +4,14 @@
 // directly (its own load/save, NOT part of the event form submit) so it stays
 // decoupled from the tier/capacity validation in the main form. Light-themed to
 // match EditEvent's section styling.
+//
+// "Own entry code" (mig 20261107110000): each unit bought gets its own
+// rotating code in the buyer's tickets, scanned at a check-in list that
+// admits add-ons (a VIP lounge, a merch pickup). Turning it on for an add-on
+// already sold issues codes for what was sold.
 
 import { useEffect, useState } from 'react';
-import { Plus, Trash2, Package } from 'lucide-react';
+import { Plus, Trash2, Package, QrCode } from 'lucide-react';
 import { listEventAddons, saveAddon, deleteAddon, type AddonInput } from '../lib/addons';
 import { useToast } from '../context/ToastContext';
 
@@ -31,7 +36,7 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
       setRows(list.map((a) => ({
         id: a.id, name: a.name, description: a.description ?? '', price: a.price,
         capacity: a.capacity, maxPerOrder: a.maxPerOrder, visibility: a.visibility,
-        imageUrl: a.imageUrl, sortOrder: a.sortOrder, sold: a.sold,
+        imageUrl: a.imageUrl, sortOrder: a.sortOrder, sold: a.sold, separateAccessBarcode: a.separateAccessBarcode,
       })));
     } catch (e) {
       console.error('listEventAddons failed:', e);
@@ -57,6 +62,17 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
       toast({ kind: 'error', message: e?.message || 'Could not save add-on.' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const toggleCode = async (r: Row) => {
+    if (!r.id) return;
+    try {
+      await saveAddon(eventId, { ...r, separateAccessBarcode: !r.separateAccessBarcode });
+      await reload();
+      toast({ kind: 'success', message: r.separateAccessBarcode ? 'No separate entry code for new sales.' : 'Each one sold gets its own entry code.' });
+    } catch (e: any) {
+      toast({ kind: 'error', message: e?.message || 'Could not save add-on.' });
     }
   };
 
@@ -90,10 +106,21 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
                 <p className="font-bold text-slate-900 text-sm truncate">{r.name}</p>
                 <p className="text-slate-400 text-xs font-bold">
                   ${Number(r.price).toFixed(2)}
-                  {r.capacity ? ` · ${r.sold ?? 0}/${r.capacity} sold` : ' · unlimited'}
+                  {r.capacity ? ` · ${r.sold ?? 0}/${r.capacity} sold` : ' · closed (capacity 0)'}
                   {r.visibility === 'hidden' ? ' · hidden' : ''}
+                  {r.separateAccessBarcode ? ' · own entry code' : ''}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => void toggleCode(r)}
+                aria-pressed={!!r.separateAccessBarcode}
+                className={`shrink-0 mr-3 transition-colors ${r.separateAccessBarcode ? 'text-brand-primary' : 'text-slate-300 hover:text-slate-600'}`}
+                aria-label={`${r.name}: own entry code ${r.separateAccessBarcode ? 'on' : 'off'}`}
+                title="Own entry code (scanned at a list that admits add-ons)"
+              >
+                <QrCode className="w-4 h-4" />
+              </button>
               <button
                 type="button"
                 onClick={() => remove(r.id)}
@@ -129,12 +156,19 @@ export default function AddonsEditor({ eventId }: { eventId: string }) {
           />
         </label>
         <label className="space-y-1">
-          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacity (0 = ∞)</span>
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1">Capacity (0 = closed)</span>
           <input
             type="number" min={0} value={draft.capacity ?? 0}
             onChange={(e) => setDraft({ ...draft, capacity: parseInt(e.target.value, 10) || 0 })}
             className={inputCls}
           />
+        </label>
+        <label className="col-span-2 flex items-start gap-2 text-sm font-bold text-slate-700">
+          <input type="checkbox" className="mt-1" checked={!!draft.separateAccessBarcode}
+            onChange={(e) => setDraft({ ...draft, separateAccessBarcode: e.target.checked })} />
+          <span>Own entry code
+            <span className="block text-xs font-normal text-slate-400">Each one sold gets its own code in the buyer's tickets, scanned at a check-in list for add-ons (a VIP lounge, a merch pickup).</span>
+          </span>
         </label>
       </div>
       <button

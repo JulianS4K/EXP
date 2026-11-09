@@ -1,0 +1,1243 @@
+{
+  "file": "membership-writes",
+  "name": "Memberships: products, members and imported attendees",
+  "order": 41,
+  "description": "Writes for membership products (create, edit, and the lifecycle draft → published ⇄ unpublished → archived; archived is final), staff-issued memberships (comps and members who paid somewhere else) and their edits, and attendees imported from other platforms. Each write runs as the member who created the key, needs that member's owner or manager role, takes an Idempotency-Key, and is logged; it does exactly what the same action in the dashboard does. Editing a product never changes existing members: they keep the benefits and price they joined with. Opendate's field names are accepted alongside Exos's (see each endpoint).",
+  "endpoints": [
+    {
+      "id": "create-membership-product",
+      "method": "POST",
+      "path": "/v1/membership-products",
+      "summary": "Create a membership product",
+      "description": "Creates a draft: not on sale until published. Body fields are the product's (wrapped in membership_product or not); unknown fields are refused with 400. Opendate's venue, team and benefit-row fields are ignored: an Exos product belongs to the key's organization and its benefits are the fields below. Idempotency-Key makes a retry safe.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-120 characters, unique among the organization's products that aren't archived.",
+          "example": "Member"
+        },
+        {
+          "name": "billing",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "month or year (a Stripe subscription), or once (a one-time term). Set once.",
+          "example": "month",
+          "enum": [
+            "month",
+            "year",
+            "once"
+          ]
+        },
+        {
+          "name": "currency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "ISO 4217, lower case (default usd). Set once.",
+          "example": "usd"
+        },
+        {
+          "name": "default_monthly_amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Opendate spelling: sets price_cents with billing month. Send this, default_annual_amount_cents, or price_cents + billing.",
+          "example": 1500
+        },
+        {
+          "name": "default_annual_amount_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Opendate spelling: sets price_cents with billing year.",
+          "example": 15000
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Shown to fans, up to 2000 characters.",
+          "example": "Member price and presales all year."
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An https image URL.",
+          "example": "https://cdn.example.com/member.png"
+        },
+        {
+          "name": "price_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Price per period (month, year) or for the one-time term, in the currency's minor unit (50 or more). Changing it applies to new members only.",
+          "example": 1500
+        },
+        {
+          "name": "duration_days",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Length of a one-time term in days (1-3660; default 365).",
+          "example": 365
+        },
+        {
+          "name": "discount_percent",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "Member discount on tickets, 0-100.",
+          "example": 10
+        },
+        {
+          "name": "presale",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Members get the member presales.",
+          "example": true
+        },
+        {
+          "name": "free_tickets_per_period",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Free tickets each period, 0-100.",
+          "example": 1
+        },
+        {
+          "name": "guest_allowance",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Extra tickets a member may bring on a free ticket, 0-20.",
+          "example": 1
+        },
+        {
+          "name": "household_seats",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "People the member may share benefits with, 0-20.",
+          "example": 1
+        },
+        {
+          "name": "giftable",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Can be bought as a gift.",
+          "example": true
+        }
+      ],
+      "request_example": {
+        "membership_product": {
+          "name": "Member",
+          "price_cents": 1500,
+          "billing": "month",
+          "discount_percent": 10,
+          "presale": true,
+          "free_tickets_per_period": 1
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created (status draft).",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "description": "Member price and presales all year.",
+              "image_url": null,
+              "price_cents": 1500,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 10,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "status": "draft",
+              "active": false,
+              "archived_at": null,
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00",
+              "members_count": 0
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A missing or bad field, or an unknown one.",
+          "example": {
+            "error": "unknown or read-only field: colour"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 409,
+          "description": "Another live product has that name.",
+          "example": {
+            "error": "there is already a membership product called Member"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-membership-product",
+      "method": "PATCH",
+      "path": "/v1/membership-products/{id}",
+      "summary": "Update a membership product",
+      "description": "Changes the fields sent. Current members keep the benefits they joined with, and a subscription keeps the price it started at: edits apply to new members. billing and currency are set once; status changes with publish, unpublish and archive. An archived product can't be edited.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Membership product id.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "1-120 characters, unique among the organization's products that aren't archived.",
+          "example": "Member"
+        },
+        {
+          "name": "description",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Shown to fans, up to 2000 characters.",
+          "example": "Member price and presales all year."
+        },
+        {
+          "name": "image_url",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "An https image URL.",
+          "example": "https://cdn.example.com/member.png"
+        },
+        {
+          "name": "price_cents",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Price per period (month, year) or for the one-time term, in the currency's minor unit (50 or more). Changing it applies to new members only.",
+          "example": 1500
+        },
+        {
+          "name": "duration_days",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Length of a one-time term in days (1-3660; default 365).",
+          "example": 365
+        },
+        {
+          "name": "discount_percent",
+          "location": "body",
+          "type": "number",
+          "required": false,
+          "description": "Member discount on tickets, 0-100.",
+          "example": 10
+        },
+        {
+          "name": "presale",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Members get the member presales.",
+          "example": true
+        },
+        {
+          "name": "free_tickets_per_period",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Free tickets each period, 0-100.",
+          "example": 1
+        },
+        {
+          "name": "guest_allowance",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Extra tickets a member may bring on a free ticket, 0-20.",
+          "example": 1
+        },
+        {
+          "name": "household_seats",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "People the member may share benefits with, 0-20.",
+          "example": 1
+        },
+        {
+          "name": "giftable",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Can be bought as a gift.",
+          "example": true
+        }
+      ],
+      "request_example": {
+        "membership_product": {
+          "price_cents": 1800,
+          "discount_percent": 15
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "description": "Member price and presales all year.",
+              "image_url": null,
+              "price_cents": 1800,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 15,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "status": "published",
+              "active": true,
+              "archived_at": null,
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00",
+              "members_count": 12
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad, unknown or set-once field.",
+          "example": {
+            "error": "unknown or read-only field: billing"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's product.",
+          "example": {
+            "error": "membership product not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Archived, or the new name is taken.",
+          "example": {
+            "error": "this membership product is archived and can't be changed"
+          }
+        }
+      ]
+    },
+    {
+      "id": "publish-membership-product",
+      "method": "POST",
+      "path": "/v1/membership-products/{id}/publish",
+      "summary": "Publish a membership product",
+      "description": "Puts a draft or unpublished product on sale (the shop and checkout offer it). An archived product can't be published: archiving is final.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Membership product id.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the product, now published. Asking again is a no-op.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "description": "Member price and presales all year.",
+              "image_url": null,
+              "price_cents": 1500,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 10,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "status": "published",
+              "active": true,
+              "archived_at": null,
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00",
+              "members_count": 12
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's product.",
+          "example": {
+            "error": "membership product not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not allowed from its current status (archived).",
+          "example": {
+            "error": "this membership product is archived; archiving is final"
+          }
+        }
+      ]
+    },
+    {
+      "id": "unpublish-membership-product",
+      "method": "POST",
+      "path": "/v1/membership-products/{id}/unpublish",
+      "summary": "Unpublish a membership product",
+      "description": "Takes a published product off sale. Current members keep their benefits; nobody new can join until it is published again.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Membership product id.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the product, now unpublished. Asking again is a no-op.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "description": "Member price and presales all year.",
+              "image_url": null,
+              "price_cents": 1500,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 10,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "status": "unpublished",
+              "active": false,
+              "archived_at": null,
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00",
+              "members_count": 12
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's product.",
+          "example": {
+            "error": "membership product not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not allowed from its current status (draft or archived).",
+          "example": {
+            "error": "this membership product is archived; archiving is final"
+          }
+        }
+      ]
+    },
+    {
+      "id": "archive-membership-product",
+      "method": "POST",
+      "path": "/v1/membership-products/{id}/archive",
+      "summary": "Archive a membership product",
+      "description": "Retires the product for good: off sale, out of the shop, not editable, and never published again. There is no delete for a product that has been sold; archive is the delete verb. Members keep their benefits until their period ends.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Membership product id.",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK: the product, now archived. Asking again is a no-op.",
+          "example": {
+            "data": {
+              "id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "name": "Member",
+              "description": "Member price and presales all year.",
+              "image_url": null,
+              "price_cents": 1500,
+              "currency": "usd",
+              "billing": "month",
+              "duration_days": 365,
+              "discount_percent": 10,
+              "presale": true,
+              "free_tickets_per_period": 1,
+              "guest_allowance": 1,
+              "household_seats": 1,
+              "giftable": true,
+              "status": "archived",
+              "active": false,
+              "archived_at": "2026-11-02T12:00:00+00:00",
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00",
+              "members_count": 12
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's product.",
+          "example": {
+            "error": "membership product not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not allowed from its current status (none: any product can be archived).",
+          "example": {
+            "error": "this membership product is archived; archiving is final"
+          }
+        }
+      ]
+    },
+    {
+      "id": "issue-membership",
+      "method": "POST",
+      "path": "/v1/memberships",
+      "summary": "Issue a membership",
+      "description": "Staff-issues a membership: a comp, or one the member paid for somewhere else (source import, e.g. a roster move from another platform). Active at once with the product's benefits, for a one-time term that ends at expires_at (default: one period of the product). No card, no Stripe subscription, nothing charged. The member is matched to an Exos account by confirmed email; with none yet, the membership is held for that email and becomes theirs when they sign up. Refused while that email already holds a live membership of the product, or when the product is archived. Opendate spellings: membership wrapper, first_name + last_name (member_name), rebilling_date (expires_at), idempotency_key (used as the Idempotency-Key). 30 a minute per member.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "product_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The membership product (not archived).",
+          "example": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "The member's email.",
+          "example": "dana@example.com"
+        },
+        {
+          "name": "member_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The member's name as staff know it, up to 120 characters.",
+          "example": "Dana Lee"
+        },
+        {
+          "name": "source",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "comp (default) or import (paid somewhere else).",
+          "example": "import",
+          "enum": [
+            "comp",
+            "import"
+          ]
+        },
+        {
+          "name": "expires_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "When the membership ends: in the next 10 years.",
+          "example": "2027-11-02T10:00:00Z"
+        },
+        {
+          "name": "staff_notes",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Notes for staff (never shown to the member), up to 2000 characters.",
+          "example": "Moved over from the old box office."
+        }
+      ],
+      "request_example": {
+        "membership": {
+          "product_id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+          "email": "dana@example.com",
+          "first_name": "Dana",
+          "last_name": "Lee",
+          "rebilling_date": "2027-11-02",
+          "notes": "Moved over from the old box office."
+        }
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Created.",
+          "example": {
+            "data": {
+              "id": "2b4d6f8a-1c3e-4a5b-9d7f-0e2a4c6e8b1d",
+              "product_id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "product_name": "Member",
+              "billing": "once",
+              "holder_email": "dana@example.com",
+              "member_name": "Dana Lee",
+              "has_account": true,
+              "status": "active",
+              "effective_status": "active",
+              "current_period_start": "2026-11-02T10:00:00+00:00",
+              "current_period_end": "2027-11-02T10:00:00+00:00",
+              "cancel_at_period_end": false,
+              "source": "import",
+              "benefits": {
+                "discount_percent": 10,
+                "presale": true,
+                "free_tickets_per_period": 1,
+                "guest_allowance": 1,
+                "household_seats": 1,
+                "term": "1 month"
+              },
+              "ended_reason": null,
+              "stripe_billed": false,
+              "staff_notes": "Moved over from the old box office.",
+              "issued_by": "5f1e2d3c-4b5a-4968-8776-655443322110",
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A missing or bad field.",
+          "example": {
+            "error": "enter a valid email"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's product.",
+          "example": {
+            "error": "membership product not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The email already has this membership, the product is archived, or too many a minute.",
+          "example": {
+            "error": "dana@example.com already has this membership"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-membership",
+      "method": "PATCH",
+      "path": "/v1/memberships/{id}",
+      "summary": "Update a membership",
+      "description": "Renames the member, changes staff notes, moves the end date (expires_at) or sets the status to active, cancelled or expired. Cancelling or expiring ends the benefits now; reactivating needs an end date in the future. The status and dates of a membership Stripe bills mirror Stripe (cancel it through Stripe), a pending gift is changed with the gift routes, and a refunded membership is never revived: those answer 409. Opendate spellings: first_name + last_name, notes, current_period_end.",
+      "auth": "api_key",
+      "scope": "commerce:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Membership id.",
+          "example": "2b4d6f8a-1c3e-4a5b-9d7f-0e2a4c6e8b1d"
+        },
+        {
+          "name": "member_name",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The member's name.",
+          "example": "Dana Lee-Park"
+        },
+        {
+          "name": "staff_notes",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Notes for staff.",
+          "example": "Comped for the season."
+        },
+        {
+          "name": "status",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "active, cancelled or expired.",
+          "example": "cancelled",
+          "enum": [
+            "active",
+            "cancelled",
+            "expired"
+          ]
+        },
+        {
+          "name": "expires_at",
+          "location": "body",
+          "type": "string (ISO 8601)",
+          "required": false,
+          "description": "The new end of the current period (in the next 10 years).",
+          "example": "2028-01-01T00:00:00Z"
+        }
+      ],
+      "request_example": {
+        "membership": {
+          "first_name": "Dana",
+          "last_name": "Lee-Park"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "2b4d6f8a-1c3e-4a5b-9d7f-0e2a4c6e8b1d",
+              "product_id": "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              "product_name": "Member",
+              "billing": "once",
+              "holder_email": "dana@example.com",
+              "member_name": "Dana Lee-Park",
+              "has_account": true,
+              "status": "active",
+              "effective_status": "active",
+              "current_period_start": "2026-11-02T10:00:00+00:00",
+              "current_period_end": "2027-11-02T10:00:00+00:00",
+              "cancel_at_period_end": false,
+              "source": "import",
+              "benefits": {
+                "discount_percent": 10,
+                "presale": true,
+                "free_tickets_per_period": 1,
+                "guest_allowance": 1,
+                "household_seats": 1,
+                "term": "1 month"
+              },
+              "ended_reason": null,
+              "stripe_billed": false,
+              "staff_notes": "Moved over from the old box office.",
+              "issued_by": "5f1e2d3c-4b5a-4968-8776-655443322110",
+              "created_at": "2026-11-02T10:00:00+00:00",
+              "updated_at": "2026-11-02T10:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad or read-only field.",
+          "example": {
+            "error": "unknown or read-only field: holder_email"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks commerce:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "commerce:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"commerce:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's membership.",
+          "example": {
+            "error": "membership not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Billed by Stripe, an unclaimed gift, or ended for good.",
+          "example": {
+            "error": "Stripe bills this membership: change or cancel it through Stripe"
+          }
+        }
+      ]
+    },
+    {
+      "id": "list-migrated-attendees",
+      "method": "GET",
+      "path": "/v1/migrated-attendees",
+      "summary": "List imported attendees",
+      "description": "Attendees imported from another platform: the rows of a door import (Org → event → guest lists → Import), Posh and other exports, and attendees synced from Eventbrite (synced: true, read-only here). Newest first, tiebreak on id. Paged.",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "event_id",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Only this event's.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "source",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "Only this source (the platform name given at import; case-insensitive).",
+          "example": "Posh"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Page, from 1.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Rows per page (max 200).",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "event_name": "Late Show",
+                "starts_at": "2026-11-14T01:00:00+00:00",
+                "list_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+                "guest_name": "Ann Lee",
+                "email": "ann@example.com",
+                "phone": null,
+                "plus_ones": 0,
+                "arrived": 0,
+                "arrived_at": null,
+                "note": null,
+                "code": "POSH-0001",
+                "ticket_label": "GA",
+                "source": "Posh",
+                "synced": false,
+                "voided": false,
+                "created_at": "2026-11-01T18:00:00+00:00",
+                "updated_at": "2026-11-02T09:00:00+00:00"
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-migrated-attendee",
+      "method": "GET",
+      "path": "/v1/migrated-attendees/{id}",
+      "summary": "Get an imported attendee",
+      "description": "One imported attendee (a guest entry from an import or sync).",
+      "auth": "api_key",
+      "scope": "tickets:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Imported attendee (guest entry) id.",
+          "example": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "event_name": "Late Show",
+              "starts_at": "2026-11-14T01:00:00+00:00",
+              "list_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+              "guest_name": "Ann Lee",
+              "email": "ann@example.com",
+              "phone": null,
+              "plus_ones": 0,
+              "arrived": 0,
+              "arrived_at": null,
+              "note": null,
+              "code": "POSH-0001",
+              "ticket_label": "GA",
+              "source": "Posh",
+              "synced": false,
+              "voided": false,
+              "created_at": "2026-11-01T18:00:00+00:00",
+              "updated_at": "2026-11-02T09:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:read, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's, or not an import.",
+          "example": {
+            "error": "imported attendee not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-migrated-attendee",
+      "method": "PATCH",
+      "path": "/v1/migrated-attendees/{id}",
+      "summary": "Update an imported attendee",
+      "description": "Edits an imported attendee. Name, email, phone, plus-ones and note follow the guest list's rules (its plus-one limit, cap and capacity). The code (the other platform's barcode) is normalized like at import (spaces removed, upper case), unique within the event, and can't change once the party checked in. Source can change but not be blanked. An attendee synced from Eventbrite is edited there (409). Opendate spellings: first_name + last_name (guest_name), barcode (code).",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Imported attendee id.",
+          "example": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0"
+        },
+        {
+          "name": "guest_name",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Name, 1-80 characters.",
+          "example": "Ann Lee"
+        },
+        {
+          "name": "email",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Email.",
+          "example": "ann@example.com"
+        },
+        {
+          "name": "phone",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Phone.",
+          "example": "+1 555 0100"
+        },
+        {
+          "name": "plus_ones",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Plus-ones (the list's limit applies).",
+          "example": 1
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Note for the door, up to 200 characters.",
+          "example": "VIP table 4"
+        },
+        {
+          "name": "code",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "The other platform's barcode or ticket number.",
+          "example": "POSH-0001"
+        },
+        {
+          "name": "ticket_label",
+          "location": "body",
+          "type": "string or null",
+          "required": false,
+          "description": "Their ticket type, up to 80 characters.",
+          "example": "GA"
+        },
+        {
+          "name": "source",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The platform's name, 1-40 characters.",
+          "example": "Posh"
+        }
+      ],
+      "request_example": {
+        "migrated_attendee": {
+          "first_name": "Ann",
+          "last_name": "Lee",
+          "barcode": "posh 0001"
+        }
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "id": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "event_name": "Late Show",
+              "starts_at": "2026-11-14T01:00:00+00:00",
+              "list_id": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+              "guest_name": "Ann Lee",
+              "email": "ann@example.com",
+              "phone": null,
+              "plus_ones": 0,
+              "arrived": 0,
+              "arrived_at": null,
+              "note": null,
+              "code": "POSH-0001",
+              "ticket_label": "GA",
+              "source": "Posh",
+              "synced": false,
+              "voided": false,
+              "created_at": "2026-11-01T18:00:00+00:00",
+              "updated_at": "2026-11-02T09:00:00+00:00"
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad or unknown field.",
+          "example": {
+            "error": "unknown or read-only field: arrived"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's, or not an import.",
+          "example": {
+            "error": "imported attendee not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Code taken, party already checked in, list rule, or synced from Eventbrite.",
+          "example": {
+            "error": "another attendee of this event has that code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "delete-migrated-attendee",
+      "method": "DELETE",
+      "path": "/v1/migrated-attendees/{id}",
+      "summary": "Delete an imported attendee",
+      "description": "Removes one imported attendee and frees their place when the list counts toward capacity. Refused (409) once the party checked in, and for attendees synced from Eventbrite.",
+      "auth": "api_key",
+      "scope": "tickets:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "Imported attendee id.",
+          "example": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "Deleted.",
+          "example": {
+            "data": {
+              "id": "9e8d7c6b-5a49-4382-9716-a5b4c3d2e1f0",
+              "deleted": true
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks tickets:write, or the member who created it may not do this.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "tickets:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "Not this organization's, or not an import.",
+          "example": {
+            "error": "imported attendee not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Checked in, or synced.",
+          "example": {
+            "error": "this attendee already checked in"
+          }
+        }
+      ]
+    }
+  ]
+}

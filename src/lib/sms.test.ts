@@ -27,5 +27,7 @@ describe('sms', () => {
     const o = parseOverview({ subscribers: '3', provider: 'twilio', campaigns: [{ id: 'c', audience: 'event_buyers', body: 'x', status: 'sent', send_after: '2026-10-16T13:00:00Z', created_at: '2026-10-16T12:00:00Z', queued: 2, dry_run: 2 }] });
     expect(o.subscribers).toBe(3);
     expect(o.campaigns[0]).toMatchObject({ audience: 'event_buyers', queued: 2, dryRun: 2 });
+    const w = parseOverview({ campaigns: [{ id: 'w', audience: 'staff_report' }, { id: 'z', audience: 'weird' }] });
+    expect(w.campaigns.map((c) => c.audience)).toEqual(['staff_report', 'org']);
   });
 });

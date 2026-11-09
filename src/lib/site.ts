@@ -3,7 +3,7 @@
 // (text goes through the store page's safe markdown).
 
 import { supabase } from './supabase';
-import { callFn } from './integrations';
+import { callFn } from './integrationsFn';
 
 export type SectionType = 'hero' | 'events' | 'about' | 'text' | 'faq' | 'gallery' | 'links' | 'newsletter';
 

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Event } from '../types';
-import { listPublicEvents } from '../lib/events';
+import { listPublicEvents, listPublicEventsWithGenres } from '../lib/events';
+import { genreChips, matchesGenre, type GenreChip } from '../lib/genres';
+import { listPublicGenres } from '../lib/genresApi';
 import { Link } from 'react-router-dom';
 import { Calendar, MapPin, Search } from 'lucide-react';
 import { formatInTz } from '../lib/datetime';
@@ -74,6 +76,8 @@ function eventMeta(event: Event): string {
 
 /** "$30+" / "FREE" price stamp. */
 function priceStamp(event: Event): string {
+  // A link-out event whose source gave no price (mig 20261029170500).
+  if (event.linkOut && event.linkOut.priceMin === null && !event.linkOut.isFree) return 'TICKETS';
   const p = eventFromPrice(event);
   if (!p || p <= 0) return 'FREE';
   return `${formatCurrency(p, event.currency)}+`;
@@ -85,6 +89,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // Genre chips (mig 20261106140000): the selected genre's key, the genres of
+  // upcoming listed events, and that genre's events beyond the first page.
+  const [selectedGenre, setSelectedGenre] = useState<string | null>(null);
+  const [remoteGenres, setRemoteGenres] = useState<GenreChip[]>([]);
+  const [genreEvents, setGenreEvents] = useState<Event[]>([]);
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
 
   // Local-day key ("y-m-d") used to match an event's date against a selected
@@ -99,7 +108,12 @@ export default function Home() {
   // an Algolia-style index.
   const filteredEvents = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-    return events.filter((ev) => {
+    // A genre's own read adds its events past the first page (no duplicates).
+    const pool = selectedGenre
+      ? [...events, ...genreEvents.filter((g) => !events.some((ev) => ev.id === g.id))]
+      : events;
+    return pool.filter((ev) => {
+      if (!matchesGenre(ev, selectedGenre)) return false;
       if (term.length > 0) {
         const haystack = `${ev.title || ''} ${ev.location || ''} ${ev.category || ''}`.toLowerCase();
         if (!haystack.includes(term)) return false;
@@ -110,7 +124,7 @@ export default function Home() {
       }
       return true;
     });
-  }, [events, searchTerm, selectedDay]);
+  }, [events, genreEvents, searchTerm, selectedDay, selectedGenre]);
 
   useEffect(() => {
     async function fetchEvents() {
@@ -128,6 +142,17 @@ export default function Home() {
       }
     }
     fetchEvents();
+  }, []);
+
+  // The genres of upcoming listed events (public discovery). Non-fatal.
+  useEffect(() => {
+    let alive = true;
+    void listPublicGenres().then((g) => {
+      if (alive) setRemoteGenres(g);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   // Which of these events the signed-in user has already saved — fetched once
@@ -148,13 +173,29 @@ export default function Home() {
 
   // --- Derived, presentational-only view slices -----------------------------
 
-  // Genre pills bound to the real category set. Clicking one drives the
-  // EXISTING search filter (no new state) — "ALL" clears it.
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    for (const ev of events) if (ev.category) set.add(ev.category);
-    return ['ALL', ...Array.from(set)];
-  }, [events]);
+  // Genre chips: the genres of upcoming listed events plus those on the
+  // loaded ones (an event without genres counts under its category).
+  const chips = useMemo(() => genreChips(remoteGenres, events), [remoteGenres, events]);
+
+  // Picking a genre also reads that genre's events (the first page may not
+  // hold them all). Non-fatal: the loaded ones still filter.
+  useEffect(() => {
+    if (!selectedGenre) {
+      setGenreEvents([]);
+      return undefined;
+    }
+    const chip = chips.find((c) => c.key === selectedGenre);
+    if (!chip) return undefined;
+    let alive = true;
+    listPublicEventsWithGenres(chip.variants, 50)
+      .then((list) => {
+        if (alive) setGenreEvents(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [selectedGenre, chips]);
 
   const featured = filteredEvents.slice(0, 2);
   const popular = filteredEvents.slice(2, 6);
@@ -303,27 +344,26 @@ export default function Home() {
         </div>
       </header>
 
-      {/* ============ GENRE PILLS (sticky under the h-20 navbar) ============ */}
-      {categories.length > 1 && (
+      {/* ============ GENRE CHIPS (sticky under the h-20 navbar) ============ */}
+      {chips.length > 0 && (
         <div className="sticky top-20 z-40 bg-black/92 backdrop-blur border-b border-white/10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex gap-2 overflow-x-auto no-bar py-3.5 items-center">
-              {categories.map((cat) => {
-                const active =
-                  cat === 'ALL'
-                    ? searchTerm.trim() === ''
-                    : searchTerm.trim().toLowerCase() === cat.toLowerCase();
+            <div role="group" aria-label="Filter by genre" className="flex gap-2 overflow-x-auto no-bar py-3.5 items-center">
+              {[{ key: null as string | null, label: 'ALL' }, ...chips].map((chip) => {
+                const active = selectedGenre === chip.key;
                 return (
                   <button
-                    key={cat}
-                    onClick={() => setSearchTerm(cat === 'ALL' ? '' : cat)}
+                    key={chip.key ?? 'all'}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setSelectedGenre(chip.key)}
                     className={`shrink-0 disp text-lg tracking-wide px-4 py-0.5 border transition-colors ${
                       active
                         ? 'bg-white text-black border-white'
                         : 'bg-white/5 text-white/70 border-white/15 hover:border-brand-primary hover:text-brand-primary'
                     }`}
                   >
-                    {cat.toUpperCase()}
+                    {chip.label.toUpperCase()}
                   </button>
                 );
               })}

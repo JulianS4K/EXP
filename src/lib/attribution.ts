@@ -46,13 +46,14 @@ export function captureAttribution(
 }
 
 // Set attribution params on a URL, replacing any it already has. The AI
-// referrer stays with this visit: a link shared on to a friend shouldn't
-// count the friend's purchase as coming from an assistant.
+// referrer and the in-app escape marker (iab_from) stay with this visit: a
+// link shared on to a friend shouldn't count the friend's purchase as coming
+// from an assistant or out of someone else's Instagram.
 export function withAttribution(url: string, attr: Attribution): string {
   let u: URL;
   try { u = new URL(url); } catch { return url; }
   for (const [k, v] of Object.entries(attr)) {
-    if (v && k !== 'ai_ref') u.searchParams.set(k, v);
+    if (v && k !== 'ai_ref' && k !== 'iab_from') u.searchParams.set(k, v);
   }
   return u.toString();
 }

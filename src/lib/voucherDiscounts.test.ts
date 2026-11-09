@@ -53,13 +53,14 @@ describe('quotaInputError', () => {
   const ok = { name: 'Standing', size: 400, closed: false, tierIds: ['t1'] };
   it('accepts a named quota with ticket types', () => {
     expect(quotaInputError(ok)).toBeNull();
-    expect(quotaInputError({ ...ok, size: null })).toBeNull();
     expect(quotaInputError({ ...ok, size: 0 })).toBeNull();
   });
   it('refuses a blank name, a bad size or no ticket types', () => {
     expect(quotaInputError({ ...ok, name: '  ' })).toMatch(/name/);
-    expect(quotaInputError({ ...ok, size: -1 })).toMatch(/Size/);
-    expect(quotaInputError({ ...ok, size: 2.5 })).toMatch(/Size/);
+    // No unlimited shared limit since mig 20261106120000: a size is required.
+    expect(quotaInputError({ ...ok, size: null as unknown as number })).toMatch(/0 or more/);
+    expect(quotaInputError({ ...ok, size: -1 })).toMatch(/0 or more/);
+    expect(quotaInputError({ ...ok, size: 2.5 })).toMatch(/0 or more/);
     expect(quotaInputError({ ...ok, tierIds: [] })).toMatch(/ticket type/);
   });
 });

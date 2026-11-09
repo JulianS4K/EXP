@@ -81,6 +81,8 @@ export interface ExosAllocation {
     price_schedule?: unknown;
     /** exos_ticket_tiers.market_split (mig 20260929061000); unset = any. */
     market_split?: string | null;
+    /** The type's price now (exos_tier_current_price, mig 20261106130000); wins over the schedule rule. */
+    current_price?: number | string | null;
   } | null;
   // min_age (mig 20260929120000) is read when the caller selects it.
   event: (Omit<ExosEventRowForChannels, 'id'> & { id?: string; currency?: string | null; purchase_limits?: unknown; min_age?: number | null }) | null;
@@ -191,7 +193,10 @@ export function planExosListings(a: ExosAllocation, label: string, channel?: Spl
   // what Exos charges for the ticket type now (its scheduled price), so the
   // organizer nets the same on every store. The organizer's marketplace price
   // (exos_set_channel_price) wins when higher. Blank = net-equal.
-  const exosNow = effectiveTierPrice(face, a.tier.price_schedule ?? []);
+  // Price steps: the current step's price when the reader has it (a step that
+  // ends on a count has no schedule form).
+  const stepNow = a.tier.current_price == null || a.tier.current_price === '' ? NaN : Number(a.tier.current_price);
+  const exosNow = Number.isFinite(stepNow) ? stepNow : effectiveTierPrice(face, a.tier.price_schedule ?? []);
   const floor = channel ? netEqualListPrice(channel, exosNow) : exosNow;
   const custom = a.unit_price === null || a.unit_price === undefined || a.unit_price === '' ? NaN : Number(a.unit_price);
   const price = Number.isFinite(custom) && custom > floor ? custom : floor;

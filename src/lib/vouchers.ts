@@ -8,6 +8,7 @@
 
 import { supabase } from './supabase';
 import { mapTier } from './events';
+import { listPublicFeeRules, withTierFees } from './feeRules';
 import type { Event } from '../types';
 
 export interface VoucherCheck {
@@ -83,7 +84,10 @@ export async function getVoucherTier(
   });
   if (error) return null;
   const row = Array.isArray(data) ? data[0] : data;
-  return row ? mapTier(row) : null;
+  if (!row) return null;
+  // Its price includes the event's passed-on fees, like every public tier.
+  const fees = await listPublicFeeRules([eventId]);
+  return mapTier(withTierFees([row], fees.get(eventId) ?? [])[0]);
 }
 
 /** Organizer: mint a voucher; returns the generated code. */

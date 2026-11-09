@@ -1,0 +1,258 @@
+{
+  "file": "pos-sales",
+  "name": "Door sales (walk-up)",
+  "order": 45.5,
+  "description": "Tickets sold at the door by the Exos Door app (the Sell tab): cash, a comp or a card on a Stripe Terminal reader (when the operator has switched card at the door on), rung by door staff, through the same inventory rules as online sales (a ticket type's capacity, shared limits and live checkouts all count) at the door price (`door_price_cents` when set, else the current price step). Each sale mints real tickets that scan like any other. Selling happens only in the door app (cash needs a cash drawer); this API lists the sales and voids cash and comp ones. A card sale is refunded to the card from the door app. Money is integer cents. See docs/pos.md \"Walk-up sales\".",
+  "endpoints": [
+    {
+      "id": "list-event-pos-orders",
+      "method": "GET",
+      "path": "/v1/events/:id/pos-orders",
+      "summary": "List an event's door sales",
+      "description": "The event's POS sales, newest first: walk-up ticket sales (and any bar or merch order rung at the event). `status` is `paid`, `pending` (reserved while the card is on the reader), `void` (voided the same night: the tickets were cancelled and the cash handed back) or `refunded`. `tenders` splits what was paid by method; a comp is value given, not money. `ticket_ids` are the tickets the sale minted, `tickets_scanned` how many of them came in.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 1,
+          "description": "The page, from 1.",
+          "example": 1
+        },
+        {
+          "name": "per_page",
+          "location": "query",
+          "type": "integer",
+          "required": false,
+          "default": 50,
+          "description": "Sales per page, 1-200.",
+          "example": 50
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": [
+              {
+                "id": "6a0e3c1d-2b4f-4c8e-9d7a-1f2e3d4c5b6a",
+                "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                "status": "paid",
+                "payment_method": "split",
+                "currency": "usd",
+                "subtotal_cents": 5000,
+                "tax_cents": 0,
+                "total_cents": 5000,
+                "tenders": {
+                  "cash": 2500,
+                  "comp": 2500,
+                  "card": 0
+                },
+                "tier_id": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                "tier_name": "GA",
+                "quantity": 2,
+                "comp_quantity": 1,
+                "unit_cents": 2500,
+                "lines": [
+                  {
+                    "category": "ticket",
+                    "name": "GA",
+                    "quantity": 2,
+                    "total_cents": 5000
+                  }
+                ],
+                "ticket_ids": [
+                  "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                  "1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a"
+                ],
+                "tickets_scanned": 0,
+                "buyer_name": "Sam Lee",
+                "buyer_email": null,
+                "device_id": null,
+                "order_key": "c0ffee00-1234-4abc-8def-000000000001",
+                "created_at": "2026-11-07T22:14:03Z",
+                "paid_at": "2026-11-07T22:14:03Z",
+                "hold_expires_at": null,
+                "voided_at": null,
+                "reversed_at": null,
+                "reverse_reason": null
+              }
+            ],
+            "meta": {
+              "page": 1,
+              "per_page": 50,
+              "total": 1,
+              "total_pages": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks orders:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event in this organization.",
+          "example": {
+            "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "void-event-pos-order",
+      "method": "POST",
+      "path": "/v1/events/:id/pos-orders/:order/void",
+      "summary": "Void a door sale",
+      "description": "Voids a paid door sale the same night (within 12 hours of the sale) while none of its tickets has been scanned: the tickets are cancelled and their places go back on sale, the cash is handed back out of an open drawer at the event (recorded as a paid-out against that drawer), the tenders are marked refunded, and the void is recorded with the key that did it. The settlement report counts it. Needs an organization API key whose creator is an owner or manager now. A sale whose ticket was scanned, or an older sale, is refunded at the door by an owner or manager (with an override after a scan), not through the API. Voiding a voided sale again answers the same sale (`replay: true`). A pending sale is cancelled (its reserved places go back).",
+      "auth": "api_key",
+      "scope": "refunds:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "order",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The sale's id (from the list). A sale of another event or organization answers 404.",
+          "example": "6a0e3c1d-2b4f-4c8e-9d7a-1f2e3d4c5b6a"
+        },
+        {
+          "name": "reason",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Why, 3 to 300 characters. Kept on the sale and in the void record.",
+          "example": "rang the wrong ticket type"
+        },
+        {
+          "name": "drawer_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "The open drawer to hand the cash back from when the one the cash went into is closed.",
+          "example": "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
+        }
+      ],
+      "request_example": {
+        "reason": "rang the wrong ticket type"
+      },
+      "responses": [
+        {
+          "status": 200,
+          "description": "Voided.",
+          "example": {
+            "data": {
+              "id": "6a0e3c1d-2b4f-4c8e-9d7a-1f2e3d4c5b6a",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "status": "void",
+              "payment_method": "split",
+              "currency": "usd",
+              "subtotal_cents": 5000,
+              "tax_cents": 0,
+              "total_cents": 5000,
+              "tenders": {
+                "cash": 2500,
+                "comp": 2500,
+                "card": 0
+              },
+              "tier_id": "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+              "tier_name": "GA",
+              "quantity": 2,
+              "comp_quantity": 1,
+              "unit_cents": 2500,
+              "lines": [
+                {
+                  "category": "ticket",
+                  "name": "GA",
+                  "quantity": 2,
+                  "total_cents": 5000
+                }
+              ],
+              "ticket_ids": [
+                "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+                "1d2e3f4a-5b6c-4d7e-8f9a-0b1c2d3e4f5a"
+              ],
+              "tickets_scanned": 0,
+              "buyer_name": "Sam Lee",
+              "buyer_email": null,
+              "device_id": null,
+              "order_key": "c0ffee00-1234-4abc-8def-000000000001",
+              "created_at": "2026-11-07T22:14:03Z",
+              "paid_at": "2026-11-07T22:14:03Z",
+              "hold_expires_at": null,
+              "voided_at": "2026-11-07T22:20:41Z",
+              "reversed_at": "2026-11-07T22:20:41Z",
+              "reverse_reason": "rang the wrong ticket type",
+              "replay": false,
+              "cash_returned_cents": 2500,
+              "drawer_id": "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b",
+              "tickets_voided": 2,
+              "tickets_kept": 0,
+              "override": false
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The credential lacks refunds:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "refunds:write"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key's creator isn't an owner or manager, or the credential isn't an organization API key.",
+          "example": {
+            "error": "only a key created by an organization owner or manager can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such sale at this event in this organization.",
+          "example": {
+            "error": "order not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "A ticket was scanned, the sale is more than 12 hours old, it was already refunded, no drawer is open to hand the cash back, or the event's settlement is final.",
+          "example": {
+            "error": "a ticket of this sale was scanned: an owner or manager can refund it"
+          }
+        },
+        {
+          "status": 501,
+          "description": "The sale was paid by card: it's voided or refunded to the card from the door app, not over the API.",
+          "example": {
+            "error": "a card sale is refunded to the card from the door app"
+          }
+        }
+      ]
+    }
+  ]
+}

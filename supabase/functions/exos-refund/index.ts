@@ -52,6 +52,16 @@
 //   also finalizes by the refund's metadata.exos_refund_request_id, so a crash
 //   between steps 2 and 3 still reconciles.
 //
+// PayPal orders (mig 20261031220000): a claim whose payment is a PayPal
+// capture (payment_intent 'ppcap_…') is refunded at PayPal instead
+// (_shared/paypal/flows.ts refundPayPal: POST /v2/payments/captures/{id}/refund
+// with PayPal-Request-Id exos_refund_<request id> and custom_id the same, so
+// exos-paypal's PAYMENT.CAPTURE.REFUNDED finalizes it too). Same claim,
+// finalize and void as Stripe; the refund id is stored as 'pprf_<id>'. The
+// platform fee comes back the same way (exos_paypal_order_owed lowers what
+// the org is owed by the refund less its share of the fee);
+// EXOS_REFUND_KEEP_PLATFORM_FEE doesn't apply. Works with PayPal keys alone.
+//
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY. Optional: EXOS_REFUND_KEEP_PLATFORM_FEE=true.
 // Payments off (no STRIPE_SECRET_KEY) -> 503.
@@ -59,35 +69,23 @@
 // undeployed until the operator turns payments on (docs/payments-go-live.md).
 
 import Stripe from "https://esm.sh/stripe@16?target=deno";
-import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import {
-  type ClaimedRequest,
-  isDefinitiveStripeRejection,
-  NONCE_RE,
-  organizerRefundIdempotencyKey,
-  organizerRefundParams,
-  requestStatusFromStripe,
-} from "../_shared/organizer-refund.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { NONCE_RE } from "../_shared/organizer-refund.ts";
+import { type Claim, type Outcome, refundClaim } from "../_shared/refundRun.ts";
 import { RESCHEDULE_TOKEN_RE } from "../_shared/reschedule-refund.ts";
+import { createPayPalClient, paypalConfig, type PayPalClient } from "../_shared/paypal/client.ts";
+
+// Stripe and PayPal clients, each only when its keys are set.
+function processors(): { stripe: Stripe | null; pp: PayPalClient | null } {
+  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+  const ppCfg = paypalConfig((k) => Deno.env.get(k));
+  return {
+    stripe: stripeKey ? new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" }) : null,
+    pp: ppCfg ? createPayPalClient(ppCfg) : null,
+  };
+}
 
 const BATCH = 10;
-
-type Claim = ClaimedRequest & {
-  status: string;
-  stripe_refund_id: string | null;
-  existing: boolean;
-  currency: string;
-};
-
-type Outcome = {
-  session_id: string;
-  request_id?: string;
-  status: string;
-  amount_cents?: number;
-  voided?: number;
-  stripe_refund_id?: string | null;
-  error?: string;
-};
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -102,8 +100,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return await rescheduleAction(req, parsed);
   }
 
-  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  if (!stripeKey) return json({ error: "payments are switched off" }, 503);
+  const procs = processors();
+  if (!procs.stripe && !procs.pp) return json({ error: "payments are switched off" }, 503);
 
   const authHeader = req.headers.get("Authorization") ?? "";
   const sbUser = createClient(
@@ -123,7 +121,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const reason = typeof p.reason === "string" ? p.reason.slice(0, 500) : null;
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-  const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  const stripe = procs;
   const keepFee = Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true";
 
   if (p.action === "refund") {
@@ -252,9 +250,8 @@ async function rescheduleAction(req: Request, p: any): Promise<Response> {
   }
 
   if (p.action === "reschedule_refund") {
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) return json({ error: "payments are switched off" }, 503);
-    const stripe = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+    const stripe = processors();
+    if (!stripe.stripe && !stripe.pp) return json({ error: "payments are switched off" }, 503);
     const keepFee = Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true";
     const { data, error } = await sb.rpc("exos_request_reschedule_refund", {
       p_actor: userId, p_ticket_ids: ticketIds, p_token: token,
@@ -287,56 +284,8 @@ async function rescheduleAction(req: Request, p: any): Promise<Response> {
   return json({ error: "unknown action" }, 400);
 }
 
-// Steps 2 + 3 for one claimed request. Never throws.
-// deno-lint-ignore no-explicit-any
-async function refundClaim(sb: SupabaseClient<any, any, any>, stripe: Stripe, c: Claim, keepFee: boolean): Promise<Outcome> {
-  const base = { session_id: c.session_id, request_id: c.request_id, amount_cents: c.amount_cents };
-  // A retried nonce whose request already has Stripe's answer: nothing to do.
-  if (c.existing && c.status !== "claimed") {
-    return { ...base, status: c.status, voided: 0, stripe_refund_id: c.stripe_refund_id };
-  }
-
-  let refund: Stripe.Refund | null = null;
-  try {
-    // A claimed request from an earlier attempt may already have a refund
-    // (idempotency keys expire after 24h): look for it before creating one.
-    if (c.existing) {
-      for await (const rf of stripe.refunds.list({ payment_intent: c.payment_intent, limit: 100 })) {
-        if (rf.metadata?.exos_refund_request_id === c.request_id) { refund = rf; break; }
-      }
-    }
-    refund ??= await stripe.refunds.create(
-      organizerRefundParams(c, keepFee),
-      { idempotencyKey: organizerRefundIdempotencyKey(c.request_id) },
-    );
-  } catch (e) {
-    const msg = (e as Error).message ?? "stripe error";
-    if (isDefinitiveStripeRejection(e)) {
-      const { error } = await sb.rpc("exos_refund_finalize", {
-        p_request_id: c.request_id, p_stripe_refund_id: null, p_status: "failed", p_error: msg,
-      });
-      if (error) console.error(`exos-refund: finalize(failed) ${c.request_id}`, error);
-      return { ...base, status: "failed", error: msg };
-    }
-    console.error(`exos-refund: stripe refund for ${c.request_id} not confirmed`, e);
-    return { ...base, status: "claimed", error: "Stripe didn't answer; try again (it won't refund twice)" };
-  }
-
-  const status = requestStatusFromStripe(refund.status);
-  const { data, error } = await sb.rpc("exos_refund_finalize", {
-    p_request_id: c.request_id,
-    p_stripe_refund_id: refund.id,
-    p_status: status,
-    p_error: refund.failure_reason ?? null,
-  });
-  if (error) {
-    // The refund exists; stripe-webhook's charge.refunded finalizes it by metadata.
-    console.error(`exos-refund: finalize ${c.request_id} (refund ${refund.id}) failed`, error);
-    return { ...base, status, stripe_refund_id: refund.id, error: "refund sent; bookkeeping will catch up" };
-  }
-  const f = data as { voided?: number } | null;
-  return { ...base, status, voided: f?.voided ?? 0, stripe_refund_id: refund.id };
-}
+// Steps 2 + 3 (Stripe or PayPal, then exos_refund_finalize): refundClaim in
+// _shared/refundRun.ts, shared with exos-api.
 
 function claimError(error: { code?: string; message?: string }): Response {
   const msg = (error.message ?? "refund refused").replace(/^exos_refund_[a-z_]+: /, "");

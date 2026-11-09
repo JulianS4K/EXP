@@ -14,6 +14,9 @@
 import {
   attendanceModeUrl, parseAttendanceFormat, schemaLocation, type AttendanceFormat,
 } from '../../../supabase/functions/_shared/attendance.ts';
+import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
+import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
+import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
 import { assistantFacts } from './productFacts';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
@@ -80,9 +83,11 @@ interface TierRow {
   price?: unknown;
   price_schedule?: unknown;
   exclusive_tax_percent?: unknown;
+  /** The tier's passed-on fees (fee rules, mig 20261027100000), attached from exos_public_fee_rules. */
+  passed_on_fees?: unknown;
 }
 
-/** Lowest all-in (price + exclusive tax) tier price in cents, as the storefront shows it. */
+/** Lowest all-in (price + passed-on fees + exclusive tax) tier price in cents, as the storefront shows it. */
 export function fromPriceCents(tiers: TierRow[], now: Date = new Date()): number | null {
   let best: number | null = null;
   for (const t of tiers ?? []) {
@@ -90,7 +95,7 @@ export function fromPriceCents(tiers: TierRow[], now: Date = new Date()): number
     if (!Number.isFinite(base)) continue;
     const unit = Math.round(effectivePrice(base, t.price_schedule, now) * 100);
     const rate = Number(t.exclusive_tax_percent ?? 0) || 0;
-    const allIn = unit + Math.round((unit * rate) / 100);
+    const allIn = allInCents(unit, rate, parseUnitFees(t.passed_on_fees));
     best = best === null ? allIn : Math.min(best, allIn);
   }
   return best;
@@ -147,6 +152,8 @@ export interface EventSummary {
   orgName?: string;
   // In person / online / hybrid (mig 20261005090000); in person when absent.
   format: AttendanceFormat;
+  // performer_names: the lineup's first 10 names once it has one (mig 20261030110000).
+  performers?: string[];
 }
 
 type Row = Record<string, unknown>;
@@ -174,6 +181,9 @@ export function eventSummary(event: Row | null | undefined, tiers: TierRow[], or
     currency,
     orgName: str(org?.name),
     format: parseAttendanceFormat(event.format),
+    performers: Array.isArray(event.performer_names)
+      ? event.performer_names.filter((n): n is string => typeof n === 'string' && !!n.trim()).map((n) => n.trim()).slice(0, 20)
+      : undefined,
   };
 }
 
@@ -186,20 +196,47 @@ export function esc(v: unknown): string {
     .replace(/'/g, '&#x27;');
 }
 
+/**
+ * An absolute https image URL for og:image (Facebook, Instagram and WhatsApp
+ * drop a relative one): a /path is resolved against the page's origin;
+ * anything that isn't http(s) falls back to `fallback`.
+ */
+export function absoluteImage(image: string, pageUrl: string, fallback: string): string {
+  try {
+    const u = new URL(image, pageUrl);
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// og:type has no "event" in the Open Graph vocabulary (only website, article,
+// profile, book, music.*, video.*); Facebook's debugger flags it as invalid
+// and Instagram / WhatsApp then fall back to a bare link. Events are
+// described by the JSON-LD below; the card is a website card.
+const OG_TYPES = new Set(['website', 'article', 'profile']);
+
 function tags(title: string, desc: string, url: string, image: string, ogType: string, noindex: boolean, extra = ''): string {
-  const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(image)];
+  const fallback = new URL('/bridge/icon-512.png', url).toString();
+  const abs = absoluteImage(image, url, fallback);
+  const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(abs)];
   // The fallback is the square app icon: a big card would crop it.
-  const card = image.endsWith('/bridge/icon-512.png') ? 'summary' : 'summary_large_image';
+  const isIcon = abs.endsWith('/bridge/icon-512.png');
+  const card = isIcon ? 'summary' : 'summary_large_image';
   const lines = [
     `<title>${t}</title>`,
     `<meta name="description" content="${d}" />`,
     `<meta name="robots" content="${noindex ? 'noindex, nofollow' : 'index, follow'}" />`,
     '<meta property="og:site_name" content="Exos" />',
-    `<meta property="og:type" content="${ogType}" />`,
+    `<meta property="og:type" content="${OG_TYPES.has(ogType) ? ogType : 'website'}" />`,
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:url" content="${u}" />`,
     `<meta property="og:image" content="${img}" />`,
+    `<meta property="og:image:alt" content="${t}" />`,
+    // Known size for the icon, so the first share already shows it (Facebook
+    // otherwise fetches the image after the first unfurl).
+    ...(isIcon ? ['<meta property="og:image:width" content="512" />', '<meta property="og:image:height" content="512" />'] : []),
     '<meta property="og:locale" content="en_US" />',
     `<meta name="twitter:card" content="${card}" />`,
     `<meta name="twitter:title" content="${t}" />`,
@@ -238,6 +275,7 @@ export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: s
   const location = schemaLocation(s.format, place, canonicalUrl);
   if (location) ld.location = location;
   if (s.orgName) ld.organizer = { '@type': 'Organization', name: s.orgName };
+  if (s.performers?.length) ld.performer = s.performers.map((name) => ({ '@type': 'PerformingGroup', name }));
   if (s.fromCents !== null) {
     ld.offers = {
       '@type': 'Offer',
@@ -273,6 +311,20 @@ export function bioTags(promoterName: string, org: Row, canonicalUrl: string, de
   return tags(`${who} · ${name}`.slice(0, 200), `Tickets from ${who} for ${name}'s events.`.slice(0, 300), canonicalUrl, image, 'website', true);
 }
 
+/**
+ * The site card for a crawler on a page that names no event or organizer
+ * (home, /map, a bad link): the static tags in index.html, but with absolute
+ * URLs, since a relative og:image shows no picture in Instagram or WhatsApp.
+ */
+export function defaultTags(baseUrl: string, page = ''): string {
+  const clean = page.replace(/[?#].*$/, '').replace(/^\/+/, '');
+  // req.path arrives still percent-encoded; tags() escapes it for the attribute.
+  const url = `${baseUrl}/bridge/${clean}`;
+  const title = 'Exos | Live the Moment';
+  const desc = 'Exos — ticketing for independent venues and promoters.';
+  return tags(title, desc, url, `${baseUrl}/bridge/icon-512.png`, 'website', false);
+}
+
 /** Swap the SSR_META block in the SPA shell for `tagBlock`; no-op on any miss. */
 export function inject(shell: string, tagBlock: string | null | undefined): string {
   if (!tagBlock) return shell;
@@ -285,11 +337,11 @@ export function inject(shell: string, tagBlock: string | null | undefined): stri
 // ── Data ─────────────────────────────────────────────────────────────
 
 /**
- * Reads the public views (exos_public_events / _tiers / _orgs). The server
+ * Reads the public views (exos_public_events / _tiers / _orgs / _fee_rules). The server
  * backs it with supabase-js + the anon key; tests pass a fake.
  */
 export type PublicReader = (
-  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs',
+  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs' | 'exos_public_fee_rules',
   cols: string,
   filter: { col: string; val: string } | null,
   limit: number,
@@ -301,7 +353,7 @@ export type PublicReader = (
 export type PromoterReader = (orgSlug: string, code: string) => Promise<string | null>;
 
 const EVENT_COLS =
-  'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url';
+  'id,org_id,name,slug,description,occurs_at_local,starts_at,timezone,currency,venue_name,venue_location,venue_address,image_url,performer_names';
 // Added by mig 20261005090000; read with a fallback until prod has it.
 const ONLINE_COLS = ',format,noindex';
 
@@ -333,7 +385,8 @@ export interface PreviewPage {
 // Extra event columns for the full crawler page (store content + online
 // events); read with a fallback so an older database still gets the tags.
 const CONTENT_COLS = ',summary,lineup,faq,min_age,refund_policy,policy_notes,what_to_bring';
-const CONTENT_TIER_COLS = 'name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
+const FEE_RULE_COLS = 'id,name,kind,per,calc,percent,amount_cents,cap_cents,taxable,applies_to_addons,tier_ids,rank';
+const CONTENT_TIER_COLS = 'id,name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
 
 /**
  * Head tags, plus with `opts.content` (server.ts EXOS_AI_DISCOVERY, off until
@@ -385,10 +438,17 @@ async function previewParts(
   if (!events.length) return null;
   const ev = events[0];
   let tiers: Row[] = [];
+  const byEvent = { col: 'event_id', val: String(ev.id) };
   if (content) {
-    try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, { col: 'event_id', val: String(ev.id) }, 50); } catch { tiers = []; }
+    try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, byEvent, 50); } catch { tiers = []; }
   }
-  if (!tiers.length) tiers = await read('exos_public_tiers', 'price,price_schedule,exclusive_tax_percent', { col: 'event_id', val: String(ev.id) }, 50);
+  if (!tiers.length) tiers = await read('exos_public_tiers', 'id,price,price_schedule,exclusive_tax_percent', byEvent, 50);
+  // The passed-on fee rules (mig 20261027100000) are inside every price shown;
+  // a database without them (or a failed read) prices without fees.
+  let feeRows: Row[] = [];
+  try { feeRows = await read('exos_public_fee_rules', FEE_RULE_COLS, byEvent, 20, { order: 'rank' }); } catch { feeRows = []; }
+  const rules = parseFeeRules(feeRows);
+  tiers = tiers.map((t) => ({ ...t, passed_on_fees: tierPassedOnFees(rules, String(t.id)) }));
   const orgs = ev.org_id ? await read('exos_public_orgs', 'name', { col: 'id', val: String(ev.org_id) }, 1) : [];
   const s = eventSummary(ev, tiers as TierRow[], orgs[0] ?? null);
   if (!s) return null;
@@ -465,8 +525,8 @@ export function eventBody(ev: Row, tiers: Row[], s: EventSummary, url: string, n
     out.push('<h2>Tickets</h2><p>Prices are all-in: the price shown is the price paid.</p><ul>');
     for (const t of priced.slice(0, 20)) {
       const cents = fromPriceCents([t as TierRow], now) ?? 0;
-      const cap = Number(t.capacity ?? 0);
-      const soldOut = cap > 0 && Number(t.sold ?? 0) >= cap;
+      // Capacity 0 is closed, never unlimited (mig 20261105100000).
+      const soldOut = t.capacity != null && isSoldOut(t.capacity, t.sold);
       const ended = typeof t.sales_end === 'string' && parseInstant(t.sales_end) < now.getTime();
       const starts = typeof t.sales_start === 'string' ? parseInstant(t.sales_start) : NaN;
       const notYet = !Number.isNaN(starts) && starts > now.getTime();

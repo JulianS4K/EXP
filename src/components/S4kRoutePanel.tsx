@@ -9,19 +9,22 @@ import { setDistributionRoute, type DistributionRoute } from '../lib/marketplace
 import S4kSplitPanel from './S4kSplitPanel';
 import { resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
 
-export default function S4kRoutePanel({ eventId, route, onChanged, maxCapacity }: {
+export default function S4kRoutePanel({ eventId, route, onChanged, maxCapacity, optInNeeded }: {
   eventId: string;
   route: DistributionRoute;
   onChanged: (route: DistributionRoute) => void;
-  /** The event's max capacity (lib/marketplace/resaleGate): S4K needs 250+. */
+  /** The event's max capacity (lib/marketplace/resaleGate): S4K needs more than the free tier's 150. */
   maxCapacity?: number;
+  /** Big enough, but not opted in to resale yet (ResaleConsentPanel). */
+  optInNeeded?: boolean;
 }) {
   const { activeOrg } = useOrganization();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Not in the network and not already on it: nothing to choose.
   if (!activeOrg?.s4kNetwork && route !== 's4k') return null;
-  const locked = maxCapacity !== undefined && !resaleUnlocked(maxCapacity);
+  const tooSmall = maxCapacity !== undefined && !resaleUnlocked(maxCapacity);
+  const locked = tooSmall || !!optInNeeded;
 
   const change = async (next: DistributionRoute) => {
     setBusy(true);
@@ -55,7 +58,10 @@ export default function S4kRoutePanel({ eventId, route, onChanged, maxCapacity }
           ? 'S4K lists the seats you give it below on the marketplaces, and buys from Exos when a marketplace sells. Exos and Eventbrite sell the rest. Free tickets stay off resale.'
           : 'You choose each marketplace\'s seats in the grid below. To hand the event to S4K, set every marketplace to 0 first.'}
       </p>
-      {locked && maxCapacity !== undefined && <p role="status" className="type text-xs text-amber-400">{resaleLockedText(maxCapacity)}</p>}
+      {tooSmall && maxCapacity !== undefined && <p role="status" className="type text-xs text-amber-400">{resaleLockedText(maxCapacity)}</p>}
+      {!tooSmall && optInNeeded && route !== 's4k' && (
+        <p role="status" className="type text-xs text-amber-400">Opt this event in to resale (above) before handing it to S4K.</p>
+      )}
       {error && <p role="alert" className="type text-xs text-rose-400">{error}</p>}
       {route === 's4k' && <S4kSplitPanel eventId={eventId} />}
     </div>

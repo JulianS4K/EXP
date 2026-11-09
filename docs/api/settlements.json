@@ -1,0 +1,1479 @@
+{
+  "file": "settlements",
+  "name": "Settlements, P&L and ticket counts",
+  "order": 66,
+  "description": "Settle a show from its actual sales, after Opendate's settlements: each act's deal worked through, deposits, adjustments with reasons, the venue in promoter mode, finalize (frozen) and reopen, a PDF. Profit and loss per show and across shows in forecast, estimate and actual columns, with CSV export. Scheduled ticket-count emails to agents. Money is in cents. Reads need `finance:read`, writes `finance:write`.",
+  "endpoints": [
+    {
+      "id": "get-settlement",
+      "method": "GET",
+      "path": "/v1/events/:id/settlement",
+      "summary": "Get a show's settlement",
+      "description": "The settlement row, its inputs and the computed result. Live until finalized: Exos ticket sales (tickets still valid, paid vs comps, gross less refunds; tax, fees and the ticketing fee as deductions), tickets sold elsewhere in the show's currency, finance items, the accepted offers on the show (or on its hold) and their pool, and the hold's rental terms. In promoter mode (a rented or partner venue, or a hold with rental terms) the venue is settled too: rental + its share of net box office − the rental deposit paid. The first read adds the rental line. Also /confirms/:id/settlements/summary.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "draft",
+              "adjustments": [
+                {
+                  "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "offer_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "label": "Late start",
+                  "amount_cents": -10000,
+                  "reason": "Went on 40 minutes late",
+                  "by": null,
+                  "at": "2026-10-31T15:04:05.120+00:00"
+                }
+              ],
+              "deposits_paid": {
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b": true
+              },
+              "venue_share_percent": 10,
+              "venue_deposit_paid_cents": null,
+              "finalized_at": null,
+              "finalized_by": null,
+              "emailed_to": [],
+              "revision": 3,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "edited",
+                  "by": null
+                }
+              ],
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "inputs": {
+                "version": 1,
+                "computed_at": "2026-10-31T15:04:05.120+00:00",
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "status": "published",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago",
+                  "currency": "USD",
+                  "capacity": 500,
+                  "venue": {
+                    "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Metro",
+                    "relationship": "rented"
+                  },
+                  "venue_name": "Metro",
+                  "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                },
+                "box_office": {
+                  "tiers": [
+                    {
+                      "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "General Admission",
+                      "paid": 300,
+                      "comps": 10,
+                      "gross_cents": 600000
+                    }
+                  ],
+                  "paid_sold": 300,
+                  "comps": 10,
+                  "sold_last_24h": 12,
+                  "first_sale_at": "2026-10-01T16:00:00+00:00",
+                  "gross_cents": 600000,
+                  "refunded_cents": 2500,
+                  "tax_cents": 12000,
+                  "passed_on_fees_cents": 0,
+                  "absorbed_fees_cents": 3000,
+                  "platform_fees_cents": 5000
+                },
+                "sold_elsewhere": {
+                  "available": true,
+                  "lines": [
+                    {
+                      "currency": "USD",
+                      "sold": 20,
+                      "gross_cents": 40000,
+                      "entries": 1
+                    }
+                  ]
+                },
+                "items": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "kind": "expense",
+                    "label": "Venue rental",
+                    "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "category_key": "venue-rental",
+                    "category_name": "Venue rental",
+                    "gl_code": "5300",
+                    "amount_cents": 150000,
+                    "forecast_cents": null,
+                    "estimate_cents": null,
+                    "actual_cents": null,
+                    "auto": "venue-rental",
+                    "notes": ""
+                  }
+                ],
+                "offers": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "artist_name": "The Headliners",
+                    "act_type": "headliner",
+                    "status": "accepted",
+                    "currency": "USD",
+                    "terms": {
+                      "deal_type": "flat",
+                      "guarantee_cents": 200000
+                    },
+                    "pool_share_percent": null
+                  }
+                ],
+                "pools": [],
+                "budget": null,
+                "rental": {
+                  "status": "confirmed",
+                  "fee_cents": 150000,
+                  "deposit_cents": 50000,
+                  "currency": "USD"
+                },
+                "promoter_mode": true,
+                "settlement": {
+                  "adjustments": [],
+                  "deposits_paid": {},
+                  "venue_share_percent": 10,
+                  "venue_deposit_paid_cents": 50000
+                }
+              },
+              "computed": {
+                "currency": "USD",
+                "result": {
+                  "grossBoxOffice": 640000,
+                  "deductions": 20000,
+                  "netBoxOffice": 620000,
+                  "expensesTotal": 150000,
+                  "artistsTotal": 190000,
+                  "promoterNet": 218000,
+                  "venue": {
+                    "rentalFee": 150000,
+                    "sharePercent": 10,
+                    "depositPaid": 50000,
+                    "share": 62000,
+                    "total": 212000,
+                    "balanceDue": 162000
+                  },
+                  "slots": [
+                    {
+                      "slotId": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "The Headliners",
+                      "dealType": "flat",
+                      "base": 200000,
+                      "adjustments": -10000,
+                      "payout": 190000,
+                      "depositPaid": 0,
+                      "balanceDue": 190000
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-settlement",
+      "method": "PATCH",
+      "path": "/v1/events/:id/settlement",
+      "summary": "Update a settlement",
+      "description": "Adjustments (the full list; each { offer_id or null for the house, label, amount_cents (negative to deduct), reason }), deposits paid to acts ({ offer_id: true }) and venue terms ({ share_percent, deposit_paid_cents or null for the hold's deposit }). Not while finalized. Pass revision to refuse a save over someone else's.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "adjustments",
+          "location": "body",
+          "type": "array of objects",
+          "required": false,
+          "description": "At most 50.",
+          "example": [
+            {
+              "offer_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "label": "Late start",
+              "amount_cents": -10000,
+              "reason": "Went on 40 minutes late"
+            }
+          ]
+        },
+        {
+          "name": "deposits_paid",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Offer id → true / false.",
+          "example": {
+            "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b": true
+          }
+        },
+        {
+          "name": "venue",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Promoter mode.",
+          "example": {
+            "share_percent": 10
+          }
+        },
+        {
+          "name": "revision",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The revision you loaded.",
+          "example": 3
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "draft",
+              "adjustments": [
+                {
+                  "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "offer_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "label": "Late start",
+                  "amount_cents": -10000,
+                  "reason": "Went on 40 minutes late",
+                  "by": null,
+                  "at": "2026-10-31T15:04:05.120+00:00"
+                }
+              ],
+              "deposits_paid": {
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b": true
+              },
+              "venue_share_percent": 10,
+              "venue_deposit_paid_cents": null,
+              "finalized_at": null,
+              "finalized_by": null,
+              "emailed_to": [],
+              "revision": 3,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "edited",
+                  "by": null
+                }
+              ],
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "inputs": {
+                "version": 1,
+                "computed_at": "2026-10-31T15:04:05.120+00:00",
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "status": "published",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago",
+                  "currency": "USD",
+                  "capacity": 500,
+                  "venue": {
+                    "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Metro",
+                    "relationship": "rented"
+                  },
+                  "venue_name": "Metro",
+                  "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                },
+                "box_office": {
+                  "tiers": [
+                    {
+                      "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "General Admission",
+                      "paid": 300,
+                      "comps": 10,
+                      "gross_cents": 600000
+                    }
+                  ],
+                  "paid_sold": 300,
+                  "comps": 10,
+                  "sold_last_24h": 12,
+                  "first_sale_at": "2026-10-01T16:00:00+00:00",
+                  "gross_cents": 600000,
+                  "refunded_cents": 2500,
+                  "tax_cents": 12000,
+                  "passed_on_fees_cents": 0,
+                  "absorbed_fees_cents": 3000,
+                  "platform_fees_cents": 5000
+                },
+                "sold_elsewhere": {
+                  "available": true,
+                  "lines": [
+                    {
+                      "currency": "USD",
+                      "sold": 20,
+                      "gross_cents": 40000,
+                      "entries": 1
+                    }
+                  ]
+                },
+                "items": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "kind": "expense",
+                    "label": "Venue rental",
+                    "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "category_key": "venue-rental",
+                    "category_name": "Venue rental",
+                    "gl_code": "5300",
+                    "amount_cents": 150000,
+                    "forecast_cents": null,
+                    "estimate_cents": null,
+                    "actual_cents": null,
+                    "auto": "venue-rental",
+                    "notes": ""
+                  }
+                ],
+                "offers": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "artist_name": "The Headliners",
+                    "act_type": "headliner",
+                    "status": "accepted",
+                    "currency": "USD",
+                    "terms": {
+                      "deal_type": "flat",
+                      "guarantee_cents": 200000
+                    },
+                    "pool_share_percent": null
+                  }
+                ],
+                "pools": [],
+                "budget": null,
+                "rental": {
+                  "status": "confirmed",
+                  "fee_cents": 150000,
+                  "deposit_cents": 50000,
+                  "currency": "USD"
+                },
+                "promoter_mode": true,
+                "settlement": {
+                  "adjustments": [],
+                  "deposits_paid": {},
+                  "venue_share_percent": 10,
+                  "venue_deposit_paid_cents": 50000
+                }
+              },
+              "computed": {
+                "currency": "USD",
+                "result": {
+                  "grossBoxOffice": 640000,
+                  "deductions": 20000,
+                  "netBoxOffice": 620000,
+                  "expensesTotal": 150000,
+                  "artistsTotal": 190000,
+                  "promoterNet": 218000,
+                  "venue": {
+                    "rentalFee": 150000,
+                    "sharePercent": 10,
+                    "depositPaid": 50000,
+                    "share": 62000,
+                    "total": 212000,
+                    "balanceDue": 162000
+                  },
+                  "slots": [
+                    {
+                      "slotId": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "The Headliners",
+                      "dealType": "flat",
+                      "base": 200000,
+                      "adjustments": -10000,
+                      "payout": 190000,
+                      "depositPaid": 0,
+                      "balanceDue": 190000
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Finalized, or changed since your revision.",
+          "example": {
+            "error": "the settlement is finalized; reopen it to change it"
+          }
+        }
+      ]
+    },
+    {
+      "id": "finalize-settlement",
+      "method": "POST",
+      "path": "/v1/events/:id/settlement/finalize",
+      "summary": "Finalize a settlement",
+      "description": "Freezes the inputs (later sales and edits no longer move it), emails every settlement contact of the show a link to it (no promoter net on that page) and emits settlement.finalized. The response carries link_path (with the token) once.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "revision",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "The revision you loaded.",
+          "example": 3
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "finalized",
+              "adjustments": [
+                {
+                  "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "offer_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "label": "Late start",
+                  "amount_cents": -10000,
+                  "reason": "Went on 40 minutes late",
+                  "by": null,
+                  "at": "2026-10-31T15:04:05.120+00:00"
+                }
+              ],
+              "deposits_paid": {
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b": true
+              },
+              "venue_share_percent": 10,
+              "venue_deposit_paid_cents": null,
+              "finalized_at": "2026-10-31T15:04:05.120+00:00",
+              "finalized_by": null,
+              "emailed_to": [
+                "accounts@tour.example"
+              ],
+              "revision": 3,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "edited",
+                  "by": null
+                }
+              ],
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "inputs": {
+                "version": 1,
+                "computed_at": "2026-10-31T15:04:05.120+00:00",
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "status": "published",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago",
+                  "currency": "USD",
+                  "capacity": 500,
+                  "venue": {
+                    "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Metro",
+                    "relationship": "rented"
+                  },
+                  "venue_name": "Metro",
+                  "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                },
+                "box_office": {
+                  "tiers": [
+                    {
+                      "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "General Admission",
+                      "paid": 300,
+                      "comps": 10,
+                      "gross_cents": 600000
+                    }
+                  ],
+                  "paid_sold": 300,
+                  "comps": 10,
+                  "sold_last_24h": 12,
+                  "first_sale_at": "2026-10-01T16:00:00+00:00",
+                  "gross_cents": 600000,
+                  "refunded_cents": 2500,
+                  "tax_cents": 12000,
+                  "passed_on_fees_cents": 0,
+                  "absorbed_fees_cents": 3000,
+                  "platform_fees_cents": 5000
+                },
+                "sold_elsewhere": {
+                  "available": true,
+                  "lines": [
+                    {
+                      "currency": "USD",
+                      "sold": 20,
+                      "gross_cents": 40000,
+                      "entries": 1
+                    }
+                  ]
+                },
+                "items": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "kind": "expense",
+                    "label": "Venue rental",
+                    "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "category_key": "venue-rental",
+                    "category_name": "Venue rental",
+                    "gl_code": "5300",
+                    "amount_cents": 150000,
+                    "forecast_cents": null,
+                    "estimate_cents": null,
+                    "actual_cents": null,
+                    "auto": "venue-rental",
+                    "notes": ""
+                  }
+                ],
+                "offers": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "artist_name": "The Headliners",
+                    "act_type": "headliner",
+                    "status": "accepted",
+                    "currency": "USD",
+                    "terms": {
+                      "deal_type": "flat",
+                      "guarantee_cents": 200000
+                    },
+                    "pool_share_percent": null
+                  }
+                ],
+                "pools": [],
+                "budget": null,
+                "rental": {
+                  "status": "confirmed",
+                  "fee_cents": 150000,
+                  "deposit_cents": 50000,
+                  "currency": "USD"
+                },
+                "promoter_mode": true,
+                "settlement": {
+                  "adjustments": [],
+                  "deposits_paid": {},
+                  "venue_share_percent": 10,
+                  "venue_deposit_paid_cents": 50000
+                }
+              },
+              "computed": {
+                "currency": "USD",
+                "result": {
+                  "grossBoxOffice": 640000,
+                  "deductions": 20000,
+                  "netBoxOffice": 620000,
+                  "expensesTotal": 150000,
+                  "artistsTotal": 190000,
+                  "promoterNet": 218000,
+                  "venue": {
+                    "rentalFee": 150000,
+                    "sharePercent": 10,
+                    "depositPaid": 50000,
+                    "share": 62000,
+                    "total": 212000,
+                    "balanceDue": 162000
+                  },
+                  "slots": [
+                    {
+                      "slotId": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "The Headliners",
+                      "dealType": "flat",
+                      "base": 200000,
+                      "adjustments": -10000,
+                      "payout": 190000,
+                      "depositPaid": 0,
+                      "balanceDue": 190000
+                    }
+                  ]
+                }
+              },
+              "link_path": "/settlement/9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b?t=<64 hex characters>"
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Already finalized.",
+          "example": {
+            "error": "the settlement is already finalized"
+          }
+        }
+      ]
+    },
+    {
+      "id": "reopen-settlement",
+      "method": "POST",
+      "path": "/v1/events/:id/settlement/reopen",
+      "summary": "Reopen a settlement",
+      "description": "Back to live numbers; the contacts' link stops working.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "status": "draft",
+              "adjustments": [
+                {
+                  "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "offer_id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "label": "Late start",
+                  "amount_cents": -10000,
+                  "reason": "Went on 40 minutes late",
+                  "by": null,
+                  "at": "2026-10-31T15:04:05.120+00:00"
+                }
+              ],
+              "deposits_paid": {
+                "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b": true
+              },
+              "venue_share_percent": 10,
+              "venue_deposit_paid_cents": null,
+              "finalized_at": null,
+              "finalized_by": null,
+              "emailed_to": [],
+              "revision": 3,
+              "history": [
+                {
+                  "at": "2026-10-31T15:04:05.120+00:00",
+                  "action": "edited",
+                  "by": null
+                }
+              ],
+              "updated_at": "2026-10-31T15:04:05.120+00:00",
+              "inputs": {
+                "version": 1,
+                "computed_at": "2026-10-31T15:04:05.120+00:00",
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "status": "published",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago",
+                  "currency": "USD",
+                  "capacity": 500,
+                  "venue": {
+                    "id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "Metro",
+                    "relationship": "rented"
+                  },
+                  "venue_name": "Metro",
+                  "hold_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+                },
+                "box_office": {
+                  "tiers": [
+                    {
+                      "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "General Admission",
+                      "paid": 300,
+                      "comps": 10,
+                      "gross_cents": 600000
+                    }
+                  ],
+                  "paid_sold": 300,
+                  "comps": 10,
+                  "sold_last_24h": 12,
+                  "first_sale_at": "2026-10-01T16:00:00+00:00",
+                  "gross_cents": 600000,
+                  "refunded_cents": 2500,
+                  "tax_cents": 12000,
+                  "passed_on_fees_cents": 0,
+                  "absorbed_fees_cents": 3000,
+                  "platform_fees_cents": 5000
+                },
+                "sold_elsewhere": {
+                  "available": true,
+                  "lines": [
+                    {
+                      "currency": "USD",
+                      "sold": 20,
+                      "gross_cents": 40000,
+                      "entries": 1
+                    }
+                  ]
+                },
+                "items": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "kind": "expense",
+                    "label": "Venue rental",
+                    "category_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "category_key": "venue-rental",
+                    "category_name": "Venue rental",
+                    "gl_code": "5300",
+                    "amount_cents": 150000,
+                    "forecast_cents": null,
+                    "estimate_cents": null,
+                    "actual_cents": null,
+                    "auto": "venue-rental",
+                    "notes": ""
+                  }
+                ],
+                "offers": [
+                  {
+                    "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "budget_id": "a040d6b1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "artist_name": "The Headliners",
+                    "act_type": "headliner",
+                    "status": "accepted",
+                    "currency": "USD",
+                    "terms": {
+                      "deal_type": "flat",
+                      "guarantee_cents": 200000
+                    },
+                    "pool_share_percent": null
+                  }
+                ],
+                "pools": [],
+                "budget": null,
+                "rental": {
+                  "status": "confirmed",
+                  "fee_cents": 150000,
+                  "deposit_cents": 50000,
+                  "currency": "USD"
+                },
+                "promoter_mode": true,
+                "settlement": {
+                  "adjustments": [],
+                  "deposits_paid": {},
+                  "venue_share_percent": 10,
+                  "venue_deposit_paid_cents": 50000
+                }
+              },
+              "computed": {
+                "currency": "USD",
+                "result": {
+                  "grossBoxOffice": 640000,
+                  "deductions": 20000,
+                  "netBoxOffice": 620000,
+                  "expensesTotal": 150000,
+                  "artistsTotal": 190000,
+                  "promoterNet": 218000,
+                  "venue": {
+                    "rentalFee": 150000,
+                    "sharePercent": 10,
+                    "depositPaid": 50000,
+                    "share": 62000,
+                    "total": 212000,
+                    "balanceDue": 162000
+                  },
+                  "slots": [
+                    {
+                      "slotId": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                      "name": "The Headliners",
+                      "dealType": "flat",
+                      "base": 200000,
+                      "adjustments": -10000,
+                      "payout": 190000,
+                      "depositPaid": 0,
+                      "balanceDue": 190000
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "Not finalized.",
+          "example": {
+            "error": "the settlement isn't finalized"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-settlement-pdf",
+      "method": "GET",
+      "path": "/v1/events/:id/settlement/pdf",
+      "summary": "Settlement PDF",
+      "description": "The settlement as a PDF: box office, expenses, each act's deal worked through, the venue and the result. ?for=contacts leaves out the promoter net.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "for",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "contacts: the copy for artists and the venue.",
+          "enum": [
+            "contacts"
+          ],
+          "example": "contacts"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": "%PDF-1.4 …",
+          "content_type": "application/pdf"
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-event-pnl",
+      "method": "GET",
+      "path": "/v1/events/:id/profit-and-loss",
+      "summary": "A show's profit and loss",
+      "description": "One row per line in three columns: forecast (the budget: capacity × sell-through × average price, its lines, items with a forecast, and the deal math on that), estimate (sales so far plus the current daily pace until the show, capped at capacity) and actual (the settlement). ?format=csv for a spreadsheet.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "format",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "csv for text/csv.",
+          "enum": [
+            "csv"
+          ],
+          "example": "csv"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "finalized": false,
+              "currency": "USD",
+              "rows": [
+                {
+                  "key": "gross",
+                  "label": "Gross box office",
+                  "section": "revenue",
+                  "forecast": 1000000,
+                  "estimate": 900000,
+                  "actual": 640000
+                },
+                {
+                  "key": "expense:venue-rental",
+                  "label": "Venue rental",
+                  "section": "expense",
+                  "forecast": -150000,
+                  "estimate": -150000,
+                  "actual": -150000
+                },
+                {
+                  "key": "net",
+                  "label": "Net",
+                  "section": "result",
+                  "forecast": 400000,
+                  "estimate": 330000,
+                  "actual": 218000
+                }
+              ],
+              "net": {
+                "forecast": 400000,
+                "estimate": 330000,
+                "actual": 218000
+              },
+              "sold": {
+                "forecast": 400,
+                "estimate": 450,
+                "actual": 320
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-org-pnl",
+      "method": "GET",
+      "path": "/v1/profit-and-loss",
+      "summary": "Profit and loss across shows",
+      "description": "Each show starting in [from, to] (at most 366 days, 100 shows) with its gross, expenses, payouts and net in the three columns, and totals per currency (never summed across currencies). ?format=csv for a spreadsheet.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "from",
+          "location": "query",
+          "type": "string (date)",
+          "required": false,
+          "description": "Default today.",
+          "example": "2026-11-01"
+        },
+        {
+          "name": "to",
+          "location": "query",
+          "type": "string (date)",
+          "required": false,
+          "description": "Default from + 90 days.",
+          "example": "2026-11-30"
+        },
+        {
+          "name": "format",
+          "location": "query",
+          "type": "string",
+          "required": false,
+          "description": "csv for text/csv.",
+          "enum": [
+            "csv"
+          ],
+          "example": "csv"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "from": "2026-11-01",
+              "to": "2026-11-30",
+              "truncated": false,
+              "shows": [
+                {
+                  "eventId": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "startsAt": "2026-11-20T02:00:00+00:00",
+                  "currency": "USD",
+                  "finalized": false,
+                  "gross": 640000,
+                  "expenses": 150000,
+                  "payouts": 252000,
+                  "net": {
+                    "forecast": 400000,
+                    "estimate": 330000,
+                    "actual": 218000
+                  }
+                }
+              ],
+              "totals": [
+                {
+                  "currency": "USD",
+                  "shows": 1,
+                  "gross": 640000,
+                  "expenses": 150000,
+                  "payouts": 252000,
+                  "net": {
+                    "forecast": 400000,
+                    "estimate": 330000,
+                    "actual": 218000
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "A bad range.",
+          "example": {
+            "error": "to must be on or after from, at most 366 days later."
+          }
+        }
+      ]
+    },
+    {
+      "id": "get-ticket-counts",
+      "method": "GET",
+      "path": "/v1/events/:id/ticket-counts",
+      "summary": "Get ticket-count emails",
+      "description": "The show's schedule, its recipients (and the agent contacts suggested), and a preview of what the next email says.",
+      "auth": "api_key",
+      "scope": "finance:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "enabled": true,
+              "frequency": "daily",
+              "send_time": "09:30",
+              "weekday": 1,
+              "timezone": "America/Chicago",
+              "next_run_at": "2026-11-01T14:30:00+00:00",
+              "last_sent_at": null,
+              "last_sent_count": 0,
+              "recipients": [
+                {
+                  "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Ann Agent",
+                  "email": "ann@agency.example",
+                  "role": "agent",
+                  "source": "contact",
+                  "opted_out_at": null
+                }
+              ],
+              "suggested": [
+                {
+                  "name": "Ann Agent",
+                  "email": "ann@agency.example",
+                  "role": "agent"
+                }
+              ],
+              "preview": {
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago"
+                },
+                "currency": "USD",
+                "tiers": [
+                  {
+                    "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "General Admission",
+                    "paid": 300,
+                    "comps": 10,
+                    "gross_cents": 600000
+                  }
+                ],
+                "paid_sold": 300,
+                "comps": 10,
+                "sold_last_24h": 12,
+                "gross_cents": 600000,
+                "capacity": 500,
+                "sold_elsewhere": [],
+                "attendance_percent": 62.0
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:read.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "update-ticket-counts",
+      "method": "PATCH",
+      "path": "/v1/events/:id/ticket-counts",
+      "summary": "Set up ticket-count emails",
+      "description": "Daily at a local time or weekly on a weekday, in the show's time zone. recipients is the full list; an address already on it keeps its opt-out. A new schedule without recipients gets the show's agent contacts. Schedules switch off a day after the show or when it is cancelled.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        },
+        {
+          "name": "enabled",
+          "location": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "On or off.",
+          "example": true
+        },
+        {
+          "name": "frequency",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "daily or weekly.",
+          "enum": [
+            "daily",
+            "weekly"
+          ],
+          "example": "daily"
+        },
+        {
+          "name": "send_time",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "HH:MM, 24-hour, local.",
+          "example": "09:30"
+        },
+        {
+          "name": "weekday",
+          "location": "body",
+          "type": "integer",
+          "required": false,
+          "description": "0 (Sunday) to 6, for weekly.",
+          "example": 1
+        },
+        {
+          "name": "recipients",
+          "location": "body",
+          "type": "array of objects",
+          "required": false,
+          "description": "[{ name, email, role: agent | promoter | settlement | other }], at most 25.",
+          "example": [
+            {
+              "name": "Ann Agent",
+              "email": "ann@agency.example",
+              "role": "agent"
+            }
+          ]
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "event_id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+              "enabled": true,
+              "frequency": "daily",
+              "send_time": "09:30",
+              "weekday": 1,
+              "timezone": "America/Chicago",
+              "next_run_at": "2026-11-01T14:30:00+00:00",
+              "last_sent_at": null,
+              "last_sent_count": 0,
+              "recipients": [
+                {
+                  "id": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "Ann Agent",
+                  "email": "ann@agency.example",
+                  "role": "agent",
+                  "source": "contact",
+                  "opted_out_at": null
+                }
+              ],
+              "suggested": [
+                {
+                  "name": "Ann Agent",
+                  "email": "ann@agency.example",
+                  "role": "agent"
+                }
+              ],
+              "preview": {
+                "event": {
+                  "id": "9f30c5a1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                  "name": "The Headliners",
+                  "starts_at": "2026-11-20T02:00:00+00:00",
+                  "timezone": "America/Chicago"
+                },
+                "currency": "USD",
+                "tiers": [
+                  {
+                    "tier_id": "8e20b4f1-1c2d-4e3f-8a9b-0c1d2e3f4a5b",
+                    "name": "General Admission",
+                    "paid": 300,
+                    "comps": 10,
+                    "gross_cents": 600000
+                  }
+                ],
+                "paid_sold": 300,
+                "comps": 10,
+                "sold_last_24h": 12,
+                "gross_cents": 600000,
+                "capacity": 500,
+                "sold_elsewhere": [],
+                "attendance_percent": 62.0
+              }
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 400,
+          "description": "A field is missing or invalid; the message names it.",
+          "example": {
+            "error": "terms.percentage must be a percentage from 0 to 100 (at most 3 decimals)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "send-ticket-counts",
+      "method": "POST",
+      "path": "/v1/events/:id/ticket-counts/send",
+      "summary": "Send ticket counts now",
+      "description": "One email per recipient who has not opted out; at most once per 10 minutes.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event id.",
+          "example": "7d10a3e1-1c2d-4e3f-8a9b-0c1d2e3f4a5b"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "queued": 1
+            }
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such id in your organization.",
+          "example": {
+            "error": "not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "No recipients, or sent in the last 10 minutes.",
+          "example": {
+            "error": "ticket counts were sent less than 10 minutes ago"
+          }
+        }
+      ]
+    }
+  ]
+}
