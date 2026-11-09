@@ -819,6 +819,10 @@ export const ROUTES: readonly ApiRoute[] = [
   // Existing scopes: orders:read for one order's, finance:read for an event's.
   { id: 'get-order-fee-adjustments', method: 'GET', auth: K, path: '/orders/:id/adjustments', scope: 'orders:read', paged: false },
   { id: 'list-event-fee-adjustments', method: 'GET', auth: K, path: '/events/:id/fee-adjustments', scope: 'finance:read', paged: true },
+  // claude/exos-money-journal (mig 20261108100000, exos-api/journal.ts,
+  // docs/api/journal.json): the org's double-entry journal, one row per line.
+  // Read-only; existing scope finance:read.
+  { id: 'list-journal', method: 'GET', auth: K, path: '/journal', scope: 'finance:read', paged: true },
 ];
 
 /** Methods the API answers (anything else is 405). */

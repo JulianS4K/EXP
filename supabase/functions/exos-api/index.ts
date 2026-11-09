@@ -178,6 +178,7 @@ import { DICE_ROUTES, DiceApiError, handleDice } from "./diceImport.ts";
 import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, orderLocation } from "./buyerGeoGenre.ts";
 import { handlePosSales, POS_SALES_ROUTES, PosSalesError } from "./posSales.ts"; // claude/exos-pos-walkup
 import { FEE_ADJ_ROUTES, FeeAdjError, handleFeeAdjustments } from "./feeAdjustments.ts";
+import { handleJournal, JOURNAL_ROUTES, JournalError } from "./journal.ts"; // claude/exos-money-journal
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
@@ -436,6 +437,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof GeoGenreError) return json({ error: e.message }, e.status);
     if (e instanceof PosSalesError) return json({ error: e.message }, e.status); // claude/exos-pos-walkup
     if (e instanceof FeeAdjError) return json({ error: e.message }, e.status);
+    if (e instanceof JournalError) return json({ error: e.message }, e.status); // claude/exos-money-journal
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
       if (oa) return json(oa.body, oa.status);
@@ -613,6 +615,8 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-dice-gaps-6 (mig 20261107110000): the fee-change log.
   if (FEE_ADJ_ROUTES.has(route.id)) return await handleFeeAdjustments(route, { sb, orgId, params: c.params, page });
+  // claude/exos-money-journal (mig 20261108100000): the journal, read-only.
+  if (JOURNAL_ROUTES.has(route.id)) return await handleJournal(route, { sb, orgId, q: c.q, page });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
   if (GIVING_ROUTES.has(route.id)) {
     return await handleGiving(route, {
