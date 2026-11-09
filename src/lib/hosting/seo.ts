@@ -18,6 +18,7 @@ import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
 import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
 import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
 import { assistantFacts } from './productFacts';
+import { APP_LANDINGS, appLandingAt } from '../apps/landing';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
@@ -30,9 +31,13 @@ const ORG_RE = new RegExp(`^o/(${SLUG})/?$`);
 const PROMOTER_RE = new RegExp(`^promoter/(${UUID})/[A-Za-z0-9_-]{1,64}/?$`);
 // Promoter link-in-bio (/l/:orgSlug/:code): the promoter's name and the organizer.
 const BIO_RE = new RegExp(`^l/(${SLUG})/([A-Za-z0-9_-]{1,64})/?$`);
+// Neighborhood pages (mig 20261111110000): /nyc and /nyc/<neighborhood>.
+const NYC_RE = /^nyc\/?$/;
+const NEIGHBORHOOD_RE = /^nyc\/([a-z0-9]+(?:-[a-z0-9]+)*)\/?$/;
 const UUID_RE = new RegExp(`^${UUID}$`);
 
-export type PreviewKind = 'event' | 'event_slug' | 'org' | 'bio' | 'promoter' | 'checkout_event' | 'checkout_tier';
+export type PreviewKind = 'event' | 'event_slug' | 'org' | 'bio' | 'promoter' | 'checkout_event' | 'checkout_tier'
+  | 'neighborhoods' | 'neighborhood';
 export type PreviewTarget = [PreviewKind, string];
 
 /** Which record a /bridge/<page>?<query> link previews, or null. */
@@ -43,6 +48,8 @@ export function previewTarget(page: string, query = ''): PreviewTarget | null {
   if ((m = page.match(ORG_RE))) return ['org', m[1]];
   if ((m = page.match(BIO_RE))) return ['bio', `${m[1]}/${m[2]}`];
   if ((m = page.match(PROMOTER_RE))) return ['promoter', m[1].toLowerCase()];
+  if (NYC_RE.test(page)) return ['neighborhoods', 'nyc'];
+  if ((m = page.match(NEIGHBORHOOD_RE)) && m[1].length <= 60) return ['neighborhood', m[1]];
   if (page.replace(/\/+$/, '') === 'checkout') {
     const q = new URLSearchParams(query || '');
     const ev = q.get('event') ?? '';
@@ -300,6 +307,18 @@ export function orgTags(org: Row, canonicalUrl: string, defaultImage: string): s
   return tags(String(name).slice(0, 200), desc, canonicalUrl, image, 'website', false);
 }
 
+/** A neighborhood page ('This week in Bushwick'), or the /nyc index when name is null. Indexed. */
+export function neighborhoodTags(name: string | null, canonicalUrl: string, defaultImage: string): string {
+  if (!name) {
+    return tags('New York events by neighborhood',
+      'Live events this week in Bushwick, Williamsburg, the Lower East Side, Ridgewood and more. All-in prices on Exos.',
+      canonicalUrl, defaultImage, 'website', false);
+  }
+  return tags(`This week in ${name}`.slice(0, 200),
+    `Live events in ${name}, New York, this week: all-in prices, tickets on Exos.`.slice(0, 300),
+    canonicalUrl, defaultImage, 'website', false);
+}
+
 /** A promoter's link-in-bio: '<promoter> · <org>', the org's image, never indexed. */
 export function bioTags(promoterName: string, org: Row, canonicalUrl: string, defaultImage: string): string | null {
   const name = str(org?.name);
@@ -318,6 +337,12 @@ export function bioTags(promoterName: string, org: Row, canonicalUrl: string, de
  */
 export function defaultTags(baseUrl: string, page = ''): string {
   const clean = page.replace(/[?#].*$/, '').replace(/^\/+/, '');
+  // An app landing page (/apps/door, …) gets its own title and description
+  // (src/lib/apps/landing.ts), on its canonical path.
+  const app = appLandingAt(clean);
+  if (app) {
+    return tags(`${app.title} | Exos`, app.description, `${baseUrl}/bridge${app.path}`, `${baseUrl}/bridge/icon-512.png`, 'website', false);
+  }
   // req.path arrives still percent-encoded; tags() escapes it for the attribute.
   const url = `${baseUrl}/bridge/${clean}`;
   const title = 'Exos | Live the Moment';
@@ -341,7 +366,7 @@ export function inject(shell: string, tagBlock: string | null | undefined): stri
  * backs it with supabase-js + the anon key; tests pass a fake.
  */
 export type PublicReader = (
-  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs' | 'exos_public_fee_rules',
+  table: 'exos_public_events' | 'exos_public_tiers' | 'exos_public_orgs' | 'exos_public_fee_rules' | 'exos_neighborhoods',
   cols: string,
   filter: { col: string; val: string } | null,
   limit: number,
@@ -415,6 +440,19 @@ async function previewParts(
     // Unknown or paused promoter: the organizer's card, still kept out of the index.
     const t = who ? bioTags(who, orgs[0], url, defaultImage) : orgTags(orgs[0], url, defaultImage)?.replace('index, follow', 'noindex, nofollow');
     return t ? { tags: t, body: null } : null;
+  }
+
+  // Neighborhood pages: the card names the place; the events are in the page
+  // itself (ItemList JSON-LD, set by the SPA). An unknown slug: the site card.
+  if (kind === 'neighborhoods') {
+    return { tags: neighborhoodTags(null, `${baseUrl}/bridge/nyc`, defaultImage), body: null };
+  }
+  if (kind === 'neighborhood') {
+    let rows: Row[] = [];
+    try { rows = await read('exos_neighborhoods', 'slug,name', { col: 'slug', val: key }, 1); } catch { rows = []; }
+    const name = str(rows[0]?.name);
+    if (!name) return null;
+    return { tags: neighborhoodTags(name, `${baseUrl}/bridge/nyc/${encodeURIComponent(key)}`, defaultImage), body: null };
   }
 
   if (kind === 'org') {
@@ -601,6 +639,9 @@ export async function buildLlmsTxt(
     const own = facts.filter((f) => f.audience === audience);
     if (own.length) lines.push('', `## ${heading}`, '', ...own.map((f) => `- ${f.claim}`));
   }
+  // The apps suite's landing pages: what each one is for, and where it lives.
+  lines.push('', '## Apps for organizers', '');
+  for (const app of APP_LANDINGS) lines.push(`- [Exos ${app.name}](${baseUrl}/bridge${app.path}): ${app.headline}`);
   // Upcoming only, soonest first, filtered and sorted by the database: the
   // view also holds every past event, and an unordered capped read could drop
   // the newest ones.
@@ -630,13 +671,14 @@ export async function buildLlmsTxt(
 }
 
 /**
- * sitemap.xml: every published event that hasn't ended (or, without an end,
- * didn't start more than a day ago) plus every organizer page.
+ * sitemap.xml: the apps suite's landing pages, every published event that
+ * hasn't ended (or, without an end, didn't start more than a day ago) and
+ * every organizer page.
  */
 export async function buildSitemap(read: PublicReader, baseUrl: string, now: Date = new Date()): Promise<string> {
   const cutoff = now.getTime() - 86_400_000;
   const ts = (v: unknown) => (typeof v === 'string' && v ? parseInstant(v) : NaN);
-  const urls: string[] = [];
+  const urls: string[] = APP_LANDINGS.map((app) => `${baseUrl}/bridge${app.path}`);
   for (const ev of await readWithFallback(read, 'id,starts_at,ends_at', ',noindex', null, 5000)) {
     if (ev.noindex === true) continue;
     const end = ts(ev.ends_at);
@@ -647,6 +689,11 @@ export async function buildSitemap(read: PublicReader, baseUrl: string, now: Dat
   for (const org of await read('exos_public_orgs', 'slug', null, 5000)) {
     if (org.slug) urls.push(`${baseUrl}/bridge/o/${org.slug}`);
   }
+  // Neighborhood pages (mig 20261111110000); none on a database without it.
+  let hoods: Row[] = [];
+  try { hoods = await read('exos_neighborhoods', 'slug,city', { col: 'city', val: 'nyc' }, 200); } catch { hoods = []; }
+  const slugs = hoods.map((h) => str(h.slug)).filter((v): v is string => !!v && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(v));
+  if (slugs.length) urls.push(`${baseUrl}/bridge/nyc`, ...slugs.map((v) => `${baseUrl}/bridge/nyc/${v}`));
   return (
     '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
     urls.map((u) => `  <url><loc>${esc(u)}</loc></url>\n`).join('') +

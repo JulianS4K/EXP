@@ -7,6 +7,9 @@
 //   Signup forms    build a form, copy its embed snippet
 //   Refund requests every event's open asks: Refund runs the usual refund
 //                   (exos-refund, nonce ask:<id>), Decline sends a note
+//   Followers       how many follow the org and get its new-event email;
+//                   rows only for followers who are fans; export CSV
+//                   (owner / manager, logged as export.run; mig 20261111110000)
 //
 // Roles: fans and refunds owner / manager / finance (finance reads only);
 // tags also content (read); forms owner / manager. The RPCs re-check.
@@ -28,9 +31,10 @@ import {
   type FanDetail, type FanRow, type OrgTag, type QueueAsk, type TagChip, type TaggableType,
 } from '../lib/fans';
 import { listSignupForms, saveSignupForm, signupSnippets, type SignupForm } from '../lib/signupForms';
+import { exportOrgFollowers, FOLLOWERS_CSV_HEADER, followersCsvRows, listOrgFollowers, type OrgFollowers } from '../lib/followers';
 import type { Event } from '../types';
 
-type Tab = 'fans' | 'tags' | 'forms' | 'refunds';
+type Tab = 'fans' | 'tags' | 'forms' | 'refunds' | 'followers';
 
 const card = 'bg-white rounded-2xl border border-slate-200 p-5';
 const btn = 'inline-flex items-center gap-1.5 px-3 py-2 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50';
@@ -93,6 +97,7 @@ export default function OrgFans() {
     { id: 'tags', label: 'Tags', show: canTags },
     { id: 'forms', label: 'Signup forms', show: canWrite },
     { id: 'refunds', label: 'Refund requests', show: canRead },
+    { id: 'followers', label: 'Followers', show: canWrite },
   ];
   const visible = tabs.filter((t) => t.show);
   const requested = params.get('tab') as Tab | null;
@@ -131,6 +136,7 @@ export default function OrgFans() {
         {tab === 'tags' && <TagsTab orgId={orgId} canWrite={canWrite} tags={tags} onTagsChanged={reloadTags} />}
         {tab === 'forms' && <FormsTab orgId={orgId} tags={tags} />}
         {tab === 'refunds' && <RefundsTab orgId={orgId} canAct={canRead} />}
+        {tab === 'followers' && <FollowersTab orgId={orgId} orgName={entry?.org.name ?? ''} />}
       </div>
     </div>
   );
@@ -655,6 +661,90 @@ function RefundsTab({ orgId, canAct }: { orgId: string; canAct: boolean }) {
         ))}
       </ul>
       {rows && rows.length < total && <button type="button" className={btn} onClick={() => load(rows.length)}>Load more</button>}
+    </div>
+  );
+}
+
+// ── Followers (mig 20261111110000) ───────────────────────────────────────────
+
+const LIST_LABEL: Record<string, string> = { subscribed: 'On your list', unsubscribed: 'Unsubscribed', none: 'Not on your list' };
+
+function FollowersTab({ orgId, orgName }: { orgId: string; orgName: string }) {
+  const { toast } = useToast();
+  const [data, setData] = useState<OrgFollowers | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    listOrgFollowers(orgId).then((d) => { if (live) setData(d); }).catch((e) => {
+      toast({ kind: 'error', message: (e as Error).message });
+      if (live) setData({ total: 0, listed: 0, notListed: 0, getsNewEventMail: 0, rows: [] });
+    });
+    return () => { live = false; };
+  }, [orgId, toast]);
+
+  const doExport = async () => {
+    setBusy(true);
+    try {
+      const r = await exportOrgFollowers(orgId);
+      downloadCsv(csvFileName(['followers', orgName]), toCsv(FOLLOWERS_CSV_HEADER, followersCsvRows(r.rows)));
+      toast({ kind: 'success', message: `Exported ${r.count} follower${r.count === 1 ? '' : 's'}. The export is logged.` });
+    } catch (e) {
+      toast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!data) return <p className="text-sm text-slate-500" role="status">Loading…</p>;
+  return (
+    <div className="space-y-4">
+      <div className={card}>
+        <p className="text-2xl font-bold" data-testid="followers-total">{data.total} follower{data.total === 1 ? '' : 's'}</p>
+        <p className="text-sm text-slate-600 mt-1">
+          {data.getsNewEventMail} get an email when you publish a new event (at most one a day; they can unfollow from it).
+        </p>
+        {data.notListed > 0 && (
+          <p className="text-xs text-slate-500 mt-2">
+            {data.notListed} of them haven't bought a ticket or signed up with you, so they're only in this count.
+          </p>
+        )}
+      </div>
+      <div className="flex justify-end">
+        <button type="button" className={btn} disabled={busy || data.listed === 0} onClick={() => void doExport()}>
+          <Download size={14} /> Export CSV
+        </button>
+      </div>
+      {data.rows.length === 0 ? (
+        <p className="text-sm text-slate-500">None of your followers are on your fan list yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm bg-white rounded-2xl border border-slate-200">
+            <caption className="sr-only">Followers who are also your fans</caption>
+            <thead>
+              <tr className="text-left text-[10px] font-black uppercase tracking-widest text-slate-500">
+                <th scope="col" className="px-3 py-2">Fan</th>
+                <th scope="col" className="px-3 py-2">Following since</th>
+                <th scope="col" className="px-3 py-2">Email list</th>
+                <th scope="col" className="px-3 py-2">New-event email</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <tr key={r.fanId || r.email} className="border-t border-slate-100">
+                  <td className="px-3 py-2">
+                    <span className="font-bold">{[r.firstName, r.lastName].filter(Boolean).join(' ') || r.email}</span>
+                    {(r.firstName || r.lastName) && <span className="block text-xs text-slate-500">{r.email}</span>}
+                  </td>
+                  <td className="px-3 py-2">{day(r.followedAt)}</td>
+                  <td className="px-3 py-2">{LIST_LABEL[r.emailList]}</td>
+                  <td className="px-3 py-2">{r.getsNewEventMail ? 'Yes' : 'No'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

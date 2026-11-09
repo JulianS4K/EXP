@@ -239,6 +239,45 @@ await check('transfer a ticket', async (page, run) => {
   await run();
 }, { signedIn: true, mock: ticketMock });
 
+// ── Apps suite landing pages (public, signed out) ─────────────────────────
+for (const [id, headline, device] of [
+  ['door', 'The free door app for any event, even with no signal.', 'iPhone 13'],
+  ['events', 'Create an event page. Ticket sales open at launch.', 'Desktop Chrome'],
+  ['promote', 'Get people to your event, and see who brought them.', 'iPhone 13'],
+  ['money', 'Your sales, settlements and books in one place.', 'Desktop Chrome'],
+]) {
+  await check(`app landing (/apps/${id})`, async (page, run) => {
+    await page.goto(BASE + '/apps/' + id);
+    await page.getByRole('heading', { level: 1, name: headline }).waitFor({ timeout: 8000 });
+    await run();
+  }, { device });
+}
+
+// ── Neighborhood pages + unfollow (mig 20261111110000) ─────────────────────
+await check('neighborhoods index (/nyc)', async (page, run) => {
+  await page.goto(BASE + '/nyc');
+  await page.getByRole('heading', { name: 'Queens' }).waitFor({ timeout: 8000 });
+  await run();
+});
+
+await check('neighborhood page (/nyc/bushwick, phone)', async (page, run) => {
+  await page.goto(BASE + '/nyc/bushwick');
+  await text(page, 'Fall Party');
+  await run();
+});
+
+await check('neighborhood page (desktop)', async (page, run) => {
+  await page.goto(BASE + '/nyc/bushwick');
+  await text(page, 'Fall Party');
+  await run();
+}, { device: 'Desktop Chrome' });
+
+await check('unfollow link', async (page, run) => {
+  await page.goto(BASE + '/unfollow?t=' + 'a'.repeat(64));
+  await text(page, 'Stop following this organizer?');
+  await run();
+});
+
 // ── Door app ────────────────────────────────────────────────────────────────
 await check('door app (signed out)', async (page, run) => {
   await page.goto(BASE + '/door');

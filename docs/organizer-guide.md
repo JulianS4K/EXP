@@ -253,14 +253,19 @@ tiers and discount codes, into a series of dates.
 
 ### Group buys: friends pay for their own seats
 
-Buyers can bring friends two ways. You don't switch anything on; both use your normal prices, fees,
-codes and limits.
+> **"Pay separately" (v2) is paused** (operator decision, 2026-11-09). It isn't offered on any event:
+> the event page has no "Pay separately" button, and group links (`/group-pay/...`) say "Group pay
+> isn't available". **"Split with friends" (v1) is available as usual.** The description of v2 below
+> is kept for reference only.
+
+Buyers can bring friends with **Split with friends** below. You don't switch anything on; it uses your
+normal prices, fees, codes and limits.
 
 - **Split with friends** (`/split/:sessionId`, after a purchase): the buyer pays for every ticket,
   sends each friend their ticket, and the friends pay the buyer back by Venmo or Cash App. Exos never
   touches that money.
-- **Pay separately** (the event page's ticket picker, "Pay separately: up to N friends"; mig
-  `20261108120000`): a signed-in buyer (the host) picks 2 to 10 tickets of one type, at most your
+- **Pay separately** (paused, see above; the event page's ticket picker, "Pay separately: up to N
+  friends"; mig `20261108120000`): a signed-in buyer (the host) picks 2 to 10 tickets of one type, at most your
   max per order. Exos holds that many seats for **30 minutes** and gives the host one link per seat
   (`/group-pay/seat/<link>`) to text or copy from their own phone.
   - Each friend opens their link and pays for **that one seat** in the normal checkout (signed in or

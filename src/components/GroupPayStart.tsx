@@ -3,14 +3,17 @@
 // each friend their own link to pay. Signed-in buyers only (the hold is theirs
 // until friends pay); the host page is /group-pay/:groupId. A timed type
 // (mig 20261110110000): the whole group takes the slot picked above.
+// Paused by the operator 2026-11-09 (mig 20261111120000): renders nothing
+// unless the build sets VITE_EXOS_GROUP_PAY=on.
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { canStartGroup, maxGroupSize, startGroup } from '../lib/groupPay';
+import { groupPayEnabled } from '../lib/groupPayFlag';
 
-export default function GroupPayStart({ eventId, tierId, quantity, maxPerOrder, signedIn, needsSlot = false, slotId = null }: {
+type Props = {
   eventId: string;
   tierId: string;
   quantity: number;
@@ -19,7 +22,13 @@ export default function GroupPayStart({ eventId, tierId, quantity, maxPerOrder, 
   /** A timed type: a slot must be picked first. */
   needsSlot?: boolean;
   slotId?: string | null;
-}) {
+};
+
+export default function GroupPayStart(props: Props) {
+  return groupPayEnabled() ? <GroupPayStartOn {...props} /> : null;
+}
+
+function GroupPayStartOn({ eventId, tierId, quantity, maxPerOrder, signedIn, needsSlot = false, slotId = null }: Props) {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);

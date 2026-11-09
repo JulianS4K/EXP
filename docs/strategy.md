@@ -36,11 +36,11 @@ Rules for every app:
 
 | App | Job | Status |
 |---|---|---|
-| **Door** (`/door`) | Check in any event: Exos tickets, imported tickets from other platforms, guest lists; offline, many phones | **Built** (mig `20261013090000`): import CSV, scan their barcodes, door-only events |
-| **Events** | Create an event page and sell tickets (the only app that charges, per ticket sold) | Exists as the organizer dashboard; needs its own landing page |
-| **Promote** | Promoter links, guest lists, kits, leaderboard | Exists (`/p/:token`, `/orgs/:id/promoters`); needs its own landing page |
+| **Door** (`/door`) | Check in any event: Exos tickets, imported tickets from other platforms, guest lists; offline, many phones | **Built** (mig `20261013090000`): import CSV, scan their barcodes, door-only events; landing page `/apps/door` |
+| **Events** | Create an event page and sell tickets (the only app that charges, per ticket sold) | Exists as the organizer dashboard; landing page `/apps/events` |
+| **Promote** | Promoter links, guest lists, kits, leaderboard | Exists (`/p/:token`, `/orgs/:id/promoters`); landing page `/apps/promote` |
 | **Box Office** | Walk-ups and comps at the door | Comps exist; card sales need Stripe Terminal (Phase 3) |
-| **Money** | Payouts, receipts, settlement, the end-of-night summary | Exists inside the event report; needs its own landing page |
+| **Money** | Payouts, receipts, settlement, the end-of-night summary | Exists inside the event report and `/orgs/:id/finance`; landing page `/apps/money` |
 
 **Order:** Door first. It's the strongest piece we have, every event needs a door, and it brings
 in organizers who sell elsewhere today. Next, give Events and Promote their own landing pages,

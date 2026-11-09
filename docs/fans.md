@@ -31,6 +31,37 @@ yes / no, source, order counts and dates, email-list state, tag names and the da
 the browser (`fansCsvRows` + `src/lib/csv.ts`, which defuses formula-looking text). No unsubscribe tokens, no
 phone numbers.
 
+## Followers
+
+Mig `20261111110000_exos_neighborhoods.sql`, harness `tests/exos/test_neighborhoods.sql` (race:
+`tests/exos/race_follower_mail.sh`, by hand). Fans follow an organizer from its page (`exos_follow_org`, mig
+20260520140000).
+
+- **The "new event" email.** When an event goes live and listed (published, not hidden from search, starting in the
+  future; a series announces its first date only), every follower gets one notice row (`exos_follower_notices`,
+  keyed by event and follower, so republishing, un-hiding or `exos_announce_to_followers` never sends twice). It
+  becomes the `follower-new-event` mail (`docs/email.md`) only for a follower who may get marketing mail:
+  - still following, and not on the org's team;
+  - an account with an email;
+  - not opted out of Exos follow-up mail (`exos_mail_prefs.marketing_opt_out`, the `/unsubscribe` link);
+  - not unsubscribed from this org's email list (`exos_fans`).
+- **At most one a day.** One mail per follower per org per 24 hours (`exos_follower_mail_slots`). An event published
+  inside the window waits and goes out with the next mail, batched with whatever else is waiting (up to 10 events
+  listed, "and N more"): with the org's next publish after the window, or from `exos_send_follower_digests` (cron
+  `exos-follower-digests-hourly`, created inactive; turn it on with the mail drain).
+- **Leaving.** Each mail carries a one-click unfollow for that org (`/unfollow?t=<64 hex>`, `exos_unfollow_by_token`;
+  the page takes a click so mail scanners don't unfollow anyone) and the usual unsubscribe footer and
+  `List-Unsubscribe` header for every follow-up.
+- **Nothing sends yet.** Rows wait in `exos_mail` like every other mail until `exos-mail-drain` runs with Resend.
+- **What the organizer sees.** Counts only, on the event editor (`exos_event_follower_notice`, owner / manager):
+  "N followers will be notified when you publish", then "Notified N followers" (and how many are waiting for their
+  daily window); the publish toast says it too. Nobody's address.
+- **Follower list.** The **Followers** tab on the Fans page (owner / manager): how many follow, how many get the
+  email, and rows (email, names, since when, email-list state, gets the email) only for followers who already have a
+  fan profile with the org, which the Fans tab shows anyway. The rest are a count: following alone never hands the
+  organizer an address. **Export CSV** (`exos_org_followers_export`) returns the same rows, allows 3 a minute and 20 a
+  day per org, and writes an `export.run` row (entity `followers`) to the org audit log.
+
 ## Signup forms
 
 An org builds a form (title, intro, button, whether to ask for a name, whether to offer texts, tags to put on

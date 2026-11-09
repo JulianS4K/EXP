@@ -275,7 +275,10 @@ for m in \
   20261109110000_exos_security_hygiene \
   20261110100000_exos_journal_complete \
   20261110110000_exos_group_pay_2 \
-  20261110120000_exos_leftovers_9; do
+  20261110120000_exos_leftovers_9 \
+  20261111100000_exos_e2e_fixes \
+  20261111110000_exos_neighborhoods \
+  20261111120000_exos_group_pay_off; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -510,7 +513,10 @@ for m in \
          20261109110000_exos_security_hygiene \
          20261110100000_exos_journal_complete \
          20261110110000_exos_group_pay_2 \
-         20261110120000_exos_leftovers_9; do
+         20261110120000_exos_leftovers_9 \
+         20261111100000_exos_e2e_fixes \
+         20261111110000_exos_neighborhoods \
+         20261111120000_exos_group_pay_off; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -630,6 +636,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_money_jou
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_journal_complete.sql"
 # claude/exos-group-pay: group buy v2, each friend pays their own seat in a 30-minute window: holds, deadline release, cover the rest, per-seat orders, cross-group / cross-org tokens (mig 20261108120000; race: race_group_pay.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay.sql"
+# claude/exos-group-pay-off (mig 20261111120000): group pay v2 paused by the operator 2026-11-09: off by default (platform setting group_pay_enabled), the admin-only audited setter, every entry point refuses (start / claim / checkout context XGOFF, seat page NULL), an existing group stays readable; the suites above turn it on for themselves
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay_off.sql"
 # claude/exos-harness-full: transfer claims through prod's exos_claim_transfer body (mig 20261108130000: the proof check's alias clashed with its row variable t)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_claim_alias_fix.sql"
 # claude/exos-org-audit: the org audit log (mig 20261109100000): append-only, RLS, actors (user, API key, OAuth app, service), masking, cross-org, export.run (race: race_org_audit.sh, by hand)
@@ -638,3 +646,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_audit
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_security_hygiene.sql"
 # claude/exos-leftovers-9 (mig 20261110120000): partner / organizer reservations take checkout answers (required for partners, conditional, cross-org), API undo of an add-on scan, the event report's changes since publish
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_leftovers_9.sql"
+# claude/exos-neighborhoods (mig 20261111110000): neighborhood pages (matching, window, hidden / noindex left out, admin-only count), follower "new event" mail (consent, once per event + follower, 24-hour limit + batching, cross-org), follower list + export, unfollow by token (race: race_follower_mail.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_neighborhoods.sql"
+# claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"
