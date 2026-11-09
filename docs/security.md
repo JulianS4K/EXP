@@ -523,6 +523,52 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   account, so the staff member can't read it as their own order. It issues
   no invoice and moves no money.
 
+### DICE leftovers (mig 20261108110000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **POST /v1/orders/:id/adjustments** (`finance:write`, an organization API
+  key only: personal and OAuth tokens never write here). The scope gates
+  the route; the role is checked in SQL: `_exos_api_fee_adjustment`
+  (service role) runs `_exos_api_key_actor(org, key, owner / manager /
+  finance)` first, the dashboard's `exos_fee_adjustment_record` rule, so a
+  key whose creator lost the role, or a revoked key, is 403. Then the
+  existing core `_exos_fee_adjustment_add`: the order is looked up in the
+  key's org only (another org's order: 404 "order not found", nothing
+  echoed), integer cents, a note, never below zero, under the order's row
+  lock. An idempotency key is required (header or body); the unique
+  `(org_id, idempotency_key)` index makes a resend one row
+  (`tests/exos/race_dice_leftovers.sh` race 1). It moves no money.
+- **Walk-up questions.** The skip is an explicit argument of the 13-argument
+  `exos_pos_walkup_sell` (authenticated; the same role, rate limit and
+  idempotency checks as the 12-argument one, which it calls) and of the
+  service-role `_exos_pos_walkup_begin_card` overload. It reaches the begin
+  as a transaction-local setting (`exos.pos_skip_questions`) that only these
+  wrappers set and clear; PostgREST can't set it from a request. The skip
+  log `exos_pos_question_skips` has RLS (owner / manager / finance, door
+  staff of the event) and no client write grant.
+- **Undo an add-on scan.** `exos_undo_addon_check_in` (authenticated): owner
+  / manager / scanner of the pass's org (42501 otherwise, before anything is
+  read back), the event in the request, the per-event scanner scope; then an
+  owner / manager any time, or the scanner who made the pass's last entry
+  within 10 minutes of it. A reason is required. The removed scans are kept
+  in `exos_addon_pass_undos` (RLS as the skip log; no client writes). The
+  offline merge passes a client ref (unique: one undo per ref; a ref of
+  another pass is refused) and the time it was done (at most 24 hours ago,
+  never ahead), and only scans at or before that time are removed.
+- **Add-on wallet codes.** `exos_wallet_addon_pass` (authenticated) answers
+  the pass's holder only (42501 for anyone else, the pass unnamed), never
+  for a voided pass, and returns the derived Apple code and Google TOTP key,
+  never `barcode_secret` (the holder can already read the secret through
+  `exos_my_addon_passes`). The door takes the codes in
+  `_exos_check_in_addon_pass` (marker `exos: addon wallet codes`): the live
+  holder and `exos_addon_passes.wallet_epoch` are checked before the MAC /
+  TOTP, and a new holder rotates the secret, which kills every earlier code.
+  Door phones get only the Apple code's SHA-256 and the Google TOTP key
+  (`exos_event_addon_passes`, marker `exos: addon wallet keys`), as for
+  tickets. Apple add-on passes are static (no web service): the phone keeps
+  showing a refunded pass's code, which the door refuses.
+
 ### Search path
 ### Search path
 

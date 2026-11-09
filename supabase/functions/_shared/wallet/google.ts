@@ -39,7 +39,8 @@ export function objectId(issuerId: string, serial: string): string {
   return `${issuerId}.exos-pass-${serial}`;
 }
 
-export function buildEventTicketClass(p: WalletPayload, issuerId: string): Record<string, unknown> {
+/** The event's class (a ticket's or an add-on's pass: only the event and the org are read). */
+export function buildEventTicketClass(p: Pick<WalletPayload, "event" | "org_name">, issuerId: string): Record<string, unknown> {
   const ev = p.event;
   const cls: Record<string, unknown> = {
     id: classId(issuerId, ev.id),

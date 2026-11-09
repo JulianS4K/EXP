@@ -823,6 +823,10 @@ export const ROUTES: readonly ApiRoute[] = [
   // docs/api/journal.json): the org's double-entry journal, one row per line.
   // Read-only; existing scope finance:read.
   { id: 'list-journal', method: 'GET', auth: K, path: '/journal', scope: 'finance:read', paged: true },
+  // claude/exos-dice-leftovers (mig 20261108110000, exos-api/feeAdjustments.ts,
+  // docs/api/fee-adjustments.json): record a manual fee change. finance:write,
+  // and an API key whose creator is an owner, manager or finance (in SQL).
+  { id: 'create-order-fee-adjustment', method: 'POST', auth: K, path: '/orders/:id/adjustments', scope: 'finance:write', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

@@ -1294,6 +1294,96 @@ await run('conditional questions: the buyer sees B only after answering A, and B
     'only A rides in the request: ' + JSON.stringify(condCheckout.body?.answers));
 }, { mock: { ...checkoutFn(condCheckout), rpcs: { exos_public_event_questions: () => COND_QUESTIONS } } });
 
+// --- claude/exos-dice-leftovers (mig 20261108110000): walk-up questions ------
+// A required question at the door: the sale waits for it, "Skip questions"
+// sells anyway (the server logs the skip); answering it sells normally.
+const WQ = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const walkupQSales = [];
+const walkupQPos = (b) => {
+  if (b.action === 'walkup_catalog') {
+    const c = walkupPos(b);
+    c.body.data.questions = [{ id: WQ, label: 'Company', kind: 'text', required: true, scope: 'order', options: [], tier_ids: null, hidden: false }];
+    return c;
+  }
+  if (b.action === 'mint_walkup') {
+    walkupQSales.push(b);
+    return { body: { data: { ...walkupOrder(), questions_skipped: b.skip_questions === true } } };
+  }
+  return walkupPos(b);
+};
+await run('door: a required question at the door: Skip questions sells (logged), an answer sells normally', async (page, log) => {
+  walkupSold = false;
+  walkupQSales.length = 0;
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Sell' }).click();
+  await expectText(page, 'Door GA');
+  await expectText(page, '1 required answer missing: Company');
+  const sellBtn = page.getByRole('button', { name: /Take \$25\.00 · sell 1/ });
+  assert(await sellBtn.isDisabled(), 'the sale waits for the required answer');
+  await page.getByTestId('walkup-skip-questions').click();
+  await expectText(page, 'Sold 1 × Door GA (questions skipped)');
+  assert(walkupQSales.length === 1 && walkupQSales[0].skip_questions === true, 'the skip rides in the sale: ' + JSON.stringify(walkupQSales));
+  // The next sale: answered, no skip.
+  await page.getByTestId('walkup-questions-toggle').click();
+  await page.getByLabel(/Company/).fill('Acme');
+  await until(async () => !(await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).isDisabled()), 'answered: the sale is on');
+  assert(await page.getByTestId('walkup-skip-questions').count() === 0, 'no skip button once answered');
+  await page.getByRole('button', { name: /Take \$25\.00 · sell 1/ }).click();
+  await until(async () => walkupQSales.length === 2, 'the second sale went');
+  assert(!('skip_questions' in walkupQSales[1]) && walkupQSales[1].answers?.order?.[WQ] === 'Acme',
+    'answered sale: the answer, no skip: ' + JSON.stringify(walkupQSales[1]));
+  assert(log.some((l) => l.startsWith('fn exos-pos') && l.includes('"skip_questions":true')), 'logged call');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupQPos } }) });
+
+// Undo an add-on scan from the scan log (mig 20261108110000): online, its own RPC.
+const ADDON_PASS = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+await run('door: an add-on scan can be undone from the scan log', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  const box = page.getByLabel('Search by name or pass ID');
+  await box.waitFor({ timeout: 8000 });
+  await box.fill(`A-${ADDON_PASS}:${UID}:${Math.floor(Date.now() / 30000)}:mac`);
+  await box.press('Enter');
+  await until(async () => log.some((l) => l.startsWith('rpc exos_check_in_ticket')), 'the add-on code went to the check-in');
+  assert(!log.some((l) => l.includes('exos_get_ticket_for_scan')), 'an add-on code is not read as a ticket');
+  await page.getByTestId('addon-undo').click();
+  await page.getByLabel('Reason for undoing this check-in').fill('scanned the wrong wristband');
+  await page.getByRole('button', { name: 'Undo', exact: true }).last().click();
+  await expectText(page, 'Add-on scan undone');
+  const call = log.find((l) => l.startsWith('rpc exos_undo_addon_check_in'));
+  assert(call && call.includes(ADDON_PASS) && call.includes('scanned the wrong wristband'), 'the undo call: ' + call);
+  assert(!log.some((l) => l.startsWith('rpc exos_undo_check_in')), 'not the ticket undo');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+  exos_check_in_ticket: () => ({ ok: true, reason: 'checked-in', kind: 'addon', pass_id: ADDON_PASS, addon_name: 'VIP lounge',
+    check_in_at: new Date().toISOString(), verified: true }),
+  exos_undo_addon_check_in: () => ({ ok: true, reason: 'undone', kind: 'addon', status: 'active', removed: 1 }),
+} }) });
+
+// The organizer dashboard's genre filter (mig 20261106140000's genres, here
+// on the dashboard): only the picked genre's events stay listed.
+await run('dashboard: the genre filter narrows the event list', async (page) => {
+  await page.goto(BASE + '/dashboard');
+  await expectText(page, 'Fall Party');
+  const sel = page.getByTestId('dashboard-genre-filter');
+  await sel.waitFor({ timeout: 8000 });
+  const opts = await sel.locator('option').allTextContents();
+  assert(opts.includes('All genres') && opts.includes('House') && opts.includes('Jazz'), 'options: ' + opts.join(', '));
+  await sel.selectOption({ label: 'Jazz' });
+  await expectText(page, 'Late Jazz');
+  await until(async () => (await page.getByText('Fall Party', { exact: true }).count()) === 0, 'Fall Party (House) filtered out');
+  await sel.selectOption({ label: 'All genres' });
+  await expectText(page, 'Fall Party');
+}, { signedIn: true, mock: ownerMock({ tables: { exos_events: [
+  { ...EVENT_ROW, genres: ['House'] },
+  { ...EVENT_ROW, id: '99999999-9999-4999-8999-999999999992', slug: 'late-jazz', name: 'Late Jazz', genres: ['Jazz'] },
+] } }) });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

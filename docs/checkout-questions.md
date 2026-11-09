@@ -102,9 +102,32 @@ buyer) all keep them. The buyer can read an order's answers once its tickets are
 | Phone RSVP | `exos-rsvp` "info" returns the questions, "start" takes `answers` (one entry per guest incl. plus-ones); a refusal expires the RSVP |
 | Organizer reservations (API) | `answers` on POST /v1/events/:id/organizer-reservations/:token/complete; checked, never required |
 | The door | `exos_door_set_ticket_answers` (door staff of the event; per-ticket questions, hidden ones included, nothing required) |
+| Walk-up sales at the door | `exos-pos` `mint_walkup` `answers` (cash, comp and card; mig 20261108110000): see below |
 
-Not covered: POS walk-up mints (`exos-pos` doesn't mint tickets yet: its `mint_walkup` answers 501); comps, box-office
-and member-pass issues (staff can add answers at the door); partner (`/public/...`) reservations.
+Not covered: comps, box-office and member-pass issues (staff can add answers at the door); partner (`/public/...`)
+reservations.
+
+### Walk-up sales (mig 20261108110000)
+
+A walk-up sale at the door (`docs/pos.md` "Walk-up sales") asks the same questions as checkout and stores the answers
+the same way: order ref `pos:<order>`, attached to the n-th ticket minted, `source = 'door'`.
+
+- **Required means required at the door too**, per order and per ticket, with the "show only if" rules (a question its
+  condition hides is never required). A question hidden from checkout ("staff fill it at the door") is asked but never
+  required. Without the required answers the sale is refused (`22023`, hint `questions-required`) and nothing is
+  sold or held.
+- **Keeping the door fast: the seller may skip.** The Sell tab disables the sale button while a required answer is
+  missing and offers **Skip questions**, which sends `skip_questions: true` (the 13-argument `exos_pos_walkup_sell`,
+  or the card begin's 11-argument `_exos_pos_walkup_begin_card`). The sale goes through, the answers that were given
+  are kept, and one `exos_pos_question_skips` row records who skipped which required questions (the order, the
+  question ids and labels, the ticket number). Nothing is logged when nothing required was missing. RLS: owner /
+  manager / finance of the org and door staff of the event read the log; nobody writes it but the sale.
+- Invalid answers (a choice not in the options, a bad email) are refused even with the skip: the skip covers missing
+  answers only.
+- Implementation: `_exos_pos_walkup_answers` (marker `exos: pos walkup questions` on `_exos_pos_walkup_begin`), the
+  door's question list `_exos_pos_door_question_defs`; the Sell tab mirrors it with `walkupMissingRequired`
+  (`supabase/functions/_shared/pos/walkup.ts`). Tests: `tests/exos/test_dice_leftovers.sql` DL1,
+  `src/lib/pos/walkup.test.ts`, the smoke step "a required question at the door".
 
 Only the order's own tickets take its answers: the trigger requires the ticket's buyer to be the order's buyer, or
 the ticket to be parked on the org owner for an order with no buyer (guest, RSVP, reservation) or for that buyer's own

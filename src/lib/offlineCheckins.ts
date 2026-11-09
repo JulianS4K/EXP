@@ -29,8 +29,11 @@ export interface QueuedScan {
   /** Typed override reason (owner / manager). */
   reason?: string;
   /** A check-in by name (optional note in `reason`): replayed through
-   *  exos_door_checkin_by_name, mig 20260929130000. */
-  kind?: 'name';
+   *  exos_door_checkin_by_name, mig 20260929130000. 'addon-undo': an add-on
+   *  scan undone offline (mig 20261108110000; `ticketId` is the pass,
+   *  `scannedAt` when it was undone, `reason` why), replayed through
+   *  exos_undo_addon_check_in (lib/addonUndo). */
+  kind?: 'name' | 'addon-undo';
   /** Check-in lists (mig 20260929140000): set on scans queued by a build that
    *  knows lists (null = no list). Such a scan replays through the list-aware
    *  RPCs, which also record a refused entry as a forced check-in. */
@@ -94,6 +97,7 @@ export function parseQueue(
         source: item.source,
         ...(typeof item.reason === 'string' && item.reason ? { reason: item.reason } : {}),
         ...((item as { kind?: unknown }).kind === 'name' ? { kind: 'name' as const } : {}),
+        ...((item as { kind?: unknown }).kind === 'addon-undo' ? { kind: 'addon-undo' as const } : {}),
         ...listFields(item as { listId?: unknown; direction?: unknown }),
       });
     }
@@ -126,6 +130,12 @@ export function pendingScanCount(storage: Pick<Storage, 'length' | 'key' | 'getI
 export function enqueueScan(queue: QueuedScan[], scan: QueuedScan): QueuedScan[] {
   if (queue.some((q) => q.ref === scan.ref)) return queue;
   return [...queue, scan];
+}
+
+/** Is a scan of this ticket / pass waiting to upload? (A queued undo isn't a
+ *  scan: the pass may be scanned again after it.) */
+export function hasQueuedScan(queue: readonly QueuedScan[], ticketId: string): boolean {
+  return queue.some((q) => q.ticketId === ticketId && q.kind !== 'addon-undo');
 }
 
 /** Drop the scans the server has answered. */
