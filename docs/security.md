@@ -528,6 +528,26 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   account, so the staff member can't read it as their own order. It issues
   no invoice and moves no money.
 
+### Money journal completed (mig 20261110100000)
+
+Nothing new is granted to anon or authenticated (H3 unchanged; no new table,
+RLS as above). Points to review:
+
+- **Six new writers, service role only** (`exos_journal_post_pos_reversal`,
+  `_gift_card`, `_gift_card_redemption`, `_drawer`, `_instant_payout`,
+  `_paypal_remittance`), definer with `search_path` pinned, run from triggers.
+  They read money rows Exos already wrote and post through
+  `_exos_journal_post` / `_exos_journal_sync`: same balance, idempotency and
+  append-only rules, same WARNING-not-block on failure.
+- **An entry is always the source's org.** A gift card refund posts only when
+  the order (or reservation redemption) is the card's org; a row naming
+  another org's order posts nothing (`test_journal_complete.sql` JC5a).
+- **No new money path.** Nothing here charges, refunds or pays out: card
+  refunds, instant payouts and PayPal remittances are recorded by their own
+  flows and only read here. The gift card ledger's trigger is deferred to
+  commit; a failure there is a WARNING too, so it can't fail the commit of
+  the sale or refund that wrote the ledger row.
+
 ### DICE leftovers (mig 20261108110000)
 
 Nothing new is granted to anon (H3 unchanged). Points to review:
