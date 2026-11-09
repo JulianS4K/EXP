@@ -26,7 +26,17 @@ const SESSION = {
 };
 const results = [];
 
+// Contrast is judged on what the user ends up seeing, not on a frame of a
+// fade-in: CI's faster headless Chromium reached the scan mid-animation
+// (a dialog fading in, an overlay over the live ticket) and measured
+// half-faded colors. Every animation and transition jumps to its end state.
+const SETTLE_CSS = `*, *::before, *::after {
+  animation-duration: 0s !important; animation-delay: 0s !important;
+  transition-duration: 0s !important; transition-delay: 0s !important; }`;
+
 async function scan(page, name, advisory) {
+  await page.addStyleTag({ content: SETTLE_CSS });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   const r = await new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE).analyze();
   // An advisory page (a known gap, docs/pci.md) prints its violations as
   // warnings until it's fixed, then moves to the blocking list.
@@ -38,7 +48,7 @@ async function scan(page, name, advisory) {
 }
 
 async function check(name, fn, opts = {}) {
-  const ctx = await browser.newContext({ ...devices[opts.device || 'iPhone 13'] });
+  const ctx = await browser.newContext({ ...devices[opts.device || 'iPhone 13'], reducedMotion: 'reduce' });
   await ctx.route((u) => !u.href.startsWith('http://localhost') && !u.href.startsWith('https://mock.supabase.test/'), (r) => r.abort());
   await ctx.route('https://mock.supabase.test/**', (r) => handle(r, [], opts.mock));
   // The cookie banner already answered (it has its own scan below).
