@@ -278,7 +278,8 @@ for m in \
   20261110120000_exos_leftovers_9 \
   20261111100000_exos_e2e_fixes \
   20261111110000_exos_neighborhoods \
-  20261111120000_exos_group_pay_off; do
+  20261111120000_exos_group_pay_off \
+  20261111130000_exos_journal_payouts_tax; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -516,7 +517,8 @@ for m in \
          20261110120000_exos_leftovers_9 \
          20261111100000_exos_e2e_fixes \
          20261111110000_exos_neighborhoods \
-         20261111120000_exos_group_pay_off; do
+         20261111120000_exos_group_pay_off \
+         20261111130000_exos_journal_payouts_tax; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -634,6 +636,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_dice_left
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_money_journal.sql"
 # claude/exos-journal-2: the journal completed: POS card tenders and card refunds, gift cards (sale, redemption, refund, void), instant payouts and PayPal remittances, the drawer float and count variance; whole-DB trial balance (mig 20261110100000; race: race_money_journal.sh races 5-7, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_journal_complete.sql"
+# claude/exos-journal-3: Stripe's scheduled payouts from the connected account (record, post, reverse, idempotent, scoped to the org's own account), the sales tax report read from the journal (agrees per org, currency, event and period), the Exos fee owed on a gift card part handed back (mig 20261111130000; race: race_journal_payouts.sh, CI)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_journal_payouts_tax.sql"
 # claude/exos-group-pay: group buy v2, each friend pays their own seat in a 30-minute window: holds, deadline release, cover the rest, per-seat orders, cross-group / cross-org tokens (mig 20261108120000; race: race_group_pay.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_group_pay.sql"
 # claude/exos-group-pay-off (mig 20261111120000): group pay v2 paused by the operator 2026-11-09: off by default (platform setting group_pay_enabled), the admin-only audited setter, every entry point refuses (start / claim / checkout context XGOFF, seat page NULL), an existing group stays readable; the suites above turn it on for themselves

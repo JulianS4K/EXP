@@ -29,6 +29,8 @@
 --   I8 the other org's owner reads none of org A's rows through RLS beyond
 --      what anon reads (the public catalog), nor its trial balance or audit
 --   I9 gift cards outstanding in the journal = the cards' balances (+ holds)
+--   I10 the sales tax report's net = the journal's sales tax payable, per org,
+--       currency, period (all time and split at the median tax entry) and event
 -- Steps E2E-0..33 run in order; each RAISEs 'OK  E2E-n ...'. A real bug the
 -- simulation found is FIXED in mig 20261111100000 and its step is the
 -- regression test (E2E-2, E2E-2b).
@@ -291,7 +293,8 @@ BEGIN
 END $$;
 SELECT pg_temp.check_invariants('E2E-9 sale: guest checkout on a pooled type');
 
--- E2E-10 a gift card redemption: b3, Balcony × 1 ($60): $20 from the card, $40 by card.
+-- E2E-10 a gift card redemption: b3, Balcony × 1 ($60): $20 from the card, $40 by card,
+-- $4.80 sales tax inside it (E2E-22 hands its shares back: I10).
 DO $$
 DECLARE v_hold uuid; v_ids uuid[]; q jsonb;
 BEGIN
@@ -299,7 +302,7 @@ BEGIN
   PERFORM pg_temp.act('b3');
   v_hold := public.exos_create_hold(pg_temp.u('e1'), pg_temp.u('bal'), 1);
   PERFORM pg_temp.act(NULL);
-  PERFORM pg_temp.sess('cs_e2e_gift', 'e1', 'bal', 'b3', 'e2e-b3@x.com', 1, 4000, 300, 120, NULL, NULL, NULL, NULL, 2000);
+  PERFORM pg_temp.sess('cs_e2e_gift', 'e1', 'bal', 'b3', 'e2e-b3@x.com', 1, 4000, 300, 120, NULL, NULL, NULL, NULL, 2000, 480);
   UPDATE public.exos_cart_holds SET checkout_session_id = 'cs_e2e_gift' WHERE id = v_hold;
   PERFORM public.exos_gift_card_hold(pg_temp.v('gc_code'), 'cs_e2e_gift', 2000, 'e2e-b3', pg_temp.u('A'), 'usd');
   v_ids := pg_temp.paid('cs_e2e_gift');
