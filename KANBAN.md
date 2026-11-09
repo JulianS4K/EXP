@@ -562,7 +562,8 @@ How we build it (techniques):
   `20261110110000_exos_group_pay_2`, branch `claude/exos-group-pay-2`; not on prod): friends' open Stripe pages are
   expired by `exos-reconcile-checkouts` once their seat is gone (deadline, cancel, cover, a restart; late-payment
   refund stays as the backstop), timed types (one slot per group), price-step types (one locked step per group, CAP),
-  host-only seat labels, cover / cancel in the org audit log. Left: API / MCP routes; still refused by design:
+  host-only seat labels, cover / cancel in the org audit log; abuse limits after review (maxPerAccount over the whole
+  group, a per-event ceiling on group seats, 3 starts an hour, seat-link rate limit before Stripe). Left: API / MCP routes; still refused by design:
   reserved seating, add-ons / gift cards / donations on a group seat. Never a multi-day hold: card authorizations
   last ~7 days and ticketing can't use Stripe's extended authorization.
 

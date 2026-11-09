@@ -34,6 +34,11 @@
 #   race 9 two hosts start a group of 2 at the same moment with 3 left at the
 #          price: one locks the step, the other waits and is refused with
 #          "only 1 left at this price"
+#   race 10 two hosts start a group of 6 at the same moment on an event of 40:
+#          live group seats may hold at most 10 (the per-event ceiling): one
+#          group starts, the other waits and is refused
+# A host starts at most 3 groups an hour (mig 20261110110000): age_groups
+# moves earlier groups back 2 hours between races.
 # Every race ends with the invariant: tier sold = paid seats, each seat paid
 # by exactly one order or released, never oversold.
 set -euo pipefail
@@ -46,14 +51,15 @@ F1=c7f00000-0000-0000-0000-0000000000b1; F2=c7f00000-0000-0000-0000-0000000000b2
 F3=c7f00000-0000-0000-0000-0000000000b3; F4=c7f00000-0000-0000-0000-0000000000b4; F5=c7f00000-0000-0000-0000-0000000000b5
 E=c7f00000-0000-0000-0000-0000000000e1; T=c7f00000-0000-0000-0000-0000000000d1
 T2=c7f00000-0000-0000-0000-0000000000d2; HOST2=c7f00000-0000-0000-0000-0000000000b6
+E2=c7f00000-0000-0000-0000-0000000000e2; T3=c7f00000-0000-0000-0000-0000000000d3
 cleanup() {
-  $P -c "DELETE FROM exos_tickets WHERE event_id='$E';
+  $P -c "DELETE FROM exos_tickets WHERE event_id IN ('$E','$E2');
          DELETE FROM exos_mail WHERE to_email LIKE '%@race-gp.test';
-         DELETE FROM exos_group_buys WHERE event_id='$E';
-         DELETE FROM exos_cart_holds WHERE event_id='$E';
+         DELETE FROM exos_group_buys WHERE event_id IN ('$E','$E2');
+         DELETE FROM exos_cart_holds WHERE event_id IN ('$E','$E2');
          DELETE FROM exos_price_steps WHERE event_id='$E';
          DELETE FROM exos_checkout_sessions WHERE event_id='$E';
-         DELETE FROM exos_ticket_tiers WHERE event_id='$E'; DELETE FROM exos_events WHERE id='$E';
+         DELETE FROM exos_ticket_tiers WHERE event_id IN ('$E','$E2'); DELETE FROM exos_events WHERE id IN ('$E','$E2');
          DELETE FROM exos_org_memberships WHERE org_id='$O'; DELETE FROM exos_orgs WHERE id='$O';
          DELETE FROM auth.users WHERE email LIKE '%@race-gp.test';" >/dev/null
 }
@@ -73,8 +79,14 @@ ok() { echo "OK   $1"; }
 bad() { echo "FAIL $1"; fail=1; }
 
 # A fresh group of $1 seats; prints its id. The previous one is closed first.
+# Earlier groups closed and 2 hours old (the 3-an-hour cap), their unpaid holds over.
+age_groups() {
+  $P -c "UPDATE exos_cart_holds SET status='expired' WHERE event_id IN ('$E','$E2') AND group_seat_id IS NOT NULL AND status='active';
+         UPDATE exos_group_buys SET status=CASE WHEN status='open' THEN 'closed' ELSE status END,
+                created_at=now() - interval '2 hours', deadline=now() - interval '90 minutes' WHERE event_id IN ('$E','$E2');" >/dev/null
+}
 new_group() {
-  $P -c "UPDATE exos_group_buys SET status='closed' WHERE event_id='$E' AND status='open';" >/dev/null
+  age_groups
   $P -c "WITH me AS MATERIALIZED (SELECT set_config('app.uid','$HOST',false), set_config('app.jwt','{\"email\":\"host@race-gp.test\"}',false))
          SELECT public.exos_group_buy_start('$E','$T',$1)->>'id' FROM me;"
 }
@@ -246,7 +258,7 @@ start_as() {  # host uid, host email, qty: the group id (or the error)
 
 # race 8: two friends pay at once at the step boundary.
 steps 2
-$P -c "UPDATE exos_group_buys SET status='closed' WHERE event_id='$E' AND status='open';" >/dev/null
+age_groups
 G=$(start_as "$HOST" host@race-gp.test 2)
 S1=$($P -c "SELECT id FROM exos_price_steps WHERE tier_id='$T2' AND sort_order=1")
 pub=$($P -c "SELECT public.exos_tier_current_price('$T2')->>'price_cents'")
@@ -272,7 +284,8 @@ else bad "race 8: public $pub / issued $r1 $r2 / tickets at the step $tk / latch
 
 # race 9: two hosts start a group of 2 at once with 3 left at the price.
 $P -c "DELETE FROM exos_tickets WHERE tier_id='$T2'; UPDATE exos_ticket_tiers SET sold=0 WHERE id='$T2';
-       UPDATE exos_group_buys SET status='closed' WHERE event_id='$E' AND status='open';" >/dev/null
+" >/dev/null
+age_groups
 steps 3
 S1=$($P -c "SELECT id FROM exos_price_steps WHERE tier_id='$T2' AND sort_order=1")
 TMPD=$(mktemp -d)
@@ -287,4 +300,23 @@ groups=$($P -c "SELECT count(*) FROM exos_group_buys WHERE tier_id='$T2' AND sta
 if [[ "$a" =~ ^[0-9a-f-]{36}\|$ && "$b" == *"only 1 left at this price"* && "$locked" == 2 && "$groups" == 1 ]]; then
   ok "race 9 two hosts at the step boundary at once: one group locks the step, the other is refused (1 left)"
 else bad "race 9: host 1 '$a' / host 2 '$b' / locked holds $locked / open groups $groups"; fi
+
+# race 10: two hosts at once against the per-event ceiling of group seats.
+age_groups
+$P -c "INSERT INTO exos_events(id,org_id,name,slug,status,starts_at,total_tickets,tickets_sold,created_by)
+         VALUES ('$E2','$O','Race 2','race-gp-2','published',now() + interval '10 days',0,0,'$A');
+       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility) VALUES ('$T3','$E2','GA',25,40,0,'public');" >/dev/null
+TMPD=$(mktemp -d)
+( r=$($P -c "WITH me AS MATERIALIZED (SELECT set_config('app.uid','$HOST',false), set_config('app.jwt','{\"email\":\"host@race-gp.test\"}',false))
+              SELECT public.exos_group_buy_start('$E2','$T3',6)->>'id', pg_sleep(1.5) FROM me;" 2>&1 || true); echo "$r" > "$TMPD/a.out" ) &
+sleep 0.3
+( r=$($P -c "WITH me AS MATERIALIZED (SELECT set_config('app.uid','$HOST2',false), set_config('app.jwt','{\"email\":\"host2@race-gp.test\"}',false))
+              SELECT public.exos_group_buy_start('$E2','$T3',6)->>'id' FROM me;" 2>&1 || true); echo "$r" > "$TMPD/b.out" ) &
+wait
+a=$(cat "$TMPD/a.out"); b=$(cat "$TMPD/b.out"); rm -rf "$TMPD"
+held=$($P -c "SELECT coalesce(sum(quantity),0) FROM exos_cart_holds WHERE event_id='$E2' AND group_seat_id IS NOT NULL AND status='active'")
+avail=$($P -c "SELECT public.exos_tier_available('$T3')")
+if [[ "$a" =~ ^[0-9a-f-]{36}\|$ && "$b" == *"lots of groups are holding seats"* && "$held" == 6 && "$avail" == 34 ]]; then
+  ok "race 10 two hosts at once past the per-event group ceiling: one group of 6 starts, the other waits and is refused"
+else bad "race 10: host 1 '$a' / host 2 '$b' / group seats held $held / available $avail"; fi
 exit $fail
