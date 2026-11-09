@@ -272,7 +272,8 @@ for m in \
   20261108120000_exos_group_pay \
   20261108130000_exos_claim_alias_fix \
   20261109100000_exos_org_audit \
-  20261109110000_exos_security_hygiene; do
+  20261109110000_exos_security_hygiene \
+  20261110120000_exos_leftovers_9; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -504,7 +505,8 @@ for m in \
          20261108120000_exos_group_pay \
          20261108130000_exos_claim_alias_fix \
          20261109100000_exos_org_audit \
-         20261109110000_exos_security_hygiene; do
+         20261109110000_exos_security_hygiene \
+         20261110120000_exos_leftovers_9; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -628,3 +630,5 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_claim_ali
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_org_audit.sql"
 # claude/exos-hygiene: advisor sweep 2026-11-09: probe table, anon off exos sequences and two helpers, auth.* wrapped in exos policies (same access), parked guest tickets in matched seats, seat view ids (mig 20261109110000)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_security_hygiene.sql"
+# claude/exos-leftovers-9 (mig 20261110120000): partner / organizer reservations take checkout answers (required for partners, conditional, cross-org), API undo of an add-on scan, the event report's changes since publish
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_leftovers_9.sql"

@@ -104,6 +104,35 @@ export function parseOrderItems(raw: unknown): OrderItem[] {
   });
 }
 
+/**
+ * Checkout-question answers on a reservation (mig 20261110120000):
+ * `answers: { order: { <question id>: value }, tickets: [{ <question id>: value }, ...] }`,
+ * top-level or inside the wrapper (`ticket_reservation`, `comp`). A Rails form
+ * body's `tickets` hash ({ "0": {...}, "1": {...} }) becomes a list in key
+ * order. undefined when none was sent; the SQL checks the rest (questions,
+ * options, required ones for partners).
+ */
+export function reservationAnswersParam(body: unknown, wrapper: string): Record<string, unknown> | undefined {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const b = body as Record<string, unknown>;
+  const inner = b[wrapper] && typeof b[wrapper] === 'object' && !Array.isArray(b[wrapper])
+    ? (b[wrapper] as Record<string, unknown>).answers : undefined;
+  const raw = inner ?? b.answers;
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ParamError('answers must be an object: { order: { <question id>: value }, tickets: [{ <question id>: value }] }.');
+  }
+  const a = { ...(raw as Record<string, unknown>) };
+  const t = a.tickets;
+  if (t && typeof t === 'object' && !Array.isArray(t)) {
+    const keys = Object.keys(t);
+    if (!keys.every((k) => /^\d{1,3}$/.test(k))) throw new ParamError('answers.tickets must be a list, one entry per ticket.');
+    a.tickets = keys.sort((x, y) => Number(x) - Number(y)).map((k) => (t as Record<string, unknown>)[k]);
+  }
+  if (JSON.stringify(a).length > 100_000) throw new ParamError('answers are too long.');
+  return a;
+}
+
 /** Attendee and bookkeeping fields, as the SQL core's p_attrs (only those sent). */
 export function reservationAttrs(p: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};

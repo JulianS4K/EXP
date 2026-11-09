@@ -5,7 +5,7 @@
 // admins); the SQL checks the role, anyone else gets the notice.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { ArrowLeft, Download } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -13,7 +13,7 @@ import { getOrganization, getUserRoleInOrg } from '../lib/orgs';
 import { listOrgEvents } from '../lib/financeExtrasApi';
 import { csvFileName, downloadCsv } from '../lib/csv';
 import {
-  actionLabel, actorText, amountLabel, AUDIT_GROUP_NAMES, auditCsv, changeSummary, GROUP_LABEL, sourceLabel,
+  actionLabel, actorText, amountLabel, AUDIT_GROUP_NAMES, auditCsv, changeSummary, eventFilterFromSearch, GROUP_LABEL, sourceLabel,
   type AuditFilters, type AuditGroup, type AuditRow,
 } from '../lib/orgAudit';
 import { allOrgAudit, listOrgAudit, logExport } from '../lib/orgAuditApi';
@@ -29,7 +29,12 @@ export default function OrgActivity() {
   const [orgName, setOrgName] = useState('');
   const [events, setEvents] = useState<{ id: string; name: string }[]>([]);
   const [actors, setActors] = useState<{ uid: string; label: string }[]>([]);
-  const [filters, setFilters] = useState<AuditFilters>({});
+  // A link from an event report (?event=<id>) opens filtered to that event.
+  const { search } = useLocation();
+  const [filters, setFilters] = useState<AuditFilters>(() => {
+    const eventId = eventFilterFromSearch(search);
+    return eventId ? { eventId } : {};
+  });
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [next, setNext] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);

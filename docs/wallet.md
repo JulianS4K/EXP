@@ -273,7 +273,14 @@ of the same message, and back fields can't be scanned), so the code can't ride o
   so an offline door checks them too (`verifyAddonWalletWithKeys`, `src/lib/barcode.ts`).
 - Static on purpose: no push or update path for add-on passes. A refunded or transferred add-on's Apple pass keeps
   showing its code, which the door refuses; Google's object is left as stored. A reissue (a new epoch) isn't built.
-- No SPA button yet: wallets aren't configured in prod (every route answers 503 until they are).
+- **The button** (claude/exos-leftovers-9): on the ticket page, each add-on code that can still be used (active, its
+  code drawn for this account) gets "Add to Apple Wallet" / "Add to Google Wallet" under it, named for the add-on
+  ("Add to Apple Wallet: VIP lounge 1 of 2"). It is hidden exactly when the ticket's buttons are: the same session
+  probe (`POST /exos-wallet/pass` for the nil ticket; 503 = not configured), the same platform rule, and a 503 on a
+  click hides that wallet for the session. Inside an iOS in-app browser Apple's button is left out (the ticket's "open
+  in Safari" escape covers it). Code: `AddonWalletButtons` in `src/components/WalletButtons.tsx`,
+  `fetchAddonPassApple` / `fetchAddonPassGoogleUrl` in `src/lib/walletApi.ts`, `addonWalletEligible` in
+  `src/lib/walletButtons.ts`. A 409 `voided` reads "This add-on was refunded…". Smoke: "add-on wallet button: …".
 - Tests: `src/lib/wallet/addonPass.test.ts` (the codes against SQL vectors, the door check, both builders, the save
   link), `tests/exos/test_dice_leftovers.sql` DL5.
 

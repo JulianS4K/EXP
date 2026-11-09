@@ -831,6 +831,9 @@ export const ROUTES: readonly ApiRoute[] = [
   // docs/api/audit.json): the org audit log, newest first. Read-only; the new
   // scope audit:read (owner and finance credentials by default).
   { id: 'list-audit', method: 'GET', auth: K, path: '/audit', scope: 'audit:read', paged: true },
+  // claude/exos-leftovers-9 (mig 20261110120000, docs/partner-sales.md): the
+  // checkout questions a partner reservation answers (partner key).
+  { id: 'public-list-questions', method: 'GET', auth: P, path: '/public/confirms/:id/questions', scope: null, paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

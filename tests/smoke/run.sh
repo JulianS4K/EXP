@@ -7,6 +7,13 @@ cd "$(dirname "$0")/../.."
 PORT="${SMOKE_PORT:-4174}"
 export SMOKE_BASE="${SMOKE_BASE:-http://localhost:$PORT/bridge}"
 OUT=$(mktemp -d)
+PREVIEW=
+# The build is ~7.5 MB a run: remove it on every exit (and stop the preview).
+cleanup() {
+  if [ -n "$PREVIEW" ]; then kill -- -"$PREVIEW" 2>/dev/null || true; fi
+  rm -rf "$OUT"
+}
+trap cleanup EXIT
 # A test publishable key turns paid checkout on (lib/payments.ts); Stripe's page
 # itself is stubbed in smoke.mjs, so nothing reaches Stripe.
 VITE_SUPABASE_URL=https://mock.supabase.test VITE_SUPABASE_ANON_KEY=anon-test VITE_STRIPE_PUBLISHABLE_KEY=pk_test_smoke \
@@ -20,7 +27,6 @@ fi
 # it in its own process group and kill the group.
 setsid npx vite preview --outDir "$OUT" --port "$PORT" --strictPort >/dev/null 2>&1 &
 PREVIEW=$!
-trap 'kill -- -$PREVIEW 2>/dev/null || true' EXIT
 for _ in $(seq 1 30); do curl -sf "http://localhost:$PORT/bridge/" >/dev/null && break; sleep 0.5; done
 # Both suites run even when the first fails, so one CI run reports both.
 rc=0
