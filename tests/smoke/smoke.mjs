@@ -1450,6 +1450,44 @@ await run('group pay: the host sees each seat live, texts a link, and covers the
     { id: 's3', seat_no: 3, state: 'waiting', path: '/group-pay/seat/' + 'bb'.repeat(16), paid_at: null, order_status: null },
   ] }) } } });
 
+// Group pay 2 (mig 20261110110000): the host names a seat (saved on the seat
+// row, host page only), and a price-step / timed group shows its locked price
+// and slot.
+const savedLabels = {};
+const labelGroup = () => ({
+  id: GROUP, event_id: EV, tier_id: TIER2, quantity: 3, deadline: inMinutes(20), status: 'open', server_now: new Date().toISOString(),
+  can_cover: true, counts: { paid: 0, paying: 0, waiting: 3, released: 0 }, slot_id: '20261112T1030', unit_price_cents: 2000,
+  seats: [
+    { id: 's1', seat_no: 1, state: 'waiting', label: 'Sam', path: '/group-pay/seat/' + 'aa'.repeat(16), paid_at: null, order_status: null },
+    { id: 's2', seat_no: 2, state: 'waiting', label: null, path: '/group-pay/seat/' + 'ef'.repeat(16), paid_at: null, order_status: null },
+    { id: 's3', seat_no: 3, state: 'waiting', label: savedLabels.s3 ?? null, path: '/group-pay/seat/' + 'bb'.repeat(16), paid_at: null, order_status: null },
+  ],
+});
+await run('group pay: the host names a seat; a locked step price and the slot show on the host page', async (page, log) => {
+  await page.goto(BASE + '/group-pay/' + GROUP);
+  await expectText(page, 'Seat 1: Sam');
+  await expectText(page, 'at $20.00 each, entry 2026-11-12 10:30');
+  const field = page.getByTestId('seat-label-3');
+  assert(await field.getAttribute('aria-label') === 'Name for seat 3 (only you see this)', 'the field is labelled');
+  await field.fill('  Jo  ');
+  await field.press('Enter');
+  await until(async () => log.some((l) => l.startsWith('PATCH exos_group_buy_seats')), 'the label is saved');
+  const patch = log.find((l) => l.startsWith('PATCH exos_group_buy_seats'));
+  assert(patch.includes('id=eq.s3') && patch.includes('{"label":"Jo"}'), 'saved on seat 3, trimmed: ' + patch);
+  savedLabels.s3 = 'Jo';  // what the next poll of the group reads
+  await expectText(page, 'Seat 3: Jo');
+  assert(await page.getByRole('button', { name: /Cover the rest: 3 seats, \$60\.00/ }).count() === 1, 'the cover pays the locked price per seat');
+}, { signedIn: true, mock: { rpcs: { exos_group_buy_get: labelGroup }, tables: { exos_group_buy_seats: [{ id: 's3', label: 'Jo' }] } } });
+
+await run('group pay: a friend\'s seat page shows the locked price and the slot, never the host\'s names', async (page) => {
+  await page.goto(BASE + '/group-pay/seat/' + SEAT_TOKEN);
+  await expectText(page, 'Seat 2 of 4');
+  await expectText(page, '$20.00');
+  await expectText(page, 'Entry slot: 2026-11-12 10:30');
+  const body = await page.locator('body').innerText();
+  assert(!body.includes('$50.00') && !body.includes('Sam'), 'the locked price, and no labels');
+}, { mock: { rpcs: { exos_group_seat_view: (b) => (b.p_token === SEAT_TOKEN ? seatView({ unit_price_cents: 2000, slot_id: '20261112T1030' }) : null) } } });
+
 // claude/exos-org-audit: Org → Activity, the audit log (mig 20261109100000).
 const auditRow = (id, over = {}) => ({
   id, at: '2026-11-09T15:04:22Z', event_id: EV, event_name: 'Fall Party', actor_uid: UID, actor_kind: 'user', actor_ref: null,

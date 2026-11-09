@@ -101,6 +101,7 @@ MIGRATIONS=(
   20261108130000_exos_claim_alias_fix  # claude/exos-harness-full: transfer claims fail in prod (t.order_ref ambiguous); conditional patch, no cron
   20261109100000_exos_org_audit       # claude/exos-org-audit: org audit log; 34 marker patches (2 conditional: exos_set_org_comp_budget, exos_void_ticket); no cron; apply before deploying exos-api (audit:read)
   20261109110000_exos_security_hygiene  # claude/exos-hygiene: advisor sweep (probe table, sequence + helper grants, RLS initplan wraps, matched-seats parked key, seat view ids); no cron
+  20261110110000_exos_group_pay_2     # claude/exos-group-pay-2: group pay on timed / price-step types, seat labels, friends' open pages listed for expiry (exos-reconcile-checkouts); no cron; deploy exos-checkout + exos-reconcile-checkouts after
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

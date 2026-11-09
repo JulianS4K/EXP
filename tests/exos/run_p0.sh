@@ -272,7 +272,8 @@ for m in \
   20261108120000_exos_group_pay \
   20261108130000_exos_claim_alias_fix \
   20261109100000_exos_org_audit \
-  20261109110000_exos_security_hygiene; do
+  20261109110000_exos_security_hygiene \
+  20261110110000_exos_group_pay_2; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -504,7 +505,8 @@ for m in \
          20261108120000_exos_group_pay \
          20261108130000_exos_claim_alias_fix \
          20261109100000_exos_org_audit \
-         20261109110000_exos_security_hygiene; do
+         20261109110000_exos_security_hygiene \
+         20261110110000_exos_group_pay_2; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

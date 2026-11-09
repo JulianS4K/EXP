@@ -148,9 +148,9 @@ export const PRODUCT_FACTS: ProductFact[] = [
   },
   {
     id: 'group-pay', audience: 'fan', status: 'at_launch',
-    claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes and texts each friend a link to pay for their own seat, and can cover whatever is left.',
+    claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes (timed-entry and price-step tickets too, at one slot and one locked price) and texts each friend a link to pay for their own seat, and can cover whatever is left.',
     code: ['src/lib/groupPay.ts', 'src/components/GroupPayStart.tsx', 'src/views/GroupPayHost.tsx', 'src/views/GroupPaySeat.tsx',
-      'supabase/migrations/20261108120000_exos_group_pay.sql'],
+      'supabase/migrations/20261108120000_exos_group_pay.sql', 'supabase/migrations/20261110110000_exos_group_pay_2.sql'],
     note: 'Each friend pays in the normal checkout, so it works once paid checkout is on.',
   },
   {

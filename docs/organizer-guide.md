@@ -272,11 +272,22 @@ codes and limits.
     countdown. Before the time runs out they can **cover the rest**: one checkout for every unpaid
     seat, issued to the host, who can then send the tickets on or split the cost. They can also end
     the group early.
-  - When the 30 minutes are up, unpaid seats **go back on sale** at once. A payment that comes in
-    after that (a checkout page left open) isn't issued and is refunded in full automatically, as is
-    a friend's payment for a seat the host already covered.
-  - Not for reserved seating, timed entry, price steps, hidden (code-only) types or free tickets. One
-    open group per buyer per event; a host can't hold seats for longer than 30 minutes, ever.
+  - When the 30 minutes are up, unpaid seats **go back on sale** at once, and a friend's checkout page
+    that's still open is **closed** (within about 15 minutes, by the checkout safety sweep). The same
+    happens to a friend's page when the host ends the group or covers that seat. A payment that still
+    gets in first isn't issued and is refunded in full automatically.
+  - **Price steps** (mig `20261110110000`): a group pays one price. Starting it locks the current
+    step's price on every seat, and the seats count against that step for the 30 minutes. If the
+    step has fewer places left than the group has seats, the start is refused with how many are left
+    at that price (the same rule as a normal order). Each friend pays the locked price, and so does
+    "cover the rest", even if the public price has moved on since.
+  - **Timed entry**: the host picks the date and time slot first; every seat is held in that slot
+    (the slot must have room for the whole group) and every friend's ticket is for it.
+  - **Seat names**: the host can type a name next to each seat ("Sam") to keep track of who's who.
+    Only the host sees it; it's never on the friend's seat page.
+  - Not for reserved seating, hidden (code-only) types or free tickets (including a price step that's
+    free right now), and a group seat is just the ticket: no add-ons, gift cards or donations on it.
+    One open group per buyer per event; a host can't hold seats for longer than 30 minutes, ever.
 
 ### Changing the date
 

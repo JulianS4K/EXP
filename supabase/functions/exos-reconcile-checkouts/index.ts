@@ -17,6 +17,14 @@
 //      20260925020000) so the sweep makes progress instead of re-reading the
 //      same newest rows.
 //
+//   0. Group pay (mig 20261110110000): friends' open Checkout pages whose
+//      seat is gone (the group's deadline passed, the host ended it or
+//      covered the seat, the friend started over) are expired at Stripe
+//      (POST /v1/checkout/sessions/:id/expire, the platform's own account;
+//      the only Stripe write added) and marked expired
+//      (_shared/groupPages.ts). A page paid just before is left alone: its
+//      fulfilment refuses the seat and the auto-refund below pays it back.
+//
 //   3. Fee actuals backfill (mig 20260929131000): settled payments whose
 //      Stripe fee / net / transfer weren't recorded (the webhook's best-effort
 //      read failed or timed out, or the order was fulfilled by step 1) ->
@@ -33,6 +41,7 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { autoRefundIdempotencyKey, autoRefundParams, ledgerRefundStatus } from "../_shared/auto-refund.ts";
 import { chargeModelFromMetadata } from "../_shared/payouts/commissionMethods.ts";
 import { recordFeeActuals } from "../_shared/feeActuals.ts";
+import { expireGroupPages, groupPageReason } from "../_shared/groupPages.ts";
 
 const stripeKey = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const stripe = new Stripe(stripeKey, {
@@ -62,8 +71,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const out = {
     checked: 0, fulfilled: 0, expired: 0, swept: 0, refunded: 0, already_refunded: 0, errors: 0,
     fees_recorded: 0, fees_pending: 0,
+    group_pages_expired: 0, group_pages_paid: 0,
   };
   const cutoff = new Date(Date.now() - GRACE_MS).toISOString();
+
+  // 0. Group pay: close friends' pages that can't be issued any more. Before
+  //    mig 20261110110000 (no RPC) there is nothing to do.
+  const pages = await expireGroupPages(stripe, {
+    due: async (limit) => {
+      const { data, error } = await sb.rpc("exos_group_pages_to_expire", { p_limit: limit });
+      if (error && ["PGRST202", "42883"].includes(String(error.code))) return [];
+      if (error) throw new Error(error.message);
+      return (data ?? []) as { session_id: string; why: string }[];
+    },
+    markExpired: async (sessionId, why) => {
+      const { data, error } = await sb.from("exos_checkout_sessions")
+        .update({ status: "expired", failure_reason: groupPageReason(why) })
+        .eq("session_id", sessionId).eq("status", "pending").select("session_id");
+      if (error) throw new Error(error.message);
+      return (data ?? []).length > 0;
+    },
+  }, { log: (msg, err) => console.error(`reconcile: ${msg}`, err ?? "") });
+  out.group_pages_expired = pages.expired + pages.already_closed;
+  out.group_pages_paid = pages.paid;
+  out.errors += pages.errors;
 
   // 1. Pending-but-maybe-paid: ask Stripe the source of truth. PayPal
   //    sessions (pp_…, mig 20261031220000) are exos-paypal's reconcile's.
