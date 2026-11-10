@@ -793,6 +793,11 @@ How the door treats a fair-day list:
 - Without re-entry, a ticket gets in **once that day**, at any gate scanning a list for that day
   (two gates of one day share it). A ticket used yesterday gets in today.
 - With re-entry, the in / out rules above apply, per list.
+- Every entry counts, whichever list it was on: a scan with no list, on an ordinary list or on a list
+  that was deleted since counts for its date in the event's time zone. So a ticket let in at an
+  ordinary gate today is refused at today's fair-day list, and an any-day pass used at an ordinary
+  gate has used its day.
+- A ticket refunded or sent to a friend while it is being scanned is refused, never let in.
 - The same rules hold offline (the saved list knows which days a ticket used), for check in by name
   and in the API's check-in. An offline admission the server refuses as a day already used is logged
   as a refusal, not recorded as attended.

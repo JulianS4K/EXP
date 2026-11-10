@@ -2,7 +2,7 @@
 // which mirror SQL _exos_checkin_day_refusal (tests/exos/test_fair_day.sql).
 import { describe, expect, it } from 'vitest';
 import { decideScan, parseDoorCode, type DoorCachedTicket, type ScanDecisionInput } from './decide';
-import { dayListRefusal, describeList, enteredOnDay, mapCheckinListRow, type DoorCheckinList } from './lists';
+import { dayListRefusal, describeList, enteredOnDay, localDayKey, mapCheckinListRow, type DoorCheckinList } from './lists';
 import { listsSignature } from './roster';
 
 const EVENT = 'eeeeeeee-0000-4000-8000-000000000001';
@@ -108,5 +108,35 @@ describe('fair day lists: the door offline', () => {
       .toEqual(reject('day-limit'));
     expect(decideScan(offline({ used: true, tierId: 'multi', lists: { d1: 'entry' } }, D2, { byName: true })))
       .toEqual({ ...admit, byName: true });
+  });
+});
+
+// Security review of 3610a22: every entry counts, whatever its list. The
+// device keeps a 'day:YYYY-MM-DD' key (the event's zone) for an entry off the
+// fair-day lists (no list, an ordinary list, a deleted list), as the roster does.
+describe('fair day lists: entries off the day lists count', () => {
+  it('a day key is the local date in the event zone, UTC when unknown', () => {
+    const t = Date.parse('2027-08-21T05:30:00Z');
+    expect(localDayKey(t, 'America/Phoenix')).toBe('day:2027-08-20');
+    expect(localDayKey(t, 'Europe/Berlin')).toBe('day:2027-08-21');
+    expect(localDayKey(t, null)).toBe('day:2027-08-21');
+    expect(localDayKey(t, 'Mars/Olympus')).toBe('day:2027-08-21');
+  });
+  it('a no-list entry today, then today\'s day list: used', () => {
+    expect(dayListRefusal(D2, { 'day:2027-08-21': 'entry' }, LISTS, null)).toBe('used');
+    expect(enteredOnDay(D2, { 'day:2027-08-21': 'entry' }, LISTS)).toBe(true);
+    expect(dayListRefusal(D2, { 'day:2027-08-20': 'entry' }, LISTS, null)).toBeNull();
+    expect(decideScan(offline({ used: true, tierId: 'multi', lists: { 'day:2027-08-21': 'entry' } }, D2))).toEqual(reject('used'));
+  });
+  it('an ordinary-list (or deleted-list) entry on day 1 uses an any-day pass\'s day', () => {
+    expect(dayListRefusal(D2, { main: 'entry', 'day:2027-08-20': 'entry' }, LISTS, 1)).toBe('day-limit');
+    expect(decideScan(offline({ used: true, tierId: 'any', lists: { 'day:2027-08-20': 'entry' } }, D2))).toEqual(reject('day-limit'));
+    // A day key and a day list for the same day are one day.
+    expect(dayListRefusal(D3, { d1: 'entry', 'day:2027-08-20': 'entry' }, LISTS, 2)).toBeNull();
+    // Re-entry day list: today's own day key doesn't count against the limit.
+    expect(dayListRefusal(R2, { 'day:2027-08-21': 'entry' }, RLISTS, 1)).toBeNull();
+  });
+  it('an ordinary list\'s key alone is not a day (its day key is)', () => {
+    expect(dayListRefusal(D2, { main: 'entry' }, [...LISTS, { ...D2, id: 'main', entryDay: null }], 1)).toBeNull();
   });
 });

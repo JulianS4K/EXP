@@ -9,6 +9,10 @@
 #          (offline replays): one admits, the other answers 'day-limit'
 #   race 3 two tabs run the fair setup for one event at once: one sets it up,
 #          the other is refused (23505); one set of lists
+#   race 4 a 3-day pass used on day 1 is refunded (voided) while a day 3 gate
+#          scans it: the scan read 'used' before the refund committed, waits
+#          on the ticket's lock, re-reads it and answers 'voided'; no entry
+#   race 5 the same with a transfer started mid-scan: 'in-transfer'; no entry
 # The audit log is append-only, so each run uses fresh ids (its rows stay;
 # the fixtures are removed).
 set -euo pipefail
@@ -18,9 +22,11 @@ P="psql -h $H -p $PORT -U $U -d $DB -v ON_ERROR_STOP=1 -qAt"
 RUN=$($P -c "SELECT substr(md5(random()::text || clock_timestamp()::text), 1, 8)")
 id() { $P -c "SELECT md5('race-fd:$RUN:$1')::uuid"; }
 O=$(id org); A=$(id owner); S=$(id scanner); B=$(id buyer); E=$(id event); E2=$(id event2)
-K1=$(id multi); K2=$(id any)
+K1=$(id multi); K2=$(id any); K3=$(id refunded); K4=$(id transferred); TR=$(id transfer)
 cleanup() {
   $P -c "DELETE FROM exos_scan_rejects WHERE event_id IN ('$E','$E2');
+         UPDATE exos_tickets SET pending_transfer_id = NULL WHERE event_id IN ('$E','$E2');
+         DELETE FROM exos_transfers WHERE event_id IN ('$E','$E2');
          DELETE FROM exos_checkin_client_refs WHERE event_id IN ('$E','$E2');
          DELETE FROM exos_event_checkins WHERE event_id IN ('$E','$E2');
          DELETE FROM exos_tickets WHERE event_id IN ('$E','$E2');
@@ -60,7 +66,10 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner-$
        INSERT INTO exos_tickets(id,event_id,org_id,tier_id,tier_name,buyer_id,owner_id,buyer_email,status,barcode_secret,price_paid,order_ref,channel_source)
          SELECT k, '$E', '$O', (SELECT id FROM exos_ticket_tiers WHERE event_id='$E' AND name=n), n, '$B', '$B', 'b@race-fd.test',
                 'active', 'sek-' || k, 35, 'cs_race_fd_$RUN', 'stripe'
-           FROM (VALUES ('$K1'::uuid, '3-day pass'), ('$K2'::uuid, 'Any-day pass')) v(k, n);" >/dev/null
+           FROM (VALUES ('$K1'::uuid, '3-day pass'), ('$K2'::uuid, 'Any-day pass'), ('$K3'::uuid, '3-day pass'),
+                        ('$K4'::uuid, '3-day pass')) v(k, n);
+       INSERT INTO exos_transfers(id,ticket_id,org_id,sender_id,receiver_email,status,event_id,created_at,updated_at)
+         VALUES ('$TR','$K4','$O','$B','friend@race-fd.test','pending','$E',now(),now());" >/dev/null
 list() { $P -c "SELECT id FROM exos_checkin_lists WHERE event_id='$E' AND name='$1'"; }
 L3=$(list 'Day 3'); L3N=$(list 'Day 3 north'); L1=$(list 'Day 1'); L2=$(list 'Day 2')
 # One scan as the scanner, held open for $5 seconds before committing.
@@ -117,5 +126,25 @@ if [[ "$r1" == true && "$r2" == *"already has fair-day lists"* && "$n" == 3 ]]; 
 else
   echo "FAIL race 3: [$r1] [$r2] lists $n"; fail=1
 fi
+# races 4-5: used on day 1 first, then the state changes while a day 3 gate scans.
+for k in "$K3" "$K4"; do
+  $P -c "$(scan_sql "$k" "$L1" "(now() - interval '45 hours')" 0)" >/dev/null
+done
+race_state() {  # $1 ticket, $2 the UPDATE's SET clause, $3 expected reason, $4 label
+  $P -c "BEGIN; UPDATE exos_tickets SET $2 WHERE id='$1'; SELECT pg_sleep(2); COMMIT;" >/dev/null 2>&1 &
+  sleep 0.5
+  $P -c "$(scan_sql "$1" "$L3" NULL 0)" >"$OUT2" 2>&1
+  wait
+  local r n
+  r=$(cat "$OUT2")
+  n=$($P -c "SELECT count(*) FROM exos_event_checkins WHERE ticket_id='$1' AND list_id='$L3'")
+  if [[ "$r" == *"$3"* && "$n" == 0 ]]; then
+    echo "OK   $4: '$3', no entry"
+  else
+    echo "FAIL $4: [$r] day 3 entries $n"; fail=1
+  fi
+}
+race_state "$K3" "status='voided', voided_at=now()" voided "race 4 refunded while a day gate scans it"
+race_state "$K4" "pending_transfer_id='$TR'" in-transfer "race 5 transfer started while a day gate scans it"
 rm -f "$OUT1" "$OUT2"
 exit $fail
