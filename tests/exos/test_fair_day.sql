@@ -18,6 +18,13 @@
 --   FD5 offline replay and by name follow the day rule; a refused replay
 --       logs 'used' and writes no forced row; the roster's list_state covers
 --       day lists
+--   FD7 the security review of 3610a22: a voided / mid-transfer ticket is
+--       refused at a day list (the interleaved case is race_fair_day.sh
+--       races 4-5); every prior entry counts, whatever its list: a no-list
+--       entry then a day list the same day is 'used', an ordinary-list entry
+--       on another day uses an any-day pass's day, a deleted list's entry
+--       still counts (by its scan's local date); the roster's day keys;
+--       _exos_event_tz falls back to UTC
 --   FD6 exos_door_throughput: 15-minute buckets per gate and list (tickets
 --       and lot), gate totals (devices, peak), in-park now on re-entry lists
 --       (a person inside counted once), refusals by reason; scanner of the
@@ -82,6 +89,10 @@ BEGIN
   RETURN public.exos_check_in_ticket(p_pass, 'camera', 'verified', pg_temp.acode(p_pass, clock_timestamp()), pg_temp.u(p_event),
                                      NULL, NULL, 'Lot 1', p_list, p_dir);
 END $$;
+-- Today in the fair's zone (e1 / e2 are in America/Phoenix).
+CREATE FUNCTION pg_temp.today() RETURNS date LANGUAGE sql STABLE AS $$
+  SELECT (now() AT TIME ZONE 'America/Phoenix')::date
+$$;
 -- The editor's plan (src/lib/fairSetup.ts builds the same shape).
 CREATE FUNCTION pg_temp.plan(p_reentry boolean) RETURNS jsonb LANGUAGE sql STABLE AS $$
   SELECT jsonb_build_object(
@@ -98,13 +109,13 @@ CREATE FUNCTION pg_temp.plan(p_reentry boolean) RETURNS jsonb LANGUAGE sql STABL
     'lists', jsonb_build_array(
       jsonb_build_object('name', 'Day 1', 'admits', 'tickets', 'tier_keys', jsonb_build_array('day-1', 'multi', 'any', 'flex'),
         'allow_reentry', p_reentry, 'valid_from', now() - interval '50 hours', 'valid_until', now() - interval '38 hours',
-        'entry_day', current_date - 2),
+        'entry_day', pg_temp.today() - 2),
       jsonb_build_object('name', 'Day 2', 'admits', 'tickets', 'tier_keys', jsonb_build_array('day-2', 'multi', 'any', 'flex'),
         'allow_reentry', p_reentry, 'valid_from', now() - interval '26 hours', 'valid_until', now() - interval '14 hours',
-        'entry_day', current_date - 1),
+        'entry_day', pg_temp.today() - 1),
       jsonb_build_object('name', 'Day 3', 'admits', 'tickets', 'tier_keys', jsonb_build_array('day-3', 'multi', 'any', 'flex'),
         'allow_reentry', p_reentry, 'valid_from', now() - interval '2 hours', 'valid_until', now() + interval '10 hours',
-        'entry_day', current_date),
+        'entry_day', pg_temp.today()),
       jsonb_build_object('name', 'Parking & camping', 'admits', 'addons', 'addon_keys', jsonb_build_array('parking', 'camping'),
         'allow_reentry', true, 'valid_from', now() - interval '50 hours', 'valid_until', now() + interval '10 hours')))
 $$;
@@ -151,7 +162,7 @@ BEGIN
     ASSERT (SELECT prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp'] FROM pg_proc WHERE oid = f::regprocedure),
            'FD0 definer with a pinned search_path: ' || f;
   END LOOP;
-  FOREACH f IN ARRAY ARRAY['public._exos_checkin_day_refusal(uuid,uuid,uuid)', 'public._exos_fair_text(jsonb,text,integer,boolean)',
+  FOREACH f IN ARRAY ARRAY['public._exos_checkin_day_refusal(uuid,uuid,uuid)', 'public._exos_event_tz(uuid)', 'public._exos_fair_text(jsonb,text,integer,boolean)',
                            'public._exos_fair_int(jsonb,text,bigint,bigint,boolean)'] LOOP
     ASSERT NOT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE'),
            'FD0 helper private: ' || f;
@@ -173,7 +184,7 @@ BEGIN
   ASSERT pg_temp.st($q$INSERT INTO public.exos_ticket_tiers (event_id, name, price, capacity, max_entry_days)
                        VALUES ('$q$ || pg_temp.u('e1') || $q$', 'x', 1, 1, 0)$q$) LIKE '23514%', 'FD0 max_entry_days >= 1';
   ASSERT pg_temp.st($q$INSERT INTO public.exos_checkin_lists (event_id, name, admits, entry_day)
-                       VALUES ('$q$ || pg_temp.u('e1') || $q$', 'x', 'addons', current_date)$q$) LIKE '23514%', 'FD0 an add-on list has no day';
+                       VALUES ('$q$ || pg_temp.u('e1') || $q$', 'x', 'addons', now()::date)$q$) LIKE '23514%', 'FD0 an add-on list has no day';
   RAISE NOTICE 'OK  FD0 grants, private helpers, markers on 4 functions, the old check-in untouched, column checks';
 END $$;
 
@@ -208,7 +219,7 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
            jsonb_set(pg_temp.plan(false), '{lists,0,tier_keys}', '["nobody"]'))) LIKE '22023%must name ticket types%', 'FD1 unknown tier key';
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
-           jsonb_set(pg_temp.plan(false), '{lists,3,entry_day}', to_jsonb(current_date::text)))) LIKE '22023%lot list has no fair day%', 'FD1 a lot list with a day';
+           jsonb_set(pg_temp.plan(false), '{lists,3,entry_day}', to_jsonb(pg_temp.today()::text)))) LIKE '22023%lot list has no fair day%', 'FD1 a lot list with a day';
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
            jsonb_set(pg_temp.plan(false), '{tiers,0,price_cents}', '12.5'))) LIKE '22023%price_cents%', 'FD1 cents are whole';
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
@@ -246,7 +257,7 @@ BEGIN
             FROM public.exos_ticket_tiers WHERE id = pg_temp.tier('e1', 'Day pass · Day 1')), 'FD1 cents become the price column';
   ASSERT (SELECT bool_and(separate_access_barcode) AND count(*) = 2 FROM public.exos_event_addons WHERE event_id = pg_temp.u('e1')),
          'FD1 parking and camping have their own entry codes';
-  ASSERT (SELECT entry_day = current_date - 2 AND NOT allow_reentry AND admits = 'tickets' AND cardinality(tier_ids) = 4
+  ASSERT (SELECT entry_day = pg_temp.today() - 2 AND NOT allow_reentry AND admits = 'tickets' AND cardinality(tier_ids) = 4
                  AND org_id = pg_temp.u('1')
             FROM public.exos_checkin_lists WHERE id = pg_temp.l('e1', 'Day 1')), 'FD1 the day 1 list';
   ASSERT (SELECT entry_day IS NULL AND allow_reentry AND admits = 'addons' AND cardinality(addon_ids) = 2 AND tier_ids IS NULL
@@ -286,7 +297,7 @@ BEGIN
   ASSERT (r ->> 'ok')::boolean, 'FD2 a day 1 pass on day 1: ' || r::text;
   ASSERT (SELECT status FROM public.exos_tickets WHERE id = pg_temp.u('d1')) = 'used', 'FD2 the first entry uses the ticket';
   r := pg_temp.scan('d1', pg_temp.l('e1', 'Day 1'), 1);
-  ASSERT r ->> 'reason' = 'used' AND r ->> 'day' = (current_date - 2)::text AND r ? 'check_in_at', 'FD2 once a day: ' || r::text;
+  ASSERT r ->> 'reason' = 'used' AND r ->> 'day' = (pg_temp.today() - 2)::text AND r ? 'check_in_at', 'FD2 once a day: ' || r::text;
 
   -- 3-day pass: each day once.
   ASSERT (pg_temp.scan('m1', pg_temp.l('e1', 'Day 1'), 1) ->> 'ok')::boolean, 'FD2 3-day pass day 1';
@@ -433,6 +444,82 @@ BEGIN
   RAISE NOTICE 'OK  FD5 offline replay and by name follow the day rule (logged as used, no forced row), roster list_state';
 END $$;
 
+-- FD7 -------------------------------------------------------------------------
+-- A scan at a given time (offline replay through the door's check-in).
+CREATE FUNCTION pg_temp.scan_at(p_ticket text, p_list uuid, p_at timestamptz) RETURNS jsonb LANGUAGE plpgsql AS $$
+BEGIN
+  RETURN public.exos_check_in_ticket(pg_temp.u(p_ticket), 'camera', 'verified', pg_temp.tcode(pg_temp.u(p_ticket), p_at),
+           (SELECT event_id FROM public.exos_tickets WHERE id = pg_temp.u(p_ticket)), NULL, p_at, 'Gate X', p_list, 'entry');
+END $$;
+-- Noon, three days ago, in the fair's zone: a day none of e1's day lists is for.
+CREATE FUNCTION pg_temp.t3() RETURNS timestamptz LANGUAGE sql STABLE AS $$
+  SELECT ((pg_temp.today() - 3) + time '12:00') AT TIME ZONE 'America/Phoenix'
+$$;
+DO $$ BEGIN PERFORM pg_temp.mk(k, 'e1', t) FROM (VALUES ('v1', '3-day pass'), ('v2', '3-day pass'), ('x1', '3-day pass'),
+  ('n1', '3-day pass'), ('a7', 'Any-day pass'), ('a8', 'Any-day pass')) v(k, t); END $$;
+INSERT INTO public.exos_transfers (id, ticket_id, org_id, sender_id, receiver_email, status, event_id, created_at, updated_at)
+VALUES (pg_temp.u('tr-x1'), pg_temp.u('x1'), pg_temp.u('1'), pg_temp.u('b1'), 'friend@x.com', 'pending', pg_temp.u('e1'), now(), now());
+
+DO $$
+DECLARE r jsonb; st jsonb;
+BEGIN
+  PERFORM pg_temp.act(pg_temp.u('sa'));
+  -- (a) voided / mid-transfer at a day list: refused, nothing written.
+  UPDATE public.exos_tickets SET status = 'voided' WHERE id = pg_temp.u('v1');
+  ASSERT pg_temp.scan('v1', pg_temp.l('e1', 'Day 3'), 3) ->> 'reason' = 'voided', 'FD7 a voided pass at a day list';
+  ASSERT (pg_temp.scan('v2', pg_temp.l('e1', 'Day 1'), 1) ->> 'ok')::boolean, 'FD7 v2 in on day 1';
+  UPDATE public.exos_tickets SET status = 'voided' WHERE id = pg_temp.u('v2');
+  ASSERT pg_temp.scan('v2', pg_temp.l('e1', 'Day 3'), 3) ->> 'reason' = 'voided', 'FD7 used, then refunded: refused on day 3';
+  UPDATE public.exos_tickets SET pending_transfer_id = pg_temp.u('tr-x1') WHERE id = pg_temp.u('x1');
+  ASSERT pg_temp.scan('x1', pg_temp.l('e1', 'Day 3'), 3) ->> 'reason' = 'in-transfer', 'FD7 mid-transfer at a day list';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_event_checkins
+                      WHERE ticket_id IN (pg_temp.u('v1'), pg_temp.u('x1')) OR (ticket_id = pg_temp.u('v2') AND gate = 'Day 3')),
+         'FD7 no entry written for them';
+
+  -- (b) a scan with no list today, then today's day list: once a day.
+  r := pg_temp.scan('n1', NULL, 3);
+  ASSERT (r ->> 'ok')::boolean, 'FD7 n1 in through a no-list scan: ' || r::text;
+  r := pg_temp.scan('n1', pg_temp.l('e1', 'Day 3'), 3);
+  ASSERT r ->> 'reason' = 'used' AND r ->> 'day' = pg_temp.today()::text, 'FD7 then the day 3 list: used: ' || r::text;
+  r := public.exos_door_checkin_by_name(pg_temp.u('n1'), pg_temp.u('e1'), NULL, 'Gate 3', NULL, NULL, pg_temp.l('e1', 'Day 3'), 'entry');
+  ASSERT r ->> 'reason' = 'used', 'FD7 and by name: ' || r::text;
+  ASSERT (pg_temp.scan('n1', pg_temp.l('e1', 'Day 2'), 2) ->> 'ok')::boolean, 'FD7 another day is still its own';
+
+  -- (c) an ordinary list on another day uses an any-day pass's day.
+  INSERT INTO public.exos_checkin_lists (id, event_id, name, tier_ids, allow_reentry)
+  VALUES (pg_temp.u('l-main'), pg_temp.u('e1'), 'Main gate (any day)', NULL, false);
+  r := pg_temp.scan_at('a7', pg_temp.u('l-main'), pg_temp.t3());
+  ASSERT (r ->> 'ok')::boolean, 'FD7 a7 in at the ordinary gate: ' || r::text;
+  r := pg_temp.scan('a7', pg_temp.l('e1', 'Day 2'), 2);
+  ASSERT r ->> 'reason' = 'day-limit' AND (r ->> 'days_used')::int = 1, 'FD7 then day 2: day-limit: ' || r::text;
+
+  -- (d) a deleted list's entry still counts, by its scan's local date.
+  INSERT INTO public.exos_checkin_lists (id, event_id, name, tier_ids, allow_reentry, entry_day)
+  VALUES (pg_temp.u('l-old'), pg_temp.u('e1'), 'Old gate', NULL, false, pg_temp.today() - 3);
+  ASSERT (pg_temp.scan_at('a8', pg_temp.u('l-old'), pg_temp.t3()) ->> 'ok')::boolean, 'FD7 a8 in at the old gate';
+  DELETE FROM public.exos_checkin_lists WHERE id = pg_temp.u('l-old');
+  ASSERT (SELECT list_id IS NULL AND gate = 'Old gate' FROM public.exos_event_checkins WHERE ticket_id = pg_temp.u('a8')),
+         'FD7 the entry stays, its list gone';
+  r := pg_temp.scan('a8', pg_temp.l('e1', 'Day 2'), 2);
+  ASSERT r ->> 'reason' = 'day-limit', 'FD7 the deleted list''s day still used: ' || r::text;
+
+  -- The roster carries a day key for entries off the day lists.
+  SELECT x.list_state INTO st FROM public.exos_event_door_roster(pg_temp.u('e1')) x WHERE x.ticket_id = pg_temp.u('n1');
+  ASSERT st ->> ('day:' || pg_temp.today()) = 'entry' AND st ->> pg_temp.l('e1', 'Day 2')::text = 'entry'
+     AND NOT st ? ('day:' || (pg_temp.today() - 1)), 'FD7 n1 roster: ' || st::text;
+  SELECT x.list_state INTO st FROM public.exos_event_door_roster(pg_temp.u('e1')) x WHERE x.ticket_id = pg_temp.u('a8');
+  ASSERT st ->> ('day:' || (pg_temp.today() - 3)) = 'entry', 'FD7 a8 roster (deleted list): ' || st::text;
+  SELECT x.list_state INTO st FROM public.exos_event_door_roster(pg_temp.u('e1')) x WHERE x.ticket_id = pg_temp.u('m1');
+  ASSERT NOT EXISTS (SELECT 1 FROM jsonb_object_keys(st) k WHERE k LIKE 'day:%'), 'FD7 day-list entries need no day key';
+
+  -- The zone helper.
+  ASSERT public._exos_event_tz(pg_temp.u('e1')) = 'America/Phoenix' AND public._exos_event_tz(pg_temp.u('e4')) = 'UTC',
+         'FD7 event zone, unset = UTC';
+  UPDATE public.exos_events SET timezone = 'Mars/Olympus' WHERE id = pg_temp.u('e4');
+  ASSERT public._exos_event_tz(pg_temp.u('e4')) = 'UTC', 'FD7 an unknown zone = UTC';
+  RAISE NOTICE 'OK  FD7 voided / mid-transfer refused at day lists; every entry counts (no list, ordinary, deleted list); roster day keys';
+END $$;
+
 -- FD6 -------------------------------------------------------------------------
 -- e3: two gates (Main re-entry, North no re-entry) and a lot, scans at fixed
 -- times in one 15-minute bucket and the next.
@@ -542,7 +629,7 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_door_throughput(%L)', pg_temp.u('e3'))) LIKE '42501%', 'FD6 signed out';
   -- The fair: e1's report sees its day lists and lot.
   PERFORM pg_temp.act(pg_temp.u('ma'));
-  r := public.exos_door_throughput(pg_temp.u('e1'), now() - interval '3 days', now() + interval '1 minute', 60);
+  r := public.exos_door_throughput(pg_temp.u('e1'), now() - interval '6 days', now() + interval '1 minute', 60);
   ASSERT (SELECT sum((x ->> 'entries')::int) FROM jsonb_array_elements(r -> 'gates') x WHERE x ->> 'kind' = 'ticket')
          = (SELECT count(*) FROM public.exos_event_checkins WHERE event_id = pg_temp.u('e1') AND direction = 'entry'),
          'FD6 the fair: every entry in a gate';

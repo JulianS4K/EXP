@@ -80,12 +80,15 @@ import {
   loadDirection,
   loadListChoice,
   enteredOnDay,
+  localDayKey,
   pickList,
   saveDirection,
   saveListChoice,
   sortLists,
   withDirection,
+  type DoorCheckinList,
   type DoorDirection,
+  type ListState,
 } from '../lib/door/lists';
 import { classifyReplayError, conflictText, syncHealth, type ReplayConflict } from '../lib/door/health';
 import {
@@ -329,6 +332,20 @@ export default function OrganizerCheckIn() {
   const nameAccess = nameMode ? nameCheckinAccess(nameMode, canOverride) : 'off';
   // null = the database has no lists yet: the old RPCs, exactly as before.
   const checkinLists = event?.checkinLists ?? null;
+  // For callbacks that outlive a render (the realtime channel).
+  const doorListsRef = useRef<{ lists: DoorCheckinList[] | null; tz?: string }>({ lists: null });
+  doorListsRef.current = { lists: checkinLists, tz: event?.timezone };
+  /** A ticket's list state after a scan at `at`: the list's last direction,
+   *  and for an entry off the fair-day lists (no list, an ordinary list) a
+   *  day key for its local date, so fair-day lists count it (as the server). */
+  const nextListState = (cur: ListState | undefined, listId: string | null, dir: DoorDirection, at: number): ListState | undefined => {
+    const { lists, tz } = doorListsRef.current;
+    const l = listId ? lists?.find((x) => x.id === listId) : undefined;
+    let st = cur;
+    if (listId) st = withDirection(st, listId, dir);
+    if (dir === 'entry' && !l?.entryDay) st = withDirection(st, localDayKey(at, tz), 'entry');
+    return st;
+  };
   const activeList = pickList(checkinLists, listChoice);
   const direction = effectiveDirection(activeList, wantedDirection);
   const doorTarget: DoorScanTarget | undefined = checkinLists ? { listId: activeList?.id ?? null, direction } : undefined;
@@ -837,10 +854,11 @@ export default function OrganizerCheckIn() {
         // An add-on scan undone offline: usable again (mig 20261108110000).
         if (q.kind === 'addon-undo') { merged[q.ticketId] = { ...cur, used: false, lists: undefined }; continue; }
         const dir = q.direction ?? 'entry';
+        const lists = nextListState(cur.lists, q.listId ?? null, dir, q.scannedAt);
         merged[q.ticketId] = {
           ...cur,
           ...(dir === 'entry' ? { used: true } : {}),
-          ...(q.listId ? { lists: withDirection(cur.lists, q.listId, dir) } : {}),
+          ...(lists ? { lists } : {}),
         };
       }
       setOfflineRegistry(merged);
@@ -884,9 +902,13 @@ export default function OrganizerCheckIn() {
       // An exit on a re-entry list re-opens the ticket on that list only.
       if (row.direction === 'exit') {
         if (row.listId) markListDirection(row.ticketId, row.listId, 'exit');
-      } else if (!row.forced) {
-        markLocal(row.ticketId, { used: true });
-        if (row.listId) markListDirection(row.ticketId, row.listId, 'entry');
+      } else {
+        // A forced row (offline admission the server refused) doesn't use the
+        // ticket, but it came in: it counts as a day entered, as on the server.
+        const cur = offlineRegistryRef.current[row.ticketId];
+        const lists = cur ? nextListState(cur.lists, row.listId, 'entry', row.at ?? Date.now()) : undefined;
+        if (!row.forced) markLocal(row.ticketId, { used: true, ...(lists ? { lists } : {}) });
+        else if (lists) markLocal(row.ticketId, { lists });
       }
       // "In" counts tickets checked in, not scan rows (exits, re-entries and
       // forced records are rows too): re-count once the burst settles rather
@@ -1149,9 +1171,13 @@ export default function OrganizerCheckIn() {
     setFoundTicket(ticket);
     if (!test) {
       pushScan(ticket.id, name, dir === 'exit' ? 'OUT' : 'SUCCESS');
-      if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
-      // Re-entry and fair-day lists: which list (so which day) it entered.
-      if (activeList?.allowReentry || activeList?.entryDay) markListDirection(ticket.id, activeList.id, dir);
+      // Re-entry and fair-day lists: which list (so which day) it entered; an
+      // entry anywhere else: its local date (one patch, so neither is lost).
+      const cur = offlineRegistryRef.current[ticket.id];
+      const listId = activeList && (activeList.allowReentry || activeList.entryDay) ? activeList.id : null;
+      const lists = cur ? nextListState(cur.lists, listId, dir, serverNow()) : undefined;
+      if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false, ...(lists ? { lists } : {}) });
+      else if (lists) markLocal(ticket.id, { lists });
     }
     setStatus('success');
     setSearchId('');

@@ -165,10 +165,40 @@ export function parseListState(v: unknown): ListState | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Fair days: a ticket's list state also has a 'day:YYYY-MM-DD' key for each
+ *  local date (the event's zone) it entered on no list, an ordinary list or a
+ *  deleted list (the roster sends them; the device adds its own). */
+export const DAY_KEY_PREFIX = 'day:';
+
+/** The day key for an entry at `ms` in the event's zone (UTC when unset or
+ *  unknown, as the server's _exos_event_tz). */
+export function localDayKey(ms: number, timezone: string | null | undefined): string {
+  const fmt = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(ms));
+  let d: string;
+  try {
+    d = fmt(timezone || 'UTC');
+  } catch {
+    d = fmt('UTC');
+  }
+  return `${DAY_KEY_PREFIX}${d}`;
+}
+
+/** The fair day of each state key: a day list's entryDay, or a day key's date. */
+function stateDays(state: ListState | undefined, dayOf: Map<string, string>): Set<string> {
+  const days = new Set<string>();
+  for (const k of Object.keys(state ?? {})) {
+    const d = k.startsWith(DAY_KEY_PREFIX) ? k.slice(DAY_KEY_PREFIX.length) : dayOf.get(k);
+    if (d) days.add(d);
+  }
+  return days;
+}
+
 /** Fair days (mig 20261113110000): why a day list refuses a ticket's ENTRY,
  *  or null. `state` is the ticket's per-list last direction (roster
- *  list_state, which covers day lists, plus this device's marks); a list
- *  with a state was entered. Without re-entry: once that day, whichever of
+ *  list_state, which covers day lists and has day keys for every other
+ *  entry, plus this device's marks); a list with a state was entered, and
+ *  an entry anywhere else counts as its local date. Without re-entry: once that day, whichever of
  *  the day's lists ('used'). The ticket type's day limit counts the other
  *  days entered ('day-limit'). On a re-entry list the inside / outside rule
  *  is the caller's (as before). Mirrors SQL _exos_checkin_day_refusal. */
@@ -181,11 +211,7 @@ export function dayListRefusal(
   if (!list?.entryDay) return null;
   const dayOf = new Map((allLists ?? []).filter((l) => l.entryDay).map((l) => [l.id, l.entryDay as string]));
   dayOf.set(list.id, list.entryDay);
-  const days = new Set<string>();
-  for (const id of Object.keys(state ?? {})) {
-    const d = dayOf.get(id);
-    if (d) days.add(d);
-  }
+  const days = stateDays(state, dayOf);
   if (!list.allowReentry && days.has(list.entryDay)) return 'used';
   days.delete(list.entryDay);
   if (dayLimit != null && dayLimit > 0 && days.size >= dayLimit) return 'day-limit';
@@ -197,6 +223,7 @@ export function enteredOnDay(list: DoorCheckinList, state: ListState | undefined
   if (!list.entryDay) return false;
   const ids = new Set((allLists ?? []).filter((l) => l.entryDay === list.entryDay).map((l) => l.id));
   ids.add(list.id);
+  ids.add(`${DAY_KEY_PREFIX}${list.entryDay}`);
   return Object.keys(state ?? {}).some((id) => ids.has(id));
 }
 
