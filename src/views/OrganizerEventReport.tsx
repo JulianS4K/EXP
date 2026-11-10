@@ -40,6 +40,7 @@ import EventSalesTax from '../components/finance/EventSalesTax';
 import DisputesPanel from '../components/DisputesPanel';
 import SourcesPanel from '../components/SourcesPanel';
 import BuyerLocationsPanel from '../components/BuyerLocationsPanel';
+import AttendanceReportPanel from '../components/AttendanceReportPanel'; // claude/exos-attendance-report
 import InAppReportPanel from '../components/InAppReportPanel';
 import ChannelSalesPanel from '../components/ChannelSalesPanel';
 import SalesCountsPanel from '../components/SalesCountsPanel';
@@ -406,6 +407,11 @@ export default function OrganizerEventReport() {
 
         {/* Answers to the checkout questions, with a CSV (owner / manager / finance). */}
         <QuestionAnswersPanel eventId={eventId!} eventTitle={event.title} canView={canSeeMoney(activeRole, isAdmin)} />
+
+        {/* Attendance: by postal code (under 5 buyers grouped) and sales pace
+            against an earlier event, with an XLSX (mig 20261113120000). */}
+        <AttendanceReportPanel eventId={eventId!} orgId={event.orgId} eventTitle={event.title}
+          canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Attendees + per-ticket refund/void controls. Lists every
             ticket including voided ones (greyed out, with reason).

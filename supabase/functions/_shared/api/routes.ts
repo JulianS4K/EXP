@@ -834,6 +834,12 @@ export const ROUTES: readonly ApiRoute[] = [
   // claude/exos-leftovers-9 (mig 20261110120000, docs/partner-sales.md): the
   // checkout questions a partner reservation answers (partner key).
   { id: 'public-list-questions', method: 'GET', auth: P, path: '/public/confirms/:id/questions', scope: null, paged: false },
+  // claude/exos-attendance-report (mig 20261113120000, exos-api/attendance.ts,
+  // docs/api/attendance.json): an event's attendance by postal area (under 5
+  // buyers folded, never named) and daily pacing against another event of the
+  // org. Aggregate only; existing scope orders:read, and the key's creator (or
+  // the token's user) must be an owner, manager or finance member (in SQL).
+  { id: 'get-event-attendance', method: 'GET', auth: K, path: '/events/:id/attendance', scope: 'orders:read', paged: false },
 ];
 
 /** Methods the API answers (anything else is 405). */

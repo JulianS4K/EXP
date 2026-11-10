@@ -141,6 +141,31 @@ nonce `ask:<id>` (Stripe, the ticket voided, the refund mail), and the ask close
 **Decline** is the existing `exos_decline_refund_ask`, with a note the buyer sees. Nothing new moves money.
 `GET /v1/refund-requests` (`orders:read`) reads the queue; deciding needs a signed-in staff member.
 
+## Attendance report
+
+Mig `20261113120000_exos_attendance_report.sql`, harness `tests/exos/test_attendance_report.sql`. Event report →
+**Attendees & refunds → Attendance report** (`src/components/AttendanceReportPanel.tsx`), `GET
+/v1/events/:id/attendance` (`docs/api/attendance.json`). Owner / manager / finance, checked in SQL; for an API key,
+its creator's role now, for a personal or OAuth token, its user's.
+
+- **Where attendees are, by postal code.** The billing postal code Stripe or PayPal already gave at payment
+  (`exos_order_locations`, mig 20261106140000; nothing new is collected, no backfill). Counted by live tickets now
+  (a refunded order with no ticket left drops out): buyers, orders, tickets and checked in per (country, postal
+  area). US ZIP+4 is folded to the 5-digit ZIP, Canada to the first three characters, the UK to the outward code.
+- **Privacy.** Aggregate only: no row describes one buyer, and no email, name, city, street or order id is in the
+  report or the workbook. A postal area with **fewer than 5 distinct buyers** is never named: its orders fold into
+  one **Other (fewer than 5)** row, in SQL, before anything leaves the database. Orders without a postal code (free
+  orders, RSVPs, card payments that gave only a country) are one **No postal code** row. 20 reads a minute per user
+  or credential. The per-order location itself stays where it was (`GET /v1/orders/:id`'s `buyer_location`, RLS on
+  `exos_order_locations`), and it is erased with the buyer's account as before.
+- **Sales pace.** Per day of sale in the event's time zone: paid tickets and gross (charged plus any gift card part,
+  before refunds), with $0 orders (free claims, comps, RSVPs, pass redemptions) and their tickets counted apart and
+  never in gross; running totals. **Compare with** lines it up against one of the org's earlier events by days
+  before the event; a sale on or after the event day counts on day 0.
+- **Download XLSX**: Summary, Postal codes and Pacing sheets, built in the browser (`src/lib/xlsx.ts`, loaded on the
+  click) and logged as `export.run` (kind `attendance`). The Money section, sales tax and the journal have XLSX
+  buttons too (kinds `settlement`, `sales_tax`, `journal`), next to their CSVs.
+
 ## Opendate endpoints
 
 How each Opendate endpoint in these areas maps to Exos.

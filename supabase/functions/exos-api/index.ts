@@ -179,6 +179,7 @@ import { eventIdsByGenre, GEO_GENRE_ROUTES, GeoGenreError, handleGeoGenre, order
 import { handlePosSales, POS_SALES_ROUTES, PosSalesError } from "./posSales.ts"; // claude/exos-pos-walkup
 import { FEE_ADJ_CREATED, FEE_ADJ_ROUTES, FeeAdjError, handleFeeAdjustments } from "./feeAdjustments.ts";
 import { handleJournal, JOURNAL_ROUTES, JournalError } from "./journal.ts"; // claude/exos-money-journal
+import { ATTENDANCE_ROUTES, AttendanceError, handleAttendance } from "./attendance.ts"; // claude/exos-attendance-report
 import { AUDIT_ROUTES, AuditError, handleAudit } from "./audit.ts"; // claude/exos-org-audit
 import { actorHeaders } from "../_shared/api/audit.ts"; // claude/exos-org-audit
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
@@ -447,6 +448,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (e instanceof PosSalesError) return json({ error: e.message }, e.status); // claude/exos-pos-walkup
     if (e instanceof FeeAdjError) return json({ error: e.message }, e.status);
     if (e instanceof JournalError) return json({ error: e.message }, e.status); // claude/exos-money-journal
+    if (e instanceof AttendanceError) return json({ error: e.message }, e.status); // claude/exos-attendance-report
     if (e instanceof AuditError) return json({ error: e.message }, e.status); // claude/exos-org-audit
     if (ORG_ACCESS_ROUTES.has(match.route.id)) {
       const oa = orgAccessDbError(e);
@@ -633,6 +635,12 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-money-journal (mig 20261108100000): the journal, read-only.
   if (JOURNAL_ROUTES.has(route.id)) return await handleJournal(route, { sb, orgId, q: c.q, page });
+  // claude/exos-attendance-report (mig 20261113120000): the attendance report, aggregate only.
+  if (ATTENDANCE_ROUTES.has(route.id)) {
+    return await handleAttendance(route, {
+      sb, orgId, cred: { kind: c.cred.kind, id: c.cred.id, userId: c.cred.userId }, params: c.params, q: c.q,
+    });
+  }
   // claude/exos-org-audit (mig 20261109100000): the org audit log, read-only.
   if (AUDIT_ROUTES.has(route.id)) return await handleAudit(route, { sb, orgId, q: c.q, page });
   // claude/exos-gap-giving (mig 20261102110000): giving and gift card writes.
