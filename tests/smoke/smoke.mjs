@@ -602,6 +602,78 @@ await run('event report: where buyers are (countries, cities, unknown; org-wide)
   exos_event_buyer_geo: () => GEO(4), exos_org_buyer_geo: () => GEO(10),
 } }) });
 
+// ── claude/exos-attendance-report (mig 20261113120000): postal rollup, pacing, XLSX ──
+const PREV_EV = '99999999-9999-4999-8999-99999999e0e0';
+const paceDay = (day, before, paid, gross, free, cum) => ({ day, days_before: before, paid_orders: paid ? 1 : 0, paid_tickets: paid,
+  gross_cents: gross, free_orders: free ? 1 : 0, free_tickets: free, cum_paid_tickets: cum[0], cum_gross_cents: cum[1], cum_free_tickets: cum[2] });
+const ATTENDANCE = (compare) => ({
+  org_id: ORG, event_id: EV, generated_at: '2026-12-12T15:00:00Z', min_buyers: 5,
+  attendance: {
+    totals: { buyers: 17, orders: 18, tickets: 24, checked_in: 2, located_orders: 16 },
+    postal: [{ country: 'US', postal_code: '10001', buyers: 5, orders: 5, tickets: 5, checked_in: 1 }],
+    postal_other: { label: 'Other (fewer than 5)', buyers: 5, orders: 6, tickets: 11, checked_in: 0 },
+    postal_unknown: { label: 'No postal code', buyers: 2, orders: 2, tickets: 3, checked_in: 1 },
+    other_tickets: 1,
+  },
+  pacing: {
+    event: { event_id: EV, name: 'Fall Party', starts_at: '2026-12-21T01:00:00Z', timezone: 'America/New_York', currency: 'USD',
+      event_day: '2026-12-20', on_sale_day: '2026-11-20', on_sale_days_before: 30, days_out_now: 7,
+      totals: { paid_orders: 3, paid_tickets: 4, gross_cents: 8000, free_orders: 1, free_tickets: 3 },
+      rows: [paceDay('2026-12-10', 10, 3, 5500, 0, [3, 5500, 0]), paceDay('2026-12-13', 7, 1, 2500, 3, [4, 8000, 3])] },
+    comparison: compare ? { event_id: PREV_EV, name: 'Fall Party 2025', starts_at: '2025-12-20T01:00:00Z', timezone: 'America/New_York',
+      currency: 'USD', event_day: '2025-12-19', on_sale_day: '2025-11-21', on_sale_days_before: 28, days_out_now: -358,
+      totals: { paid_orders: 2, paid_tickets: 5, gross_cents: 10000, free_orders: 0, free_tickets: 0 },
+      rows: [paceDay('2025-12-09', 10, 4, 8000, 0, [4, 8000, 0]), paceDay('2025-12-18', 1, 1, 2000, 0, [5, 10000, 0])] } : null,
+  },
+  comparison_candidates: [{ event_id: PREV_EV, name: 'Fall Party 2025', starts_at: '2025-12-20T01:00:00Z' }],
+});
+const attendanceMock = ownerMock({ tables: reportMock.tables, rpcs: {
+  exos_event_attendance: (b) => ATTENDANCE(b.p_compare_event_id === PREV_EV),
+  exos_audit_export: () => true,
+  // The Attendees tab's other panels, empty.
+  exos_event_refund_orders: () => [],
+} });
+async function downloadBytes(page, click) {
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 8000 }), click()]);
+  return { name: dl.suggestedFilename(), bytes: readFileSync(await dl.path()) };
+}
+await run('event report: attendance by postal code, pace against last year, XLSX', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=attendees');
+  const section = page.locator('#attendance-report');
+  await section.getByRole('table', { name: 'Attendees by postal code' }).waitFor({ timeout: 8000 });
+  let text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['10001', 'Other (fewer than 5)', 'No postal code', '16 of 18', '4 paid tickets sold, $80.00 gross',
+    '3 $0 tickets', '1 more ticket came from door sales']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_attendance') && l.includes(EV) && l.includes('"p_compare_event_id":null')), 'report RPC');
+  await section.getByLabel('Compare with').selectOption(PREV_EV);
+  await section.getByText('against 4 for Fall Party 2025').waitFor({ timeout: 8000 });
+  text = (await section.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('At 7 days out: 4 paid tickets, against 4 for Fall Party 2025 (0%).'), 'pace line: ' + text);
+  assert(await section.getByRole('img', { name: /Paid tickets sold so far/ }).count() === 1, 'chart has a text alternative');
+  assert(log.some((l) => l.startsWith('rpc exos_event_attendance') && l.includes(PREV_EV)), 'comparison sent');
+  const { name, bytes } = await downloadBytes(page, () => section.getByRole('button', { name: 'Download XLSX' }).click());
+  assert(/^attendance-fall-party-\d{4}-\d{2}-\d{2}\.xlsx$/.test(name), 'file name ' + name);
+  assert(bytes[0] === 0x50 && bytes[1] === 0x4b, 'a ZIP');
+  const raw = bytes.toString('latin1');
+  for (const part of ['xl/workbook.xml', 'xl/worksheets/sheet3.xml', 'name="Postal codes"', 'Other (fewer than 5)', 'Fall Party 2025']) {
+    assert(raw.includes(part), 'workbook has ' + part);
+  }
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_audit_export') && l.includes('"p_kind":"attendance"') && l.includes(EV)),
+    'the XLSX logs export.run');
+}, { signedIn: true, mock: attendanceMock });
+
+await run('event report: Money orders XLSX logs export.run', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  await page.getByRole('heading', { name: 'Money' }).waitFor({ timeout: 8000 });
+  const { name, bytes } = await downloadBytes(page, () => page.getByRole('button', { name: /Orders XLSX/ }).click());
+  assert(/^settlement-fall-party-.*\.xlsx$/.test(name), 'file name ' + name);
+  const raw = bytes.toString('latin1');
+  assert(raw.includes('name="Summary"') && raw.includes('name="Orders"') && raw.includes('cs_1'), 'Summary + Orders sheets');
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_audit_export') && l.includes('"p_kind":"settlement"')), 'logged');
+}, { signedIn: true, mock: attendanceMock });
+
 await run('home: genre chips filter the events', async (page, log) => {
   await page.goto(BASE + '/');
   const chips = page.getByRole('group', { name: 'Filter by genre' });

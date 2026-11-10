@@ -136,6 +136,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'Door cash sales, the cash drawer, gift cards and $0 orders post today; online card sales, card at the door, refunds and payouts post once payments are on (docs/payments-go-live.md).',
   },
   {
+    id: 'attendance-report', audience: 'organizer', status: 'not_shipped',
+    claim: 'Organizers get an attendance report for each event: attendees by billing postal code (areas with fewer than 5 buyers grouped together, never named) and daily sales pace against an earlier event, downloadable as XLSX along with the settlement, sales tax and journal reports.',
+    code: ['src/lib/attendanceReport.ts', 'src/lib/xlsx.ts', 'src/components/AttendanceReportPanel.tsx',
+      'supabase/functions/exos-api/attendance.ts', 'supabase/migrations/20261113120000_exos_attendance_report.sql'],
+    note: 'Branch claude/exos-attendance-report (wave 13): not on main, migration not applied. Postal codes exist only for paid orders since mig 20261106140000, so the rollup is empty until card payments are on.',
+  },
+  {
     id: 'api-fee-adjustments', audience: 'organizer', status: 'live',
     claim: 'Through the Exos API, an organizer\'s systems can record a fee change on an order (POST /v1/orders/:id/adjustments); it is logged with a note and moves no money.',
     code: ['supabase/functions/exos-api/feeAdjustments.ts', 'supabase/migrations/20261108110000_exos_dice_leftovers.sql'],

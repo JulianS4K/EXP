@@ -135,7 +135,9 @@ export function auditArgs(orgId: string, f: AuditFilters, before: number | null,
   };
 }
 
-export type ExportKind = 'audit' | 'donations' | 'price_disclosure' | 'attendees';
+export type ExportKind = 'audit' | 'donations' | 'price_disclosure' | 'attendees'
+  // claude/exos-attendance-report (mig 20261113120000): the XLSX workbooks.
+  | 'attendance' | 'settlement' | 'sales_tax' | 'journal';
 
 // ── The event report's footer (claude/exos-leftovers-9, mig 20261110120000) ──
 // exos_event_audit_summary: the event's audit rows after its latest publish

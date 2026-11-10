@@ -117,7 +117,8 @@ decided, `pos_cash_sale` carries no Exos fee line and nothing records one as owe
 ## Reads
 
 - Payouts page: a period, the trial balance per currency, **Journal CSV** (date, entry id and number, source, account,
-  debit, credit, currency, memo) and sales tax by jurisdiction (CSV too).
+  debit, credit, currency, memo) and sales tax by jurisdiction (CSV too). **Journal XLSX** is one workbook: the
+  journal lines, the trial balance and sales tax (amounts as numbers); logged as `export.run` (mig 20261113120000).
 - `exos_journal_rows` (security-invoker view, one row per line) and the two tables: owner / manager / finance of the
   org through RLS. `exos_journal_trial_balance(org, from, to, event)`: the same people (or the service role).
 - `GET /v1/journal` (`finance:read`, paged; `from`, `to`, `event_id`, `account`, `source`).

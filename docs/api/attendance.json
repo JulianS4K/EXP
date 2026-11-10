@@ -1,0 +1,228 @@
+{
+  "file": "attendance",
+  "name": "Attendance report",
+  "order": 31.7,
+  "description": "Where an event's attendees are, by billing postal area, and how its ticket sales are pacing against another event of the organization. Aggregate only: no row describes one buyer, and a postal area with fewer than 5 buyers is never named.",
+  "endpoints": [
+    {
+      "id": "get-event-attendance",
+      "method": "GET",
+      "path": "/v1/events/:id/attendance",
+      "summary": "An event's attendance report",
+      "description": "Two parts. `attendance`: the event's orders (paid, and the $0 orders Exos records for free claims, comps and RSVPs) counted by their live tickets now (active or checked in), grouped by the billing postal code Stripe or PayPal gave at payment (Exos never looks up IP addresses and never stores a street). The code is coarsened first: a US ZIP+4 to the 5-digit ZIP, a Canadian code to its first three characters, a UK postcode to its outward code. An area with at least `min_buyers` (5) distinct buyers is listed in `postal`, most tickets first; every smaller area is folded into `postal_other` (\"Other (fewer than 5)\") and never named. `postal_unknown` is the orders with no postal code (free orders, card payments that carried only a country, orders from before locations were recorded); `other_tickets` counts live tickets with no order (door sales, imports). `pacing`: for this event, and for `compare` when given, one row per day with a sale, in the event's time zone: paid orders and tickets, gross (charged plus any gift card part, in `currency`'s minor unit, before refunds), and $0 orders and tickets counted apart (never in gross), with running totals. `days_before` lines the two events up (sales on or after the event day count on day 0); `on_sale_day` is the earlier of the first ticket type's sales start and the first sale; `days_out_now` is negative once the event has passed. `comparison_candidates` lists the organization's events that started before this one (at most 50, newest first). Who may read it: the scope `orders:read`, and an API key whose creator (or a personal / OAuth token whose user) is an owner, manager or finance member of the organization now. 20 reads a minute per credential.",
+      "auth": "api_key",
+      "scope": "orders:read",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string (UUID)",
+          "required": true,
+          "description": "The event's id. An event of another organization answers 404.",
+          "example": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14"
+        },
+        {
+          "name": "compare",
+          "location": "query",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "Another event of the organization to pace against (usually last year's edition). Also accepted as `compare_event_id`. An event of another organization answers 404.",
+          "example": "9c2d4e6f-1a3b-4c5d-8e7f-0a1b2c3d4e5f"
+        }
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "description": "OK.",
+          "example": {
+            "data": {
+              "org_id": "7d1c2b3a-4e5f-4a6b-9c8d-0e1f2a3b4c5d",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "generated_at": "2026-12-12T15:04:05Z",
+              "min_buyers": 5,
+              "attendance": {
+                "totals": {
+                  "buyers": 212,
+                  "orders": 230,
+                  "tickets": 402,
+                  "checked_in": 0,
+                  "located_orders": 201
+                },
+                "postal": [
+                  {
+                    "country": "US",
+                    "postal_code": "86001",
+                    "buyers": 61,
+                    "orders": 66,
+                    "tickets": 118,
+                    "checked_in": 0
+                  },
+                  {
+                    "country": "US",
+                    "postal_code": "86004",
+                    "buyers": 38,
+                    "orders": 40,
+                    "tickets": 71,
+                    "checked_in": 0
+                  },
+                  {
+                    "country": "US",
+                    "postal_code": "86326",
+                    "buyers": 7,
+                    "orders": 7,
+                    "tickets": 12,
+                    "checked_in": 0
+                  }
+                ],
+                "postal_other": {
+                  "label": "Other (fewer than 5)",
+                  "buyers": 81,
+                  "orders": 88,
+                  "tickets": 149,
+                  "checked_in": 0
+                },
+                "postal_unknown": {
+                  "label": "No postal code",
+                  "buyers": 25,
+                  "orders": 29,
+                  "tickets": 52,
+                  "checked_in": 0
+                },
+                "other_tickets": 14
+              },
+              "pacing": {
+                "event": {
+                  "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+                  "name": "Fall Fair 2026",
+                  "starts_at": "2026-12-20T01:00:00Z",
+                  "timezone": "America/Phoenix",
+                  "currency": "USD",
+                  "event_day": "2026-12-19",
+                  "on_sale_day": "2026-10-20",
+                  "on_sale_days_before": 60,
+                  "days_out_now": 7,
+                  "totals": {
+                    "paid_orders": 201,
+                    "paid_tickets": 350,
+                    "gross_cents": 875000,
+                    "free_orders": 29,
+                    "free_tickets": 52
+                  },
+                  "rows": [
+                    {
+                      "day": "2026-10-20",
+                      "days_before": 60,
+                      "paid_orders": 40,
+                      "paid_tickets": 72,
+                      "gross_cents": 180000,
+                      "free_orders": 0,
+                      "free_tickets": 0,
+                      "cum_paid_tickets": 72,
+                      "cum_gross_cents": 180000,
+                      "cum_free_tickets": 0
+                    },
+                    {
+                      "day": "2026-12-12",
+                      "days_before": 7,
+                      "paid_orders": 6,
+                      "paid_tickets": 11,
+                      "gross_cents": 27500,
+                      "free_orders": 2,
+                      "free_tickets": 4,
+                      "cum_paid_tickets": 350,
+                      "cum_gross_cents": 875000,
+                      "cum_free_tickets": 52
+                    }
+                  ]
+                },
+                "comparison": {
+                  "event_id": "9c2d4e6f-1a3b-4c5d-8e7f-0a1b2c3d4e5f",
+                  "name": "Fall Fair 2025",
+                  "starts_at": "2025-12-21T01:00:00Z",
+                  "timezone": "America/Phoenix",
+                  "currency": "USD",
+                  "event_day": "2025-12-20",
+                  "on_sale_day": "2025-10-15",
+                  "on_sale_days_before": 66,
+                  "days_out_now": -357,
+                  "totals": {
+                    "paid_orders": 260,
+                    "paid_tickets": 455,
+                    "gross_cents": 1092000,
+                    "free_orders": 20,
+                    "free_tickets": 31
+                  },
+                  "rows": [
+                    {
+                      "day": "2025-10-15",
+                      "days_before": 66,
+                      "paid_orders": 25,
+                      "paid_tickets": 44,
+                      "gross_cents": 105600,
+                      "free_orders": 0,
+                      "free_tickets": 0,
+                      "cum_paid_tickets": 44,
+                      "cum_gross_cents": 105600,
+                      "cum_free_tickets": 0
+                    },
+                    {
+                      "day": "2025-12-13",
+                      "days_before": 7,
+                      "paid_orders": 9,
+                      "paid_tickets": 15,
+                      "gross_cents": 36000,
+                      "free_orders": 1,
+                      "free_tickets": 2,
+                      "cum_paid_tickets": 301,
+                      "cum_gross_cents": 722400,
+                      "cum_free_tickets": 21
+                    }
+                  ]
+                }
+              },
+              "comparison_candidates": [
+                {
+                  "event_id": "9c2d4e6f-1a3b-4c5d-8e7f-0a1b2c3d4e5f",
+                  "name": "Fall Fair 2025",
+                  "starts_at": "2025-12-21T01:00:00Z"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "status": 400,
+          "description": "A malformed compare id, or compare is the event itself.",
+          "example": {
+            "error": "compare must be an event id"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks orders:read, or its creator (or the token's user) is not an owner, manager or finance member now.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "orders:read"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"orders:read\""
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such event (or comparison event) in the key's organization, or the id is malformed.",
+          "example": {
+            "error": "event not found"
+          }
+        },
+        {
+          "status": 429,
+          "description": "More than 20 reads a minute with this credential.",
+          "example": {
+            "error": "too many attendance reports a minute"
+          }
+        }
+      ]
+    }
+  ]
+}

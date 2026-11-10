@@ -459,6 +459,15 @@ names: promoter codes show as *Promoters*, and any source Exos doesn't know show
 shows its cleaned name beside it). Each org gets one report per week however
 often the job runs. The operator turns the job on (see `docs/email.md`).
 
+### Attendance report and sales pace
+
+**Event report → Attendees & refunds → Attendance report** (owners, managers, finance): where your attendees are by
+billing postal code (buyers, orders, tickets, checked in), and how sales are pacing day by day. Pick an earlier event
+under **Compare with** to line the two up by days before the event ("at 7 days out: 350 paid tickets, against 301 for
+last year, +16%"). Totals only: a postal code with fewer than 5 buyers is shown as *Other (fewer than 5)*, and free
+tickets are counted apart from paid ones and never in gross. **Download XLSX** saves it as a spreadsheet (Summary,
+Postal codes, Pacing). Details: `docs/fans.md` "Attendance report".
+
 ### Text messages
 
 Fans opt in from their ticket ("Get texts about … next events"), with the consent words stored. To send:
@@ -852,6 +861,9 @@ them anyway).
   - **Promoter commissions** accrued for the event, and the organizer net for all channels before and
     after them.
   - **Orders CSV:** one row per order (Exos checkouts, then marketplace orders) with the same columns.
+    **Orders XLSX** is the same as a spreadsheet, with a Summary sheet; sales tax and the Payouts page's journal
+    have XLSX buttons too (the journal's workbook adds the trial balance and sales tax). Each download is logged
+    in the org's Activity.
   - Exos checkout money is paid out **by Stripe, directly to your connected account**, on Stripe's
     schedule. Exos never holds it.
   - Orders from before fee recording started have no fee split; the summary says how many and leaves

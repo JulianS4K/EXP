@@ -809,6 +809,41 @@ Three anon RPCs, listed above and in H3. The rest:
   consent-gated path (before, it mailed every follower with no opt-out check,
   no unsubscribe link and no dedupe). Same caller check.
 
+### Attendance report (mig 20261113120000)
+
+Nothing new is granted to anon (H3 unchanged); no table, no sequence. Points
+to review:
+
+- **Who reads it.** `exos_event_attendance(event, compare)` (authenticated):
+  `auth.uid()` first, then owner / manager / finance of the event's org (or a
+  platform admin), else 42501; an unknown event answers the same 42501 (no
+  existence oracle). `_exos_api_attendance` (service role, exos-api
+  `GET /v1/events/:id/attendance`, scope `orders:read`): an API key acts as its
+  creator, who must hold one of those roles now (`_exos_api_key_actor`); a
+  personal / OAuth token's user must hold one now
+  (`_exos_member_role`); any other credential kind is 42501. The scope still
+  decides at the edge: a role never stands in for `orders:read`.
+- **Scoped lookups.** The core `_exos_attendance_report(org, event, compare)`
+  (service role) names the org in every read; the event and the comparison
+  must be the org's (P0002 "event not found" / "comparison event not found",
+  echoing nothing about the other org's event).
+- **Rate limits before work.** 20 a minute per user (`attendance:<uid>`) and
+  per credential (`attendance-api:<id>`), 54000 (the API answers 429), checked
+  after the role and before the report is built.
+- **Aggregate only, small groups suppressed.** No row describes one buyer: per
+  (country, postal area) buyers, orders, live tickets and checked in, with the
+  area coarsened (US ZIP+4 to the ZIP, CA to the FSA, GB to the outward code).
+  An area with fewer than 5 distinct buyers is never named: it folds into
+  "Other (fewer than 5)" inside SQL (AR1 checks the small codes appear nowhere
+  in the answer). No email, name, city, street or order id. The per-order
+  location (`exos_order_locations`, `GET /v1/orders/:id`'s `buyer_location`)
+  is unchanged.
+- **Exports.** The XLSX workbooks (attendance, settlement, sales tax, journal)
+  are built in the browser and logged through `exos_audit_export`, which now
+  accepts those four kinds and counts them toward its 200-a-day cap (markers
+  `exos: attendance export kinds`, `exos: attendance export cap`). Text cells
+  are inline strings, which a spreadsheet never evaluates as formulas.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)
