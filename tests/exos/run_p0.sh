@@ -282,6 +282,7 @@ for m in \
   20261111130000_exos_journal_payouts_tax \
   20261111140000_exos_api_leftovers \
   20261112100000_exos_follower_fixes \
+  20261113100000_exos_kiosk \
   20261113110000_exos_fair_day \
   20261113120000_exos_attendance_report; do
   apply "$m"
@@ -525,6 +526,7 @@ for m in \
          20261111130000_exos_journal_payouts_tax \
          20261111140000_exos_api_leftovers \
          20261112100000_exos_follower_fixes \
+         20261113100000_exos_kiosk \
          20261113110000_exos_fair_day \
          20261113120000_exos_attendance_report; do
   $PSQL -f "$MIG/$m.sql"
@@ -668,5 +670,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fair_day.
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_leftovers.sql"
 # claude/exos-attendance-report (mig 20261113120000): the attendance report: postal rollup (areas under 5 buyers folded into "Other", never named; live tickets; $0 orders by ticket_ids), daily pacing in the event's zone ($0 tickets apart from gross) aligned with a prior event by days before, roles (owner / manager / finance; API key creator, token user), cross-org, rate limits, XLSX export kinds in exos_audit_export
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_attendance_report.sql"
+# claude/exos-kiosk (mig 20261113100000): kiosk mode: the kiosk flag + admin PIN (bcrypt, rate-limited exit, lockout), the kiosk credential (sha-256 only), event lock, card only (no cash / comp / door sale on a kiosk device), required questions never skipped, journal + settlement, audit rows, cross-org (race: race_pos_kiosk.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

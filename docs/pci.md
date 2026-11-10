@@ -14,6 +14,7 @@ what keeps us eligible for SAQ A as the product grows.
 | Event page → **Cash App Pay** (on Stripe Checkout, mig 20261031220000) | Stripe-hosted page, next to cards | SAQ A, same as cards |
 | Event page → **Pay with Venmo / PayPal** → `/bridge/pay/paypal` | PayPal's JS SDK buttons (PayPal / Venmo log-ins in PayPal's windows; card funding switched off) on a page of its own | No card data on our page. See "PayPal / Venmo" below |
 | Box office (`exos-pos`) | Cash and comp; a card only on a Stripe Terminal reader when `EXOS_POS_CARD=on` (`docs/pos.md` "Card at the door"). The reader reads the card; Exos sends and keeps the PaymentIntent id only | Card-present: the card is read and encrypted inside Stripe's PCI PTS readers; see "Box office cards" |
+| Self-serve kiosk (`/kiosk`, mig 20261113100000) | A card on the kiosk's own Stripe Terminal reader only; the page has no card field and no payment script | The web page: SAQ A. The reader: as the box office |
 
 - No Exos code, table, log or email holds a card number, CVC or expiry. Exos keeps Stripe ids
   (`cs_…`, `pi_…`, `ch_…`) and amounts only (`grep -rn "last4\|card_number\|cvc" src supabase` finds nothing).
@@ -62,6 +63,12 @@ stays in the reader: no Exos page, request, table or log sees it (`exos-pos` ref
 Sell tab has no card field and loads no script). Before the first live card, re-check the SAQ type with Stripe
 (card-present usually adds SAQ B-IP or a P2PE assessment to SAQ A).
 
+**Kiosk mode** (mig 20261113100000, `docs/pos.md` "Kiosk mode") doesn't change this: the self-serve screen
+(`/kiosk`) is the same SPA with **no card field and no payment script**; the buyer pays on the kiosk's Stripe
+Terminal reader, and the page sends only ids (`exos-pos` refuses any card-looking field, the smoke test checks every
+kiosk call). The web side stays **SAQ A**; the reader's card-present scope is the box-office question above.
+Running the tablet in single-app mode keeps the public off anything but the kiosk page.
+
 ## Operator checklist (once, then yearly)
 
 1. **SAQ A in Stripe.** Dashboard → Settings → Compliance → complete the SAQ A questionnaire. Stripe generates
@@ -105,10 +112,10 @@ picker (map, then list with a seat picked), checkout (the guest email dialog; ba
 My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, the Door app
 (`/door`, signed out and signed in), the staff door scanner (`/checkin/:eventId`), the four app landing pages
 (`/apps/door`, `/apps/events`, `/apps/promote`, `/apps/money`), the neighborhood pages (`/nyc`, and
-`/nyc/:neighborhood` on phone and desktop), the mail's unfollow page (`/unfollow`) and, in the event editor, the fair /
-multi-day setup panel (closed, open with its preview, and with an error). The scans run with the browser
-set to reduced motion.
-
+`/nyc/:neighborhood` on phone and desktop), the mail's unfollow page (`/unfollow`), in the event editor the fair /
+multi-day setup panel (closed, open with its preview, and with an error), and the self-serve kiosk (`/kiosk`: pick,
+questions, paid with the QR, the staff PIN dialog; the same run also fails a kiosk button under 48 px or one without
+a visible focus ring). The scans run with the browser set to reduced motion.
 **Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /
 ES switch; the seat picker's list view has one toggle button per seat, named with section, row, seat, price and
 wheelchair / companion / restricted-view flags (the SVG map is `role="img"` and points to the list); errors are

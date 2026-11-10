@@ -19,6 +19,23 @@
 // card-looking field is refused before anything else; the reader handles the
 // card and Exos keeps only the PaymentIntent id.
 //
+// Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"): a self-serve
+// screen sells one event's public ticket types by card on its own reader.
+// kiosk_* actions carry no staff JWT: the body's kiosk_token (the credential
+// exos_pos_kiosk_enter showed once) is resolved in SQL first by every
+// service-role core (_exos_pos_kiosk_*), which then reach the card walk-up
+// path as the member who started the kiosk:
+//   kiosk_state   the event, its public types, questions, the reader; card.on
+//   kiosk_begin   { tier_id, quantity, order_key, answers } -> pending sale
+//   kiosk_charge  { order_id } -> the PaymentIntent on the kiosk's reader
+//   kiosk_status  { order_id } -> waiting | succeeded | declined | canceled
+//   kiosk_cancel  { order_id } -> the reader stopped, the sale cancelled
+//   kiosk_codes   { order_id } -> the ticket QR codes (10 minutes after paying)
+//   kiosk_email   { order_id, email } -> queued mail
+//   kiosk_exit    { pin } -> leaves kiosk mode (a pending card sale is cancelled)
+// With EXOS_POS_CARD off only kiosk_state and kiosk_exit answer (the screen
+// says it's unavailable). No cash, comps, voids or refunds at a kiosk.
+//
 // Auth: the caller's Supabase JWT (auth.getUser). Cash / comp calls go through
 // a client carrying that JWT, so the SQL decides who may do what (the role
 // checks, the per-device rate limit and the idempotency are all in SQL):
@@ -80,7 +97,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { lineTotals, type PosCategory, PaymentsNotWiredError, WALKUP_CARD_MESSAGE } from "../_shared/pos/index.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import {
-  advanceCard, cancelCard, type CardDb, CardDbError, type CardFlowOpts, type CardPlan, type CardRefundState, cardSwitch,
+  advanceCard, cancelCard, type CardDb, CardDbError, type CardFlowOpts, type CardPlan, type CardRefundState, cardSwitch, type CardSwitch,
   isRegistrationCode, refundCardSale, startCardPayment, terminalAddress, terminalCardFee, type TerminalStripe,
 } from "../_shared/pos/stripeTerminal.ts";
 import { posStripe, terminalStripe } from "../_shared/pos/stripeAdapter.ts";
@@ -96,6 +113,12 @@ const CARD_ACTIONS = new Set([
   "card_payment", "capture", "card_status", "card_cancel", "connection_token", "register_reader", "terminal_location",
 ]);
 const CARD_OFF_MESSAGE = "Card at the door is switched off (EXOS_POS_CARD). Walk-up sales take cash or a comp.";
+// Kiosk mode (mig 20261113100000): the kiosk's credential, never a staff JWT.
+const KIOSK_ACTIONS = new Set([
+  "kiosk_state", "kiosk_begin", "kiosk_charge", "kiosk_status", "kiosk_cancel", "kiosk_codes", "kiosk_email", "kiosk_exit",
+]);
+const KIOSK_TOKEN_RE = /^exk_[0-9a-f]{64}$/;
+const KIOSK_OFF_MESSAGE = "This kiosk is unavailable: card payments are switched off. Please buy at the box office.";
 
 // Field names that could only hold card data. Refused anywhere in the body.
 const CARD_FIELD_RE = /^(card(_?number)?|pan|cc(_?num(ber)?)?|cvc|cvv|cvv2|csc|exp(iry|iration)?(_?(month|year|date))?|exp_(month|year)|track_?[12]?|magstripe|cardholder(_?name)?)$/i;
@@ -158,6 +181,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (hasCardField(p)) {
     return json({ error: "card_data_refused", message: "Card data is never accepted: the card reader handles the card." }, 400);
   }
+  // Kiosk mode (mig 20261113100000): no staff JWT, the kiosk's own credential.
+  if (KIOSK_ACTIONS.has(p.action)) return await kioskAction(p, cardSwitch((k) => Deno.env.get(k)));
   if (PAYMENT_ACTIONS.has(p.action)) {
     return json({
       error: "not_implemented",
@@ -598,4 +623,164 @@ async function pollCard(db: CardDb, stripe: TerminalStripe, order: string, lk: C
 async function shortHash(s: string): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
   return Array.from(d.slice(0, 8), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Kiosk mode (mig 20261113100000). The credential is resolved in SQL by every
+// core, before any Stripe call; the kiosk sees its own sale only, trimmed.
+// ---------------------------------------------------------------------------
+
+/** What a kiosk screen may see of its sale (no seller, device, key or buyer data). */
+function kioskOrder(o: unknown): Record<string, unknown> | null {
+  if (!o || typeof o !== "object") return null;
+  const r = o as Record<string, unknown>;
+  const card = r.card && typeof r.card === "object" ? r.card as Record<string, unknown> : null;
+  return {
+    id: r.id, status: r.status, currency: r.currency, total_cents: r.total_cents, tax_cents: r.tax_cents,
+    tier_name: r.tier_name, quantity: r.quantity,
+    ticket_count: Array.isArray(r.ticket_ids) ? r.ticket_ids.length : 0,
+    ...(card ? { card: { status: card.status ?? null, decline_code: card.decline_code ?? null } } : {}),
+  };
+}
+
+// deno-lint-ignore no-explicit-any
+async function kioskAction(p: any, sw: CardSwitch): Promise<Response> {
+  const token = typeof p.kiosk_token === "string" ? p.kiosk_token : "";
+  if (!KIOSK_TOKEN_RE.test(token)) return json({ error: "kiosk-ended", message: "This kiosk session has ended." }, 403);
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!service) return json({ error: "not configured" }, 503);
+  const svc: Svc = createClient(url, service, { auth: { persistSession: false } });
+  const core = async <T>(fn: string, args: Record<string, unknown>): Promise<{ data: T } | Response> => {
+    const { data, error } = await svc.rpc(fn, { p_token: token, ...args });
+    return error ? dbError(error) : { data: data as T };
+  };
+  const orderId = (): string | Response => {
+    const v = p.order_id;
+    return typeof v === "string" && UUID_RE.test(v) ? v.toLowerCase() : json({ error: "missing or bad order_id" }, 400);
+  };
+
+  if (p.action === "kiosk_state") {
+    const r = await core<Record<string, unknown>>("_exos_pos_kiosk_state", { p_live: sw.live });
+    if (r instanceof Response) return r;
+    const reader = (r.data.reader ?? {}) as { ready?: boolean };
+    const available = sw.on && reader.ready === true;
+    return json({ data: { ...r.data, card: { on: sw.on, available,
+      message: !sw.on ? KIOSK_OFF_MESSAGE : available ? "Pay by card on the reader." : "This kiosk's card reader isn't ready. Please buy at the box office." } } },
+      200, { "cache-control": "no-store" });
+  }
+
+  const key = Deno.env.get("STRIPE_SECRET_KEY");
+  // deno-lint-ignore no-explicit-any
+  let raw: any = null;
+  let stripe: TerminalStripe | null = null;
+  const st = (): TerminalStripe => {
+    if (!stripe) {
+      raw = posStripe(key!);
+      stripe = terminalStripe(raw);
+    }
+    return stripe;
+  };
+  const db = cardDb(svc);
+  const opts: CardFlowOpts = {
+    cardFee: terminalCardFee((k) => Deno.env.get(k)),
+    onBehalfOf: (Deno.env.get("EXOS_POS_CARD_ON_BEHALF_OF") ?? "").toLowerCase() === "on",
+    keepPlatformFee: Deno.env.get("EXOS_REFUND_KEEP_PLATFORM_FEE") === "true",
+  };
+
+  try {
+    if (p.action === "kiosk_exit") {
+      const pin = typeof p.pin === "string" ? p.pin.slice(0, 12) : "";
+      const r = await core<{ ok: boolean; ended?: boolean; error?: string; attempts_left?: number; retry_after_seconds?: number;
+        actor?: string; pending?: string[] }>("_exos_pos_kiosk_exit", { p_pin: pin });
+      if (r instanceof Response) return r;
+      const { actor, pending, ...answer } = r.data;
+      // A card sale still on the reader: stop it and give the places back.
+      if (r.data.ok && actor && Array.isArray(pending) && pending.length > 0 && sw.on && key) {
+        for (const order of pending.slice(0, 5)) {
+          const { data: lk } = await svc.rpc("_exos_pos_card_lookup", { p_actor: actor, p_order: order, p_need: "act", p_rate: false });
+          const l = lk as CardLookup | null;
+          if (l?.is_card && l.order_status === "pending") {
+            await cancelCard(db, st(), order, l, "kiosk closed by staff").catch((e) => console.error("exos-pos: kiosk exit cancel", String(e)));
+          }
+        }
+      }
+      // Always 200: { ok: false, error } is an answer the PIN pad shows, not a failure.
+      return json({ data: answer });
+    }
+
+    if (!sw.on) return json({ error: "kiosk_unavailable", message: KIOSK_OFF_MESSAGE }, 501);
+    if (!key) return json({ error: "not configured", message: "card payments need a Stripe key" }, 503);
+
+    switch (p.action) {
+      case "kiosk_begin": {
+        const tier = typeof p.tier_id === "string" && UUID_RE.test(p.tier_id) ? p.tier_id.toLowerCase() : null;
+        const okey = typeof p.order_key === "string" && UUID_RE.test(p.order_key) ? p.order_key.toLowerCase() : null;
+        const qty = p.quantity;
+        if (!tier || !okey || !Number.isInteger(qty)) return json({ error: "tier_id, quantity and order_key are required" }, 400);
+        const answers = p.answers && typeof p.answers === "object" && !Array.isArray(p.answers) ? p.answers : null;
+        const r = await core<unknown>("_exos_pos_kiosk_begin", {
+          p_tier: tier, p_quantity: qty, p_order_key: okey, p_answers: answers, p_live: sw.live,
+        });
+        return r instanceof Response ? r : json({ data: kioskOrder(r.data) }, 200, { "cache-control": "no-store" });
+      }
+      case "kiosk_charge": {
+        const order = orderId(); if (order instanceof Response) return order;
+        const plan = await core<CardPlan>("_exos_pos_kiosk_charge", { p_order: order, p_live: sw.live });
+        if (plan instanceof Response) return plan;
+        if (!plan.data.done && !isCheckoutCurrency(plan.data.currency)) {
+          return json({ error: "refused", message: `cards can't be taken in ${plan.data.currency.toUpperCase()} yet` }, 409);
+        }
+        const r = await startCardPayment(db, st(), plan.data, opts);
+        return json({ data: { order_id: order, state: plan.data.done ? "succeeded" : "waiting", status: r.status } },
+          200, { "cache-control": "no-store" });
+      }
+      case "kiosk_status": {
+        const order = orderId(); if (order instanceof Response) return order;
+        const lk = await core<CardLookup>("_exos_pos_kiosk_lookup", { p_order: order });
+        if (lk instanceof Response) return lk;
+        const l = lk.data;
+        if (!l.is_card) return json({ error: "not-card" }, 409);
+        if (l.livemode !== sw.live) return json({ error: "refused", message: "this sale was started in the other Stripe mode" }, 409);
+        const done = l.status === "succeeded" || l.status === "declined" || l.status === "canceled" || l.status === "refunded";
+        if (done || !l.payment_intent_id) {
+          const state = l.status === "succeeded" || l.status === "refunded" || l.status === "declined" || l.status === "canceled"
+            ? l.status : "waiting";
+          return json({ data: { state, order_id: order, ticket_ready: l.status === "succeeded" } }, 200, { "cache-control": "no-store" });
+        }
+        const pi = await st().retrievePaymentIntent(l.payment_intent_id);
+        const action = l.reader_id && pi.status === "requires_payment_method"
+          ? (await st().retrieveReader(l.reader_id).catch(() => null))?.action ?? null : null;
+        const r = await advanceCard(db, st(), order, pi, { via: "door", action });
+        return json({ data: { state: r.state, order_id: order, decline_code: r.decline_code ?? null,
+          ...(r.order ? { order: kioskOrder(r.order) } : {}) } }, 200, { "cache-control": "no-store" });
+      }
+      case "kiosk_cancel": {
+        const order = orderId(); if (order instanceof Response) return order;
+        const lk = await core<CardLookup>("_exos_pos_kiosk_lookup", { p_order: order });
+        if (lk instanceof Response) return lk;
+        if (!lk.data.is_card || lk.data.order_status !== "pending") {
+          return json({ data: { state: lk.data.status ?? "done", order_id: order } });
+        }
+        const r = await cancelCard(db, st(), order, lk.data, "cancelled at the kiosk");
+        return json({ data: { state: r.state, order_id: order } });
+      }
+      case "kiosk_codes": {
+        const order = orderId(); if (order instanceof Response) return order;
+        const r = await core<{ tickets?: unknown[]; skipped?: unknown[] }>("_exos_pos_kiosk_codes", { p_order: order });
+        return r instanceof Response ? r : json({ data: r.data }, 200, { "cache-control": "no-store" });
+      }
+      case "kiosk_email": {
+        const order = orderId(); if (order instanceof Response) return order;
+        const email = typeof p.email === "string" ? p.email.trim().slice(0, 254) : "";
+        if (!email) return json({ error: "an email is required" }, 400);
+        const r = await core<{ emailed: number }>("_exos_pos_kiosk_email", { p_order: order, p_email: email });
+        return r instanceof Response ? r : json({ data: { emailed: r.data.emailed } });
+      }
+    }
+  } catch (e) {
+    if (e instanceof CardDbError) return dbError(e.db);
+    return stripeError(e);
+  }
+  return json({ error: "unknown action" }, 400);
 }

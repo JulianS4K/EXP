@@ -334,6 +334,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'Off until EXOS_POS_CARD=on.',
   },
   {
+    id: 'kiosk-mode', audience: 'organizer', status: 'off',
+    claim: 'Organizers can run self-serve ticket kiosks: a locked screen that sells one event\'s tickets by card on its own reader, resets after each buyer, and only staff with the PIN can leave.',
+    code: ['src/views/Kiosk.tsx', 'src/lib/kiosk.ts', 'supabase/functions/exos-pos/index.ts', 'supabase/migrations/20261113100000_exos_kiosk.sql'],
+    note: 'Built, but it sells only by card at the door, which is off until EXOS_POS_CARD=on; until then a kiosk shows "unavailable".',
+  },
+  {
     id: 'dice-import', audience: 'organizer', status: 'off',
     claim: 'Promoters can import their DICE events, ticket holders and opted-in fans.',
     code: ['supabase/functions/exos-dice-import/index.ts', 'supabase/migrations/20261106100000_exos_dice_import.sql'],

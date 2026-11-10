@@ -354,6 +354,7 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
    no card data, buyer emails or phones), Org → Activity with filters and CSV, `GET /v1/audit` (`audit:read`); docs/security.md.
 10. ✅ Fair-day setup (branch `claude/exos-fair-day`, mig 20261113110000): editor preset (day pass + list per day, multi-day / any-day passes, parking + camping add-ons on a lot list), door enforces day validity and once-a-day online and offline, per-gate throughput on the door report; docs/organizer-guide.md "Fairs and multi-day events".
 11. Attendance report (branch `claude/exos-attendance-report`, mig 20261113120000; Coconino demographics, UT pacing): attendees by billing postal code (under 5 buyers folded into "Other", never named), daily pace vs a prior event ($0 tickets apart), XLSX of it + settlement / sales tax / journal (export.run), `GET /v1/events/:id/attendance`; docs/fans.md. Not applied.
+12. ✅ Kiosk mode, code side (branch `claude/exos-kiosk`, mig 20261113100000; fair RFPs): a self-serve screen for one event, card only on its own reader, required questions, QR / email / print, auto-reset, PIN exit (audited); sells once `EXOS_POS_CARD=on`; `docs/pos.md` "Kiosk mode".
 
 ## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
 
