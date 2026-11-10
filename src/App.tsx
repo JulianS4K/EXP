@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigationType } from 'react-router-dom';
 import { lazy, Suspense, ReactNode, useEffect } from 'react';
 import { MotionConfig } from 'motion/react';
 import { AuthProvider } from './context/AuthContext';
@@ -12,6 +12,7 @@ import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
 import GroupPayGate from './components/GroupPayGate';
 import { isPixelRoute, leavePixelScope } from './lib/pixels';
+import { kioskRedirect, kioskStorage, readKioskCredential } from './lib/kiosk';
 
 // Home is the landing page — keep it eagerly loaded so the first paint is
 // fast. Every other route is split out so we don't ship CreateEvent / the
@@ -75,6 +76,8 @@ const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
+// Kiosk mode (mig 20261113100000): the self-serve screen, bare and locked.
+const Kiosk = lazy(() => import('./views/Kiosk'));
 // The apps suite's public landing pages (docs/strategy.md "Apps"; claude/exos-apps-pages).
 const AppLanding = lazy(() => import('./views/AppLanding'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
@@ -151,7 +154,12 @@ function ChromeLayout({ children }: { children: ReactNode }) {
     if (navType !== 'POP') window.scrollTo(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
+  // Kiosk mode keeps this browser on /kiosk (no other page, no navigation)
+  // while it holds a kiosk credential; the staff PIN on /kiosk clears it.
+  const kioskTo = kioskRedirect(location.pathname, readKioskCredential(kioskStorage()));
+  if (kioskTo) return <Navigate to={kioskTo} replace />;
   const isBare =
+    location.pathname === '/kiosk' ||
     location.pathname.startsWith('/embed/') ||
     location.pathname.startsWith('/wallet/pass/') ||
     // Printable receipts / credit notes: the page is the document.
@@ -245,6 +253,7 @@ export default function App() {
                     <Route path="/create-event" element={<CreateEvent />} />
                     <Route path="/checkin/:eventId" element={<OrganizerCheckIn />} />
                     <Route path="/door" element={<DoorApp />} />
+                    <Route path="/kiosk" element={<Kiosk />} />
                     <Route path="/apps/door" element={<AppLanding app="door" />} />
                     <Route path="/apps/events" element={<AppLanding app="events" />} />
                     <Route path="/apps/promote" element={<AppLanding app="promote" />} />

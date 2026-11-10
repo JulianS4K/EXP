@@ -352,6 +352,7 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
 8. Parked: SOC 2 Type II (about $30–110k, 6–12 months): only when a target bid makes it pass/fail.
 9. ✅ Org audit log (branch `claude/exos-org-audit`, mig 20261109100000): append-only `exos_org_audit` (who, what, when, from where;
    no card data, buyer emails or phones), Org → Activity with filters and CSV, `GET /v1/audit` (`audit:read`); docs/security.md.
+10. ✅ Kiosk mode, code side (branch `claude/exos-kiosk`, mig 20261113100000; fair RFPs): a self-serve screen for one event, card only on its own reader, required questions, QR / email / print, auto-reset, PIN exit (audited); sells once `EXOS_POS_CARD=on`; `docs/pos.md` "Kiosk mode".
 
 ## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
 

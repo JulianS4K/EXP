@@ -4,6 +4,7 @@
 import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
+import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 // Group pay v2 is paused (mig 20261111120000): its steps run against a build
 // with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
@@ -954,6 +955,71 @@ await run('door: with card on, the Sell tab charges on a reader and shows the QR
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
 }, fns: { 'exos-pos': cardPos } }) });
+
+// --- claude/exos-kiosk: kiosk mode (mig 20261113100000) ---------------------
+const kioskSt = {};
+await run('kiosk: locked to /kiosk, a card sale with a required question, QR, email, reset, PIN exit', async (page, log) => {
+  await page.addInitScript((cred) => {
+    if (!sessionStorage.getItem('kiosk-smoke')) {
+      sessionStorage.setItem('kiosk-smoke', '1');
+      localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred));
+      localStorage.setItem('exos.checkout.draft', '{"email":"left@behind.test"}');
+    }
+  }, KIOSK_CRED);
+  // Any other page goes back to the kiosk; no site navigation there.
+  await page.goto(BASE + '/dashboard');
+  await page.waitForURL(/\/kiosk$/, { timeout: 8000 });
+  await expectText(page, 'County Fair');
+  assert(await page.getByRole('navigation').count() === 0, 'no navigation on the kiosk');
+  assert(await page.getByRole('radio', { name: /Child/ }).isDisabled(), 'a sold-out type is disabled');
+  await page.getByRole('radio', { name: /Adult/ }).click();
+  await page.getByRole('button', { name: 'One more' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  // The required question can't be skipped: there is no skip button.
+  assert(await page.getByRole('button', { name: /skip/i }).count() === 0, 'no skip at a kiosk');
+  await page.getByRole('button', { name: /Pay \$30\.00 by card/ }).click();
+  await expectText(page, 'answer');
+  assert(!log.some((l) => l.includes('"kiosk_begin"')), 'nothing sent with the question unanswered');
+  await page.getByLabel(/ZIP code/).fill('86001');
+  await page.getByRole('button', { name: /Pay \$30\.00 by card/ }).click();
+  await expectText(page, 'Tap, insert or swipe your card');
+  await expectText(page, 'Paid. Here are your tickets.', 12000);
+  await page.getByRole('img', { name: /Ticket QR code 1 of 2/ }).waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Next ticket' }).click();
+  await page.getByRole('img', { name: /Ticket QR code 2 of 2/ }).waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /Print my tickets/ }).count() === 1, 'print offered (the kiosk has a printer)');
+  await page.getByLabel(/Email it to me/).fill('fan@example.com');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expectText(page, 'Sent to fan@example.com');
+  const calls = log.filter((l) => l.startsWith('fn exos-pos'));
+  assert(calls.length > 0 && calls.every((l) => l.includes('"kiosk_token":"exk_')), 'every call carries the kiosk credential');
+  assert(!calls.some((l) => /card_number|cvc|"pan"|exp_month|skip_questions|payment"|drawer_id|comp_quantity/.test(l)), 'no card data, cash, comp or skip');
+  assert(calls.some((l) => l.includes('"kiosk_begin"') && l.includes('86001')), 'the answer went with the sale');
+  assert(!log.some((l) => l.startsWith('rpc ') || /^(GET|POST|PATCH) exos_/.test(l)), 'nothing but kiosk calls: ' + log.filter((l) => !l.startsWith('fn ')).join(' | '));
+  // Done: back to the start; what the buyer typed is gone, the credential stays.
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expectText(page, '1. Choose your tickets');
+  assert(await page.getByRole('radio', { name: /Adult/ }).getAttribute('aria-checked') === 'false', 'nothing chosen after reset');
+  const stored = await page.evaluate(() => Object.keys(localStorage).sort());
+  assert(!stored.includes('exos.checkout.draft') && stored.includes('exos.kiosk.v1'), 'buyer data wiped, credential kept: ' + stored.join(','));
+  // Staff leave with the PIN.
+  await page.getByRole('button', { name: 'Staff' }).click();
+  await page.getByLabel('Admin PIN').fill('111111');
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expectText(page, 'Wrong PIN');
+  await page.getByLabel('Admin PIN').fill('482913');
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await page.waitForURL(/\/door$/, { timeout: 8000 });
+  assert(await page.evaluate(() => localStorage.getItem('exos.kiosk.v1')) === null, 'the credential is gone after the exit');
+}, { mock: { fns: { 'exos-pos': kioskPos(kioskSt) } } });
+
+await run('kiosk: card payments off, the kiosk says it is unavailable', async (page) => {
+  await page.addInitScript((cred) => localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred)), KIOSK_CRED);
+  await page.goto(BASE + '/kiosk');
+  await expectText(page, 'Kiosk unavailable');
+  await expectText(page, 'card payments are switched off');
+  assert(await page.getByRole('radio', { name: /Adult/ }).count() === 0, 'nothing to sell');
+}, { mock: { fns: { 'exos-pos': kioskPos({ cardOn: false }) } } });
 
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');

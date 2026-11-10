@@ -281,7 +281,8 @@ for m in \
   20261111120000_exos_group_pay_off \
   20261111130000_exos_journal_payouts_tax \
   20261111140000_exos_api_leftovers \
-  20261112100000_exos_follower_fixes; do
+  20261112100000_exos_follower_fixes \
+  20261113100000_exos_kiosk; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -522,7 +523,8 @@ for m in \
          20261111120000_exos_group_pay_off \
          20261111130000_exos_journal_payouts_tax \
          20261111140000_exos_api_leftovers \
-         20261112100000_exos_follower_fixes; do
+         20261112100000_exos_follower_fixes \
+         20261113100000_exos_kiosk; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -660,5 +662,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_neighborh
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_follower_fixes.sql"
 # claude/exos-api-leftovers (mig 20261111140000): reservation updates replace checkout answers while open (partners' required ones required, audit, cross-partner / org), partner order reads carry answers (hidden left out), add-on wallet reissue (holder only, door refuses old codes, 5 a day, RLS) (race: race_api_leftovers.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_leftovers.sql"
+# claude/exos-kiosk (mig 20261113100000): kiosk mode: the kiosk flag + admin PIN (bcrypt, rate-limited exit, lockout), the kiosk credential (sha-256 only), event lock, card only (no cash / comp / door sale on a kiosk device), required questions never skipped, journal + settlement, audit rows, cross-org (race: race_pos_kiosk.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

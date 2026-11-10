@@ -8,6 +8,7 @@
 import { chromium, devices } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { handle, EV, TIER, TIER2, ORG, UID, TICKET, EVENT_ROW, ownerTables, tables } from './mock.mjs';
+import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -308,6 +309,38 @@ await check('door scanner (/checkin)', async (page, run) => {
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
+
+// Kiosk mode (mig 20261113100000): the self-serve screen, blocking. Big touch
+// targets and visible focus are its own rules (src/views/Kiosk.tsx); axe
+// checks names, contrast, labels and the PIN dialog.
+await check('kiosk screen', async (page, run) => {
+  await page.addInitScript((cred) => localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred)), KIOSK_CRED);
+  await page.goto(BASE + '/kiosk');
+  await text(page, 'County Fair');
+  await run('pick');
+  await page.getByRole('radio', { name: /Adult/ }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel(/ZIP code/).waitFor({ timeout: 8000 });
+  await run('questions');
+  await page.getByLabel(/ZIP code/).fill('86001');
+  await page.getByRole('button', { name: /by card/ }).click();
+  await text(page, 'Paid. Here are your tickets.');
+  await page.getByRole('img', { name: /Ticket QR code/ }).waitFor({ timeout: 8000 });
+  await run('paid');
+  // Focus is visible on the kiosk's buttons (a ring, not the browser default only).
+  await page.getByRole('button', { name: 'Done' }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  const ring = await page.getByRole('button', { name: 'Done' }).evaluate((el) => getComputedStyle(el).boxShadow);
+  if (!ring || ring === 'none') throw new Error('no visible focus ring on the kiosk button');
+  const small = await page.evaluate(() => [...document.querySelectorAll('main button')]
+    .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.height < 48 || r.width < 48); })
+    .map((b) => b.textContent?.trim() || b.getAttribute('aria-label')));
+  if (small.length) throw new Error('kiosk touch targets under 48 px: ' + small.join(', '));
+  await page.getByRole('button', { name: 'Staff' }).click();
+  await page.getByLabel('Admin PIN').waitFor({ timeout: 5000 });
+  await run('staff PIN');
+}, { mock: { fns: { 'exos-pos': kioskPos({}) } } });
 
 await browser.close();
 
