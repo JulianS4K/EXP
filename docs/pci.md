@@ -116,6 +116,7 @@ My Tickets, the ticket (code locked, and with the rotating entry QR live), trans
 multi-day setup panel (closed, open with its preview, and with an error), and the self-serve kiosk (`/kiosk`: pick,
 questions, paid with the QR, the staff PIN dialog; the same run also fails a kiosk button under 48 px or one without
 a visible focus ring). The scans run with the browser set to reduced motion.
+
 **Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /
 ES switch; the seat picker's list view has one toggle button per seat, named with section, row, seat, price and
 wheelchair / companion / restricted-view flags (the SVG map is `role="img"` and points to the list); errors are
