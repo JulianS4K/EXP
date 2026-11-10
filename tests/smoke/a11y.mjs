@@ -34,7 +34,7 @@ const SETTLE_CSS = `*, *::before, *::after {
   animation-duration: 0s !important; animation-delay: 0s !important;
   transition-duration: 0s !important; transition-delay: 0s !important; }`;
 
-async function scan(page, name, advisory) {
+async function scan(page, name, advisory, include) {
   await page.addStyleTag({ content: SETTLE_CSS });
   // JS animations (motion/react: the ticket card fades in from opacity 0)
   // ignore CSS. Wait for every Web Animation to finish and for inline
@@ -54,7 +54,10 @@ async function scan(page, name, advisory) {
       prev = now;
     }
   });
-  const r = await new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE).analyze();
+  // `include`: scan one part of a page (a panel), when the rest has its own check.
+  let axe = new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE);
+  if (include) axe = axe.include(include);
+  const r = await axe.analyze();
   // An advisory page (a known gap, docs/pci.md) prints its violations as
   // warnings until it's fixed, then moves to the blocking list.
   const blocking = advisory ? [] : r.violations.filter((v) => BLOCKING.has(v.impact));
@@ -82,7 +85,7 @@ async function check(name, fn, opts = {}) {
   if (opts.signedIn) await ctx.addInitScript((s) => localStorage.setItem('sb-mock-auth-token', JSON.stringify(s)), SESSION);
   const page = await ctx.newPage();
   try {
-    await fn(page, (label) => scan(page, label ? `${name}: ${label}` : name, opts.advisory));
+    await fn(page, (label) => scan(page, label ? `${name}: ${label}` : name, opts.advisory, opts.include));
   } catch (e) {
     results.push({ name, error: String(e.message || e).split('\n')[0] });
     await page.screenshot({ path: 'tests/smoke/fail-a11y-' + name.replace(/\W+/g, '_') + '.png' }).catch(() => {});
@@ -307,6 +310,26 @@ await check('door scanner (/checkin)', async (page, run) => {
   exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
+} }) });
+
+// claude/exos-fair-day: the editor's fair / multi-day setup, open with a
+// preview and with an error (blocking; the panel only, the editor around it
+// isn't in this gate yet).
+await check('event editor: fair / multi-day setup', async (page, run) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('fair-setup');
+  await panel.waitFor({ timeout: 8000 });
+  await run('closed');
+  await panel.getByRole('button', { name: 'Set up a fair or multi-day event' }).click();
+  await panel.getByRole('checkbox', { name: /Sell camping/ }).check();
+  await panel.getByTestId('fair-setup-preview').waitFor({ timeout: 5000 });
+  await run('open, preview');
+  await panel.getByLabel('Per day').fill('0');
+  await panel.getByTestId('fair-setup-errors').waitFor({ timeout: 5000 });
+  await run('open, error');
+}, { signedIn: true, include: '[data-testid="fair-setup"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
 } }) });
 
 await browser.close();

@@ -753,6 +753,49 @@ Add lists in **Edit event → Venue & seating → Check-in lists** when the door
   refused the same as a scan. With Exit selected, the button reads **Check out by name**.
 - Deleting a list doesn't remove its past check-ins; the scan report keeps the list's name.
 
+### Fairs and multi-day events
+
+County fairs, rodeos and state fairs sell day passes, passes for several days, parking and camping,
+and run several gates for several days. **Edit event → Venue & seating → Fair / multi-day setup**
+builds all of it in one go from a few answers, as ordinary ticket types, check-in lists and add-ons
+you can change afterwards in the usual places:
+
+- **The days and gate hours** (in the event's time zone; a closing time at or before the opening
+  time means after midnight).
+- **A day pass for each day**: a ticket type on that day's check-in list only. At another day's
+  list it's refused ("isn't on this check-in list"); at its own list outside the day's hours it's
+  refused ("isn't open right now").
+- **A multi-day pass**, valid every day (a *3-day pass*) or on **any N days** of your choice, and an
+  **any-day pass**: one day, which the holder picks by showing up. Once it has been used on a day,
+  every other day says **This pass has used all its days**.
+- **Re-entry**: *same-day re-entry* (gate staff scan people out and back in, that day only) or *no
+  re-entry* (one entry a day). A pass for several days gets in once on each of its days either way.
+- **Parking and camping** are add-ons with their own entry codes, sold with the admission order
+  (spaces and campsites are the add-on's capacity), and scanned on one **lot list** that takes only
+  those codes: a ticket at the lot is refused ("scans add-on entry codes only"), and a parking code
+  at a pedestrian gate is refused too. The lot always allows in and out. Buyers find the codes on
+  their ticket page.
+
+The setup also moves the event's end to the last day's close, so the door's offline uploads and
+reports cover the whole fair. It runs once per event (owners and managers); after that, change the
+lists under **Check-in lists**, where a list's **Fair day** can also be set by hand.
+
+How the door treats a fair-day list:
+- Without re-entry, a ticket gets in **once that day**, at any gate scanning a list for that day
+  (two gates of one day share it). A ticket used yesterday gets in today.
+- With re-entry, the in / out rules above apply, per list.
+- The same rules hold offline (the saved list knows which days a ticket used), for check in by name
+  and in the API's check-in. An offline admission the server refuses as a day already used is logged
+  as a refusal, not recorded as attended.
+- A printed ticket's paper code is single-use, so a multi-day pass should be shown on a phone after
+  day 1 (or printed once per day).
+
+The event report's **Gate throughput** shows, for today (or the last 24 hours / 3 days): entries per
+15 minutes (or 5, 30, 60) for each gate and list, the lot's codes in their own column, each gate's
+totals (in, out, offline admissions, devices, the busiest minute), **how many are in the park now**
+on lists that scan people out, the lot's count, and refusals by reason. It refreshes every minute.
+Owners, managers, finance and the event's door staff can see it; it has no buyer names.
+
 ### Offline conflicts and sync health
 
 - A scan admitted while the device was offline is uploaded later. If the server refuses it then

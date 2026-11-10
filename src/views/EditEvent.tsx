@@ -2,7 +2,7 @@ import { geocodeEvent } from '../lib/geo';
 import LocationModePicker from '../components/LocationModePicker';
 import { blankLocationDraft, CAPACITY_REQUIRED_MESSAGE, draftFromView, draftToPayload, isPrivateMode, validateLocationDraft, type Address, type LocationDraft, type LocationMode } from '../lib/eventLocation';
 import { getEventLocation, setEventLocation } from '../lib/eventLocationApi';
-import { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
+import { Fragment, useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from '../lib/timestamp';
 import { uploadEventImage } from '../lib/storage';
@@ -111,6 +111,7 @@ import {
 import { getEventJoinLinkForStaff, setEventJoinLink } from '../lib/onlineEventsApi';
 import Dialog from '../components/Dialog';
 import CheckinListsEditor from '../components/CheckinListsEditor';
+import FairSetupPanel from '../components/FairSetupPanel';
 import RefundOfferFields from '../components/RefundOfferFields';
 import { rescheduleEvent } from '../lib/reschedule';
 import { qualifiesAsDateChange, defaultRefundDeadline, deadlineProblem } from '../lib/rescheduleRefunds';
@@ -166,6 +167,8 @@ export default function EditEvent() {
   // Snapshot of the original tier ids so we can compute additions/removals
   // and write the matching tierSales sub-collection updates atomically.
   const [originalTierIds, setOriginalTierIds] = useState<string[]>([]);
+  // Bumped after the fair setup writes lists and add-ons, so those editors reload.
+  const [fairKey, setFairKey] = useState(0);
   // Track the slug that was on disk when we loaded so we can free it (and
   // reserve the new one) atomically if the organizer renames.
   const [originalSlug, setOriginalSlug] = useState<string>('');
@@ -1308,12 +1311,41 @@ export default function EditEvent() {
 
            {/* Check-in lists / gates and optional re-entry (mig 20260929140000);
                hidden until the database has them. Saves on its own buttons. */}
+           {/* Fair / multi-day setup (mig 20261113110000): a preset generator that
+               writes ordinary ticket types, check-in lists and add-ons. */}
            {eventId && (
-             <CheckinListsEditor
+             <FairSetupPanel
                eventId={eventId}
                timezone={eventData.timezone}
-               tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))}
+               startsAt={eventData.date?.toDate?.() ?? null}
+               onCreated={(r) => {
+                 setFairKey((k) => k + 1);
+                 // The setup moved the event's end to the last day's close: keep the
+                 // form in step so saving it doesn't put the old end back.
+                 if (r.endsAt) {
+                   const end = Timestamp.fromDate(new Date(r.endsAt));
+                   setEventData((d) => ({ ...d, timing: { ...(d.timing || { startTime: d.date as Timestamp }), endTime: end } }));
+                 }
+                 // The new ticket types join the form as saved ones (as a reload would).
+                 const newIds = Object.values(r.tierIds);
+                 void getEventForEdit(eventId).then((fresh) => {
+                   const added = (fresh?.ticketTiers || []).filter((t) => newIds.includes(t.id));
+                   if (added.length === 0) return;
+                   setEventData((d) => ({ ...d, ticketTiers: [...(d.ticketTiers || []), ...added.filter((t) => !(d.ticketTiers || []).some((x) => x.id === t.id))] }));
+                   setOriginalTierIds((ids) => [...ids, ...added.map((t) => t.id).filter((id) => !ids.includes(id))]);
+                   setOriginalTiers((ts) => [...ts, ...added.filter((t) => !ts.some((x) => x.id === t.id)).map((t) => ({ id: t.id, name: t.name }))]);
+                 }).catch((err) => console.warn('reloading ticket types failed:', err));
+               }}
              />
+           )}
+           {eventId && (
+             <Fragment key={`lists-${fairKey}`}>
+               <CheckinListsEditor
+                 eventId={eventId}
+                 timezone={eventData.timezone}
+                 tiers={(eventData.ticketTiers || []).filter((t) => (originalTierIds as string[]).includes(t.id)).map((t) => ({ id: t.id, name: t.name }))}
+               />
+             </Fragment>
            )}
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -1677,7 +1709,7 @@ export default function EditEvent() {
         </section>
 
         {/* Add-ons & Merch — self-contained CRUD (not part of the form submit). */}
-        {eventId && <AddonsEditor eventId={eventId} />}
+        {eventId && <Fragment key={`addons-${fairKey}`}><AddonsEditor eventId={eventId} /></Fragment>}
         {/* Checkout questions (mig 20261106110000): saved ticket types only. */}
         {eventId && <QuestionBuilder eventId={eventId} tiers={originalTiers} />}
 

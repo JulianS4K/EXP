@@ -105,7 +105,8 @@ picker (map, then list with a seat picked), checkout (the guest email dialog; ba
 My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, the Door app
 (`/door`, signed out and signed in), the staff door scanner (`/checkin/:eventId`), the four app landing pages
 (`/apps/door`, `/apps/events`, `/apps/promote`, `/apps/money`), the neighborhood pages (`/nyc`, and
-`/nyc/:neighborhood` on phone and desktop) and the mail's unfollow page (`/unfollow`). The scans run with the browser
+`/nyc/:neighborhood` on phone and desktop), the mail's unfollow page (`/unfollow`) and, in the event editor, the fair /
+multi-day setup panel (closed, open with its preview, and with an error). The scans run with the browser
 set to reduced motion.
 
 **Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /

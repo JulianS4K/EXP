@@ -31,6 +31,13 @@
 //     offline (or with this ticket's scans still queued on a re-entry list,
 //     which the server hasn't seen yet) the saved list and this device's
 //     marks do.
+//   * Fair days (mig 20261113110000): on a list for one fair day (entryDay)
+//     a ticket used on ANOTHER day may enter; without re-entry it enters once
+//     that day, whichever of the day's lists ('used'); a ticket type with a
+//     day limit (the any-day pass: 1) is 'day-limit' once it has used that
+//     many other days. The device knows the days from the saved list's
+//     list_state (it covers day lists) and its own marks; online the server
+//     decides, offline (or with this ticket's scan still queued) the device.
 //   * Add-on entry codes (A-, mig 20261107110000): an add-on with its own code
 //     scans at a list that admits add-ons, and only there ('tickets-only-list'
 //     at a ticket list or with no list; 'wrong-list' at a list for other
@@ -44,6 +51,7 @@
 import { extractTicketIdFromAny, normalizeCodePrefix } from '../barcode';
 import {
   addonListRefusal,
+  dayListRefusal,
   effectiveDirection,
   listAdmitsTier,
   listWindow,
@@ -151,6 +159,10 @@ export interface ScanDecisionInput {
   list?: DoorCheckinList | null;
   /** Entry (default) or exit; exits only on a re-entry list. */
   direction?: DoorDirection;
+  /** Every list of the event (fair days: which lists share a day). */
+  lists?: DoorCheckinList[] | null;
+  /** Ticket type id → max_entry_days (fair days; absent = no limit). */
+  dayLimits?: Record<string, number> | null;
 }
 
 export type DoorRejectReason =
@@ -181,7 +193,9 @@ export type DoorRejectReason =
   /** An add-on's entry code at a list that scans tickets only (or no list). */
   | 'tickets-only-list'
   /** A ticket at a list that scans add-on entry codes only. */
-  | 'addon-only-list';
+  | 'addon-only-list'
+  /** Fair days: the ticket type's day limit is used up (an any-day pass on a second day). */
+  | 'day-limit';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -242,15 +256,16 @@ export function decideScan(input: ScanDecisionInput): ScanDecision {
   if ((input.direction ?? 'entry') === 'exit' && !list?.allowReentry) {
     return { action: 'reject', ticketId, reason: 'exit-not-allowed' };
   }
-  const reentry = !!list?.allowReentry;
+  // A fair day list: this device's marks say which days the ticket used.
+  const perList = !!list?.allowReentry || !!list?.entryDay;
 
   // Admitted on this device and not uploaded yet: used, whatever the network.
-  // On a re-entry list the device's own marks say inside / outside instead,
+  // On a re-entry or fair-day list the device's own marks decide instead,
   // and they are ahead of the server until the queue uploads.
-  if (input.queued && !reentry) return { action: 'reject', ticketId, reason: 'used' };
+  if (input.queued && !perList) return { action: 'reject', ticketId, reason: 'used' };
 
   const v = input.verify;
-  if (input.network === 'online' && !(reentry && input.queued)) {
+  if (input.network === 'online' && !(perList && input.queued)) {
     // A signature that doesn't match the CACHED secret may just mean the
     // ticket was transferred since the download: the server decides. A code
     // that is malformed or outside its time window fails there too, and the
@@ -309,9 +324,13 @@ function decideOnSavedList(
     return { action: 'admit', ticketId, test: false, queue: true, ...named, direction: 'exit' };
   }
   if (entry.pendingTransferId && !(byName && entry.parked)) return { action: 'reject', ticketId, reason: 'in-transfer' };
+  if (!entry.addon && list?.entryDay) {
+    const day = dayListRefusal(list, entry.lists, input.lists, entry.tierId ? input.dayLimits?.[entry.tierId] : null);
+    if (day) return { action: 'reject', ticketId, reason: day };
+  }
   if (list?.allowReentry) {
     if (entry.lists?.[list.id] === 'entry') return { action: 'reject', ticketId, reason: 'already-inside' };
-  } else if (entry.used) {
+  } else if (entry.used && !(list?.entryDay && !entry.addon)) {
     return { action: 'reject', ticketId, reason: 'used' };
   }
   if (preDoors) {
@@ -336,10 +355,10 @@ function decideByName(input: ScanDecisionInput, ticketId: string): ScanDecision 
   if ((input.direction ?? 'entry') === 'exit' && !list?.allowReentry) {
     return { action: 'reject', ticketId, reason: 'exit-not-allowed' };
   }
-  const reentry = !!list?.allowReentry;
+  const perList = !!list?.allowReentry || !!list?.entryDay;
   // Checked in on this device and not uploaded yet: used, whatever the network.
-  if (input.queued && !reentry) return { action: 'reject', ticketId, reason: 'used' };
-  if (input.network === 'online' && !(reentry && input.queued)) return { action: 'ask-server', ticketId, byName: true };
+  if (input.queued && !perList) return { action: 'reject', ticketId, reason: 'used' };
+  if (input.network === 'online' && !(perList && input.queued)) return { action: 'ask-server', ticketId, byName: true };
   if (gate.cancelled) return { action: 'reject', ticketId, reason: 'event-cancelled' };
   if (!entry) return { action: 'reject', ticketId, reason: 'unknown-offline' };
   return decideOnSavedList(input, ticketId, entry, true);

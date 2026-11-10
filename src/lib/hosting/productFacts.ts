@@ -227,6 +227,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
     note: 'An organizer can turn check-in by name off for an event (QR only).',
   },
   {
+    id: 'fair-days', audience: 'organizer', status: 'live',
+    claim: 'Fairs and rodeos can set up day passes, multi-day and any-day passes, parking and camping in one step, with a check-in list per day that admits each pass only on its days, a lot list for parking and camping codes, and gate-by-gate entries every 15 minutes on the door report.',
+    code: ['src/lib/fairSetup.ts', 'src/components/FairSetupPanel.tsx', 'src/components/DoorThroughputPanel.tsx',
+      'src/lib/door/lists.ts', 'supabase/migrations/20261113110000_exos_fair_day.sql'],
+    note: 'Live once mig 20261113110000 is applied (scripts/rollout-prod.sh); selling paid passes needs payments on (docs/payments-go-live.md).',
+  },
+  {
     id: 'walkup-questions', audience: 'organizer', status: 'live',
     claim: 'Walk-up sales at the door ask the same checkout questions as online; staff can skip them to keep the line moving, and every skip is logged.',
     code: ['src/components/DoorSellPanel.tsx', 'supabase/functions/_shared/pos/walkup.ts',

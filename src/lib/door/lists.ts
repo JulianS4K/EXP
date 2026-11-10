@@ -7,6 +7,12 @@
 // 2026-09-29, "Keep reentry optional"). On a re-entry list a ticket is inside
 // when its last scan on that list was an entry; an exit scan lets it back in.
 //
+// A list can be for one fair day (mig 20261113110000, entryDay): without
+// re-entry a ticket enters once that DAY (every list with the same day, so
+// several gates share it) instead of once per event, and a ticket type's
+// max_entry_days caps how many different days it enters (an any-day pass is
+// 1). See dayListRefusal.
+//
 // A list can also admit add-on entry codes (mig 20261107110000; DICE
 // Extra.hasSeparateAccessBarcode): admits 'tickets' (the default), 'addons'
 // (a VIP lounge, a merch pickup: add-on codes only) or 'both', and addonIds
@@ -36,6 +42,8 @@ export interface DoorCheckinList {
   admits?: ListAdmits;
   /** The add-ons an add-on list takes; null = every add-on with its own code. */
   addonIds?: string[] | null;
+  /** YYYY-MM-DD: a list for one fair day (mig 20261113110000); null / absent = ordinary. */
+  entryDay?: string | null;
 }
 
 export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
@@ -53,6 +61,7 @@ export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
     sortOrder: Number(r.sort_order ?? 0) || 0,
     admits,
     addonIds: admits !== 'tickets' && addons && addons.length > 0 ? addons : null,
+    ...(typeof r.entry_day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(r.entry_day) ? { entryDay: r.entry_day.slice(0, 10) } : {}),
   };
 }
 
@@ -156,6 +165,41 @@ export function parseListState(v: unknown): ListState | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Fair days (mig 20261113110000): why a day list refuses a ticket's ENTRY,
+ *  or null. `state` is the ticket's per-list last direction (roster
+ *  list_state, which covers day lists, plus this device's marks); a list
+ *  with a state was entered. Without re-entry: once that day, whichever of
+ *  the day's lists ('used'). The ticket type's day limit counts the other
+ *  days entered ('day-limit'). On a re-entry list the inside / outside rule
+ *  is the caller's (as before). Mirrors SQL _exos_checkin_day_refusal. */
+export function dayListRefusal(
+  list: DoorCheckinList | null,
+  state: ListState | undefined,
+  allLists: DoorCheckinList[] | null | undefined,
+  dayLimit: number | null | undefined,
+): 'used' | 'day-limit' | null {
+  if (!list?.entryDay) return null;
+  const dayOf = new Map((allLists ?? []).filter((l) => l.entryDay).map((l) => [l.id, l.entryDay as string]));
+  dayOf.set(list.id, list.entryDay);
+  const days = new Set<string>();
+  for (const id of Object.keys(state ?? {})) {
+    const d = dayOf.get(id);
+    if (d) days.add(d);
+  }
+  if (!list.allowReentry && days.has(list.entryDay)) return 'used';
+  days.delete(list.entryDay);
+  if (dayLimit != null && dayLimit > 0 && days.size >= dayLimit) return 'day-limit';
+  return null;
+}
+
+/** Has this ticket entered on the list's fair day (any of the day's lists)? */
+export function enteredOnDay(list: DoorCheckinList, state: ListState | undefined, allLists: DoorCheckinList[] | null | undefined): boolean {
+  if (!list.entryDay) return false;
+  const ids = new Set((allLists ?? []).filter((l) => l.entryDay === list.entryDay).map((l) => l.id));
+  ids.add(list.id);
+  return Object.keys(state ?? {}).some((id) => ids.has(id));
+}
+
 /** A ticket's list state after a scan on `listId`. */
 export function withDirection(state: ListState | undefined, listId: string, d: DoorDirection): ListState {
   return { ...(state ?? {}), [listId]: d };
@@ -174,6 +218,8 @@ export interface CheckinListInput {
   admits?: ListAdmits;
   /** null = every add-on with its own entry code (add-on lists only). */
   addonIds?: string[] | null;
+  /** YYYY-MM-DD fair day; undefined = leave it as it is. */
+  entryDay?: string | null;
 }
 
 /** Problems with a list before it's saved, or null. */
@@ -197,5 +243,6 @@ export function describeList(l: DoorCheckinList, tierName: (id: string) => strin
   const addons = l.addonIds && addonName ? l.addonIds.map(addonName).join(', ') : 'all add-on codes';
   const what = l.admits === 'addons' ? `Add-on codes only (${addons})`
     : l.admits === 'both' ? `${tiers} + ${addons}` : tiers;
-  return `${what} · ${l.allowReentry ? 're-entry allowed' : 'no re-entry'}`;
+  const day = l.entryDay ? ` · fair day ${l.entryDay}` : '';
+  return `${what} · ${l.allowReentry ? (l.entryDay ? 're-entry the same day' : 're-entry allowed') : (l.entryDay ? 'once that day' : 'no re-entry')}${day}`;
 }

@@ -79,6 +79,7 @@ import {
   effectiveDirection,
   loadDirection,
   loadListChoice,
+  enteredOnDay,
   pickList,
   saveDirection,
   saveListChoice,
@@ -187,6 +188,8 @@ const REFUSAL_TEXT: Record<string, string> = {
   // Add-on entry codes (mig 20261107110000).
   'tickets-only-list': "This is an add-on's own entry code (a VIP lounge, a merch pickup). It scans at that add-on's check-in list, not here. Switch the list if this device covers it.",
   'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
+  // Fair days (mig 20261113110000).
+  'day-limit': 'This pass has used all its days (an any-day pass gets one day). It was already used on another day of the fair.',
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -336,8 +339,10 @@ export default function OrganizerCheckIn() {
   };
   // Nothing more to do for this ticket on this list: used (no re-entry), or
   // inside and scanning entries (re-entry list).
+  // A fair-day list (no re-entry): entered on this day, at any of its gates.
   const doneHere = (e: DoorRosterEntry): boolean =>
-    activeList?.allowReentry ? direction === 'entry' && e.lists?.[activeList.id] === 'entry' : e.used;
+    activeList?.allowReentry ? direction === 'entry' && e.lists?.[activeList.id] === 'entry'
+      : activeList?.entryDay && !e.addon ? enteredOnDay(activeList, e.lists, checkinLists) : e.used;
   const chooseDirection = (d: DoorDirection) => {
     setWantedDirection(d);
     if (eventId) saveDirection(safeLocalStorage(), eventId, d);
@@ -436,9 +441,13 @@ export default function OrganizerCheckIn() {
         if (ev) {
           // Lists that failed to load (undefined) keep the ones we had.
           const saved = ev.checkinLists === undefined ? loadDoorEvent(safeLocalStorage(), eventId, Date.now()) : null;
-          setEvent((prev) =>
-            ev.checkinLists !== undefined ? ev : { ...ev, checkinLists: prev?.checkinLists ?? saved?.event.checkinLists ?? null },
-          );
+          setEvent((prev) => {
+            const next = ev.checkinLists !== undefined ? ev : { ...ev, checkinLists: prev?.checkinLists ?? saved?.event.checkinLists ?? null };
+            // Day limits that failed to load keep the ones we had (fair days).
+            return next.dayLimits === undefined && next.checkinLists?.some((l) => l.entryDay)
+              ? { ...next, dayLimits: prev?.dayLimits ?? saved?.event.dayLimits }
+              : next;
+          });
           setEventLoad('ready');
           return;
         }
@@ -1074,11 +1083,17 @@ export default function OrganizerCheckIn() {
       }
       return;
     }
+    if (result.reason === 'day-limit') {
+      setStatus('invalid-barcode');
+      setInvalidReason(REFUSAL_TEXT['day-limit']);
+      void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: 'day-limit' });
+      return;
+    }
     if (result.reason === 'used' || result.reason === 'already-inside') {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });
       markLocal(ticketId, { used: true });
-      if (inside && activeList) markListDirection(ticketId, activeList.id, 'entry');
+      if ((inside || activeList?.entryDay) && activeList) markListDirection(ticketId, activeList.id, 'entry');
       setStatus('already-used');
       void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: inside ? 'already-inside' : undefined });
       return;
@@ -1135,7 +1150,8 @@ export default function OrganizerCheckIn() {
     if (!test) {
       pushScan(ticket.id, name, dir === 'exit' ? 'OUT' : 'SUCCESS');
       if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
-      if (activeList?.allowReentry) markListDirection(ticket.id, activeList.id, dir);
+      // Re-entry and fair-day lists: which list (so which day) it entered.
+      if (activeList?.allowReentry || activeList?.entryDay) markListDirection(ticket.id, activeList.id, dir);
     }
     setStatus('success');
     setSearchId('');
@@ -1228,6 +1244,12 @@ export default function OrganizerCheckIn() {
             reasonDetail: d.reason === 'already-inside' ? 'already-inside' : undefined,
           });
         }
+        return;
+      case 'day-limit':
+        setStatus('invalid-barcode');
+        setInvalidReason(REFUSAL_TEXT['day-limit']);
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        if (canAudit) void writeScanReject('used', ctx.src, { ticketIdAttempted: id, reasonDetail: 'day-limit' });
         return;
       case 'wrong-list':
       case 'tickets-only-list':
@@ -1342,6 +1364,8 @@ export default function OrganizerCheckIn() {
       recent: lastReadRef.current,
       list: activeList,
       direction,
+      lists: checkinLists,
+      dayLimits: event?.dayLimits ?? null,
     };
     // Duplicate camera reads are dropped before anything changes on screen.
     const first = decideScan({ ...base, verify: null, network });
