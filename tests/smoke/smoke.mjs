@@ -1848,6 +1848,57 @@ await run('fans: Followers tab shows names, never an address; the CSV comes from
   ] }),
 } }) });
 
+// claude/exos-fair-day (mig 20261113110000): the editor's fair / multi-day
+// setup sends one plan (day passes, multi-day and any-day passes, a list per
+// day with its hours and fair day, parking and camping on a lot list).
+await run('edit event: fair / multi-day setup creates day passes, day lists and a lot list in one call', async (page, log) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('fair-setup');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByRole('button', { name: 'Set up a fair or multi-day event' }).click();
+  await panel.getByLabel('Day 1', { exact: true }).fill('2027-08-20');
+  await panel.getByLabel('Day 2', { exact: true }).fill('2027-08-21');
+  await panel.getByLabel('Day 3', { exact: true }).fill('2027-08-22');
+  await panel.getByLabel('Close', { exact: true }).nth(2).fill('23:30');
+  await panel.getByRole('radio', { name: /No re-entry/ }).check();
+  await panel.getByLabel('Price ($)').first().fill('12');
+  await panel.getByRole('checkbox', { name: /Sell camping/ }).check();
+  // A bad answer blocks the button and says why.
+  await panel.getByLabel('Per day').fill('0');
+  await panel.getByText('Day pass: set how many per day.').waitFor({ timeout: 5000 });
+  assert(await panel.getByRole('button', { name: 'Create passes and lists' }).isDisabled(), 'disabled while wrong');
+  await panel.getByLabel('Per day').fill('4000');
+  const preview = await panel.getByTestId('fair-setup-preview').innerText();
+  assert(preview.includes('Day pass · Fri, Aug 20: $12.00, 4,000 available'), 'preview: ' + preview);
+  assert(preview.includes('Any-day pass: $18.00, 2,000 available, one day'), 'preview any-day: ' + preview);
+  assert(preview.includes('Check-in list "Parking & camping": parking and camping codes only, in and out'), 'preview lot: ' + preview);
+  await panel.getByRole('button', { name: 'Create passes and lists' }).click();
+  const done = panel.getByTestId('fair-setup-done');
+  await done.waitFor({ timeout: 8000 });
+  assert((await done.innerText()).includes('Created 5 ticket types, 4 check-in lists and 2 add-ons.'), 'done: ' + (await done.innerText()));
+  const call = log.find((l) => l.startsWith('rpc exos_fair_setup '));
+  assert(call, 'one setup call');
+  assert(log.filter((l) => l.startsWith('rpc exos_fair_setup ')).length === 1, 'exactly one call');
+  const body = JSON.parse(call.slice('rpc exos_fair_setup '.length));
+  assert(body.p_event_id === EV, 'this event');
+  const plan = body.p_plan;
+  assert(plan.tiers.map((t) => t.key).join() === 'day-1,day-2,day-3,multi,any', 'tiers ' + plan.tiers.map((t) => t.key));
+  assert(plan.tiers[0].price_cents === 1200 && plan.tiers[0].capacity === 4000, 'cents and capacity');
+  assert(plan.tiers[4].max_entry_days === 1 && plan.tiers[3].max_entry_days === undefined, 'day limits');
+  assert(plan.addons.map((a) => a.key).join() === 'parking,camping', 'add-ons');
+  const [d1, d2, d3, lot] = plan.lists;
+  assert(d1.entry_day === '2027-08-20' && d1.allow_reentry === false && d1.tier_keys.join() === 'day-1,multi,any', 'day 1 list ' + JSON.stringify(d1));
+  // New York, EDT: 9:00 is 13:00 UTC; 23:30 on day 3 is 03:30 UTC the next day.
+  assert(d1.valid_from === '2027-08-20T13:00:00.000Z' && d3.valid_until === '2027-08-23T03:30:00.000Z', 'hours ' + d1.valid_from + ' ' + d3.valid_until);
+  assert(d2.tier_keys.join() === 'day-2,multi,any', 'day 2 list');
+  assert(lot.admits === 'addons' && lot.addon_keys.join() === 'parking,camping' && lot.allow_reentry === true && !lot.tier_keys, 'lot ' + JSON.stringify(lot));
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+  exos_fair_setup: (b) => ({ ok: true, tier_ids: Object.fromEntries(b.p_plan.tiers.map((t, i) => [t.key, `t${i}`])),
+    addon_ids: { parking: 'a1', camping: 'a2' }, list_ids: ['l1', 'l2', 'l3', 'l4'], ends_at: '2027-08-23T03:30:00Z' }),
+} }) });
+
 await run('unfollow link: one click, signed out', async (page, log) => {
   await page.goto(BASE + '/unfollow?t=' + 'a'.repeat(64));
   await page.getByRole('heading', { name: 'Stop following this organizer?' }).waitFor({ timeout: 8000 });

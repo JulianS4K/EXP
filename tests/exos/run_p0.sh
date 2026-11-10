@@ -282,6 +282,7 @@ for m in \
   20261111130000_exos_journal_payouts_tax \
   20261111140000_exos_api_leftovers \
   20261112100000_exos_follower_fixes \
+  20261113110000_exos_fair_day \
   20261113120000_exos_attendance_report; do
   apply "$m"
 done
@@ -524,6 +525,7 @@ for m in \
          20261111130000_exos_journal_payouts_tax \
          20261111140000_exos_api_leftovers \
          20261112100000_exos_follower_fixes \
+         20261113110000_exos_fair_day \
          20261113120000_exos_attendance_report; do
   $PSQL -f "$MIG/$m.sql"
 done
@@ -660,6 +662,8 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_leftovers
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_neighborhoods.sql"
 # claude/exos-follower-fixes (mig 20261112100000): a publish with 5,000 followers under statement_timeout 2s (notices only, one INSERT; the digest job mails, oldest first), the same for exos_announce_to_followers, the follow throttle (30 a minute, 300 a day), no address in the follower list, exos_audit_export 200 a day per org, unconfirmed addresses skipped (race: race_follower_mail.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_follower_fixes.sql"
+# claude/exos-fair-day (mig 20261113110000): fair days: a day list admits once per day (several gates share the day), a multi-day pass on each of its days, the any-day pass on one day only (max_entry_days), re-entry presets, the lot list scans only parking / camping codes, offline replay and by name follow, the roster carries day lists, the fair setup preset (owner / manager only, one transaction, once), the per-gate throughput view (buckets, in-park now, refusals; cross-org refused) (race: race_fair_day.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fair_day.sql"
 # claude/exos-api-leftovers (mig 20261111140000): reservation updates replace checkout answers while open (partners' required ones required, audit, cross-partner / org), partner order reads carry answers (hidden left out), add-on wallet reissue (holder only, door refuses old codes, 5 a day, RLS) (race: race_api_leftovers.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_leftovers.sql"
 # claude/exos-attendance-report (mig 20261113120000): the attendance report: postal rollup (areas under 5 buyers folded into "Other", never named; live tickets; $0 orders by ticket_ids), daily pacing in the event's zone ($0 tickets apart from gross) aligned with a prior event by days before, roles (owner / manager / finance; API key creator, token user), cross-org, rate limits, XLSX export kinds in exos_audit_export

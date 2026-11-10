@@ -345,6 +345,26 @@ await check('event report: attendance report', async (page, run) => {
   }),
 } }) });
 
+// claude/exos-fair-day: the editor's fair / multi-day setup, open with a
+// preview and with an error (blocking; the panel only, the editor around it
+// isn't in this gate yet).
+await check('event editor: fair / multi-day setup', async (page, run) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('fair-setup');
+  await panel.waitFor({ timeout: 8000 });
+  await run('closed');
+  await panel.getByRole('button', { name: 'Set up a fair or multi-day event' }).click();
+  await panel.getByRole('checkbox', { name: /Sell camping/ }).check();
+  await panel.getByTestId('fair-setup-preview').waitFor({ timeout: 5000 });
+  await run('open, preview');
+  await panel.getByLabel('Per day').fill('0');
+  await panel.getByTestId('fair-setup-errors').waitFor({ timeout: 5000 });
+  await run('open, error');
+}, { signedIn: true, include: '[data-testid="fair-setup"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+} }) });
+
 await browser.close();
 
 let failed = false;

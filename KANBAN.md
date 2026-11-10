@@ -352,7 +352,8 @@ These are the pass/fail lines that keep coming up. Doing PCI now; the rest is pa
 8. Parked: SOC 2 Type II (about $30–110k, 6–12 months): only when a target bid makes it pass/fail.
 9. ✅ Org audit log (branch `claude/exos-org-audit`, mig 20261109100000): append-only `exos_org_audit` (who, what, when, from where;
    no card data, buyer emails or phones), Org → Activity with filters and CSV, `GET /v1/audit` (`audit:read`); docs/security.md.
-10. Attendance report (branch `claude/exos-attendance-report`, mig 20261113120000; Coconino demographics, UT pacing): attendees by billing postal code (under 5 buyers folded into "Other", never named), daily pace vs a prior event ($0 tickets apart), XLSX of it + settlement / sales tax / journal (export.run), `GET /v1/events/:id/attendance`; docs/fans.md. Not applied.
+10. ✅ Fair-day setup (branch `claude/exos-fair-day`, mig 20261113110000): editor preset (day pass + list per day, multi-day / any-day passes, parking + camping add-ons on a lot list), door enforces day validity and once-a-day online and offline, per-gate throughput on the door report; docs/organizer-guide.md "Fairs and multi-day events".
+11. Attendance report (branch `claude/exos-attendance-report`, mig 20261113120000; Coconino demographics, UT pacing): attendees by billing postal code (under 5 buyers folded into "Other", never named), daily pace vs a prior event ($0 tickets apart), XLSX of it + settlement / sales tax / journal (export.run), `GET /v1/events/:id/attendance`; docs/fans.md. Not applied.
 
 ## UX polish pass 2026-10-14 (from the end-to-end walkthrough: organizer + buyer in a browser, DB dry run)
 

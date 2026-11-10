@@ -22,6 +22,7 @@ import { useToast } from '../context/ToastContext';
 import SalesChart from '../components/SalesChart';
 import ScanReport from '../components/ScanReport';
 import DoorSummaryPanel from '../components/DoorSummaryPanel';
+import DoorThroughputPanel from '../components/DoorThroughputPanel';
 import MoneySoFarPanel from '../components/MoneySoFarPanel';
 import PhoneRsvpPanel from '../components/PhoneRsvpPanel';
 import DoorImport from '../components/DoorImport';
@@ -385,6 +386,12 @@ export default function OrganizerEventReport() {
             hidden before it exists or for roles that can't read it. */}
         <div className="mb-8">
           <DoorSummaryPanel eventId={eventId!} eventTitle={event.title} />
+        </div>
+
+        {/* Per-gate throughput (mig 20261113110000): entries per 15 minutes per
+            gate and list, in the park now, refusals by reason. */}
+        <div className="mb-8">
+          <DoorThroughputPanel eventId={eventId!} timezone={event.timezone} />
         </div>
 
         {/* Attendance funnel + attribution (server-side document) + CSV exports. */}

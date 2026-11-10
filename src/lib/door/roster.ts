@@ -155,11 +155,12 @@ export interface RosterSync {
 }
 
 /** The parts of the check-in lists the roster depends on: which lists
- *  allow re-entry. A change there (or a list removed) needs a full pull. */
+ *  allow re-entry or are fair-day lists (both carry list_state). A change
+ *  there (or a list removed) needs a full pull. */
 export function listsSignature(lists: DoorCheckinList[] | null | undefined): string {
   if (!lists) return '';
   return lists
-    .map((l) => `${l.id}:${l.allowReentry ? 1 : 0}`)
+    .map((l) => `${l.id}:${l.allowReentry ? 1 : 0}${l.entryDay ? `:${l.entryDay}` : ''}`)
     .sort()
     .join(',');
 }
@@ -403,6 +404,9 @@ export interface DoorEvent {
    *  so the picker works offline. [] = none (the implicit everyone-once
    *  list); null = the database doesn't have lists yet (old RPCs only). */
   checkinLists?: DoorCheckinList[] | null;
+  /** Fair days (mig 20261113110000): ticket type id → max_entry_days, for the
+   *  door's offline day limit. Absent / {} = no limits. */
+  dayLimits?: Record<string, number>;
 }
 
 export function mapDoorEventRow(row: Record<string, unknown>): DoorEvent {
