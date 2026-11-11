@@ -30,6 +30,10 @@
 --   AR7 exports: exos_audit_export takes attendance / settlement /
 --       sales_tax / journal (export.run, the event's org), refuses others,
 --       and they count toward the 200-a-day cap; both markers in place
+--   AR8 every live ticket is in one row: named areas + Other + No postal
+--       code = the live tickets, with an area that has no country (folded
+--       into Other) and orders with no account and no email (each its own
+--       buyer, so two of them and three guests make an area of 5)
 -- Users: oa owner A, ma manager A, fa finance A, sa scanner A, ob owner B,
 --        x1 outsider, bz a ticket holder (the guests' tickets need an owner).
 -- ============================================================================
@@ -404,6 +408,67 @@ BEGIN
   PERFORM pg_temp.act(NULL);
   DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audit-export:%';
   RAISE NOTICE 'OK  AR7 XLSX exports log export.run';
+END $$;
+
+-- AR8 -------------------------------------------------------------------------
+-- Rows today's constraints refuse (a location without a country, an order with
+-- neither account nor email); the report must not depend on them. Rolled back.
+ALTER TABLE public.exos_order_locations ALTER COLUMN country DROP NOT NULL;
+ALTER TABLE public.exos_checkout_sessions DROP CONSTRAINT exos_checkout_sessions_buyer_chk;
+INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, timezone, total_tickets, created_by) VALUES
+  (pg_temp.u('e4'), pg_temp.u('1'), 'A7E Sums', 'a7e-sums', 'published', '2027-02-01 20:00 America/New_York', 'America/New_York', 500, pg_temp.u('a1'));
+SET LOCAL session_replication_role = replica;
+CREATE TEMP TABLE fx4 (sid text, email text, qty int, cents int, country text, postal text, free_kind text);
+INSERT INTO fx4 VALUES
+  ('cs_a7e4_h1', 'a7e-h1@guest.test', 1, 2000, 'US', '60601', NULL),
+  ('cs_a7e4_h2', 'a7e-h2@guest.test', 1, 2000, 'US', '60601', NULL),
+  ('cs_a7e4_h3', 'a7e-h3@guest.test', 2, 4000, 'US', '60601', NULL),
+  ('cs_a7e4_m1', NULL, 1, 2000, 'US', '60601', NULL),
+  ('cs_a7e4_m2', '  ', 1, 2000, 'US', '60601', NULL),
+  ('cs_a7e4_nc', 'a7e-nc@guest.test', 3, 6000, NULL, '12345', NULL),
+  ('cs_a7e4_k1', 'a7e-k1@guest.test', 1, 2000, 'US', '73301', NULL),
+  ('cs_a7e4_u1', 'a7e-u1@guest.test', 2, 4000, NULL, NULL, NULL),
+  ('zero_a7e4_z', 'a7e-z4@guest.test', 1, 0, NULL, NULL, 'comp');
+INSERT INTO public.exos_checkout_sessions (session_id, event_id, org_id, buyer_uid, buyer_email, guest, quantity, amount_cents,
+                                           currency, status, fulfilled_at, free_kind, tax_cents, application_fee_cents, exos_fee_cents, card_fee_est_cents)
+SELECT sid, pg_temp.u('e4'), pg_temp.u('1'), NULL, email, true, qty, cents, 'usd', 'fulfilled', timestamptz '2027-01-20 15:00Z', free_kind,
+       CASE WHEN free_kind IS NOT NULL THEN 0 END, CASE WHEN free_kind IS NOT NULL THEN 0 END,
+       CASE WHEN free_kind IS NOT NULL THEN 0 END, CASE WHEN free_kind IS NOT NULL THEN 0 END
+  FROM fx4;
+INSERT INTO public.exos_order_locations (session_id, org_id, event_id, country, postal_code, source)
+SELECT sid, pg_temp.u('1'), pg_temp.u('e4'), country, postal, 'stripe_billing' FROM fx4 WHERE postal IS NOT NULL;
+INSERT INTO public.exos_tickets (id, event_id, org_id, buyer_id, owner_id, status, barcode_secret, price_paid, order_ref)
+SELECT gen_random_uuid(), pg_temp.u('e4'), pg_temp.u('1'), pg_temp.u('b0'), pg_temp.u('b0'), 'active', 'sec', 20, fx4.sid
+  FROM fx4 CROSS JOIN LATERAL generate_series(1, fx4.qty) WHERE fx4.free_kind IS NULL;
+INSERT INTO public.exos_tickets (id, event_id, org_id, buyer_id, owner_id, status, barcode_secret, price_paid, order_ref) VALUES
+  (pg_temp.u('f4'), pg_temp.u('e4'), pg_temp.u('1'), pg_temp.u('b0'), pg_temp.u('b0'), 'used', 'sec', 0, 'free_a7e4_1');
+UPDATE public.exos_checkout_sessions SET ticket_ids = ARRAY[pg_temp.u('f4')] WHERE session_id = 'zero_a7e4_z';
+SET LOCAL session_replication_role = origin;
+DO $$
+DECLARE a jsonb; p jsonb; v_rows int; v_live int;
+BEGIN
+  a := public._exos_attendance_report(pg_temp.u('1'), pg_temp.u('e4'), NULL)->'attendance';
+  -- 60601: three guests + two orders with no email = 5 buyers, so it's named.
+  SELECT x INTO p FROM jsonb_array_elements(a->'postal') x WHERE x->>'postal_code' = '60601';
+  ASSERT p IS NOT NULL AND (p->>'buyers')::int = 5 AND (p->>'orders')::int = 5 AND (p->>'tickets')::int = 6,
+    'AR8 orders with no email are distinct buyers: ' || a::text;
+  -- The no-country area (3 tickets) and 73301 (1) are Other.
+  ASSERT (a->'postal_other'->>'tickets')::int = 4 AND (a->'postal_other'->>'orders')::int = 2,
+    'AR8 a no-country area folds into Other: ' || (a->'postal_other')::text;
+  ASSERT position('12345' IN a::text) = 0, 'AR8 the no-country area is not named';
+  ASSERT (a->'postal_unknown'->>'tickets')::int = 3, 'AR8 no postal code: ' || (a->'postal_unknown')::text;
+  SELECT coalesce(sum((x->>'tickets')::int), 0) INTO v_rows FROM jsonb_array_elements(a->'postal') x;
+  v_rows := v_rows + (a->'postal_other'->>'tickets')::int + (a->'postal_unknown'->>'tickets')::int;
+  SELECT count(*) INTO v_live FROM public.exos_tickets t
+   WHERE t.event_id = pg_temp.u('e4') AND t.status IN ('active', 'used');
+  ASSERT v_rows = v_live AND v_rows = (a->'totals'->>'tickets')::int AND v_live = 13,
+    format('AR8 rows %s = live %s = totals %s', v_rows, v_live, a->'totals'->>'tickets');
+  -- The same sum holds for e1.
+  a := public._exos_attendance_report(pg_temp.u('1'), pg_temp.u('e1'), NULL)->'attendance';
+  SELECT coalesce(sum((x->>'tickets')::int), 0) INTO v_rows FROM jsonb_array_elements(a->'postal') x;
+  ASSERT v_rows + (a->'postal_other'->>'tickets')::int + (a->'postal_unknown'->>'tickets')::int = (a->'totals'->>'tickets')::int,
+    'AR8 e1 rows add up';
+  RAISE NOTICE 'OK  AR8 the rollup adds up to the live tickets';
 END $$;
 
 ROLLBACK;

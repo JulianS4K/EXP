@@ -156,14 +156,18 @@ its creator's role now, for a personal or OAuth token, its user's.
   report or the workbook. A postal area with **fewer than 5 distinct buyers** is never named: its orders fold into
   one **Other (fewer than 5)** row, in SQL, before anything leaves the database. Orders without a postal code (free
   orders, RSVPs, card payments that gave only a country) are one **No postal code** row. 20 reads a minute per user
-  or credential. The per-order location itself stays where it was (`GET /v1/orders/:id`'s `buyer_location`, RLS on
-  `exos_order_locations`), and it is erased with the buyer's account as before.
+  or credential. Owners, managers and finance can already read each order's postal code (RLS on
+  `exos_order_locations`, and `GET /v1/orders/:id`'s `buyer_location`); that is unchanged, and the under-5 rule is
+  for what gets shared: this report, its XLSX and its API route. Locations are erased with the buyer's account as
+  before. Every live order lands in exactly one row (a named area, Other, or No postal code), so the rows add up to
+  the live tickets; an order with neither an account nor an email counts as its own buyer.
 - **Sales pace.** Per day of sale in the event's time zone: paid tickets and gross (charged plus any gift card part,
   before refunds), with $0 orders (free claims, comps, RSVPs, pass redemptions) and their tickets counted apart and
   never in gross; running totals. **Compare with** lines it up against one of the org's earlier events by days
   before the event; a sale on or after the event day counts on day 0.
 - **Download XLSX**: Summary, Postal codes and Pacing sheets, built in the browser (`src/lib/xlsx.ts`, loaded on the
-  click) and logged as `export.run` (kind `attendance`). The Money section, sales tax and the journal have XLSX
+  click). The browser writes the `export.run` row (kind `attendance`, `exos_audit_export`) after the download, best
+  effort, as the CSV exports do: a failed log never holds the file back. The Money section, sales tax and the journal have XLSX
   buttons too (kinds `settlement`, `sales_tax`, `journal`), next to their CSVs.
 
 ## Opendate endpoints
