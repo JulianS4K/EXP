@@ -804,8 +804,22 @@ the **kiosk credential**.
   returns an answer instead of raising, so the count and the rate-limit hit
   are committed (`race_pos_kiosk.sh` race 4: ten at once count at most 4
   before the lock).
-- **Rate limits per session** before any Stripe call: state 60, charge 10,
-  poll 90, codes 10, email 6 a minute (and the card cores' own limits).
+- **Rate limits per session** before any Stripe call: state 60, begin 6,
+  charge 10, poll 90, codes 10, email 6 a minute. The card begin's 20 a
+  minute counts on the kiosk session for kiosk charges (marker
+  `/* exos: pos kiosk card limit */` on `_exos_pos_card_begin`; the setting
+  is set only by `_exos_pos_kiosk_charge`), not on the starting member.
+- **A copied credential** (24 h, in the kiosk's storage, not bound to the
+  device: a fingerprint next to it would be copied with it) can't hold places
+  or take tickets: one open sale per session (`kiosk-busy` while it holds
+  places, released once lapsed; begins serialized on the session row), a hold
+  never past 10 minutes from the begin however often it's charged, and
+  hand-over (codes, email) only for the session's latest paid sale within 10
+  minutes. Staff end a session from the dashboard.
+- **Questions.** The kiosk shows and accepts the public's questions only:
+  answers are validated with online checkout's rules (hidden excluded) before
+  the walk-up path; an answer to a hidden / staff-only question is `22023`
+  `kiosk-answers`.
 - **What the screen sees.** `exos-pos` trims the order to id, status, total,
   type, quantity and ticket count (no seller, device, order key or buyer
   data); the state carries no secret.
