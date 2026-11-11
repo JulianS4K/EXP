@@ -905,11 +905,17 @@ to review:
   area coarsened (US ZIP+4 to the ZIP, CA to the FSA, GB to the outward code).
   An area with fewer than 5 distinct buyers is never named: it folds into
   "Other (fewer than 5)" inside SQL (AR1 checks the small codes appear nowhere
-  in the answer). No email, name, city, street or order id. The per-order
-  location (`exos_order_locations`, `GET /v1/orders/:id`'s `buyer_location`)
-  is unchanged.
+  in the answer). No email, name, city, street or order id. Every live order
+  is in exactly one row (named area, Other, No postal code; NULL-safe on
+  country), and an order with neither account nor email is its own buyer
+  (AR8). Owners, managers and finance can already read each order's postal
+  code (`exos_order_locations` RLS, `GET /v1/orders/:id`'s
+  `buyer_location`); that is unchanged, so the under-5 rule protects what is
+  shared: this report, its XLSX and the API route.
 - **Exports.** The XLSX workbooks (attendance, settlement, sales tax, journal)
-  are built in the browser and logged through `exos_audit_export`, which now
+  are built in the browser, and the browser logs them after the download
+  through `exos_audit_export` (best effort, as for the CSV exports: a failed
+  log row doesn't block the file), which now
   accepts those four kinds and counts them toward its 200-a-day cap (markers
   `exos: attendance export kinds`, `exos: attendance export cap`). Text cells
   are inline strings, which a spreadsheet never evaluates as formulas.

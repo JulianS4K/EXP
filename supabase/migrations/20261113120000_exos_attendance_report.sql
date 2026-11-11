@@ -216,7 +216,9 @@ GRANT EXECUTE ON FUNCTION public._exos_attendance_pacing(uuid, uuid) TO service_
 -- Attendance counts an order (paid or $0, any paid status) by its LIVE
 -- tickets now (active / used; a $0 order's tickets are its ticket_ids, a
 -- paid order's are the tickets with its order_ref), so a refunded order
--- with no ticket left drops out. Buyers: distinct account, else email.
+-- with no ticket left drops out. Buyers: distinct account, else email, else
+-- the order itself. Every live order is in exactly one row: a named area,
+-- Other (fewer than 5) or No postal code.
 CREATE OR REPLACE FUNCTION public._exos_attendance_report(p_org uuid, p_event uuid, p_compare uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -240,7 +242,8 @@ BEGIN
 
   WITH o AS (
     SELECT cs.session_id, cs.ticket_ids, cs.free_kind,
-           coalesce(cs.buyer_uid::text, 'e:' || lower(btrim(coalesce(cs.buyer_email, ''))), 'o:' || cs.session_id) AS buyer,
+           -- An order with neither an account nor an email is its own buyer.
+           coalesce(cs.buyer_uid::text, 'e:' || nullif(lower(btrim(cs.buyer_email)), ''), 'o:' || cs.session_id) AS buyer,
            l.country, public._exos_postal_area(l.country, l.postal_code) AS area
       FROM public.exos_checkout_sessions cs
       LEFT JOIN public.exos_order_locations l ON l.session_id = cs.session_id AND l.org_id = p_org
@@ -267,7 +270,10 @@ BEGIN
            sum(per.tickets)::int AS tickets, sum(per.checked_in)::int AS checked_in
       FROM per WHERE per.area IS NOT NULL GROUP BY per.country, per.area
   ), small AS (
-    SELECT per.* FROM per JOIN grp ON grp.country = per.country AND grp.area = per.area WHERE grp.buyers < k_min
+    -- NULL-safe: an area with no country still folds into Other, so the
+    -- named rows + Other + No postal code always add up to the totals.
+    SELECT per.* FROM per JOIN grp ON grp.country IS NOT DISTINCT FROM per.country AND grp.area = per.area
+     WHERE grp.buyers < k_min
   )
   SELECT jsonb_build_object(
     'totals', jsonb_build_object(
