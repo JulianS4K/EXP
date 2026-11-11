@@ -13,6 +13,8 @@
 #          scans it: the scan read 'used' before the refund committed, waits
 #          on the ticket's lock, re-reads it and answers 'voided'; no entry
 #   race 5 the same with a transfer started mid-scan: 'in-transfer'; no entry
+#   race 6 two re-entry gates of one fair day scan one 3-day pass at once:
+#          one admits, the other answers 'already-inside'; one entry
 # The audit log is append-only, so each run uses fresh ids (its rows stay;
 # the fixtures are removed).
 set -euo pipefail
@@ -22,7 +24,7 @@ P="psql -h $H -p $PORT -U $U -d $DB -v ON_ERROR_STOP=1 -qAt"
 RUN=$($P -c "SELECT substr(md5(random()::text || clock_timestamp()::text), 1, 8)")
 id() { $P -c "SELECT md5('race-fd:$RUN:$1')::uuid"; }
 O=$(id org); A=$(id owner); S=$(id scanner); B=$(id buyer); E=$(id event); E2=$(id event2)
-K1=$(id multi); K2=$(id any); K3=$(id refunded); K4=$(id transferred); TR=$(id transfer)
+K1=$(id multi); K2=$(id any); K3=$(id refunded); K4=$(id transferred); TR=$(id transfer); K5=$(id twogates)
 cleanup() {
   $P -c "DELETE FROM exos_scan_rejects WHERE event_id IN ('$E','$E2');
          UPDATE exos_tickets SET pending_transfer_id = NULL WHERE event_id IN ('$E','$E2');
@@ -38,19 +40,23 @@ cleanup() {
          DELETE FROM auth.users WHERE id IN ('$A','$S','$B');" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-# The plan: three days (two days ago, yesterday, today), a 3-day pass, an
-# any-day pass, no re-entry; day 3 has a second gate added below.
+# The plan: three whole UTC days (the events have no time zone): two days
+# ago, yesterday, today; a 3-day pass, an any-day pass, no re-entry; day 3
+# has a second gate and two re-entry gates added below.
+D="((now() AT TIME ZONE 'UTC')::date)"
+DAY="(((now() AT TIME ZONE 'UTC')::date - %s) + time '%s') AT TIME ZONE 'UTC'"
+day() { printf "$DAY" "$1" "$2"; }
 PLAN="jsonb_build_object(
   'tiers', jsonb_build_array(
     jsonb_build_object('key','multi','name','3-day pass','price_cents',3500,'capacity',100),
     jsonb_build_object('key','any','name','Any-day pass','price_cents',1800,'capacity',100,'max_entry_days',1)),
   'lists', jsonb_build_array(
     jsonb_build_object('name','Day 1','tier_keys',jsonb_build_array('multi','any'),'allow_reentry',false,
-      'valid_from',now() - interval '50 hours','valid_until',now() - interval '38 hours','entry_day',current_date - 2),
+      'valid_from',$(day 2 00:00),'valid_until',$(day 2 23:59:59),'entry_day',$D - 2),
     jsonb_build_object('name','Day 2','tier_keys',jsonb_build_array('multi','any'),'allow_reentry',false,
-      'valid_from',now() - interval '26 hours','valid_until',now() - interval '14 hours','entry_day',current_date - 1),
+      'valid_from',$(day 1 00:00),'valid_until',$(day 1 23:59:59),'entry_day',$D - 1),
     jsonb_build_object('name','Day 3','tier_keys',jsonb_build_array('multi','any'),'allow_reentry',false,
-      'valid_from',now() - interval '2 hours','valid_until',now() + interval '10 hours','entry_day',current_date)))"
+      'valid_from',$(day 0 00:00),'valid_until',$(day 0 23:59:59),'entry_day',$D)))"
 $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner-$RUN@race-fd.test',now()),
          ('$S','scan-$RUN@race-fd.test',now()),('$B','buyer-$RUN@race-fd.test',now());
        INSERT INTO exos_orgs(id,name,slug,owner_uid) VALUES ('$O','Race FD','race-fd-$RUN','$A');
@@ -63,11 +69,15 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner-$
        INSERT INTO exos_checkin_lists(event_id,name,tier_ids,allow_reentry,valid_from,valid_until,entry_day)
          SELECT event_id,'Day 3 north',tier_ids,false,valid_from,valid_until,entry_day FROM exos_checkin_lists
           WHERE event_id='$E' AND name='Day 3';
+       INSERT INTO exos_checkin_lists(event_id,name,tier_ids,allow_reentry,valid_from,valid_until,entry_day)
+         SELECT event_id,n,tier_ids,true,valid_from,valid_until,entry_day FROM exos_checkin_lists,
+                (VALUES ('Day 3 east'), ('Day 3 west')) v(n)
+          WHERE event_id='$E' AND name='Day 3';
        INSERT INTO exos_tickets(id,event_id,org_id,tier_id,tier_name,buyer_id,owner_id,buyer_email,status,barcode_secret,price_paid,order_ref,channel_source)
          SELECT k, '$E', '$O', (SELECT id FROM exos_ticket_tiers WHERE event_id='$E' AND name=n), n, '$B', '$B', 'b@race-fd.test',
                 'active', 'sek-' || k, 35, 'cs_race_fd_$RUN', 'stripe'
            FROM (VALUES ('$K1'::uuid, '3-day pass'), ('$K2'::uuid, 'Any-day pass'), ('$K3'::uuid, '3-day pass'),
-                        ('$K4'::uuid, '3-day pass')) v(k, n);
+                        ('$K4'::uuid, '3-day pass'), ('$K5'::uuid, '3-day pass')) v(k, n);
        INSERT INTO exos_transfers(id,ticket_id,org_id,sender_id,receiver_email,status,event_id,created_at,updated_at)
          VALUES ('$TR','$K4','$O','$B','friend@race-fd.test','pending','$E',now(),now());" >/dev/null
 list() { $P -c "SELECT id FROM exos_checkin_lists WHERE event_id='$E' AND name='$1'"; }
@@ -101,9 +111,9 @@ else
 fi
 
 # race 2: the any-day pass at day 1 and day 2 at once (offline replays).
-$P -c "$(scan_sql "$K2" "$L1" "(now() - interval '45 hours')" 2)" >"$OUT1" 2>&1 &
+$P -c "$(scan_sql "$K2" "$L1" "($(day 2 12:00))" 2)" >"$OUT1" 2>&1 &
 sleep 0.5
-$P -c "$(scan_sql "$K2" "$L2" "(now() - interval '20 hours')" 0)" >"$OUT2" 2>&1
+$P -c "$(scan_sql "$K2" "$L2" "($(day 1 12:00))" 0)" >"$OUT2" 2>&1
 wait
 r1=$(cat "$OUT1"); r2=$(cat "$OUT2")
 n=$($P -c "SELECT count(*) FROM exos_event_checkins WHERE ticket_id='$K2' AND direction='entry'")
@@ -128,7 +138,7 @@ else
 fi
 # races 4-5: used on day 1 first, then the state changes while a day 3 gate scans.
 for k in "$K3" "$K4"; do
-  $P -c "$(scan_sql "$k" "$L1" "(now() - interval '45 hours')" 0)" >/dev/null
+  $P -c "$(scan_sql "$k" "$L1" "($(day 2 12:00))" 0)" >/dev/null
 done
 race_state() {  # $1 ticket, $2 the UPDATE's SET clause, $3 expected reason, $4 label
   $P -c "BEGIN; UPDATE exos_tickets SET $2 WHERE id='$1'; SELECT pg_sleep(2); COMMIT;" >/dev/null 2>&1 &
@@ -146,5 +156,18 @@ race_state() {  # $1 ticket, $2 the UPDATE's SET clause, $3 expected reason, $4 
 }
 race_state "$K3" "status='voided', voided_at=now()" voided "race 4 refunded while a day gate scans it"
 race_state "$K4" "pending_transfer_id='$TR'" in-transfer "race 5 transfer started while a day gate scans it"
+# race 6: two re-entry gates of one day at once.
+L3E=$(list 'Day 3 east'); L3W=$(list 'Day 3 west')
+$P -c "$(scan_sql "$K5" "$L3E" NULL 2)" >"$OUT1" 2>&1 &
+sleep 0.5
+$P -c "$(scan_sql "$K5" "$L3W" NULL 0)" >"$OUT2" 2>&1
+wait
+r1=$(cat "$OUT1"); r2=$(cat "$OUT2")
+n=$($P -c "SELECT count(*) FROM exos_event_checkins WHERE ticket_id='$K5' AND direction='entry'")
+if [[ "$r1" == *checked-in* && "$r2" == *already-inside* && "$n" == 1 ]]; then
+  echo "OK   race 6 two re-entry gates of one day at once: one admits, the other 'already-inside'"
+else
+  echo "FAIL race 6: [$r1] [$r2] entries $n"; fail=1
+fi
 rm -f "$OUT1" "$OUT2"
 exit $fail

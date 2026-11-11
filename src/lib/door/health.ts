@@ -57,6 +57,7 @@ const CONFLICT_TEXT: Record<string, string> = {
   'print-code-used': 'printed ticket already used',
   printed: 'ticket printed: only the paper admits',
   'day-limit': "pass's days used up (fair days)",
+  'wrong-day': 'fair-day list scanned on another day',
 };
 
 export function conflictText(c: Pick<ReplayConflict, 'reason' | 'forced'>): string {

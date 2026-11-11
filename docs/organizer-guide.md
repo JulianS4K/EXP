@@ -792,7 +792,12 @@ lists under **Check-in lists**, where a list's **Fair day** can also be set by h
 How the door treats a fair-day list:
 - Without re-entry, a ticket gets in **once that day**, at any gate scanning a list for that day
   (two gates of one day share it). A ticket used yesterday gets in today.
-- With re-entry, the in / out rules above apply, per list.
+- With re-entry, in and out count across all of that day's gates: someone scanned in at the north
+  gate is refused at the south gate (**Already inside**) until they are scanned out at either one.
+  A pass's day limit still applies; coming back on a day it already used isn't a new day.
+- A fair-day list only scans on its own day (in the event's time zone), offline uploads included:
+  on any other day it says "This check-in list is for another day of the fair". A day whose hours
+  run past midnight keeps its list open until closing.
 - Every entry counts, whichever list it was on: a scan with no list, on an ordinary list or on a list
   that was deleted since counts for its date in the event's time zone. So a ticket let in at an
   ordinary gate today is refused at today's fair-day list, and an any-day pass used at an ordinary

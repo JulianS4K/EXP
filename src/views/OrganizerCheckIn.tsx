@@ -80,6 +80,7 @@ import {
   loadDirection,
   loadListChoice,
   enteredOnDay,
+  dayInsideKey,
   localDayKey,
   pickList,
   saveDirection,
@@ -193,6 +194,7 @@ const REFUSAL_TEXT: Record<string, string> = {
   'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
   // Fair days (mig 20261113110000).
   'day-limit': 'This pass has used all its days (an any-day pass gets one day). It was already used on another day of the fair.',
+  'wrong-day': "This check-in list is for another day of the fair. Switch to today's list.",
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -344,6 +346,8 @@ export default function OrganizerCheckIn() {
     let st = cur;
     if (listId) st = withDirection(st, listId, dir);
     if (dir === 'entry' && !l?.entryDay) st = withDirection(st, localDayKey(at, tz), 'entry');
+    // A fair day's re-entry lists share in / out across their gates.
+    if (l?.entryDay && l.allowReentry) st = withDirection(st, dayInsideKey(l.entryDay), dir);
     return st;
   };
   const activeList = pickList(checkinLists, listChoice);
@@ -358,7 +362,9 @@ export default function OrganizerCheckIn() {
   // inside and scanning entries (re-entry list).
   // A fair-day list (no re-entry): entered on this day, at any of its gates.
   const doneHere = (e: DoorRosterEntry): boolean =>
-    activeList?.allowReentry ? direction === 'entry' && e.lists?.[activeList.id] === 'entry'
+    activeList?.allowReentry
+      ? direction === 'entry' && (activeList.entryDay && e.lists?.[dayInsideKey(activeList.entryDay)] !== undefined
+        ? e.lists?.[dayInsideKey(activeList.entryDay)] === 'entry' : e.lists?.[activeList.id] === 'entry')
       : activeList?.entryDay && !e.addon ? enteredOnDay(activeList, e.lists, checkinLists) : e.used;
   const chooseDirection = (d: DoorDirection) => {
     setWantedDirection(d);
@@ -901,7 +907,9 @@ export default function OrganizerCheckIn() {
     const ch = joinCheckinChannel(eventId, (row: RemoteCheckin) => {
       // An exit on a re-entry list re-opens the ticket on that list only.
       if (row.direction === 'exit') {
-        if (row.listId) markListDirection(row.ticketId, row.listId, 'exit');
+        const cur = offlineRegistryRef.current[row.ticketId];
+        const lists = cur && row.listId ? nextListState(cur.lists, row.listId, 'exit', row.at ?? Date.now()) : undefined;
+        if (lists) markLocal(row.ticketId, { lists });
       } else {
         // A forced row (offline admission the server refused) doesn't use the
         // ticket, but it came in: it counts as a day entered, as on the server.
@@ -1115,7 +1123,12 @@ export default function OrganizerCheckIn() {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });
       markLocal(ticketId, { used: true });
-      if ((inside || activeList?.entryDay) && activeList) markListDirection(ticketId, activeList.id, 'entry');
+      if (activeList?.entryDay) {
+        // A fair-day list: this list (so this day) entered, and inside the day on a re-entry one.
+        const cur = offlineRegistryRef.current[ticketId];
+        const lists = cur ? nextListState(cur.lists, activeList.id, 'entry', serverNow()) : undefined;
+        if (lists) markLocal(ticketId, { lists });
+      } else if (inside && activeList) markListDirection(ticketId, activeList.id, 'entry');
       setStatus('already-used');
       void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: inside ? 'already-inside' : undefined });
       return;
@@ -1144,7 +1157,9 @@ export default function OrganizerCheckIn() {
       'event-cancelled': 'This event was cancelled. Nobody can be checked in.',
     };
     setStatus('invalid-barcode');
-    setInvalidReason(text[result.reason] || 'The server did not accept this ticket. Re-download the offline list and retry.');
+    // Fair days: the server's invalid-time with wrong_day is the list's day, not its hours.
+    const wrongDay = result.reason === 'invalid-time' && (result as CheckInResult & { wrong_day?: boolean }).wrong_day === true;
+    setInvalidReason((wrongDay ? REFUSAL_TEXT['wrong-day'] : text[result.reason]) || 'The server did not accept this ticket. Re-download the offline list and retry.');
     if (result.reason === 'doors-not-open') {
       setDoorsBlocked(true);
       return;
@@ -1277,6 +1292,7 @@ export default function OrganizerCheckIn() {
         if (id) pushScan(id, ctx.name, 'DENIED');
         if (canAudit) void writeScanReject('used', ctx.src, { ticketIdAttempted: id, reasonDetail: 'day-limit' });
         return;
+      case 'wrong-day':
       case 'wrong-list':
       case 'tickets-only-list':
       case 'addon-only-list':
@@ -1392,6 +1408,7 @@ export default function OrganizerCheckIn() {
       direction,
       lists: checkinLists,
       dayLimits: event?.dayLimits ?? null,
+      timezone: event?.timezone ?? null,
     };
     // Duplicate camera reads are dropped before anything changes on screen.
     const first = decideScan({ ...base, verify: null, network });
