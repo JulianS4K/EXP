@@ -345,8 +345,10 @@ moving the kiosk to another event ends its session too.
 1. Pick a ticket type and a quantity: the event's **public** types (never hidden ones, never tables) at the **door
    price** (`exos_tier_current_price(..., 'door')`: `door_price_cents`, else the current price step), what's left
    (shared limits, the house cap), at most the event's `purchase_limits.maxPerOrder` (and 10).
-2. The event's checkout questions. **Required ones must be answered: a kiosk has no "Skip questions"** (the kiosk
-   begin always passes `skip = false`).
+2. The event's checkout questions, **the public's only**, as online checkout: hidden (staff-only) questions such as
+   a wristband number or "ID checked" are never shown, and an answer to one (or to anything the kiosk doesn't ask)
+   is refused (`kiosk-answers`); the answers are checked with online checkout's rules (`_exos_validate_answers`,
+   hidden excluded). **Required ones must be answered: a kiosk has no "Skip questions"** (`questions-required`).
 3. Pay on the reader: the card walk-up begin (`_exos_pos_walkup_begin_card`, places held 5 minutes) and the charge
    on **the kiosk's own reader** (`_exos_pos_card_begin`), polled every 2 s; capture and completion as in "Card at
    the door", with the same webhook fallback.
@@ -390,7 +392,25 @@ the reader takes the card.
 **API** (`exos-pos`, POST JSON with `kiosk_token`, no staff JWT): `kiosk_state`, `kiosk_begin`, `kiosk_charge`,
 `kiosk_status`, `kiosk_cancel`, `kiosk_codes`, `kiosk_email`, `kiosk_exit`. Only `kiosk_state` and `kiosk_exit`
 answer with `EXOS_POS_CARD` off. Each goes through a service-role core that resolves the credential first
-(`_exos_pos_kiosk_resolve`) and rate-limits per session before any Stripe call.
+(`_exos_pos_kiosk_resolve`), then applies its limits before any Stripe call, all keyed on the kiosk session:
+state 60, begin 6, charge 10, poll 90, codes 10, email 6 a minute; the card begin's own 20 a minute is counted
+on the kiosk session too (`pos:card:kiosk:<session>`, marker `/* exos: pos kiosk card limit */`), so kiosks never use
+up the starting member's door app charges. Print codes (`_exos_print_mint`, 60 a minute) still count on that member.
+
+**Limits on the credential** (a 24-hour bearer in the kiosk browser's storage, so a copied one must not be able to
+tie up places or take another buyer's tickets):
+- **One open sale per session.** A new begin is refused (`kiosk-busy`) while the session's last unpaid sale still
+  holds its places: it may be on the reader with a buyer paying, so it is never cancelled from under them. Once its
+  hold has lapsed the next begin releases it (cancelled, places back). The screen cancels its own abandoned sale
+  (`kiosk_cancel`), so a working kiosk never meets this. Begins on one session run one at a time (the session row's
+  lock); `race_pos_kiosk.sh` race 5.
+- **A hold never outlives 10 minutes from the begin.** A charge extends the places while the guest is at the reader,
+  but never past the begin + 10 minutes, and no charge is taken after that (`expired`); race 6.
+- **Hand-over only for the session's latest paid sale**, for 10 minutes: an earlier buyer's tickets can't be called
+  back (`kiosk-too-late`).
+- **Not bound to the device.** A device fingerprint stored next to the credential was considered and left out: both
+  would sit in the same local storage, so whoever can copy one copies the other. The protection is the tablet's
+  single-app mode, the 24-hour lifetime and ending the session from the dashboard.
 
 Tests: `tests/exos/test_pos_kiosk.sql` (K1-K13), `tests/exos/race_pos_kiosk.sh` (by hand: two kiosks and the last
 ticket, a kiosk against a door sale, a double tap, ten wrong PINs at once), `src/lib/kiosk.test.ts`, the smoke tests

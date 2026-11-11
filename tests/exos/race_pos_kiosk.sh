@@ -11,6 +11,10 @@
 #          one pending sale, the second is a replay of it
 #   race 4 ten wrong PINs at once on one kiosk: at most 4 'wrong-pin', the
 #          rest 'locked' or 'rate'; the kiosk is locked, still in kiosk mode
+#   race 5 two begins with different keys on one kiosk session at once: one
+#          open sale, the other is refused ('kiosk-busy')
+#   race 6 five charges of one sale at once, 8 minutes after its begin: the
+#          hold never ends later than 10 minutes after the begin
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -136,5 +140,37 @@ if [[ "$wrong" -le 4 && $((wrong + other)) == 10 && "$locked" == "t" && "$live" 
   echo "OK   race 4 $wrong wrong-pin answers, $other locked / rate; the kiosk is locked and still in kiosk mode"
 else
   echo "FAIL race 4: wrong $wrong, other $other, locked $locked, live sessions $live"; fail=1
+fi
+
+echo "race 5: two begins with different keys on one kiosk session"
+reset_tier
+$P -c "UPDATE exos_ticket_tiers SET capacity=10 WHERE id='$T'" >/dev/null
+{ $P -c "BEGIN; $(begin_sql "$TOK1" c0b1ace0-0000-0000-0000-00000000aa06 2) COMMIT;" >/dev/null 2>&1 || true; } &
+sleep 0.5
+out2=$($P -c "BEGIN; $(begin_sql "$TOK1" c0b1ace0-0000-0000-0000-00000000aa07 0) COMMIT;" 2>&1 || true)
+wait
+open=$($P -c "SELECT count(*) FROM exos_pos_orders WHERE event_id='$E' AND channel='kiosk' AND status='open'")
+if [[ "$open" == 1 && "$out2" == *"still open"* ]]; then
+  echo "OK   race 5 one open sale on the session; the other begin: kiosk busy"
+else
+  echo "FAIL race 5: open kiosk sales $open, second: $out2"; fail=1
+fi
+
+echo "race 6: five charges at once, 8 minutes after the begin"
+ORDER=$($P -c "SELECT id FROM exos_pos_orders WHERE event_id='$E' AND channel='kiosk' AND status='open'")
+$P -c "UPDATE exos_pos_orders SET created_at = now() - interval '8 minutes' WHERE id='$ORDER'" >/dev/null
+TMP=$(mktemp -d)
+for i in $(seq 1 5); do
+  ( $P -c "SELECT public._exos_pos_kiosk_charge('$TOK1','$ORDER',false) ->> 'order_id'" > "$TMP/$i" 2>&1 || true ) &
+done
+wait
+ok=0; for i in $(seq 1 5); do [[ "$(cat "$TMP/$i")" == "$ORDER" ]] && ok=$((ok + 1)); done
+rm -rf "$TMP"
+late=$($P -c "SELECT count(*) FROM exos_cart_holds h JOIN exos_pos_orders o ON o.id = h.pos_order_id
+              WHERE o.id='$ORDER' AND h.status='active' AND h.expires_at > o.created_at + interval '10 minutes'")
+if [[ "$ok" == 5 && "$late" == 0 ]]; then
+  echo "OK   race 6 five charges, the hold still ends within 10 minutes of the begin"
+else
+  echo "FAIL race 6: charges ok $ok, holds past the cap $late"; fail=1
 fi
 exit $fail

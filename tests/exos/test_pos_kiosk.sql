@@ -27,6 +27,13 @@
 --   K12 cross-org: another org's owner, device, event or reader; RLS reads
 --   K13 a session ends from the dashboard (pos.kiosk_exit via staff) and with
 --       the kiosk turned off (pos.kiosk_off); a moved event ends it
+--   K14 hidden / staff-only questions: not on the kiosk screen, an answer to
+--       one is refused, a hidden required one isn't required at the kiosk
+--   K15 one open sale per session (busy while it holds places, released once
+--       lapsed), 6 begins a minute per session
+--   K16 a charge never extends the hold past 10 minutes from the begin; the
+--       card limit counts on the kiosk session, not on its starter
+--   K17 hand-over only for the session's most recent paid sale
 -- Self-contained (BEGIN / ROLLBACK). Org …01: owner a1, manager a2, scanner a3,
 -- finance a4. Org …02: owner b9.
 -- ============================================================================
@@ -141,8 +148,9 @@ BEGIN
   ASSERT position('/* exos: pos kiosk channel */' in pg_get_functiondef('public._exos_pos_order_json(uuid,uuid)'::regprocedure)) > 0
      AND position('/* exos: pos kiosk card only */' in pg_get_functiondef('public._exos_pos_walkup_complete(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
      AND position('/* exos: pos terminal card tender */' in pg_get_functiondef('public._exos_pos_walkup_complete(uuid,uuid,text,uuid,text)'::regprocedure)) > 0
-     AND position('/* exos: pos kiosk settlement */' in pg_get_functiondef('public.exos_pos_settlement_summary(uuid)'::regprocedure)) > 0,
-    'K1: the three patches, earlier markers kept';
+     AND position('/* exos: pos kiosk settlement */' in pg_get_functiondef('public.exos_pos_settlement_summary(uuid)'::regprocedure)) > 0
+     AND position('/* exos: pos kiosk card limit */' in pg_get_functiondef('public._exos_pos_card_begin(uuid,uuid,text,uuid,boolean)'::regprocedure)) > 0,
+    'K1: the four patches, earlier markers kept';
   RAISE NOTICE 'OK K1 RLS on, no client writes, no hash readable, cores service role only, patches in place';
 END $$;
 
@@ -556,6 +564,112 @@ BEGIN
   -- The device sells at the door again once it's no kiosk.
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_pos_kiosks WHERE device_id = pg_temp.u('c2')), 'K13: a plain device again';
   RAISE NOTICE 'OK K13 ended from the dashboard (audited), by a move to another event, and by turning it off (audited)';
+END $$;
+
+
+-- ── K14 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE q jsonb; r jsonb; v_o uuid;
+BEGIN
+  PERFORM pg_temp.act(pg_temp.u('a1'));
+  q := public.exos_save_event_question(pg_temp.u('e1'), '{"label":"Wristband #","kind":"text","required":true,"scope":"order","hidden":true}');
+  INSERT INTO tk VALUES ('q_band', q ->> 'id');
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  INSERT INTO tk VALUES ('tok5', public.exos_pos_kiosk_enter(pg_temp.u('c1')) ->> 'token');
+  PERFORM pg_temp.act(NULL);
+  r := public._exos_pos_kiosk_state(pg_temp.v('tok5'), false);
+  ASSERT NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'questions') x WHERE x ->> 'id' = pg_temp.v('q_band'))
+     AND EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'questions') x WHERE x ->> 'id' = pg_temp.v('q_zip')),
+    'K14: the hidden question is not on the kiosk screen ' || (r -> 'questions')::text;
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_begin(%L, %L, 1, %L, %L::jsonb, false)', pg_temp.v('tok5'), pg_temp.u('d1'),
+                           pg_temp.k('11'), jsonb_build_object('order', jsonb_build_object(pg_temp.v('q_zip'), '86001', pg_temp.v('q_band'), 'W-77'))))
+         = '22023:kiosk-answers', 'K14: an answer to a hidden question is refused';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_question_answers WHERE question_id = pg_temp.v('q_band')::uuid), 'K14: no hidden answer kept';
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_begin(%L, %L, 1, %L, %L::jsonb, false)', pg_temp.v('tok5'), pg_temp.u('d1'),
+                           pg_temp.k('11'), jsonb_build_object('order', jsonb_build_object('c0b10000-0000-0000-0000-0000000000ff', 'x'))))
+         = '22023:kiosk-answers', 'K14: an answer to a question nobody asked';
+  -- The visible required one answered: sold; the hidden required one isn't asked here.
+  r := public._exos_pos_kiosk_begin(pg_temp.v('tok5'), pg_temp.u('d1'), 1, pg_temp.k('11'),
+         jsonb_build_object('order', jsonb_build_object(pg_temp.v('q_zip'), '86001')), false);
+  INSERT INTO tk VALUES ('oA', r ->> 'id');
+  ASSERT r ->> 'status' = 'pending', 'K14: begun ' || r::text;
+  RAISE NOTICE 'OK K14 hidden questions: not shown, an answer to one refused, not required at the kiosk';
+END $$;
+
+-- ── K15 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE r jsonb; n int := 0; v_st text; v_ans jsonb;
+BEGIN
+  PERFORM pg_temp.act(NULL);
+  v_ans := jsonb_build_object('order', jsonb_build_object(pg_temp.v('q_zip'), '86001'));
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_begin(%L, %L, 1, %L, %L::jsonb, false)', pg_temp.v('tok5'), pg_temp.u('d1'),
+                           pg_temp.k('12'), v_ans)) = '55000:kiosk-busy', 'K15: a second open sale is refused';
+  -- The first one's hold lapses: the next begin releases it.
+  UPDATE public.exos_cart_holds SET expires_at = now() - interval '1 second' WHERE pos_order_id = pg_temp.v('oA')::uuid;
+  r := public._exos_pos_kiosk_begin(pg_temp.v('tok5'), pg_temp.u('d1'), 1, pg_temp.k('12'), v_ans, false);
+  INSERT INTO tk VALUES ('oB', r ->> 'id');
+  ASSERT (SELECT status = 'void' FROM public.exos_pos_orders WHERE id = pg_temp.v('oA')::uuid)
+     AND (SELECT status = 'canceled' FROM public.exos_pos_card_payments WHERE order_id = pg_temp.v('oA')::uuid)
+     AND (SELECT count(*) FROM public.exos_pos_orders WHERE kiosk_session_id = (SELECT id FROM public.exos_pos_kiosk_sessions
+            WHERE token_hash = encode(extensions.digest(pg_temp.v('tok5'), 'sha256'), 'hex')) AND status = 'open') = 1,
+    'K15: the lapsed sale released, one open sale';
+  -- 6 begins a minute per session (replays count): 2 so far.
+  LOOP
+    v_st := pg_temp.st(format('SELECT public._exos_pos_kiosk_begin(%L, %L, 1, %L, %L::jsonb, false)', pg_temp.v('tok5'), pg_temp.u('d1'),
+                              pg_temp.k('12'), v_ans));
+    EXIT WHEN v_st <> 'ok' OR n > 10;
+    n := n + 1;
+  END LOOP;
+  ASSERT v_st = '54000' AND n = 4, format('K15: 6 begins a minute, then 54000 (%s more, then %s)', n, v_st);
+  RAISE NOTICE 'OK K15 one open sale per session (busy, released once lapsed), 6 begins a minute';
+END $$;
+
+-- ── K16 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE v_o uuid := pg_temp.v('oB')::uuid; v_cap timestamptz; v_sess text;
+BEGIN
+  PERFORM pg_temp.act(NULL);
+  SELECT kiosk_session_id::text INTO v_sess FROM public.exos_pos_orders WHERE id = v_o;
+  UPDATE public.exos_pos_orders SET created_at = now() - interval '8 minutes' WHERE id = v_o;
+  v_cap := now() - interval '8 minutes' + interval '10 minutes';
+  PERFORM public._exos_pos_kiosk_charge(pg_temp.v('tok5'), v_o, false);
+  PERFORM public._exos_pos_kiosk_charge(pg_temp.v('tok5'), v_o, false);
+  PERFORM public._exos_pos_kiosk_charge(pg_temp.v('tok5'), v_o, false);
+  ASSERT (SELECT max(expires_at) FROM public.exos_cart_holds WHERE pos_order_id = v_o AND status = 'active') <= v_cap
+     AND (SELECT hold_expires_at <= v_cap FROM public.exos_pos_orders WHERE id = v_o),
+    'K16: three charges, the hold still ends 10 minutes after the begin';
+  ASSERT (SELECT hits FROM public.exos_rate_windows WHERE bucket = 'pos:card:kiosk:' || v_sess AND window_start = date_trunc('minute', now())) = 3
+     AND NOT EXISTS (SELECT 1 FROM public.exos_rate_windows WHERE bucket = 'pos:card:' || pg_temp.u('a2')),
+    'K16: the card limit counts on the kiosk session, not on the manager who started it';
+  UPDATE public.exos_pos_orders SET created_at = now() - interval '11 minutes' WHERE id = v_o;
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_charge(%L, %L, false)', pg_temp.v('tok5'), v_o)) = '55000:expired',
+    'K16: no charge 10 minutes after the begin';
+  PERFORM public._exos_pos_card_fail(v_o, NULL, 'canceled', NULL, 'door', 'test');
+  RAISE NOTICE 'OK K16 a charge never holds past 10 minutes from the begin; card limit per kiosk session';
+END $$;
+
+-- ── K17 ─────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE v_c uuid; v_d uuid; v_ans jsonb; k text; v_o uuid;
+BEGIN
+  PERFORM pg_temp.act(NULL);
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'pos:kiosk:begin:%';
+  v_ans := jsonb_build_object('order', jsonb_build_object(pg_temp.v('q_zip'), '86001'));
+  FOREACH k IN ARRAY ARRAY['13', '14'] LOOP
+    v_o := (public._exos_pos_kiosk_begin(pg_temp.v('tok5'), pg_temp.u('d2'), 1, pg_temp.k(k), v_ans, false) ->> 'id')::uuid;
+    PERFORM public._exos_pos_kiosk_charge(pg_temp.v('tok5'), v_o, false);
+    PERFORM public._exos_pos_card_attach(v_o, 'pi_K17s' || k, 500, 'usd', 50, 15, 35, 300);
+    PERFORM public._exos_pos_card_capture_prepare(v_o, 'pi_K17s' || k);
+    PERFORM public._exos_pos_card_complete(v_o, 'pi_K17s' || k, 500, 'door', NULL);
+    IF k = '13' THEN v_c := v_o; ELSE v_d := v_o; END IF;
+  END LOOP;
+  UPDATE public.exos_pos_orders SET paid_at = now() - interval '1 minute' WHERE id = v_c;
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_codes(%L, %L)', pg_temp.v('tok5'), v_c)) = '55000:kiosk-too-late',
+    'K17: an earlier buyer''s sale can''t be called back';
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_email(%L, %L, %L)', pg_temp.v('tok5'), v_c, 'z@example.com')) = '55000:kiosk-too-late',
+    'K17: nor emailed';
+  ASSERT jsonb_array_length(public._exos_pos_kiosk_codes(pg_temp.v('tok5'), v_d) -> 'tickets') = 1, 'K17: the latest sale''s QR';
+  RAISE NOTICE 'OK K17 hand-over only for the session''s most recent paid sale';
 END $$;
 
 ROLLBACK;

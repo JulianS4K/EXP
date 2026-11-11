@@ -67,6 +67,8 @@ const FRIENDLY: Record<string, string> = {
   'sold-out': 'Sold out.',
   'max-per-order': 'That is more tickets than one order allows.',
   'questions-required': 'Please answer the required questions.',
+  'kiosk-answers': 'Something went wrong with your answers. Please start again.',
+  'kiosk-busy': 'The last sale on this kiosk is still finishing. Please try again in a minute.',
   expired: 'That took too long and the tickets were released. Please start again.',
   'no-reader': "This kiosk's card reader isn't ready. Please buy at the box office.",
   'kiosk-too-late': 'Please ask the staff for these tickets.',

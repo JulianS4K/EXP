@@ -18,7 +18,8 @@
 --              _exos_pos_kiosk_exit (service role only: exos-pos calls them
 --              with the kiosk's credential; each resolves it first),
 --              exos_pos_tg_order_kiosk (trigger)
---           W: FUNCTION _exos_pos_order_json (marker /* exos: pos kiosk channel */),
+--           W: FUNCTION _exos_pos_card_begin (marker /* exos: pos kiosk card limit */),
+--              _exos_pos_order_json (marker /* exos: pos kiosk channel */),
 --              _exos_pos_walkup_complete (marker /* exos: pos kiosk card only */),
 --              exos_pos_settlement_summary (marker /* exos: pos kiosk settlement */)
 --           R: exos_pos_devices, exos_pos_terminal_readers, exos_events,
@@ -44,7 +45,11 @@
 --     an order for another event or device, and any comp;
 --   * a kiosk device can't take a door sale (cash, comp or card) outside
 --     kiosk mode, and a kiosk order can only be completed by a card;
---   * required checkout questions can't be skipped;
+--   * the public's questions only (hidden / staff-only ones are neither shown
+--     nor accepted), checked as online checkout; required ones can't be skipped;
+--   * one open sale per session, 6 begins a minute, a hold never past 10
+--     minutes from the begin, card charges counted per session, and only the
+--     session's latest paid sale handed over (for 10 minutes);
 --   * no cash, comps, voids or refunds: those stay with staff in the door app;
 --   * the PIN exits kiosk mode: 10 tries a minute per device and 5 wrong in a
 --     row lock it for 5 minutes (a wrong PIN answers, it doesn't raise, so the
@@ -219,6 +224,14 @@ SELECT pg_temp.exos_patch_n('public.exos_pos_settlement_summary(uuid)',
                       'gross_cents', coalesce(sum(k.total_cents), 0))
                FROM public.exos_pos_orders k WHERE k.event_id = p_event_id AND k.channel = 'kiosk' AND k.status = 'paid'),
            'computed_at', now())$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public._exos_pos_card_begin(uuid,uuid,text,uuid,boolean)',
+  '/* exos: pos kiosk card limit */',
+  $o$  IF NOT public.exos_rate_hit('pos:card:' || p_actor::text, 20) THEN$o$,
+  $n$  /* exos: pos kiosk card limit */ -- mig 20261113100000: a kiosk's charges count on its own
+  -- session (set by _exos_pos_kiosk_charge only), not on the member who started it.
+  IF NOT public.exos_rate_hit('pos:card:' || coalesce('kiosk:' || nullif(current_setting('exos.pos_kiosk_session', true), ''),
+                                                      p_actor::text), 20) THEN$n$, 1);
 
 -- ===========================================================================
 -- 3. Setup (authenticated: owner / manager of the device's org).
@@ -487,7 +500,8 @@ BEGIN
     'event', jsonb_build_object('id', ev.id, 'name', ev.name, 'starts_at', ev.starts_at, 'venue_name', ev.venue_name,
                                 'currency', upper(coalesce(ev.currency, 'usd'))),
     'tiers', public._exos_pos_kiosk_tiers(ev.id),
-    'questions', public._exos_question_defs(ev.id, true),
+    -- The public's questions only (as online checkout): never a hidden / staff-only one.
+    'questions', public._exos_question_defs(ev.id, false),
     'max_per_order', public._exos_pos_kiosk_max(ev.id),
     'reader', coalesce(v_reader, jsonb_build_object('label', NULL, 'ready', false)));
 END $$;
@@ -495,25 +509,53 @@ REVOKE ALL ON FUNCTION public._exos_pos_kiosk_state(text, boolean) FROM PUBLIC, 
 GRANT EXECUTE ON FUNCTION public._exos_pos_kiosk_state(text, boolean) TO service_role;
 
 -- Begin a kiosk sale: the card walk-up begin for the kiosk's event and device,
--- a public type, at most maxPerOrder, the required questions answered (never
--- skipped), no name or email (email comes after, if the buyer wants it). The
--- order key replays only this session's own sale.
+-- a public type, at most maxPerOrder, no name or email (email comes after, if
+-- the buyer wants it). The order key replays only this session's own sale.
+--   * Answers are checked with the ONLINE checkout's rules
+--     (_exos_validate_answers, hidden questions excluded): an answer to a
+--     hidden / staff-only question (wristband, ID checked) or to anything this
+--     kiosk doesn't ask is refused ('kiosk-answers'); required visible ones
+--     are required, never skipped ('questions-required').
+--   * One open (unpaid) sale per session, under the session row's lock: a
+--     new sale is refused while the last one still holds its places
+--     ('kiosk-busy'; it may be on the reader with a buyer paying, so it is
+--     never pulled out from under them); once its hold has lapsed it is
+--     released here (cancelled, places back). The screen cancels its own
+--     abandoned sale (kiosk_cancel), so a fair kiosk never waits on this.
+--   * 6 begins a minute per session (on top of the device's walk-up 30).
 CREATE OR REPLACE FUNCTION public._exos_pos_kiosk_begin(
   p_token text, p_tier uuid, p_quantity integer, p_order_key uuid, p_answers jsonb, p_live boolean
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE s jsonb; v_sess uuid; v_event uuid; o public.exos_pos_orders%ROWTYPE; v_max int; v_out jsonb;
+DECLARE
+  s jsonb; v_sess uuid; v_event uuid; o public.exos_pos_orders%ROWTYPE; prev public.exos_pos_orders%ROWTYPE;
+  v_max int; v_out jsonb; v_res jsonb; v_pi text;
 BEGIN
   s := public._exos_pos_kiosk_resolve(p_token);
   v_sess := (s ->> 'session_id')::uuid;
   v_event := (s ->> 'event_id')::uuid;
+  IF NOT public.exos_rate_hit('pos:kiosk:begin:' || v_sess::text, 6) THEN
+    RAISE EXCEPTION 'too many sales a minute from this kiosk' USING ERRCODE = '54000';
+  END IF;
   IF p_order_key IS NULL THEN
     RAISE EXCEPTION 'an order key is required (a new UUID per sale)' USING ERRCODE = '22023';
   END IF;
-  -- The walk-up's own key lock, taken first: a key is one session's sale.
+  -- One begin at a time per session (the one-open-sale rule below), then the
+  -- walk-up's own key lock: a key is one session's sale.
+  PERFORM 1 FROM public.exos_pos_kiosk_sessions WHERE id = v_sess FOR UPDATE;
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_pos_key:' || p_order_key::text, 0));
   SELECT * INTO o FROM public.exos_pos_orders WHERE client_ref = p_order_key;
   IF o.id IS NOT NULL AND o.kiosk_session_id IS DISTINCT FROM v_sess THEN
     RAISE EXCEPTION 'this order key was already used for another sale' USING ERRCODE = '23505';
+  END IF;
+  IF o.id IS NULL THEN
+    FOR prev IN SELECT * FROM public.exos_pos_orders WHERE kiosk_session_id = v_sess AND status = 'open' ORDER BY created_at LOOP
+      IF EXISTS (SELECT 1 FROM public.exos_cart_holds h
+                  WHERE h.pos_order_id = prev.id AND h.status = 'active' AND h.expires_at > now()) THEN
+        RAISE EXCEPTION 'the last sale on this kiosk is still open: finish or cancel it first' USING ERRCODE = '55000', HINT = 'kiosk-busy';
+      END IF;
+      SELECT payment_intent_id INTO v_pi FROM public.exos_pos_card_payments WHERE order_id = prev.id;
+      PERFORM public._exos_pos_card_fail(prev.id, v_pi, 'canceled', NULL, 'kiosk', 'released: its hold lapsed at the kiosk');
+    END LOOP;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM public.exos_ticket_tiers t
                   WHERE t.id = p_tier AND t.event_id = v_event AND coalesce(t.kind, '') <> 'table'
@@ -523,6 +565,13 @@ BEGIN
   v_max := public._exos_pos_kiosk_max(v_event);
   IF p_quantity IS NULL OR p_quantity < 1 OR p_quantity > v_max THEN
     RAISE EXCEPTION 'pick 1 to % tickets', v_max USING ERRCODE = '22023', HINT = 'max-per-order';
+  END IF;
+  v_res := public._exos_validate_answers(v_event, array_fill(p_tier, ARRAY[p_quantity]), p_answers, true, false);
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(coalesce(v_res -> 'problems', '[]'::jsonb)) x WHERE x ->> 'code' <> 'required') THEN
+    RAISE EXCEPTION 'an answer this kiosk doesn''t ask for' USING ERRCODE = '22023', HINT = 'kiosk-answers';
+  END IF;
+  IF jsonb_array_length(coalesce(v_res -> 'problems', '[]'::jsonb)) > 0 THEN
+    RAISE EXCEPTION 'answer the required questions' USING ERRCODE = '22023', HINT = 'questions-required';
   END IF;
   PERFORM set_config('exos.pos_kiosk_session', v_sess::text, true);
   v_out := public._exos_pos_walkup_begin_card((s ->> 'actor')::uuid, v_event, p_tier, p_quantity, p_order_key,
@@ -547,10 +596,15 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_pos_kiosk_order(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_pos_kiosk_order(uuid, uuid) TO service_role;
 
--- Charge the pending sale on the kiosk's own reader (never another).
+-- Charge the pending sale on the kiosk's own reader (never another). The card
+-- begin's rate limit is keyed on this kiosk session (exos.pos_kiosk_session,
+-- marker /* exos: pos kiosk card limit */), not on the member who started it,
+-- so kiosks never use up their door app's charges. A charge extends the hold
+-- (the guest is at the reader) but never past 10 minutes from the begin:
+-- charging again can't keep places off sale.
 CREATE OR REPLACE FUNCTION public._exos_pos_kiosk_charge(p_token text, p_order uuid, p_live boolean)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
-DECLARE s jsonb; o public.exos_pos_orders%ROWTYPE;
+DECLARE s jsonb; o public.exos_pos_orders%ROWTYPE; v_plan jsonb; v_cap timestamptz;
 BEGIN
   s := public._exos_pos_kiosk_resolve(p_token);
   o := public._exos_pos_kiosk_order((s ->> 'session_id')::uuid, p_order);
@@ -560,7 +614,16 @@ BEGIN
   IF s ->> 'reader_device_id' IS NULL THEN
     RAISE EXCEPTION 'this kiosk has no card reader' USING ERRCODE = '55000', HINT = 'no-reader';
   END IF;
-  RETURN public._exos_pos_card_begin((s ->> 'actor')::uuid, o.id, 'reader', (s ->> 'reader_device_id')::uuid, p_live);
+  v_cap := o.created_at + interval '10 minutes';
+  IF o.status = 'open' AND now() >= v_cap THEN
+    RAISE EXCEPTION 'reservation_expired: the places were given back; start the sale again' USING ERRCODE = '55000', HINT = 'expired';
+  END IF;
+  PERFORM set_config('exos.pos_kiosk_session', (s ->> 'session_id'), true);
+  v_plan := public._exos_pos_card_begin((s ->> 'actor')::uuid, o.id, 'reader', (s ->> 'reader_device_id')::uuid, p_live);
+  PERFORM set_config('exos.pos_kiosk_session', '', true);
+  UPDATE public.exos_cart_holds SET expires_at = least(expires_at, v_cap) WHERE pos_order_id = o.id AND status = 'active';
+  UPDATE public.exos_pos_orders SET hold_expires_at = least(hold_expires_at, v_cap) WHERE id = o.id AND status = 'open';
+  RETURN v_plan;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_pos_kiosk_charge(text, uuid, boolean) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_pos_kiosk_charge(text, uuid, boolean) TO service_role;
@@ -580,8 +643,9 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_pos_kiosk_lookup(text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_pos_kiosk_lookup(text, uuid) TO service_role;
 
--- A paid kiosk sale, for its hand-over: this session's, paid in the last 10
--- minutes (the screen resets long before; a later buyer can't call it back).
+-- A paid kiosk sale, for its hand-over: this session's MOST RECENT paid sale,
+-- paid in the last 10 minutes (the screen resets long before; a later buyer,
+-- or a copied credential, can't call back an earlier buyer's tickets).
 CREATE OR REPLACE FUNCTION public._exos_pos_kiosk_paid(p_session uuid, p_order uuid)
 RETURNS public.exos_pos_orders LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE o public.exos_pos_orders%ROWTYPE;
@@ -590,7 +654,10 @@ BEGIN
   IF o.status <> 'paid' THEN
     RAISE EXCEPTION 'this sale is %', CASE WHEN o.status = 'open' THEN 'pending' ELSE o.status END USING ERRCODE = '55000';
   END IF;
-  IF o.paid_at < now() - interval '10 minutes' THEN
+  IF o.paid_at < now() - interval '10 minutes'
+     OR o.id IS DISTINCT FROM (SELECT k.id FROM public.exos_pos_orders k
+                                WHERE k.kiosk_session_id = p_session AND k.status = 'paid'
+                                ORDER BY k.paid_at DESC, k.id DESC LIMIT 1) THEN
     RAISE EXCEPTION 'this sale can no longer be handed over here: ask the staff' USING ERRCODE = '55000', HINT = 'kiosk-too-late';
   END IF;
   RETURN o;
