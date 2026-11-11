@@ -2,7 +2,7 @@
 // which mirror SQL _exos_checkin_day_refusal (tests/exos/test_fair_day.sql).
 import { describe, expect, it } from 'vitest';
 import { decideScan, parseDoorCode, type DoorCachedTicket, type ScanDecisionInput } from './decide';
-import { dayListRefusal, describeList, enteredOnDay, localDayKey, mapCheckinListRow, type DoorCheckinList } from './lists';
+import { dayListRefusal, dayListWrongDay, describeList, enteredOnDay, localDayKey, mapCheckinListRow, type DoorCheckinList } from './lists';
 import { listsSignature } from './roster';
 
 const EVENT = 'eeeeeeee-0000-4000-8000-000000000001';
@@ -138,5 +138,41 @@ describe('fair day lists: entries off the day lists count', () => {
   });
   it('an ordinary list\'s key alone is not a day (its day key is)', () => {
     expect(dayListRefusal(D2, { main: 'entry' }, [...LISTS, { ...D2, id: 'main', entryDay: null }], 1)).toBeNull();
+  });
+});
+
+// The Applier's review of wave 13: a fair day's re-entry gates share in / out
+// ('dayin:' key), the day limit on re-entry lists, and a scan's local date
+// must be the list's day ('wrong-day').
+describe('fair day lists: re-entry across gates, and the scan\'s day', () => {
+  const R2N = day('r2n', '2027-08-21', NOW - 6 * HOUR, true);
+  const RL = [R1, R2, R2N];
+  it('in at gate A, refused at gate B until an exit (at either gate)', () => {
+    expect(dayListRefusal(R2N, { r2: 'entry', 'dayin:2027-08-21': 'entry' }, RL, null)).toBe('already-inside');
+    expect(decideScan(offline({ used: true, tierId: 'multi', lists: { r2: 'entry', 'dayin:2027-08-21': 'entry' } }, R2N, { lists: RL })))
+      .toEqual(reject('already-inside'));
+    // Out at B: back in at A even though A's own last scan was an entry.
+    expect(decideScan(offline({ used: true, tierId: 'multi', lists: { r2: 'entry', r2n: 'exit', 'dayin:2027-08-21': 'exit' } }, R2, { lists: RL })))
+      .toEqual(admit);
+    // A saved list from before the day key: the list's own state.
+    expect(decideScan(offline({ used: true, tierId: 'multi', lists: { r2: 'entry' } }, R2, { lists: RL }))).toEqual(reject('already-inside'));
+  });
+  it('the day limit holds on re-entry lists; the day used is not a new day', () => {
+    expect(decideScan(offline({ used: true, tierId: 'any', lists: { r1: 'exit', 'dayin:2027-08-20': 'exit' } }, R2, { lists: RL })))
+      .toEqual(reject('day-limit'));
+    expect(dayListRefusal(R2, { r2: 'exit', 'dayin:2027-08-21': 'exit' }, RL, 1)).toBeNull();
+  });
+  it('a scan on another day than the list\'s is wrong-day, live and offline', () => {
+    const noHours: DoorCheckinList = { ...D1, validFrom: null, validUntil: null }; // day 1 = 2027-08-20
+    expect(dayListWrongDay(noHours, NOW, 'UTC')).toBe(true); // NOW is Aug 21
+    expect(dayListWrongDay({ ...noHours, entryDay: '2027-08-21' }, NOW, 'UTC')).toBe(false);
+    expect(decideScan(offline({ used: false, tierId: 'multi' }, noHours))).toEqual(reject('wrong-day'));
+    // In the event's zone: 01:00 UTC on Aug 22 is still Aug 21 in Phoenix.
+    expect(dayListWrongDay({ ...noHours, entryDay: '2027-08-21' }, Date.UTC(2027, 7, 22, 1), 'America/Phoenix')).toBe(false);
+  });
+  it('after midnight inside a window that opens on the list\'s day is that day', () => {
+    const late: DoorCheckinList = { ...D2, validFrom: '2027-08-21T18:00:00Z', validUntil: '2027-08-22T02:00:00Z' };
+    expect(dayListWrongDay(late, Date.UTC(2027, 7, 22, 0, 30), 'UTC')).toBe(false);
+    expect(dayListWrongDay(late, Date.UTC(2027, 7, 22, 3, 0), 'UTC')).toBe(true);
   });
 });

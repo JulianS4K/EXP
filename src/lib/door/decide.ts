@@ -52,6 +52,7 @@ import { extractTicketIdFromAny, normalizeCodePrefix } from '../barcode';
 import {
   addonListRefusal,
   dayListRefusal,
+  dayListWrongDay,
   effectiveDirection,
   listAdmitsTier,
   listWindow,
@@ -163,6 +164,8 @@ export interface ScanDecisionInput {
   lists?: DoorCheckinList[] | null;
   /** Ticket type id → max_entry_days (fair days; absent = no limit). */
   dayLimits?: Record<string, number> | null;
+  /** The event's time zone (fair days: a scan's local date). */
+  timezone?: string | null;
 }
 
 export type DoorRejectReason =
@@ -195,7 +198,9 @@ export type DoorRejectReason =
   /** A ticket at a list that scans add-on entry codes only. */
   | 'addon-only-list'
   /** Fair days: the ticket type's day limit is used up (an any-day pass on a second day). */
-  | 'day-limit';
+  | 'day-limit'
+  /** Fair days: a fair-day list scanned on another day. */
+  | 'wrong-day';
 
 export type ScanDecision =
   | { action: 'ignore' }
@@ -309,6 +314,9 @@ function decideOnSavedList(
   if (direction === 'entry' && list && listWindow(list, now) !== 'open') {
     return { action: 'reject', ticketId, reason: 'invalid-time' };
   }
+  if (direction === 'entry' && !entry.addon && dayListWrongDay(list, now, input.timezone)) {
+    return { action: 'reject', ticketId, reason: 'wrong-day' };
+  }
   if (entry.voided) return { action: 'reject', ticketId, reason: 'voided' };
   const preDoors = gate.opensAt != null && now < gate.opensAt;
   const testWindow = preDoors && gate.testUntil != null && now < gate.testUntil;
@@ -329,7 +337,10 @@ function decideOnSavedList(
     if (day) return { action: 'reject', ticketId, reason: day };
   }
   if (list?.allowReentry) {
-    if (entry.lists?.[list.id] === 'entry') return { action: 'reject', ticketId, reason: 'already-inside' };
+    // A fair day's re-entry lists share in / out (dayListRefusal above); the
+    // list's own state is for ordinary lists, or a saved list from before.
+    const dayKnown = !!list.entryDay && entry.lists?.[`dayin:${list.entryDay}`] !== undefined;
+    if (!dayKnown && entry.lists?.[list.id] === 'entry') return { action: 'reject', ticketId, reason: 'already-inside' };
   } else if (entry.used && !(list?.entryDay && !entry.addon)) {
     return { action: 'reject', ticketId, reason: 'used' };
   }

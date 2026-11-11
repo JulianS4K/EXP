@@ -169,6 +169,10 @@ export function parseListState(v: unknown): ListState | undefined {
  *  local date (the event's zone) it entered on no list, an ordinary list or a
  *  deleted list (the roster sends them; the device adds its own). */
 export const DAY_KEY_PREFIX = 'day:';
+/** 'dayin:YYYY-MM-DD': the last direction across a fair day's re-entry lists
+ *  (the roster sends it; the device keeps it): in at gate A, out at gate B. */
+export const DAY_INSIDE_PREFIX = 'dayin:';
+export const dayInsideKey = (day: string) => `${DAY_INSIDE_PREFIX}${day}`;
 
 /** The day key for an entry at `ms` in the event's zone (UTC when unset or
  *  unknown, as the server's _exos_event_tz). */
@@ -188,7 +192,8 @@ export function localDayKey(ms: number, timezone: string | null | undefined): st
 function stateDays(state: ListState | undefined, dayOf: Map<string, string>): Set<string> {
   const days = new Set<string>();
   for (const k of Object.keys(state ?? {})) {
-    const d = k.startsWith(DAY_KEY_PREFIX) ? k.slice(DAY_KEY_PREFIX.length) : dayOf.get(k);
+    const d = k.startsWith(DAY_KEY_PREFIX) ? k.slice(DAY_KEY_PREFIX.length)
+      : k.startsWith(DAY_INSIDE_PREFIX) ? k.slice(DAY_INSIDE_PREFIX.length) : dayOf.get(k);
     if (d) days.add(d);
   }
   return days;
@@ -207,8 +212,10 @@ export function dayListRefusal(
   state: ListState | undefined,
   allLists: DoorCheckinList[] | null | undefined,
   dayLimit: number | null | undefined,
-): 'used' | 'day-limit' | null {
+): 'used' | 'already-inside' | 'day-limit' | null {
   if (!list?.entryDay) return null;
+  // Re-entry: inside / outside is the day's, across its gates.
+  if (list.allowReentry && state?.[dayInsideKey(list.entryDay)] === 'entry') return 'already-inside';
   const dayOf = new Map((allLists ?? []).filter((l) => l.entryDay).map((l) => [l.id, l.entryDay as string]));
   dayOf.set(list.id, list.entryDay);
   const days = stateDays(state, dayOf);
@@ -218,12 +225,26 @@ export function dayListRefusal(
   return null;
 }
 
+/** Is the scan on another day than the list's? Its local date (event zone)
+ *  must be the list's day, unless it is after midnight inside a window that
+ *  opens on that day (a rodeo till 1 am). Mirrors the SQL 'wrong_day'. */
+export function dayListWrongDay(list: DoorCheckinList | null, now: number, timezone: string | null | undefined): boolean {
+  if (!list?.entryDay) return false;
+  if (localDayKey(now, timezone) === `${DAY_KEY_PREFIX}${list.entryDay}`) return false;
+  const from = list.validFrom ? Date.parse(list.validFrom) : NaN;
+  const until = list.validUntil ? Date.parse(list.validUntil) : NaN;
+  const overnight = Number.isFinite(from) && Number.isFinite(until)
+    && localDayKey(from, timezone) === `${DAY_KEY_PREFIX}${list.entryDay}` && now >= from && now <= until;
+  return !overnight;
+}
+
 /** Has this ticket entered on the list's fair day (any of the day's lists)? */
 export function enteredOnDay(list: DoorCheckinList, state: ListState | undefined, allLists: DoorCheckinList[] | null | undefined): boolean {
   if (!list.entryDay) return false;
   const ids = new Set((allLists ?? []).filter((l) => l.entryDay === list.entryDay).map((l) => l.id));
   ids.add(list.id);
   ids.add(`${DAY_KEY_PREFIX}${list.entryDay}`);
+  ids.add(dayInsideKey(list.entryDay));
   return Object.keys(state ?? {}).some((id) => ids.has(id));
 }
 

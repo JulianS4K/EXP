@@ -23,8 +23,16 @@
 --      * without re-entry: one entry per ticket per DAY (every list of the
 --        event with the same entry_day, so several gates of one day share
 --        it) instead of one per event; a ticket used on another day may enter;
---      * with re-entry: as before (inside = the last scan on this list);
---      * the ticket type's max_entry_days (below) is checked.
+--      * with re-entry: inside = the last scan of the ticket on ANY list of
+--        the event with the same entry_day (gate A in, gate B out works; in
+--        at A then in at B with no exit is 'already-inside');
+--      * the ticket type's max_entry_days (below) is checked, re-entry or not
+--        (re-entering on a day already used is not a new day);
+--      * the scan's local date (event zone) must be entry_day, live or
+--        offline; a scan after midnight inside a window that opens on
+--        entry_day (a rodeo till 1 am) is that day. Otherwise 'invalid-time'
+--        with wrong_day = true (so an offline replay the server refuses this
+--        way is recorded as attended, like any invalid-time).
 --    Add-on lists (admits 'addons') can't have one (CHECK): add-on passes
 --    keep their own rules.
 -- 2. exos_ticket_tiers.max_entry_days (int 1..366, NULL = no limit): a ticket
@@ -45,16 +53,17 @@
 --    window): voided / transferred / mid-transfer between the first read and
 --    the lock is refused, never let in.
 --    _exos_checkin_day_refusal (internal) holds the rule. Marker patches:
---      exos_check_in_ticket (10 args)      /* exos: fair days 1..3 */
+--      exos_check_in_ticket (10 args)      /* exos: fair days 1..4 */
 --      exos_door_checkin_by_name (8 args)  /* exos: fair days 1, 2 */
 --      exos_check_in_offline (10 args),
 --      exos_door_checkin_by_name           /* exos: fair days rejects */
 --        (a refused replay logs 'day-limit' as 'used', reject only: it is a
 --        true over-use, like 'used', so no forced row)
 --      exos_event_door_roster              /* exos: fair days roster */
---        (list_state also covers day lists, and has a 'day:YYYY-MM-DD'
---        key per local date of an entry on no list / an ordinary list, so a
---        device decides offline)
+--        (list_state also covers day lists, has a 'day:YYYY-MM-DD' key per
+--        local date of an entry on no list / an ordinary list, and a
+--        'dayin:YYYY-MM-DD' key with the last direction across a day's
+--        re-entry lists, so a device decides offline)
 --    The API check-in (POST /v1/tickets/:id/check-in) and the offline replay
 --    both go through exos_check_in_ticket, so they follow too.
 -- 3. exos_fair_setup(event, plan): the editor's "Fair / multi-day setup"
@@ -184,12 +193,14 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._exos_event_tz(uuid) FROM PUBLIC, anon, authenticated;
 
--- Why a day list refuses this ticket's ENTRY, or NULL. Callers hold the
--- ticket's row lock, so two gates can't both pass it. Every prior entry of
--- the ticket for the event counts: its day is its list's entry_day, else (no
--- list, an ordinary list, a deleted list) the scan's local date in the
--- event's time zone.
-CREATE OR REPLACE FUNCTION public._exos_checkin_day_refusal(p_ticket_id uuid, p_tier_id uuid, p_list_id uuid)
+-- Why a day list refuses this ticket's ENTRY at p_scan_at, or NULL. Callers
+-- hold the ticket's row lock, so two gates can't both pass it. Every prior
+-- entry of the ticket for the event counts: its day is its list's entry_day,
+-- else (no list, an ordinary list, a deleted list) the scan's local date in
+-- the event's time zone. On a re-entry day list, inside / outside is the last
+-- scan on any list of that day.
+CREATE OR REPLACE FUNCTION public._exos_checkin_day_refusal(p_ticket_id uuid, p_tier_id uuid, p_list_id uuid,
+                                                            p_scan_at timestamptz)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -203,14 +214,38 @@ DECLARE
   v_dev  text;
   v_src  text;
   v_gate text;
+  v_dir  text;
 BEGIN
   SELECT * INTO l FROM public.exos_checkin_lists WHERE id = p_list_id;
   IF NOT FOUND OR l.entry_day IS NULL THEN
     RETURN NULL;
   END IF;
   v_tz := public._exos_event_tz(l.event_id);
-  -- Without re-entry: once that day, through whichever list (or none).
-  IF NOT l.allow_reentry THEN
+  -- The scan belongs to the list's day: its local date, or after midnight
+  -- inside a window that opens on that day.
+  IF (p_scan_at AT TIME ZONE v_tz)::date <> l.entry_day
+     AND NOT (l.valid_from IS NOT NULL AND l.valid_until IS NOT NULL
+              AND (l.valid_from AT TIME ZONE v_tz)::date = l.entry_day
+              AND p_scan_at BETWEEN l.valid_from AND l.valid_until) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'invalid-time', 'wrong_day', true, 'list', l.name, 'day', l.entry_day);
+  END IF;
+  IF l.allow_reentry THEN
+    -- Inside = the last scan of the ticket on any of the day's lists (at or
+    -- before this scan) was an entry.
+    SELECT ci.direction, coalesce(ci.offline_scanned_at, ci.scanned_at), ci.device, ci.gate
+      INTO v_dir, v_at, v_dev, v_gate
+      FROM public.exos_event_checkins ci
+      JOIN public.exos_checkin_lists dl ON dl.id = ci.list_id
+     WHERE ci.ticket_id = p_ticket_id AND ci.event_id = l.event_id AND dl.entry_day = l.entry_day
+       AND coalesce(ci.offline_scanned_at, ci.scanned_at) <= p_scan_at
+     ORDER BY coalesce(ci.offline_scanned_at, ci.scanned_at) DESC, ci.scanned_at DESC
+     LIMIT 1;
+    IF v_dir = 'entry' THEN
+      RETURN jsonb_build_object('ok', false, 'reason', 'already-inside', 'day', l.entry_day)
+             || jsonb_strip_nulls(jsonb_build_object('check_in_at', v_at, 'device', v_dev, 'list', v_gate));
+    END IF;
+  ELSE
+    -- Without re-entry: once that day, through whichever list (or none).
     SELECT coalesce(ci.offline_scanned_at, ci.scanned_at), ci.device, ci.source, ci.gate
       INTO v_at, v_dev, v_src, v_gate
       FROM public.exos_event_checkins ci
@@ -224,6 +259,7 @@ BEGIN
              || jsonb_strip_nulls(jsonb_build_object('check_in_at', v_at, 'device', v_dev, 'source', v_src, 'list', v_gate));
     END IF;
   END IF;
+  -- (Re-entry or not, the day limit below applies.)
   -- The ticket type's day limit: other days already used.
   SELECT tt.max_entry_days INTO v_max
     FROM public.exos_ticket_tiers tt WHERE tt.id = p_tier_id AND tt.event_id = l.event_id;
@@ -241,7 +277,7 @@ BEGIN
   END IF;
   RETURN NULL;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_checkin_day_refusal(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_checkin_day_refusal(uuid, uuid, uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 
 -- ===========================================================================
 -- 3. The door: online, offline replay, by name, the API (marker patches)
@@ -279,11 +315,22 @@ $o$,
     END IF;
   END IF;
   IF v_list.entry_day IS NOT NULL THEN
-    v_refusal := public._exos_checkin_day_refusal(p_ticket_id, v_tier, v_list.id);
+    v_refusal := public._exos_checkin_day_refusal(p_ticket_id, v_tier, v_list.id, v_scan_at);
     IF v_refusal IS NOT NULL THEN
       RETURN v_refusal;
     END IF;
   END IF;
+$n$, 1);
+
+-- A re-entry day list's inside / outside is the day's (in the day rule
+-- above), not this list's: in at gate A, out at gate B, in at A again.
+SELECT pg_temp.exos_patch_n(
+  'public.exos_check_in_ticket(uuid, text, text, text, uuid, text, timestamp with time zone, text, uuid, text)',
+  '/* exos: fair days 4 */',
+  $o$    v_refusal := public._exos_list_inside(p_ticket_id, v_list.id, v_scan_at);
+$o$,
+  $n$    v_refusal := CASE WHEN v_list.entry_day IS NULL /* exos: fair days 4 */
+                      THEN public._exos_list_inside(p_ticket_id, v_list.id, v_scan_at) END;
 $n$, 1);
 
 SELECT pg_temp.exos_patch_n(
@@ -318,13 +365,13 @@ SELECT pg_temp.exos_patch_n(
 $o$,
   $n$    /* exos: fair days 1 */ -- mig 20261113110000 (see exos_check_in_ticket).
     IF v_list.entry_day IS NOT NULL THEN
-      v_refusal := public._exos_checkin_day_refusal(t.id, t.tier_id, v_list.id);
+      v_refusal := public._exos_checkin_day_refusal(t.id, t.tier_id, v_list.id, v_scan_at);
       IF v_refusal IS NOT NULL THEN
         r := v_refusal; EXIT decide;
       END IF;
     END IF;
     IF v_list.allow_reentry THEN
-      v_refusal := public._exos_list_inside(t.id, v_list.id, v_scan_at);
+      v_refusal := CASE WHEN v_list.entry_day IS NULL THEN public._exos_list_inside(t.id, v_list.id, v_scan_at) END;
 $n$, 1);
 
 SELECT pg_temp.exos_patch_n(
@@ -378,7 +425,13 @@ SELECT pg_temp.exos_patch_n(
                        FROM public.exos_event_checkins ci
                        LEFT JOIN public.exos_checkin_lists l ON l.id = ci.list_id
                       WHERE ci.ticket_id = t.id AND ci.event_id = p_event_id AND ci.direction = 'entry'
-                        AND l.entry_day IS NULL)) x)$n$,
+                        AND l.entry_day IS NULL)
+                    UNION ALL
+                    (SELECT DISTINCT ON (l.entry_day) 'dayin:' || l.entry_day::text, ci.direction
+                       FROM public.exos_event_checkins ci
+                       JOIN public.exos_checkin_lists l ON l.id = ci.list_id AND l.entry_day IS NOT NULL AND l.allow_reentry
+                      WHERE ci.ticket_id = t.id AND ci.event_id = p_event_id
+                      ORDER BY l.entry_day, coalesce(ci.offline_scanned_at, ci.scanned_at) DESC, ci.scanned_at DESC)) x)$n$,
   1);
 
 -- ===========================================================================
@@ -694,18 +747,21 @@ BEGIN
      GROUP BY s.kind, s.list_id, s.gate
   ),
   -- Direction is tracked on re-entry lists: inside = the last scan there
-  -- (any time, not only this window) was an entry.
+  -- (any time, not only this window) was an entry. A fair day's re-entry
+  -- lists are one group (in at gate A, out at gate B), as at the door.
   rl AS (
     SELECT l.id, l.name, l.admits, l.entry_day, l.valid_from, l.valid_until,
+           coalesce('d:' || l.entry_day::text, l.id::text) AS grp,
            (l.valid_from IS NULL OR now() >= l.valid_from) AND (l.valid_until IS NULL OR now() <= l.valid_until) AS open_now
       FROM public.exos_checkin_lists l
      WHERE l.event_id = p_event_id AND l.allow_reentry
   ),
   t_last AS (
-    SELECT DISTINCT ON (c.list_id, c.ticket_id) c.list_id, c.ticket_id, c.direction
+    SELECT DISTINCT ON (r.grp, c.ticket_id) r.grp, c.ticket_id, c.direction
       FROM public.exos_event_checkins c
-     WHERE c.event_id = p_event_id AND c.list_id IN (SELECT id FROM rl)
-     ORDER BY c.list_id, c.ticket_id, coalesce(c.offline_scanned_at, c.scanned_at) DESC, c.scanned_at DESC
+      JOIN rl r ON r.id = c.list_id
+     WHERE c.event_id = p_event_id
+     ORDER BY r.grp, c.ticket_id, coalesce(c.offline_scanned_at, c.scanned_at) DESC, c.scanned_at DESC
   ),
   a_last AS (
     SELECT DISTINCT ON (c.list_id, c.pass_id) c.list_id, c.pass_id, c.direction
@@ -715,7 +771,7 @@ BEGIN
   ),
   inside AS (
     SELECT rl.*,
-           (SELECT count(*) FROM t_last x WHERE x.list_id = rl.id AND x.direction = 'entry') AS tickets_inside,
+           (SELECT count(*) FROM t_last x WHERE x.grp = rl.grp AND x.direction = 'entry') AS tickets_inside,
            (SELECT count(*) FROM a_last x WHERE x.list_id = rl.id AND x.direction = 'entry') AS addons_inside
       FROM rl
   ),
@@ -747,8 +803,8 @@ BEGIN
                   ORDER BY i.entry_day NULLS LAST, i.name) FROM inside i), '[]'::jsonb),
     -- Distinct tickets inside on an open re-entry list (several gates of one
     -- day count a person once); the lot counts add-on passes.
-    'in_park_now', (SELECT count(DISTINCT x.ticket_id) FROM t_last x JOIN rl ON rl.id = x.list_id
-                     WHERE x.direction = 'entry' AND rl.open_now),
+    'in_park_now', (SELECT count(DISTINCT x.ticket_id) FROM t_last x
+                     WHERE x.direction = 'entry' AND EXISTS (SELECT 1 FROM rl WHERE rl.grp = x.grp AND rl.open_now)),
     'lot_now', (SELECT count(DISTINCT x.pass_id) FROM a_last x JOIN rl ON rl.id = x.list_id
                  WHERE x.direction = 'entry' AND rl.open_now),
     'tracks_direction', EXISTS (SELECT 1 FROM rl),
