@@ -39,17 +39,21 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
-import { urlIsBlocked } from "../_shared/ssrf.ts";
 import { finishRefusal, withFinishFragment } from "../_shared/oauthFinish.ts";
 import { integrationsReturnUrl, isStateShaped, newState, returnAppUrl, stateHash } from "../_shared/eventbrite/oauth.ts";
 import { writesLive } from "../_shared/channels/model.ts";
 import {
-  discordAppConfig, discordEvent, discordHash, type DiscordStep, exchangeInstallCode, imageDataUri, installUrl,
+  discordAppConfig, discordEvent, discordHash, type DiscordStep, exchangeInstallCode, installUrl,
+  type CallHooks, type CallKind, coverDataUri, type CoverLoader, type DiscordResult,
   makeDiscordIo, postAnnouncement, type PostKind, redactDiscord, syncScheduledEvent,
 } from "../_shared/channels/discord.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 90_000;
+// Rows are claimed one at a time, each with its own 2-minute lease, and no
+// claim starts after the deadline: a row takes at most two Discord calls (10 s
+// each) and a cover read, well inside its lease. At most this many a run.
+const MAX_ROWS = 20;
 
 const env = (k: string) => Deno.env.get(k);
 const enabled = () => env("EXOS_DISCORD_ENABLED") === "on";
@@ -192,18 +196,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
 interface ClaimedPost { post_id: string; org_id: string; event_id: string; kind: PostKind; lease_id: string; payload: any }
 
 async function drainPosts(sb: SupabaseClient, app: string, postId: string | null, deadline: number) {
-  const { data, error } = await sb.rpc("exos_discord_post_claim", { p_limit: postId ? 1 : 20, p_post_id: postId });
-  if (error) {
-    console.error("exos-discord: post claim failed", redactError(error));
-    return { ok: false, results: [] as { state: string }[] };
-  }
   const results: { state: string }[] = [];
-  for (const c of (data ?? []) as ClaimedPost[]) {
-    const token = String(c.payload?.webhook?.token ?? "");
-    if (Date.now() > deadline) {
-      await sb.rpc("exos_discord_post_mark", { p_post_id: c.post_id, p_lease: c.lease_id, p_state: "retry", p_error: "out of time; retrying", p_retry_seconds: 30 });
-      continue;
+  const hooks = callHooks(sb, null);
+  for (let i = 0; i < (postId ? 1 : MAX_ROWS) && Date.now() < deadline; i++) {
+    const { data, error } = await sb.rpc("exos_discord_post_claim", { p_limit: 1, p_post_id: postId });
+    if (error) {
+      console.error("exos-discord: post claim failed", redactError(error));
+      return { ok: false, results };
     }
+    const c = ((data ?? []) as ClaimedPost[])[0];
+    if (!c) break;
+    const token = String(c.payload?.webhook?.token ?? "");
     try {
       const ev = discordEvent(c.payload?.event, app);
       if (!ev || !token) {
@@ -214,11 +217,12 @@ async function drainPosts(sb: SupabaseClient, app: string, postId: string | null
       }
       const live = writesLive(c.payload?.writes_enabled, env("EXOS_DISCORD_WRITES"));
       const steps: DiscordStep[] = [];
-      const io = makeDiscordIo({ fetch, live, bound: { webhookId: c.payload.webhook.id }, steps, userAgent: `DiscordBot (${app}, 1.0)` });
+      const io = makeDiscordIo({ fetch, live, bound: { webhookId: c.payload.webhook.id }, steps, userAgent: `DiscordBot (${app}, 1.0)`, hooks });
       const out = await postAnnouncement(io, ev, c.kind, c.payload.webhook.id, token, steps);
       await sb.rpc("exos_discord_post_mark", {
         p_post_id: c.post_id, p_lease: c.lease_id, p_state: out.state, p_message_id: out.messageId ?? null,
-        p_error: out.error ? redactDiscord(out.error, [token]) : null, p_plan: safePlan(out.plan, [token]), p_retry_seconds: out.retrySeconds ?? null,
+        p_error: out.error ? redactDiscord(out.error, [token]) : null, p_plan: safePlan(out.plan, [token]),
+        p_retry_seconds: out.retrySeconds ?? null, p_webhook_broken: out.webhookBroken === true,
       });
       results.push({ state: out.state });
     } catch (err) {
@@ -235,19 +239,21 @@ async function drainPosts(sb: SupabaseClient, app: string, postId: string | null
 interface ClaimedSync { event_id: string; org_id: string; lease_id: string; change_seq: number; payload: any }
 
 async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null, event: string | null, deadline: number) {
-  const { data, error } = await sb.rpc("exos_discord_sync_claim", { p_limit: event ? 1 : 20, p_event_id: event });
-  if (error) {
-    console.error("exos-discord: sync claim failed", redactError(error));
-    return { ok: false, results: [] as { state: string }[] };
-  }
   const results: { state: string }[] = [];
-  for (const c of (data ?? []) as ClaimedSync[]) {
+  if (!botToken) return { ok: true, results };
+  const fp = await tokenFingerprint(botToken);
+  const hooks = callHooks(sb, fp);
+  const sbUrl = env("SUPABASE_URL") ?? "";
+  for (let i = 0; i < (event ? 1 : MAX_ROWS) && Date.now() < deadline; i++) {
+    const { data, error } = await sb.rpc("exos_discord_sync_claim", { p_limit: 1, p_event_id: event, p_token_fp: fp });
+    if (error) {
+      console.error("exos-discord: sync claim failed", redactError(error));
+      return { ok: false, results };
+    }
+    const c = ((data ?? []) as ClaimedSync[])[0];
+    if (!c) break;
     const mark = (result: Record<string, unknown>) =>
       sb.rpc("exos_discord_sync_mark", { p_event_id: c.event_id, p_lease: c.lease_id, p_change_seq: c.change_seq, p_result: result });
-    if (Date.now() > deadline) {
-      await mark({ state: "retry", error: "out of time; retrying", retry_seconds: 30 });
-      continue;
-    }
     try {
       const ev = discordEvent(c.payload?.event, app);
       const guild = String(c.payload?.guild_id ?? "");
@@ -256,17 +262,12 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
         results.push({ state: "error" });
         continue;
       }
-      if (!botToken) {
-        await mark({ state: "error", error: "the Exos bot isn't set up on this server yet" });
-        results.push({ state: "error" });
-        continue;
-      }
       const live = writesLive(c.payload?.writes_enabled, env("EXOS_DISCORD_WRITES"));
       const steps: DiscordStep[] = [];
-      const io = makeDiscordIo({ fetch, live, bound: { guildId: guild }, botToken, steps, userAgent: `DiscordBot (${app}, 1.0)` });
+      const io = makeDiscordIo({ fetch, live, bound: { guildId: guild }, botToken, steps, userAgent: `DiscordBot (${app}, 1.0)`, hooks });
       const hash = await discordHash(ev);
       const out = await syncScheduledEvent(io, ev, guild, c.payload?.sync ?? { show: false, external_id: null, last_hash: null }, hash, steps,
-        () => imageDataUri(fetch, ev.imageUrl, (u) => urlIsBlocked(u)));
+        () => coverDataUri(storageLoader(sb), ev.imageUrl, sbUrl));
       await mark({ ...out, plan: safePlan(out.plan, [botToken]), ...(out.error ? { error: redactDiscord(out.error, [botToken]) } : {}) });
       results.push({ state: out.state });
     } catch (err) {
@@ -277,6 +278,46 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
     }
   }
   return { ok: true, results };
+}
+
+/** The breaker hooks: the gate before each call, the refusal report after (both in SQL). */
+function callHooks(sb: SupabaseClient, fp: string | null): CallHooks {
+  return {
+    async gate(kind: CallKind) {
+      const { data, error } = await sb.rpc("exos_discord_call_gate", { p_kind: kind, p_token_fp: kind === "bot" ? fp : null });
+      if (error || !data) return { ok: false, reason: "gate", retryAfter: 60 };
+      const d = data as { ok?: boolean; reason?: string; retry_after?: number };
+      return { ok: d.ok === true, reason: d.reason, retryAfter: Number(d.retry_after) || 60 };
+    },
+    async report(kind: CallKind, r: DiscordResult) {
+      await sb.rpc("exos_discord_call_result", {
+        p_kind: kind, p_status: r.status, p_code: r.code ?? null, p_global: r.global === true, p_scope: r.scope ?? null,
+        p_retry_after: r.retryAfter ?? null, p_token_fp: kind === "bot" ? fp : null,
+      });
+    },
+  };
+}
+
+/** The first 32 hex of the bot token's SHA-256: lets SQL tell a new token from the one that got a 401. */
+async function tokenFingerprint(token: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(d), (b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+/** Reads a cover from storage with the service client: the listed size first, then the bytes. */
+function storageLoader(sb: SupabaseClient): CoverLoader {
+  return async (bucket, path, maxBytes) => {
+    const slash = path.lastIndexOf("/");
+    const dir = path.slice(0, slash);
+    const name = path.slice(slash + 1);
+    const { data: list } = await sb.storage.from(bucket).list(dir, { limit: 1, search: name });
+    const meta = (list ?? []).find((o: { name: string }) => o.name === name) as { metadata?: { size?: number } } | undefined;
+    const size = Number(meta?.metadata?.size);
+    if (!meta || !Number.isFinite(size) || size <= 0 || size > maxBytes) return null;
+    const { data: blob } = await sb.storage.from(bucket).download(path);
+    if (!blob || blob.size > maxBytes) return null;
+    return new Uint8Array(await blob.arrayBuffer());
+  };
 }
 
 /** The plan as stored: tokens redacted, a cover image's data left out. */

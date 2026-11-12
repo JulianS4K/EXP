@@ -57,6 +57,11 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
         Promote your events in your own Discord server: an announcement in a channel when an event goes on sale, and the
         event on the server&apos;s Events list. Exos never pings anyone, and changes nothing else on your server.
       </p>
+      {st.paused && (
+        <p role="status" className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+          Discord is paused on this Exos server (Discord refused too many requests). Nothing is sent until an operator clears it.
+        </p>
+      )}
       {(!cfg.writes || !st.writesEnabled) && (
         <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
           Dry run: Exos records what it would post but sends nothing to Discord
@@ -70,6 +75,9 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
           In Discord: the channel&apos;s settings, Integrations, Webhooks, New Webhook, Copy Webhook URL. Paste it here.
           {st.webhook.set ? ` Saved: webhook ${st.webhook.hint ?? ''}.` : ' No webhook yet.'}
         </p>
+        {st.webhook.broken && (
+          <p className="text-[11px] text-rose-700">Discord refused this webhook (deleted, or the URL is wrong). Paste a new one.</p>
+        )}
         {manage && (
           <>
             <label className="block">
@@ -105,13 +113,15 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
         <div className="space-y-2">
           <h3 className={SUB}>Discord events (the Exos bot)</h3>
           <p className="text-[11px] text-slate-600">
-            {st.guild.linked
+            {st.guild.linked && st.guild.broken
+              ? `The Exos bot lost access to ${st.guild.name ?? 'your server'} (removed, or its permission was taken away). Reconnect the bot.`
+              : st.guild.linked
               ? `Linked to ${st.guild.name ?? 'your server'}. Tick "Show on Discord" on an event to list it on the server's Events tab; ${st.shownEvents} shown now.`
               : 'Add the Exos bot to your server (you need Manage Server there). It can only create and update the events it lists.'}
           </p>
           {manage && (
             <div className="flex flex-wrap gap-2">
-              {!st.guild.linked && (
+              {(!st.guild.linked || st.guild.broken) && (
                 <button type="button" className={`${BTN} bg-tm-blue text-white`} disabled={busy}
                   onClick={() => void (async () => {
                     setBusy(true);
@@ -120,7 +130,7 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
                       setBusy(false);
                     }
                   })()}>
-                  Add Exos bot to your server
+                  {st.guild.broken ? 'Reconnect the bot' : 'Add Exos bot to your server'}
                 </button>
               )}
               {st.guild.linked && (

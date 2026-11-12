@@ -80,7 +80,31 @@ export function redactDiscord(text: string, secrets: (string | null | undefined)
 // ---- the io -----------------------------------------------------------------
 
 export interface DiscordStep { op: "planned" | "sent"; method: DiscordMethod; path: string; body?: unknown; ok?: boolean; error?: string }
-export interface DiscordResult { ok: boolean; status: number; body: any; error?: string; retryAfter?: number }
+export interface DiscordResult {
+  ok: boolean;
+  status: number;
+  body: any;
+  error?: string;
+  /** Discord's numeric error code (50013, 10004, ...), when it sent one. */
+  code?: number;
+  retryAfter?: number;
+  /** A 429 that applies to every route (X-RateLimit-Global, or scope global). */
+  global?: boolean;
+  /** X-RateLimit-Scope of a 429: user, global or shared. */
+  scope?: string;
+  /** Nothing reached Discord (the gate refused it, or the connection never opened): safe to retry. */
+  notSent?: boolean;
+}
+
+/** Which credential a call uses: the bot token (guild routes) or the webhook's own. */
+export type CallKind = "bot" | "webhook";
+export interface GateAnswer { ok: boolean; reason?: string; retryAfter?: number }
+export interface CallHooks {
+  /** Before each real request (exos_discord_call_gate: breaker, global pause, platform cap). */
+  gate?: (kind: CallKind) => Promise<GateAnswer>;
+  /** After each refused answer (exos_discord_call_result: invalid count, 401 breaker, global 429 pause). */
+  report?: (kind: CallKind, r: DiscordResult) => Promise<void>;
+}
 export interface DiscordIo {
   live: boolean;
   req(method: DiscordMethod, path: string, body?: unknown): Promise<DiscordResult>;
@@ -101,6 +125,7 @@ export function makeDiscordIo(opts: {
   steps: DiscordStep[];
   userAgent?: string;
   timeoutMs?: number;
+  hooks?: CallHooks;
 }): DiscordIo {
   return {
     live: opts.live,
@@ -112,7 +137,16 @@ export function makeDiscordIo(opts: {
         opts.steps.push({ op: "planned", method, path: shown, ...(body !== undefined ? { body } : {}) });
         return { ok: true, status: 200, body: discordStandIn(method, kind) };
       }
-      if (kind === "guild" && !opts.botToken) return { ok: false, status: 0, body: null, error: "NO_BOT_TOKEN" };
+      if (kind === "guild" && !opts.botToken) return { ok: false, status: 0, body: null, error: "NO_BOT_TOKEN", notSent: true };
+      const callKind: CallKind = kind === "guild" ? "bot" : "webhook";
+      if (opts.hooks?.gate) {
+        const g = await opts.hooks.gate(callKind).catch((): GateAnswer => ({ ok: false, reason: "gate", retryAfter: 60 }));
+        if (!g.ok) {
+          const e = g.reason === "breaker" ? "DISCORD_PAUSED" : g.reason === "paused" ? "RATE_LIMITED_GLOBAL" : "PLATFORM_LIMIT";
+          if (method !== "GET") opts.steps.push({ op: "planned", method, path: shown, ok: false, error: e });
+          return { ok: false, status: 0, body: null, error: e, retryAfter: g.retryAfter ?? 60, notSent: true };
+        }
+      }
       const headers: Record<string, string> = {
         Accept: "application/json",
         "User-Agent": opts.userAgent ?? "DiscordBot (https://exos.invalid, 1.0)",
@@ -127,28 +161,44 @@ export function makeDiscordIo(opts: {
           method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, signal: ctrl.signal, redirect: "error",
         });
         const out = res.status === 204 ? null : await res.json().catch(() => null);
-        let error: string | undefined;
-        let retryAfter: number | undefined;
-        if (!res.ok) {
-          // Discord's numeric error code only (its message text is never passed on).
-          error = typeof out?.code === "number" && out.code > 0 ? `DISCORD_${out.code}` : `HTTP_${res.status}`;
-          if (res.status === 429) {
-            const ra = Number(out?.retry_after ?? res.headers.get("retry-after"));
-            retryAfter = Number.isFinite(ra) && ra > 0 ? Math.ceil(ra) : 30;
-            error = "RATE_LIMITED";
-          }
+        if (res.ok) {
+          if (method !== "GET") opts.steps.push({ op: "sent", method, path: shown, ok: true });
+          return { ok: true, status: res.status, body: out };
         }
-        if (method !== "GET") opts.steps.push({ op: "sent", method, path: shown, ok: res.ok, ...(error ? { error } : {}) });
-        return { ok: res.ok, status: res.status, body: out, ...(error ? { error } : {}), ...(retryAfter ? { retryAfter } : {}) };
+        // Discord's numeric error code only (its message text is never passed on).
+        const code = typeof out?.code === "number" && out.code > 0 ? out.code : undefined;
+        const r: DiscordResult = { ok: false, status: res.status, body: out, error: code ? `DISCORD_${code}` : `HTTP_${res.status}`,
+                                   ...(code ? { code } : {}) };
+        if (res.status === 429) {
+          const ra = Number(out?.retry_after ?? res.headers.get("retry-after"));
+          r.retryAfter = Number.isFinite(ra) && ra > 0 ? Math.ceil(ra) : 30;
+          r.scope = (res.headers.get("x-ratelimit-scope") ?? "").toLowerCase() || undefined;
+          r.global = out?.global === true || (res.headers.get("x-ratelimit-global") ?? "").toLowerCase() === "true" || r.scope === "global";
+          r.error = r.global ? "RATE_LIMITED_GLOBAL" : "RATE_LIMITED";
+        }
+        if (method !== "GET") opts.steps.push({ op: "sent", method, path: shown, ok: false, error: r.error });
+        await opts.hooks?.report?.(callKind, r).catch(() => undefined);
+        return r;
       } catch (err) {
-        const e = (err as Error)?.name === "AbortError" ? "TIMEOUT" : "NETWORK";
+        const e = errorKind(err);
         if (method !== "GET") opts.steps.push({ op: "sent", method, path: shown, ok: false, error: e });
-        return { ok: false, status: 0, body: null, error: e };
+        return { ok: false, status: 0, body: null, error: e, ...(e === "CONNECT" ? { notSent: true } : {}) };
       } finally {
         clearTimeout(timer);
       }
     },
   };
+}
+
+/**
+ * TIMEOUT (may have reached Discord), CONNECT (the connection never opened:
+ * DNS, refused, TLS; nothing was sent) or NETWORK (dropped mid-way: unknown).
+ */
+export function errorKind(err: unknown): "TIMEOUT" | "CONNECT" | "NETWORK" {
+  if ((err as Error)?.name === "AbortError") return "TIMEOUT";
+  const m = String((err as Error)?.message ?? "");
+  return /error trying to connect|tcp connect error|dns error|failed to lookup|connection refused|certificate|invalid peer/i.test(m)
+    ? "CONNECT" : "NETWORK";
 }
 
 // ---- the event as Discord shows it -------------------------------------------
@@ -252,10 +302,17 @@ export interface PostOutcome {
   messageId?: string;
   error?: string;
   retrySeconds?: number;
+  /** Discord refused the webhook itself: skip it until a new URL is saved. */
+  webhookBroken?: boolean;
   plan: { steps: DiscordStep[] };
 }
 
-/** Post one announcement through the org's webhook (or plan it, in a dry run). */
+/**
+ * Post one announcement through the org's webhook (or plan it, in a dry run).
+ * Retried only when nothing can have been posted: a 429, or a request that
+ * never left (the gate, a connection that never opened). A 5xx, a timeout or
+ * a dropped connection may have posted: an error that says to check the channel.
+ */
 export async function postAnnouncement(io: DiscordIo, ev: DiscordEvent, kind: PostKind, webhookId: string, token: string,
                                        steps: DiscordStep[]): Promise<PostOutcome> {
   const r = await io.req("POST", webhookPath(webhookId, token), announcementBody(ev, kind));
@@ -264,13 +321,16 @@ export async function postAnnouncement(io: DiscordIo, ev: DiscordEvent, kind: Po
     const id = typeof r.body?.id === "string" && SNOWFLAKE.test(r.body.id) ? r.body.id : undefined;
     return { state: "sent", ...(id ? { messageId: id } : {}), plan: { steps } };
   }
-  if (r.status === 429 || r.status >= 500) {
-    return { state: "retry", error: `Discord: ${r.error ?? "unavailable"}`, retrySeconds: r.retryAfter ?? 60, plan: { steps } };
+  if (r.status === 429 || r.notSent) {
+    return { state: "retry", error: `Discord: ${r.error ?? "not sent"}`, retrySeconds: r.retryAfter ?? 60, plan: { steps } };
   }
-  // A timeout or a dropped connection may still have posted: not retried by itself.
-  if (r.status === 0) return { state: "error", error: `Discord: ${r.error ?? "NETWORK"}; check the channel before posting again`, plan: { steps } };
-  const why = r.status === 401 || r.status === 404 ? "the webhook was deleted or its URL is wrong; paste a new one" : r.error ?? "refused";
-  return { state: "error", error: `Discord: ${why}`, plan: { steps } };
+  if (r.status === 401 || r.status === 403 || r.status === 404 || r.code === 10015) {
+    return { state: "error", webhookBroken: true, error: "Discord: the webhook was deleted or its URL is wrong; paste a new one", plan: { steps } };
+  }
+  if (r.status === 0 || r.status >= 500) {
+    return { state: "error", error: `Discord: ${r.error ?? "no answer"}; it may have posted, so check the channel before posting again`, plan: { steps } };
+  }
+  return { state: "error", error: `Discord: ${r.error ?? "refused"}`, plan: { steps } };
 }
 
 // ---- level 2: the scheduled event ----------------------------------------------
@@ -311,9 +371,16 @@ export interface DiscordSyncResult {
   external_id?: string | null;
   hash?: string;
   gone?: boolean;
+  /** The server refused the bot (403 missing access / permissions, unknown guild). */
+  link_broken?: boolean;
   error?: string;
   retry_seconds?: number;
   plan: { steps: DiscordStep[] };
+}
+
+/** 403 missing access (50001) / missing permissions (50013), or unknown guild (10004). */
+export function linkBroken(r: DiscordResult): boolean {
+  return r.code === 10004 || (r.status === 403 && (r.code === 50001 || r.code === 50013));
 }
 
 /**
@@ -328,31 +395,40 @@ export async function syncScheduledEvent(io: DiscordIo, ev: DiscordEvent, guildI
   const base = `/guilds/${guildId}/scheduled-events`;
   const ext = s.external_id && SNOWFLAKE.test(s.external_id) ? s.external_id : null;
   const want = s.show && ev.status === "published" && Date.parse(ev.endUtc) > now;
-  const fail = (r: DiscordResult, what: string): DiscordSyncResult =>
-    r.status === 429 || r.status >= 500
-      ? { state: "retry", error: `Discord: ${what} (${r.error ?? "unavailable"})`, retry_seconds: r.retryAfter ?? 60, plan: { steps } }
-      : { state: "error", error: `Discord: ${what} (${r.error ?? "refused"})`, plan: { steps } };
+  const fail = (r: DiscordResult, what: string): DiscordSyncResult => {
+    if (r.status === 429 || r.notSent) {
+      return { state: "retry", error: `Discord: ${what} (${r.error ?? "not sent"})`, retry_seconds: r.retryAfter ?? 60, plan: { steps } };
+    }
+    if (linkBroken(r)) {
+      return { state: "error", link_broken: true, guild_id: guildId,
+               error: "Discord: the Exos bot lost access to the server; reconnect the bot", plan: { steps } };
+    }
+    if (r.status === 401) return { state: "error", error: "Discord: the Exos bot's token was refused; Discord is paused", plan: { steps } };
+    return { state: "error", error: `Discord: ${what} (${r.error ?? "refused"})`, plan: { steps } };
+  };
   const done = (external: string | null): DiscordSyncResult =>
     io.live ? { state: "synced", guild_id: guildId, external_id: external, hash, plan: { steps } } : { state: "dry_run", plan: { steps } };
 
   if (ext && ev.status === "cancelled") {
     const r = await io.req("PATCH", `${base}/${ext}`, { status: 4 });
-    if (!r.ok && r.status !== 404) {
+    if (!r.ok && (r.status !== 404 || linkBroken(r))) {
       // Already started (ACTIVE can't be cancelled): take it down instead.
       const d = await io.req("DELETE", `${base}/${ext}`);
-      if (!d.ok && d.status !== 404) return fail(d, "couldn't cancel the event");
+      if (!d.ok && (d.status !== 404 || linkBroken(d))) return fail(d, "couldn't cancel the event");
     }
     return done(null);
   }
   if (!want) {
     if (ext) {
       const r = await io.req("DELETE", `${base}/${ext}`);
-      if (!r.ok && r.status !== 404) return fail(r, "couldn't remove the event");
+      if (!r.ok && (r.status !== 404 || linkBroken(r))) return fail(r, "couldn't remove the event");
     }
     return done(null);
   }
   if (!ext) {
-    const r = await io.req("POST", base, scheduledEventBody(ev, await image().catch(() => null)));
+    // The cover is read only when the event really goes out (never in a dry run).
+    const cover = io.live ? await image().catch(() => null) : null;
+    const r = await io.req("POST", base, scheduledEventBody(ev, cover));
     if (!r.ok) return fail(r, "couldn't create the event");
     const id = typeof r.body?.id === "string" ? r.body.id : "";
     if (io.live && !SNOWFLAKE.test(id)) return { state: "error", error: "Discord: no event id came back", plan: { steps } };
@@ -360,7 +436,7 @@ export async function syncScheduledEvent(io: DiscordIo, ev: DiscordEvent, guildI
   }
   if (s.last_hash === hash && s.status === "synced") return done(ext);
   const r = await io.req("PATCH", `${base}/${ext}`, scheduledEventBody(ev));
-  if (r.status === 404) {
+  if (r.status === 404 && !linkBroken(r)) {
     return { state: "error", gone: true, external_id: null,
              error: "the event was deleted in Discord; tick Show on Discord again to put it back", plan: { steps } };
   }
@@ -370,53 +446,54 @@ export async function syncScheduledEvent(io: DiscordIo, ev: DiscordEvent, guildI
 
 // ---- the cover image ------------------------------------------------------------
 
-const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif"]);
 export const IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+/** Where the SPA uploads event covers (src/lib/storage.ts uploadEventImage). */
+export const COVER_BUCKET = "exos-media";
+const COVER_PATH = /^event-images\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,5}$/;
 
 /**
- * The event image as the data URI Discord takes (JPG, PNG or GIF, at most
- * 4 MB), or null. `blocked` is the SSRF check (_shared/ssrf.ts urlIsBlocked);
- * no redirects are followed.
+ * The storage object an event's image_url names, or null. Only a cover on
+ * this project's own public storage (<SUPABASE_URL>/storage/v1/object/public/
+ * exos-media/event-images/<uid>/<uuid>.<ext>, as uploadEventImage makes it);
+ * any other URL gets no image. Exos never fetches an image URL over HTTP:
+ * the object is read with the service client, so there is no SSRF.
  */
-export async function imageDataUri(fetchFn: typeof fetch, url: string | null,
-                                   blocked: (u: string) => Promise<string | null>, timeoutMs = 8000): Promise<string | null> {
-  if (!url || !/^https:\/\//.test(url)) return null;
-  if (await blocked(url)) return null;
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetchFn(url, { redirect: "error", signal: ctrl.signal, headers: { Accept: "image/jpeg, image/png, image/gif" } });
-    const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    const len = Number(res.headers.get("content-length") ?? "0");
-    if (!res.ok || !IMAGE_TYPES.has(type) || len > IMAGE_MAX_BYTES || !res.body) return null;
-    // Count bytes as they arrive: a chunked reply has no Content-Length, so
-    // the cap must hold on the stream itself (stop and abort past 4 MB).
-    const reader = res.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > IMAGE_MAX_BYTES) {
-        ctrl.abort();
-        await reader.cancel().catch(() => {});
-        return null;
-      }
-      chunks.push(value);
-    }
-    if (total === 0) return null;
-    const buf = new Uint8Array(total);
-    let off = 0;
-    for (const c of chunks) { buf.set(c, off); off += c.byteLength; }
-    let bin = "";
-    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    return `data:${type};base64,${btoa(bin)}`;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+export function coverObject(imageUrl: string | null, supabaseUrl: string): { bucket: string; path: string } | null {
+  if (!imageUrl || imageUrl.length > 2000 || /[\s%\\]/.test(imageUrl)) return null;
+  let u: URL, base: URL;
+  try { u = new URL(imageUrl); base = new URL(supabaseUrl); } catch { return null; }
+  if (u.protocol !== "https:" || base.protocol !== "https:" || u.origin !== base.origin || u.username || u.password || u.search || u.hash) return null;
+  const prefix = `/storage/v1/object/public/${COVER_BUCKET}/`;
+  if (!u.pathname.startsWith(prefix)) return null;
+  const path = u.pathname.slice(prefix.length);
+  return COVER_PATH.test(path) && !path.includes("..") ? { bucket: COVER_BUCKET, path } : null;
+}
+
+/** The type Discord takes, from the file's own first bytes (not its name or headers). */
+export function sniffImage(b: Uint8Array): "image/png" | "image/jpeg" | "image/gif" | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.length >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return "image/gif";
+  return null;
+}
+
+/**
+ * Reads one storage object, at most maxBytes (null when larger, missing or
+ * unreadable). exos-discord passes the service client's storage here.
+ */
+export type CoverLoader = (bucket: string, path: string, maxBytes: number) => Promise<Uint8Array | null>;
+
+/** The event's cover as the data URI Discord takes (JPG, PNG or GIF, at most 4 MB), or null. */
+export async function coverDataUri(load: CoverLoader, imageUrl: string | null, supabaseUrl: string): Promise<string | null> {
+  const obj = coverObject(imageUrl, supabaseUrl);
+  if (!obj) return null;
+  const buf = await load(obj.bucket, obj.path, IMAGE_MAX_BYTES).catch(() => null);
+  if (!buf || buf.byteLength === 0 || buf.byteLength > IMAGE_MAX_BYTES) return null;
+  const type = sniffImage(buf);
+  if (!type) return null;
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return `data:${type};base64,${btoa(bin)}`;
 }
 
 // ---- the bot install (OAuth2, scope bot) -------------------------------------------

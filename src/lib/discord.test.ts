@@ -65,8 +65,10 @@ describe('status', () => {
   it('reads the org status, never more than a hint', () => {
     const s = parseDiscordStatus({ can_manage: true, is_owner: false, webhook: { set: true, hint: '…5679', set_at: '2026-11-12T10:00:00Z' },
       guild: { linked: true, id: '423456789012345671', name: 'Blue Room' }, writes_enabled: false, auto_post: true, shown_events: 2 });
-    expect(s).toEqual({ canManage: true, isOwner: false, webhook: { set: true, hint: '…5679', setAt: '2026-11-12T10:00:00Z' },
-      guild: { linked: true, name: 'Blue Room' }, writesEnabled: false, autoPost: true, shownEvents: 2 });
+    expect(s).toEqual({ canManage: true, isOwner: false, webhook: { set: true, hint: '…5679', setAt: '2026-11-12T10:00:00Z', broken: false },
+      guild: { linked: true, name: 'Blue Room', broken: false }, paused: false, writesEnabled: false, autoPost: true, shownEvents: 2 });
+    const b = parseDiscordStatus({ paused: true, webhook: { set: true, broken: true }, guild: { linked: true, broken: true } });
+    expect([b.paused, b.webhook.broken, b.guild.broken]).toEqual([true, true, true]);
     expect(parseDiscordStatus(null).webhook.set).toBe(false);
   });
   it('says what each post and the scheduled event are doing', () => {
@@ -78,6 +80,7 @@ describe('status', () => {
     expect(postLine({ kind: 'reminder', status: 'error', sentAt: null, lastError: 'the webhook was deleted' })).toBe('Not posted: the webhook was deleted.');
     expect(syncLine(e)).toBe("On Blue Room's events list.");
     expect(syncLine({ ...e, guildLinked: false })).toMatch(/Add the Exos bot/);
+    expect(syncLine({ ...e, guildBroken: true })).toMatch(/Reconnect the bot/);
     expect(syncLine({ ...e, show: false })).toBe('Not on Discord.');
     expect(syncLine({ ...e, sync: { ...e.sync!, status: 'dry_run' } })).toMatch(/^Dry run/);
   });

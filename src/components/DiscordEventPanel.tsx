@@ -69,6 +69,9 @@ export default function DiscordEventPanel({ eventId }: { eventId: string }) {
 
       {st.hasWebhook && (
         <div className="space-y-3">
+          {st.webhookBroken && (
+            <p className="type text-[11px] text-rose-300">Discord refused the org&apos;s webhook. Paste a new one in Org settings → Discord.</p>
+          )}
           {(['publish', 'reminder'] as PostKind[]).map((k) => {
             const p = postOf(k);
             const done = p?.status === 'sent' || p?.status === 'queued' || p?.status === 'sending';

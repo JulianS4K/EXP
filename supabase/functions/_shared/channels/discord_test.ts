@@ -1,7 +1,8 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   allowedRequest, announcementBody, DISCORD_API, DISCORD_BOT_PERMISSIONS, DISCORD_HOSTS, DISCORD_TOKEN_URL, discordAppConfig,
-  discordEvent, discordHash, type DiscordStep, escapeMarkdown, eventLocation, exchangeInstallCode, imageDataUri, installUrl,
+  discordEvent, discordHash, type DiscordStep, escapeMarkdown, eventLocation, exchangeInstallCode, installUrl,
+  coverDataUri, coverObject, type CallKind, type DiscordResult, errorKind, linkBroken,
   makeDiscordIo, postAnnouncement, redactDiscord, redactPath, scheduledEventBody, syncScheduledEvent, webhookPath, webhookUrlParts,
 } from "./discord.ts";
 
@@ -133,7 +134,7 @@ Deno.test("announcement: one embed, a Get tickets link, no mentions, the event's
   assertEquals(escapeMarkdown("<@&1> **x**"), "\\<\\@&1\\> \\*\\*x\\*\\*");
 });
 
-Deno.test("post: dry run plans only; sent keeps the message id; 5xx retries; 404 asks for a new URL", async () => {
+Deno.test("post: dry run plans only; sent keeps the message id; a 5xx is not retried; 404 asks for a new URL", async () => {
   const ev = discordEvent(ROW, APP)!;
   const calls: Call[] = [];
   let steps: DiscordStep[] = [];
@@ -142,7 +143,7 @@ Deno.test("post: dry run plans only; sent keeps the message id; 5xx retries; 404
   assertEquals([d.state, calls.length], ["dry_run", 0]);
   assertEquals((d.plan.steps[0].body as any).allowed_mentions, { parse: [] });
   for (const [status, body, want] of [
-    [200, { id: "723456789012345675" }, "sent"], [503, {}, "retry"], [404, { code: 10015 }, "error"],
+    [200, { id: "723456789012345675" }, "sent"], [503, {}, "error"], [404, { code: 10015 }, "error"],
   ] as const) {
     steps = [];
     const io = makeDiscordIo({ fetch: fakeFetch(() => ({ status, body }), calls), live: true, bound: { webhookId: HOOK }, steps });
@@ -226,28 +227,118 @@ Deno.test("sync: create, update on change, cancel, delete when unticked, gone on
   assertEquals([r.state, r.external_id, steps.length], ["synced", null, 0]);
 });
 
-Deno.test("image: SSRF-checked, no redirects, types and size capped", async () => {
-  const png = new Uint8Array([137, 80, 78, 71]);
-  const ok = ((_u: string, init?: RequestInit) => {
-    assertEquals(init?.redirect, "error");
-    return Promise.resolve(new Response(png, { status: 200, headers: { "content-type": "image/png" } }));
-  }) as typeof fetch;
-  assertEquals(await imageDataUri(ok, "https://cdn.example/a.png", () => Promise.resolve(null)), "data:image/png;base64,iVBORw==");
-  assertEquals(await imageDataUri(ok, "https://10.0.0.1/a.png", () => Promise.resolve("private ip")), null);
-  assertEquals(await imageDataUri(ok, "http://cdn.example/a.png", () => Promise.resolve(null)), null);
-  const webp = (() => Promise.resolve(new Response(png, { headers: { "content-type": "image/webp" } }))) as typeof fetch;
-  assertEquals(await imageDataUri(webp, "https://cdn.example/a.webp", () => Promise.resolve(null)), null);
-  const big = (() => Promise.resolve(new Response(png, { headers: { "content-type": "image/png", "content-length": "99999999" } }))) as typeof fetch;
-  assertEquals(await imageDataUri(big, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
-  // Chunked, no Content-Length: the cap holds on the stream, and reading stops past it.
-  let pulled = 0;
-  const endless = (() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
-    pull(c) { pulled++; c.enqueue(new Uint8Array(1024 * 1024)); },
-  }), { headers: { "content-type": "image/png" } }))) as typeof fetch;
-  assertEquals(await imageDataUri(endless, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
-  assertEquals(pulled <= 7, true, `read ${pulled} MB before stopping`);
-  const empty = (() => Promise.resolve(new Response(new Uint8Array(0), { headers: { "content-type": "image/png" } }))) as typeof fetch;
-  assertEquals(await imageDataUri(empty, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
+const SB = "https://proj.supabase.co";
+const COVER = `${SB}/storage/v1/object/public/exos-media/event-images/0b6f2f4e-1111-4222-8333-944455556666/1c6f2f4e-1111-4222-8333-944455556666.png`;
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+Deno.test("cover: only our own storage object, read with the service client; never an HTTP fetch", async () => {
+  const reads: string[] = [];
+  const load = (bucket: string, path: string, max: number) => { reads.push(`${bucket}/${path}:${max}`); return Promise.resolve(PNG); };
+  assertEquals(await coverDataUri(load, COVER, SB), "data:image/png;base64,iVBORw0KGgo=");
+  assertEquals(reads, [`exos-media/event-images/0b6f2f4e-1111-4222-8333-944455556666/1c6f2f4e-1111-4222-8333-944455556666.png:${4 * 1024 * 1024}`]);
+  for (const bad of [
+    "https://cdn.example/a.png",                                         // foreign host
+    "https://10.0.0.1/storage/v1/object/public/exos-media/event-images/x/y.png",
+    COVER.replace("https://proj.supabase.co", "https://proj.supabase.co.evil.example"), // look-alike host (a rebinding name)
+    COVER.replace("https://", "http://"),
+    COVER.replace("https://", "https://u:p@"),
+    COVER + "?download=1",
+    COVER.replace("/public/exos-media/", "/public/other-bucket/"),
+    COVER.replace("/object/public/", "/object/authenticated/"),
+    COVER.replace("event-images/", "event-images/../org-logos/"),
+    COVER.replace("event-images/", "event-images%2F"),
+    `${SB}/storage/v1/object/public/exos-media/org-logos/0b6f2f4e-1111-4222-8333-944455556666/logo-1.png`,
+    null,
+  ]) {
+    assertEquals(coverObject(bad, SB), null, String(bad));
+  }
+  const n = reads.length;
+  assertEquals(await coverDataUri(load, "https://cdn.example/a.png", SB), null);
+  assertEquals(reads.length, n, "a foreign URL reads nothing");
+  // Not an image, too big, unreadable: no image.
+  assertEquals(await coverDataUri(() => Promise.resolve(new TextEncoder().encode("<svg/>")), COVER, SB), null);
+  assertEquals(await coverDataUri(() => Promise.resolve(new Uint8Array(4 * 1024 * 1024 + 1)), COVER, SB), null);
+  assertEquals(await coverDataUri(() => Promise.reject(new Error("x")), COVER, SB), null);
+  // A dry run never reads the cover (and never fetches anything).
+  const ev = discordEvent({ ...ROW, image_url: COVER }, APP)!;
+  let asked = 0;
+  const calls: Call[] = [];
+  const steps: DiscordStep[] = [];
+  const dry = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: false, bound: { guildId: GUILD }, botToken: BOT, steps });
+  const r = await syncScheduledEvent(dry, ev, GUILD, { show: true, external_id: null, last_hash: null }, await discordHash(ev), steps,
+    () => { asked++; return Promise.resolve("data:image/png;base64,AAAA"); });
+  assertEquals([r.state, asked, calls.length], ["dry_run", 0, 0]);
+  assert(!("image" in (steps[0].body as any)), "no image in the dry-run plan");
+});
+
+Deno.test("breaker: the gate stops calls before fetch; refusals are reported with code, scope and global", async () => {
+  const calls: Call[] = [];
+  const reported: [CallKind, DiscordResult][] = [];
+  const hooks = (ok: boolean) => ({
+    gate: (_k: CallKind) => Promise.resolve(ok ? { ok: true } : { ok: false, reason: "breaker", retryAfter: 600 }),
+    report: (k: CallKind, r: DiscordResult) => { reported.push([k, r]); return Promise.resolve(); },
+  });
+  // Gate closed: nothing sent, safe to retry.
+  let steps: DiscordStep[] = [];
+  const shut = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: true, bound: { guildId: GUILD, webhookId: HOOK }, botToken: BOT, steps, hooks: hooks(false) });
+  const g = await shut.req("POST", `/guilds/${GUILD}/scheduled-events`, {});
+  assertEquals([g.ok, g.error, g.notSent, g.retryAfter, calls.length], [false, "DISCORD_PAUSED", true, 600, 0]);
+  // 401 on the bot: reported as bot (SQL trips the breaker); the pass says so.
+  steps = [];
+  const ev = discordEvent(ROW, APP)!;
+  const io401 = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 401, body: { code: 0, message: "401: Unauthorized" } }), calls), live: true,
+    bound: { guildId: GUILD }, botToken: BOT, steps, hooks: hooks(true) });
+  let r = await syncScheduledEvent(io401, ev, GUILD, { show: true, external_id: null, last_hash: null }, "h", steps, () => Promise.resolve(null));
+  assertEquals([r.state, reported.at(-1)![0], reported.at(-1)![1].status], ["error", "bot", 401]);
+  assert(r.error!.includes("paused"));
+  // 403 missing access: the link is broken (the guild named so SQL marks that link).
+  steps = [];
+  const io403 = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 403, body: { code: 50001 } }), calls), live: true,
+    bound: { guildId: GUILD }, botToken: BOT, steps, hooks: hooks(true) });
+  r = await syncScheduledEvent(io403, ev, GUILD, { show: true, external_id: null, last_hash: null }, "h", steps, () => Promise.resolve(null));
+  assertEquals([r.state, r.link_broken, r.guild_id], ["error", true, GUILD]);
+  // Unknown guild on an update is a broken link, not a deleted event.
+  steps = [];
+  const io10004 = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 404, body: { code: 10004 } }), calls), live: true,
+    bound: { guildId: GUILD }, botToken: BOT, steps, hooks: hooks(true) });
+  r = await syncScheduledEvent(io10004, ev, GUILD, { show: true, external_id: "523456789012345672", last_hash: "old", status: "synced" }, "h", steps, () => Promise.resolve(null));
+  assertEquals([r.link_broken, r.gone], [true, undefined]);
+  // A global 429 (header) is reported as global, and the pass retries after it.
+  steps = [];
+  const io429 = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 429, body: { retry_after: 7.2, global: false }, headers: { "x-ratelimit-global": "true", "x-ratelimit-scope": "global" } }), calls),
+    live: true, bound: { guildId: GUILD }, botToken: BOT, steps, hooks: hooks(true) });
+  r = await syncScheduledEvent(io429, ev, GUILD, { show: true, external_id: null, last_hash: null }, "h", steps, () => Promise.resolve(null));
+  const last = reported.at(-1)![1];
+  assertEquals([r.state, r.retry_seconds, last.global, last.scope, last.error], ["retry", 8, true, "global", "RATE_LIMITED_GLOBAL"]);
+  assertEquals(linkBroken({ ok: false, status: 403, body: null, code: 50013 }), true);
+  assertEquals(linkBroken({ ok: false, status: 403, body: null, code: 50035 }), false);
+});
+
+Deno.test("post: retried only when nothing can have been posted; a refused webhook is marked broken", async () => {
+  const ev = discordEvent(ROW, APP)!;
+  const run = async (f: typeof fetch) => {
+    const steps: DiscordStep[] = [];
+    const io = makeDiscordIo({ fetch: f, live: true, bound: { webhookId: HOOK }, steps });
+    return await postAnnouncement(io, ev, "publish", HOOK, TOKEN, steps);
+  };
+  const ans = (status: number, body: unknown = {}) => fakeFetch(() => ({ status, body }), []);
+  assertEquals((await run(ans(429, { retry_after: 2 }))).state, "retry");
+  for (const st of [500, 502, 503]) {
+    const r = await run(ans(st));
+    assertEquals(r.state, "error", `HTTP ${st}`);
+    assert(r.error!.includes("check the channel"));
+  }
+  const timeout = (() => Promise.reject(Object.assign(new Error("aborted"), { name: "AbortError" }))) as typeof fetch;
+  assertEquals((await run(timeout)).state, "error");
+  const refused = (() => Promise.reject(new TypeError("error sending request: error trying to connect: tcp connect error: Connection refused"))) as typeof fetch;
+  assertEquals((await run(refused)).state, "retry");
+  const reset = (() => Promise.reject(new TypeError("connection reset by peer"))) as typeof fetch;
+  assertEquals((await run(reset)).state, "error");
+  for (const [st, body] of [[404, { code: 10015 }], [401, {}], [403, {}]] as const) {
+    const r = await run(ans(st, body));
+    assertEquals([r.state, r.webhookBroken], ["error", true], `HTTP ${st}`);
+  }
+  assertEquals([errorKind(new TypeError("dns error: failed to lookup address")), errorKind(new Error("x"))], ["CONNECT", "NETWORK"]);
 });
 
 Deno.test("install: bot scope, CREATE_EVENTS only, the server from the token response, never the redirect's hint", async () => {

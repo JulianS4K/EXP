@@ -15,7 +15,7 @@ Tests: `tests/exos/test_discord.sql`, `supabase/functions/_shared/channels/disco
 
 | | 1. Announcements | 2. Discord events |
 |---|---|---|
-| What the server sees | One message in a channel: an embed with the event name (linked), date and time in the event's zone (plus Discord's relative time), venue, image, the org's name and a **Get tickets** link button | The event on the server's **Events** tab (an EXTERNAL scheduled event): name, start and end, location = the Exos event page, description starting "Get tickets: …", cover image |
+| What the server sees | One message in a channel: an embed with the event name (linked), date and time in the event's zone (plus Discord's relative time), venue, image (its URL; Discord fetches it), the org's name and a **Get tickets** link button | The event on the server's **Events** tab (an EXTERNAL scheduled event): name, start and end, location = the Exos event page, description starting "Get tickets: …", and the cover when it is one uploaded to Exos (below) |
 | How it's connected | An owner / manager pastes a channel webhook URL (channel settings → Integrations → Webhooks → Copy Webhook URL) | An owner / manager clicks **Add Exos bot to your server** (Discord's bot authorization; they need Manage Server there) |
 | When it happens | **Post to Discord** / **Post a reminder** on the event, or on publish when the org ticked "Announce each event on Discord when it's published" | **Show on Discord** on the event; Exos then creates it, updates it when the Exos event changes, cancels it when the Exos event is cancelled, deletes it when unticked or unpublished |
 | Limits | Once per event per kind (publish, reminder); 10 requests a minute and 30 posts an hour per org | 20 passes a minute per org; an edit is sent once it settles (15 seconds) |
@@ -63,8 +63,35 @@ it made.
 - **Roles in SQL.** Owner / manager for everything; only an owner turns sending on. Every lookup
   goes through the event's own org; another org's event answers like an unknown one.
 - **Rate limits before any call to Discord** (in the RPCs and the claims). Discord's own 429s are
-  honoured (`retry_after`); a post that may or may not have gone out (a timeout, a crashed pass)
-  is never resent by itself: it shows "check the channel before posting again".
+  honoured (`retry_after`, plus `X-RateLimit-Global` / `X-RateLimit-Scope`).
+- **A post is retried only when it can't have gone out**: a 429, or a request that never left (the
+  breaker or the platform cap refused it, or the connection never opened). A 5xx, a timeout, a dropped
+  connection or a crashed pass may have posted, so it becomes an error that says "check the channel
+  before posting again", and is never resent by itself.
+- **The cover image is never fetched over HTTP.** Only a cover uploaded to this project's own
+  public storage (`<SUPABASE_URL>/storage/v1/object/public/exos-media/event-images/<uid>/<uuid>.<ext>`,
+  what `uploadEventImage` makes; parsed strictly: same origin, no query, no `..`, no escapes) is read,
+  with the service client (`storage.list` for the size, then `download`), at most 4 MB, and sent only
+  if its first bytes are PNG, JPEG or GIF. Any other image URL gives the Discord event no cover. It
+  is read only when the event really goes out, never in a dry run. (The announcement embed carries
+  the image URL itself; Discord fetches that, not Exos.)
+- **Circuit breaker** (Discord bans an IP or a token at 10,000 invalid requests in 10 minutes;
+  `exos_discord_platform`, `exos_discord_call_gate` before every call, `exos_discord_call_result`
+  after every refusal):
+  - 300 Discord calls a minute across every org, counted in SQL before each call;
+  - a **401** on a bot call stops every bot call platform-wide until the bot token changes (its
+    SHA-256 fingerprint differs) or the operator runs `SELECT public.exos_discord_breaker_clear();`.
+    Webhook posts go on (they don't use the token);
+  - more than **500 invalid answers** (401, 403, a 429 that isn't scope `shared`) in 10 minutes stops
+    every Discord call, bot and webhook, until the operator clears it;
+  - a **global 429** pauses every bot call for its `retry_after`;
+  - a server that refuses the bot (**403** 50001 / 50013, **unknown guild** 10004) is marked broken
+    and skipped until it's linked again (the panel says "Reconnect the bot"); a webhook Discord
+    refuses (**10015**, 401, 403, 404) is marked broken and skipped until a new URL is saved;
+  - backoff holds for "sync now" too (`next_try_at`); the org panel says when Discord is paused.
+- **Leases.** The cron claims one row at a time, each with its own 2-minute lease, and starts no row
+  after its 90-second budget; a row makes at most two Discord calls (10 s each) and one cover read,
+  so a lease can't run out under it.
 - **Logs and errors** carry Discord's numeric error code only, never its message text, the
   webhook token or the bot token (`redactDiscord`, `redactError`).
 - **Disconnect.** "Remove webhook" deletes the Vault secret (queued posts fail). "Disconnect server"
@@ -73,6 +100,20 @@ it made.
 - **Audit** (`exos_org_audit`): `discord.webhook_set`, `discord.webhook_remove`, `discord.settings`,
   `discord.guild_link`, `discord.guild_unlink`, `discord.event_show`, `discord.post` (sent or dry run,
   with the person who asked). No token or full webhook id.
+
+## By design (reviewed, left as is)
+
+- **One announcement per event per kind, for good.** Once a publish (or reminder) post went out, it
+  isn't posted again, even after the org saves a different webhook. A dry run or an error can be
+  posted again.
+- **Disconnecting doesn't clean up Discord.** "Disconnect server" stops Exos managing the server's
+  events but leaves them there (untick Show on Discord first to remove them), and deleting an Exos
+  event leaves its Discord event; Discord ends an EXTERNAL event at its end time anyway.
+- **A scheduled event's create may be repeated** if Discord accepted it but the answer was lost
+  (a 5xx or a timeout on create): the pass retries with backoff, which can leave a duplicate the
+  organizer deletes in Discord. Posts never do this (above).
+- **The webhook is the one the org saved.** Exos doesn't check that it belongs to the linked server
+  (no extra GET); it only posts to that webhook.
 
 ## What the operator sets up
 
@@ -88,6 +129,9 @@ it made.
 4. `EXOS_DISCORD_ENABLED=on` to show it; check a dry run; then `EXOS_DISCORD_WRITES=on`.
 5. Turn the cron on: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-discord-2min';`
    (without it, posts still go out from the buttons; queued publish announcements and event edits wait).
+6. If the breaker trips (the org panels say "Discord is paused"): read
+   `SELECT * FROM public.exos_discord_platform;`, fix the cause (a revoked bot token: set a new
+   `DISCORD_BOT_TOKEN`, which clears a 401 by itself), then `SELECT public.exos_discord_breaker_clear();`.
 
 ## Discord API facts this relies on (checked 2026-11-12, docs.discord.com)
 

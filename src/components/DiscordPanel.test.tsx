@@ -88,4 +88,14 @@ describe('DiscordPanel', () => {
     expect(container.textContent).not.toMatch(/Dry run/);
     expect(screen.getByRole('button', { name: 'Disconnect server' })).toBeTruthy();
   });
+
+  it('says when the bot lost access, the webhook was refused, or Discord is paused', async () => {
+    h.status = parseDiscordStatus({ can_manage: true, is_owner: true, paused: true, webhook: { set: true, hint: '…5679', broken: true },
+      guild: { linked: true, name: 'Blue Room', broken: true }, writes_enabled: true });
+    render(<DiscordPanel orgId={ORG} />);
+    await screen.findByText(/lost access to Blue Room/);
+    expect(screen.getByRole('button', { name: 'Reconnect the bot' })).toBeTruthy();
+    expect(screen.getByText(/Discord refused this webhook/)).toBeTruthy();
+    expect(screen.getByText(/Discord is paused on this Exos server/)).toBeTruthy();
+  });
 });

@@ -49,8 +49,8 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   The third (operator decision 2026-11-11) is Discord, to promote events in the
   organizer's OWN server (`exos-discord`, `_shared/channels/discord.ts`): only
   scheduled-event create, update and delete in the org's own linked guild (by
-  the platform's bot, permission CREATE_EVENTS) and executing the org's own
-  channel webhook, never with a mention; no other messages, roles, members,
+  the platform's bot, permission CREATE_EVENTS) and executing the channel
+  webhook the org saved, never with a mention; no other messages, roles, members,
   channels or DMs (the module's allowlist throws on anything else). The bot
   install's OAuth code exchange is the only other call. Only with the org's
   switch AND `EXOS_DISCORD_WRITES=on` (otherwise dry run); off entirely until

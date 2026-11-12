@@ -40,8 +40,10 @@ export interface DiscordConfig { enabled: boolean; bot: boolean; writes: boolean
 export interface DiscordStatus {
   canManage: boolean;
   isOwner: boolean;
-  webhook: { set: boolean; hint: string | null; setAt: string | null };
-  guild: { linked: boolean; name: string | null };
+  webhook: { set: boolean; hint: string | null; setAt: string | null; broken: boolean };
+  guild: { linked: boolean; name: string | null; broken: boolean };
+  /** The platform's circuit breaker stopped Discord calls (an operator clears it). */
+  paused: boolean;
   writesEnabled: boolean;
   autoPost: boolean;
   shownEvents: number;
@@ -53,6 +55,8 @@ export interface DiscordEventStatus {
   hasWebhook: boolean;
   guildLinked: boolean;
   guildName: string | null;
+  guildBroken: boolean;
+  webhookBroken: boolean;
   writesEnabled: boolean;
   show: boolean;
   sync: { status: string; onDiscord: boolean; pending: boolean; lastError: string | null } | null;
@@ -66,8 +70,9 @@ export function parseDiscordStatus(d: any): DiscordStatus {
   return {
     canManage: bool(d?.can_manage),
     isOwner: bool(d?.is_owner),
-    webhook: { set: bool(d?.webhook?.set), hint: strOrNull(d?.webhook?.hint), setAt: strOrNull(d?.webhook?.set_at) },
-    guild: { linked: bool(d?.guild?.linked), name: strOrNull(d?.guild?.name) },
+    webhook: { set: bool(d?.webhook?.set), hint: strOrNull(d?.webhook?.hint), setAt: strOrNull(d?.webhook?.set_at), broken: bool(d?.webhook?.broken) },
+    guild: { linked: bool(d?.guild?.linked), name: strOrNull(d?.guild?.name), broken: bool(d?.guild?.broken) },
+    paused: bool(d?.paused),
     writesEnabled: bool(d?.writes_enabled),
     autoPost: bool(d?.auto_post),
     shownEvents: Number(d?.shown_events) || 0,
@@ -82,6 +87,8 @@ export function parseDiscordEventStatus(d: any): DiscordEventStatus {
     hasWebhook: bool(d?.has_webhook),
     guildLinked: bool(d?.guild_linked),
     guildName: strOrNull(d?.guild_name),
+    guildBroken: bool(d?.guild_broken),
+    webhookBroken: bool(d?.webhook_broken),
     writesEnabled: bool(d?.writes_enabled),
     show: bool(d?.show),
     sync: s && typeof s === 'object'
@@ -107,6 +114,7 @@ export function postLine(p: DiscordPost | undefined): string {
 /** One line for the scheduled event's state. */
 export function syncLine(s: DiscordEventStatus): string {
   if (!s.guildLinked) return 'Add the Exos bot to your Discord server in Org settings first.';
+  if (s.guildBroken) return 'The Exos bot lost access to your server. Reconnect the bot in Org settings → Discord.';
   if (!s.show) return 'Not on Discord.';
   if (!s.sync || s.sync.pending) return 'Updating Discord…';
   if (s.sync.status === 'dry_run') return 'Dry run: Exos recorded the Discord event but didn’t create it (Discord writes are off).';
