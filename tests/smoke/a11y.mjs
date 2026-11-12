@@ -398,6 +398,40 @@ await check('kiosk screen', async (page, run) => {
   await run('staff PIN');
 }, { mock: { fns: { 'exos-pos': kioskPos({}) } } });
 
+// claude/exos-discord (mig 20261113130000): Org settings → Discord, empty,
+// with a bad URL, and connected (blocking; the panel only).
+const DISCORD_ST = { can_manage: true, is_owner: false, webhook: { set: false }, guild: { linked: false }, writes_enabled: false, shown_events: 0 };
+const discordFns = { 'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: false } }) };
+await check('org settings: Discord', async (page, run) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/settings');
+  const panel = page.getByTestId('discord-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await run('empty');
+  await panel.getByLabel('Channel webhook URL').fill('https://evil.example/x');
+  await panel.getByText("That isn't a Discord channel webhook URL.").waitFor({ timeout: 5000 });
+  await run('bad URL');
+}, { signedIn: true, include: '[data-testid="discord-panel"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_discord_status: () => DISCORD_ST,
+}, fns: discordFns }) });
+await check('org settings: Discord connected', async (page, run) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/settings');
+  await page.getByTestId('discord-panel').getByText(/Linked to Blue Room/).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-testid="discord-panel"]', mock: ownerMock({ rpcs: {
+  exos_discord_status: () => ({ ...DISCORD_ST, is_owner: true, webhook: { set: true, hint: '…5679' }, guild: { linked: true, name: 'Blue Room' },
+    writes_enabled: true, auto_post: true, shown_events: 2 }),
+}, fns: { 'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: true } }) } }) });
+await check('edit event: Promote on Discord', async (page, run) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  await page.getByTestId('discord-event-panel').waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-testid="discord-event-panel"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true, guild_name: 'Blue Room',
+    show: true, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] }),
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+}, fns: discordFns }) });
+
 await browser.close();
 
 let failed = false;

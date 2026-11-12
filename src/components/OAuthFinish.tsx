@@ -1,6 +1,7 @@
 // The confirm screen after an OAuth sign-in (Connect Google Ads, Connect
-// Eventbrite; mig 20261029140000). The org settings page shows it instead of
-// the settings while a return is in hand (lib/oauthReturn.ts has the flow).
+// Eventbrite; mig 20261029140000; Add Exos bot to Discord, mig
+// 20261113130000). The org settings page shows it instead of the settings
+// while a return is in hand (lib/oauthReturn.ts has the flow).
 //
 // - The state and finish token were read from the URL by the page and are
 //   already gone from the address bar; the token is held here only, never
@@ -17,6 +18,7 @@ import { Loader2, ShieldAlert } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { finishGoogleAdsConnect } from '../lib/adCredentials';
 import { finishEventbriteConnect } from '../lib/door/eventbrite';
+import { finishDiscordInstall } from '../lib/discord';
 import { eventPickPath } from '../lib/eventbriteConnect';
 import {
   confirmPrompt, finishBody, finishReducer, initialStep, providerLabel, refusalMessage, type OAuthReturn,
@@ -45,6 +47,11 @@ export default function OAuthFinish({ ret, orgName, onClose }: {
         await finishGoogleAdsConnect(body.state, body.finish);
         dispatch({ type: 'ok' });
         toast({ kind: 'success', message: 'Google Ads connected. Add the customer id and conversion action, then turn it on.' });
+        onClose();
+      } else if (step.provider === 'discord') {
+        const r = await finishDiscordInstall(body.state, body.finish);
+        dispatch({ type: 'ok' });
+        toast({ kind: 'success', message: `Discord server linked${r.guildName ? `: ${r.guildName}` : ''}. Tick "Show on Discord" on an event to list it.` });
         onClose();
       } else {
         const r = await finishEventbriteConnect(body.state, body.finish);

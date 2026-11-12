@@ -48,6 +48,7 @@ import DistributionPartnersPanel from '../components/DistributionPartnersPanel';
 import OrgConnectedApps from '../components/OrgConnectedApps';
 import RoleApiScopesPanel from '../components/RoleApiScopesPanel';
 import PartnerPresalePanel from '../components/PartnerPresalePanel';
+import DiscordPanel from '../components/DiscordPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -650,6 +651,9 @@ export default function OrgSettings() {
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
+
+            {/* Discord: announcements + scheduled events in the org's own server (mig 20261113130000). Owner / manager; hidden until switched on. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <DiscordPanel orgId={org.id} />}
 
             {/* Fee rules every event inherits: passed on (inside the all-in price) or absorbed (mig 20261027100000). */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (

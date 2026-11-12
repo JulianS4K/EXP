@@ -32,6 +32,7 @@ const OFF_WORDS: Record<string, string[]> = {
   'follower-new-event-email': ['email your followers', 'emails your followers', 'followers get an email', 'new event email'],
   'group-pay': ['pay separately', 'paying separately', 'each friend pays', 'friends pay for their own', 'group pay', 'cover the rest'],
   'attendance-report': ['attendance report', 'by postal code', 'XLSX', 'sales pace'], // claude/exos-attendance-report
+  'discord-promotion': ['Discord'], // claude/exos-discord
 };
 
 /** Every text node on its own line, so words from neighbouring elements don't run together. */

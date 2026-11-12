@@ -19,7 +19,7 @@ bash tests/exos/run.sh <db>   # SQL harnesses against a scratch Postgres
 
 Run lint, test, and build before pushing. CI (`.github/workflows/ci.yml`) runs the same three plus the SQL harnesses.
 
-New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. PCI scope (SAQ A; never add scripts to a page with a Stripe card field): `docs/pci.md`. Running your own install (open source): `docs/self-hosting.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Partner REST API (scopes, /developers, adding a route): `docs/api-reference.md`. How each Opendate endpoint maps onto Exos (CI-checked): `docs/opendate-coverage.md`. Distribution partners selling through the Opendate contract (reservations, live-ticket links): `docs/partner-sales.md`. Personal access tokens, OAuth apps and the team API: `docs/developer-platform.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. Group chats and the masked SMS relay: `docs/group-chat.md`. Connect Eventbrite (OAuth app, App Marketplace application): `docs/eventbrite-app.md`. Organizer fee rules (passed on inside the all-in price, or absorbed): `docs/fees.md`. The money journal (double entry per org, trial balance, journal CSV), sales tax by jurisdiction and $0 orders for free claims and comps: `docs/journal.md`. Matched seats (buyers grouped into tables / crews, revealed before the event; the `exos_social_groups` seam): `docs/matched-seats.md`. Fans, signup forms, tags and the refund-request queue: `docs/fans.md`. Artists, lineups and the public listing feed (Bandsintown / JamBase, Opendate-shaped): `docs/listing-feed.md`. Offers, deal math, offer pools, settlements, P&L and ticket-count emails: `docs/offers-settlements.md`. Booking (venues, rooms, holds and levels, show schedule): `docs/booking.md`. Writing an RPC or reviewing the security advisor: `docs/security.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
+New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-go-live.md`. PCI scope (SAQ A; never add scripts to a page with a Stripe card field): `docs/pci.md`. Running your own install (open source): `docs/self-hosting.md`. Exos for AI assistants (MCP server for Claude / ChatGPT): `docs/mcp.md`. Partner REST API (scopes, /developers, adding a route): `docs/api-reference.md`. How each Opendate endpoint maps onto Exos (CI-checked): `docs/opendate-coverage.md`. Distribution partners selling through the Opendate contract (reservations, live-ticket links): `docs/partner-sales.md`. Personal access tokens, OAuth apps and the team API: `docs/developer-platform.md`. Events on Google Search / Maps (events feed): `docs/google-events.md`. Calendar feeds (subscribe in Google / Apple / Outlook): `docs/calendar.md`. Group chats and the masked SMS relay: `docs/group-chat.md`. Connect Eventbrite (OAuth app, App Marketplace application): `docs/eventbrite-app.md`. Promote events on Discord (channel webhook, scheduled events, the Exos bot): `docs/discord.md`. Organizer fee rules (passed on inside the all-in price, or absorbed): `docs/fees.md`. The money journal (double entry per org, trial balance, journal CSV), sales tax by jurisdiction and $0 orders for free claims and comps: `docs/journal.md`. Matched seats (buyers grouped into tables / crews, revealed before the event; the `exos_social_groups` seam): `docs/matched-seats.md`. Fans, signup forms, tags and the refund-request queue: `docs/fans.md`. Artists, lineups and the public listing feed (Bandsintown / JamBase, Opendate-shaped): `docs/listing-feed.md`. Offers, deal math, offer pools, settlements, P&L and ticket-count emails: `docs/offers-settlements.md`. Booking (venues, rooms, holds and levels, show schedule): `docs/booking.md`. Writing an RPC or reviewing the security advisor: `docs/security.md`. What to build next, in what order: `docs/strategy.md` (phases), `docs/competition.md` (vs Posh, DICE and the rest) and `docs/gtm-nyc.md`.
 
 ## Rules carried over from Terminal-2
 
@@ -31,7 +31,7 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `apply_migration`, DML/DDL, cron changes, and edge-function deploys need explicit
   operator permission. Reads are free.
 - **Upstream ticketing APIs (Automatiq, TEvo, SeatGeek, etc.) are read-only.**
-  Never add order/hold/price/inventory writes to a third party. There are two
+  Never add order/hold/price/inventory writes to a third party. There are three
   exceptions. The first (operator decision 2026-10-19) is the organizer's OWN Eventbrite
   and Luma accounts, mirrored 1-1 from Exos (`exos-channel-sync`,
   `_shared/channels/`): writes only to each module's allowlist, and only with
@@ -46,6 +46,15 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `PAYPAL_CLIENT_SECRET` are set. Paying organizers out of the PayPal balance
   is not automated (`exos_paypal_org_balances`). PayPal's JS SDK never loads
   on a page with a Stripe card field (`docs/pci.md`).
+  The third (operator decision 2026-11-11) is Discord, to promote events in the
+  organizer's OWN server (`exos-discord`, `_shared/channels/discord.ts`): only
+  scheduled-event create, update and delete in the org's own linked guild (by
+  the platform's bot, permission CREATE_EVENTS) and executing the channel
+  webhook the org saved, never with a mention; no other messages, roles, members,
+  channels or DMs (the module's allowlist throws on anything else). The bot
+  install's OAuth code exchange is the only other call. Only with the org's
+  switch AND `EXOS_DISCORD_WRITES=on` (otherwise dry run); off entirely until
+  `EXOS_DISCORD_ENABLED=on` (`docs/discord.md`).
   The group-chat SMS relay (`exos-sms-relay`, operator decision 2026-10-30)
   sends texts from the platform's own pool numbers, only with
   `EXOS_SMS_RELAY=on` (otherwise dry run); tests use a provider mock. US A2P

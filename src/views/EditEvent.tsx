@@ -26,6 +26,7 @@ import ArtistLinksEditor from '../components/ArtistLinksEditor';
 import TicketBackendPanel from '../components/TicketBackendPanel';
 import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
+import DiscordEventPanel from '../components/DiscordEventPanel';
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
@@ -1901,6 +1902,8 @@ export default function EditEvent() {
         {eventId && <LinkOutStatusPanel eventId={eventId} />}
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Discord: a scheduled event on the org's server + the announcement (mig 20261113130000). */}
+        {eventId && <DiscordEventPanel eventId={eventId} />}
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
         {eventId && <LastCallPanel eventId={eventId} />}
         {/* Posh: a capped tier fed by Posh's webhooks (mig 20261029150000). */}
