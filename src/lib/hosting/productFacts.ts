@@ -351,6 +351,14 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['supabase/functions/exos-promoter-payouts/index.ts'],
     note: 'Off until EXOS_PROMOTER_TRANSFERS is on.',
   },
+  {
+    id: 'discord-promotion', audience: 'organizer', status: 'off',
+    claim: 'Organizers can promote events in their own Discord server: an announcement in a channel when an event is published, and the event on the server\'s Discord events list, kept in step with Exos.',
+    code: ['src/components/DiscordPanel.tsx', 'src/components/DiscordEventPanel.tsx', 'src/lib/discord.ts',
+      'supabase/functions/exos-discord/index.ts', 'supabase/functions/_shared/channels/discord.ts',
+      'supabase/migrations/20261113130000_exos_discord.sql'],
+    note: 'Branch claude/exos-discord: not on main, migration not applied. Dark until EXOS_DISCORD_ENABLED=on; a dry run until the org switch and EXOS_DISCORD_WRITES=on; the bot needs the platform\'s Discord application (docs/discord.md).',
+  },
 ];
 
 const STATUS_LABEL: Record<FactStatus, string> = {

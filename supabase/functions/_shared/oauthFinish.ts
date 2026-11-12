@@ -1,6 +1,6 @@
 // The finish token of the OAuth sign-ins (mig 20261029140000), shared by
-// exos-oauth-google (Connect Google Ads) and exos-eventbrite-oauth (Connect
-// Eventbrite). No imports, so Deno and EXP's vitest both load it
+// exos-oauth-google (Connect Google Ads), exos-eventbrite-oauth (Connect
+// Eventbrite) and exos-discord (Add Exos bot, mig 20261113130000). No imports, so Deno and EXP's vitest both load it
 // (src/lib/oauthReturn.test.ts).
 //
 // Why: the user who starts a sign-in knows the raw state. Without a second
@@ -13,7 +13,7 @@
 // so it isn't in access logs and can't leak through a Referer. /finish needs
 // the state, the finish token and the starting user's JWT.
 
-export type FinishKey = "google_ads_finish" | "eventbrite_finish";
+export type FinishKey = "google_ads_finish" | "eventbrite_finish" | "discord_finish";
 
 /** The redirect back to the app with the finish token in the fragment. */
 export function withFinishFragment(url: string, key: FinishKey, token: string): string {

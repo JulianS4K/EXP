@@ -1975,6 +1975,58 @@ await run('unfollow link: one click, signed out', async (page, log) => {
   await page.getByRole('heading', { name: "This unfollow link isn't valid." }).waitFor({ timeout: 8000 });
 });
 
+// ── claude/exos-discord (mig 20261113130000): Org settings → Discord, Edit event → Promote on Discord ──
+const DISCORD_HOOK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
+const discordMock = (st) => ownerMock({ rpcs: {
+  exos_discord_status: () => ({ can_manage: true, is_owner: true, webhook: st.saved ? { set: true, hint: '…5679' } : { set: false },
+    guild: { linked: false }, writes_enabled: false, auto_post: !!st.auto, shown_events: 0 }),
+  exos_discord_set_webhook: (b) => { st.saved = b.p_url; return { ok: true, hint: '…5679', replaced: false }; },
+  exos_discord_set_options: (b) => { st.auto = b.p_auto_post; return { writes_enabled: false, auto_post: b.p_auto_post }; },
+  exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true,
+    guild_name: 'Blue Room', show: !!st.show, sync: st.show ? { status: 'dry_run', on_discord: false, pending: false } : null,
+    posts: st.posted ? [{ kind: 'publish', status: 'dry_run' }] : [] }),
+  exos_discord_set_show: (b) => { st.show = b.p_show; return { show: b.p_show, changed: true }; },
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+}, fns: {
+  'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: false } }),
+  'exos-discord/sync': () => ({ body: { state: 'dry_run' } }),
+  'exos-discord/post': () => { st.posted = true; return { body: { status: 'dry_run', already: false } }; },
+} });
+await run('org settings: Discord webhook checked and never shown back, announce on publish, dry run', async (page, log) => {
+  await page.goto(BASE + '/orgs/' + ORG + '/settings');
+  const panel = page.getByTestId('discord-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByText(/^Dry run/).waitFor({ timeout: 5000 });
+  const input = panel.getByLabel('Channel webhook URL');
+  await input.fill('https://evil.example/api/webhooks/1/2');
+  await panel.getByText("That isn't a Discord channel webhook URL.").waitFor({ timeout: 5000 });
+  assert(await panel.getByRole('button', { name: 'Save webhook' }).isDisabled(), 'save disabled for a bad URL');
+  assert(!log.some((l) => l.startsWith('rpc exos_discord_set_webhook')), 'nothing sent for a bad URL');
+  await input.fill(DISCORD_HOOK);
+  await panel.getByRole('button', { name: 'Save webhook' }).click();
+  await expectText(page, 'Discord webhook saved.');
+  assert(log.some((l) => l.startsWith('rpc exos_discord_set_webhook') && l.includes('223456789012345679')), 'saved through the RPC');
+  await panel.getByText(/Saved: webhook …5679\./).waitFor({ timeout: 5000 });
+  assert(!(await panel.innerText()).includes('/api/webhooks/') && (await panel.getByLabel('Replace the webhook URL').inputValue()) === '',
+    'the URL is never shown back');
+  // Controlled boxes: they flip once the RPC answers and the panel reloads.
+  await panel.getByRole('checkbox', { name: /Announce each event/ }).click();
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_options') && l.includes('"p_auto_post":true')), 'announce on publish');
+  assert(await panel.getByRole('button', { name: 'Add Exos bot to your server' }).count() === 1, 'the bot button');
+}, { signedIn: true, mock: discordMock({}) });
+await run('edit event: Show on Discord and Post to Discord (dry run)', async (page, log) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('discord-event-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByRole('checkbox', { name: /Show on Discord/ }).click();
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_show') && l.includes('"p_show":true')), 'show RPC');
+  await waitFor(() => log.some((l) => l.startsWith('fn exos-discord/sync') && l.includes(EV)), 'sync now');
+  await panel.getByRole('button', { name: 'Post to Discord' }).click();
+  await expectText(page, 'Dry run: recorded, not sent');
+  assert(log.some((l) => l.startsWith('fn exos-discord/post') && l.includes('"kind":"publish"')), 'post call');
+}, { signedIn: true, mock: discordMock({}) });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

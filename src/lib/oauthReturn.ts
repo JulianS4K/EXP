@@ -1,12 +1,13 @@
 // Coming back from an OAuth sign-in (Connect Google Ads: exos-oauth-google;
-// Connect Eventbrite: exos-eventbrite-oauth; mig 20261029140000). Pure, so
+// Connect Eventbrite: exos-eventbrite-oauth; mig 20261029140000; Add Exos bot
+// to a Discord server: exos-discord, mig 20261113130000). Pure, so
 // vitest covers it (oauthReturn.test.ts); the screen is
 // components/OAuthFinish.tsx, mounted by the org settings page.
 //
 // The provider sends the browser back to /orgs/<org>/settings with
 //   ?<p>=finish&<p>_state=<state>#<p>_finish=<finish token>
 //   ?<p>=error&reason=<why>
-// for <p> = google_ads | eventbrite. The finish token is in the FRAGMENT so
+// for <p> = google_ads | eventbrite | discord. The finish token is in the FRAGMENT so
 // no server sees it. The page:
 //   1. reads both, then removes them from the address bar at once (the token
 //      is kept in memory only, never shown, logged or sent anywhere but
@@ -17,16 +18,16 @@
 // /finish refuses a sign-in started by another Exos account (the
 // account-linking attack), and the page then says nothing was connected.
 
-export type OAuthProvider = 'google_ads' | 'eventbrite';
+export type OAuthProvider = 'google_ads' | 'eventbrite' | 'discord';
 
 export type OAuthReturn =
   | { provider: OAuthProvider; kind: 'finish'; state: string; finish: string }
   | { provider: OAuthProvider; kind: 'error'; reason: string };
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
-const PROVIDERS: OAuthProvider[] = ['google_ads', 'eventbrite'];
+const PROVIDERS: OAuthProvider[] = ['google_ads', 'eventbrite', 'discord'];
 
-export const providerLabel = (p: OAuthProvider): string => (p === 'google_ads' ? 'Google Ads' : 'Eventbrite');
+export const providerLabel = (p: OAuthProvider): string => (p === 'google_ads' ? 'Google Ads' : p === 'discord' ? 'Discord' : 'Eventbrite');
 
 function cleanReason(v: string | null): string {
   return (v ?? 'unknown').replace(/[^a-z_]/g, '').slice(0, 20) || 'unknown';
@@ -114,6 +115,7 @@ export function finishBody(s: FinishStep): { state: string; finish: string } | n
 }
 
 export function confirmPrompt(provider: OAuthProvider, orgName: string): string {
+  if (provider === 'discord') return `Link the Discord server you just added the Exos bot to with ${orgName}?`;
   return `Connect the ${providerLabel(provider)} account you just signed in with to ${orgName}?`;
 }
 
@@ -145,6 +147,8 @@ export function refusalMessage(provider: OAuthProvider, reason: string): string 
       return 'Google didn’t return a long-lived token. Remove Exos under your Google account’s third-party access, then connect again.';
     case 'config':
       return `The Exos app on ${label} isn't set up right. Tell your Exos admin.`;
+    case 'taken':
+      return 'That Discord server is already linked to another Exos organization, so nothing was linked. Disconnect it there first.';
     default:
       return `Could not connect ${label}, and nothing was connected. Try again.`;
   }

@@ -235,8 +235,9 @@ BEGIN
            jsonb_set(pg_temp.plan(false), '{tiers,1,key}', '"day-1"'))) LIKE '22023%keys are unique%', 'FD1 duplicate key';
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
            jsonb_set(pg_temp.plan(false), '{tiers,4,max_entry_days}', '0'))) LIKE '22023%max_entry_days%', 'FD1 day limit at least 1';
+  -- 80 hours: always before day 1 opens (local midnight two days ago, 48-72 hours back); 60 failed after local noon.
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
-           jsonb_set(pg_temp.plan(false), '{lists,0,valid_until}', to_jsonb((now() - interval '60 hours')::text)))) LIKE '22023%close after it opens%',
+           jsonb_set(pg_temp.plan(false), '{lists,0,valid_until}', to_jsonb((now() - interval '80 hours')::text)))) LIKE '22023%close after it opens%',
          'FD1 a window that closes before it opens';
   ASSERT pg_temp.st(format('SELECT public.exos_fair_setup(%L, %L::jsonb)', pg_temp.u('e1'),
            jsonb_set(pg_temp.plan(false), '{lists,0,valid_from}', '"Friday"'))) LIKE '22023%can''t be read%', 'FD1 unreadable date';

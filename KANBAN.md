@@ -310,6 +310,7 @@ pass revenue reconciles to Stripe.
    `VITE_EXOS_LUMA` unset, so nothing calls Luma and the app hides it. Turn both on to use it.
 6. Not mirrored yet: cover images (both need an upload to their CDN), Eventbrite online events, ticket sales
    windows. Not run against a live Eventbrite / Luma account from the build sandbox.
+7. Discord promotion (branch `claude/exos-discord`, mig 20261113130000; operator ask 2026-11-11): channel-webhook announcements (once per event per kind, no mentions) + EXTERNAL Discord scheduled events kept in step by the platform's bot (CREATE_EVENTS only); dark until `EXOS_DISCORD_ENABLED=on`, dry run until the org switch and `EXOS_DISCORD_WRITES=on`; needs the Discord application (`docs/discord.md`). Not applied.
 
 ## Open-source build 2026-10-16 (operator ask: BYO credentials, backends, promo links, SMS, white-label)
 

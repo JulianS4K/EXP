@@ -1,0 +1,91 @@
+// @vitest-environment jsdom
+// Org settings → Discord (mig 20261113130000): hidden until the operator turns
+// Discord on; the webhook URL is checked before saving and never shown back;
+// only an owner can turn sending on.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+const h = vi.hoisted(() => ({
+  toast: vi.fn(),
+  cfg: { enabled: true, bot: true, writes: false },
+  status: null as any,
+  save: vi.fn(),
+  options: vi.fn(),
+}));
+vi.mock('../context/ToastContext', () => ({ useToast: () => ({ toast: h.toast }) }));
+vi.mock('../lib/supabase', () => ({ supabase: {}, initialAuthUrl: '' }));
+vi.mock('../lib/discord', async (orig) => {
+  const real = await orig<typeof import('../lib/discord')>();
+  return {
+    ...real,
+    fetchDiscordConfig: async () => h.cfg,
+    fetchDiscordStatus: async () => h.status,
+    saveDiscordWebhook: (...a: unknown[]) => h.save(...a),
+    setDiscordOptions: (...a: unknown[]) => h.options(...a),
+    removeDiscordWebhook: async () => undefined,
+    unlinkDiscordServer: async () => undefined,
+    startDiscordInstall: async () => 'https://discord.com/oauth2/authorize?scope=bot',
+  };
+});
+
+import DiscordPanel from './DiscordPanel';
+import { parseDiscordStatus } from '../lib/discord';
+
+const ORG = '11111111-1111-4111-8111-111111111111';
+const URL_OK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
+
+beforeEach(() => {
+  h.toast.mockReset();
+  h.save.mockReset().mockResolvedValue('…5679');
+  h.options.mockReset().mockResolvedValue(undefined);
+  h.cfg = { enabled: true, bot: true, writes: false };
+  h.status = parseDiscordStatus({ can_manage: true, is_owner: false, webhook: { set: false }, guild: { linked: false }, writes_enabled: false });
+});
+afterEach(cleanup);
+
+describe('DiscordPanel', () => {
+  it('stays hidden while Discord is off on this server', async () => {
+    h.cfg = { enabled: false, bot: false, writes: false };
+    const { container } = render(<DiscordPanel orgId={ORG} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('checks the URL before saving, saves it, and clears the field', async () => {
+    render(<DiscordPanel orgId={ORG} />);
+    const input = await screen.findByLabelText('Channel webhook URL');
+    expect((input as HTMLInputElement).type).toBe('password');
+    fireEvent.change(input, { target: { value: 'https://evil.example/api/webhooks/1/2' } });
+    expect(screen.getByText("That isn't a Discord channel webhook URL.")).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Save webhook' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(input, { target: { value: URL_OK } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save webhook' }));
+    await waitFor(() => expect(h.save).toHaveBeenCalledWith(ORG, URL_OK));
+    await waitFor(() => expect((input as HTMLInputElement).value).toBe(''));
+    expect(screen.getByText(/Dry run/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add Exos bot to your server' })).toBeTruthy();
+  });
+
+  it('a manager can\'t turn sending on; an owner can', async () => {
+    render(<DiscordPanel orgId={ORG} />);
+    const box = await screen.findByRole('checkbox', { name: /Send to Discord/ });
+    expect((box as HTMLInputElement).disabled).toBe(true);
+    cleanup();
+    h.status = { ...h.status, isOwner: true };
+    render(<DiscordPanel orgId={ORG} />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: /Send to Discord/ }));
+    await waitFor(() => expect(h.options).toHaveBeenCalledWith(ORG, { writes: true }));
+  });
+
+  it('shows the linked server and never the webhook URL', async () => {
+    h.status = parseDiscordStatus({ can_manage: true, is_owner: true, webhook: { set: true, hint: '…5679' },
+      guild: { linked: true, name: 'Blue Room' }, writes_enabled: true, shown_events: 3 });
+    h.cfg = { enabled: true, bot: true, writes: true };
+    const { container } = render(<DiscordPanel orgId={ORG} />);
+    await screen.findByText(/Linked to Blue Room/);
+    expect(container.textContent).toContain('webhook …5679');
+    expect(container.textContent).not.toContain('/api/webhooks/');
+    expect(container.textContent).not.toMatch(/Dry run/);
+    expect(screen.getByRole('button', { name: 'Disconnect server' })).toBeTruthy();
+  });
+});
