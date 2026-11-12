@@ -239,6 +239,15 @@ Deno.test("image: SSRF-checked, no redirects, types and size capped", async () =
   assertEquals(await imageDataUri(webp, "https://cdn.example/a.webp", () => Promise.resolve(null)), null);
   const big = (() => Promise.resolve(new Response(png, { headers: { "content-type": "image/png", "content-length": "99999999" } }))) as typeof fetch;
   assertEquals(await imageDataUri(big, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
+  // Chunked, no Content-Length: the cap holds on the stream, and reading stops past it.
+  let pulled = 0;
+  const endless = (() => Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+    pull(c) { pulled++; c.enqueue(new Uint8Array(1024 * 1024)); },
+  }), { headers: { "content-type": "image/png" } }))) as typeof fetch;
+  assertEquals(await imageDataUri(endless, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
+  assertEquals(pulled <= 7, true, `read ${pulled} MB before stopping`);
+  const empty = (() => Promise.resolve(new Response(new Uint8Array(0), { headers: { "content-type": "image/png" } }))) as typeof fetch;
+  assertEquals(await imageDataUri(empty, "https://cdn.example/a.png", () => Promise.resolve(null)), null);
 });
 
 Deno.test("install: bot scope, CREATE_EVENTS only, the server from the token response, never the redirect's hint", async () => {

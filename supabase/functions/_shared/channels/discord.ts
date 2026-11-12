@@ -388,9 +388,27 @@ export async function imageDataUri(fetchFn: typeof fetch, url: string | null,
     const res = await fetchFn(url, { redirect: "error", signal: ctrl.signal, headers: { Accept: "image/jpeg, image/png, image/gif" } });
     const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     const len = Number(res.headers.get("content-length") ?? "0");
-    if (!res.ok || !IMAGE_TYPES.has(type) || len > IMAGE_MAX_BYTES) return null;
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > IMAGE_MAX_BYTES) return null;
+    if (!res.ok || !IMAGE_TYPES.has(type) || len > IMAGE_MAX_BYTES || !res.body) return null;
+    // Count bytes as they arrive: a chunked reply has no Content-Length, so
+    // the cap must hold on the stream itself (stop and abort past 4 MB).
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > IMAGE_MAX_BYTES) {
+        ctrl.abort();
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    if (total === 0) return null;
+    const buf = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) { buf.set(c, off); off += c.byteLength; }
     let bin = "";
     for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
     return `data:${type};base64,${btoa(bin)}`;
