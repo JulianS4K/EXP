@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  fetchDiscordConfig, fetchDiscordEventStatus, postLine, postToDiscord, setDiscordShow, syncLine, type DiscordEventStatus, type PostKind,
+  fetchDiscordConfig, fetchDiscordEventStatus, orgPausedLine, postLine, postToDiscord, setDiscordShow, syncLine, type DiscordEventStatus, type PostKind,
 } from '../lib/discord';
 
 const BTN = 'type text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60';
@@ -52,6 +52,10 @@ export default function DiscordEventPanel({ eventId }: { eventId: string }) {
         <MessageSquare className="text-brand-primary w-5 h-5" aria-hidden="true" />
         <h2 id="discord-event-title" className="disp text-lg uppercase tracking-wide text-white leading-none">Promote on Discord</h2>
       </div>
+
+      {orgPausedLine(st.orgPausedUntil) && (
+        <p role="status" className="type text-[11px] text-rose-300">{orgPausedLine(st.orgPausedUntil)}</p>
+      )}
 
       {bot && st.guildLinked && (
         <div className="space-y-2">

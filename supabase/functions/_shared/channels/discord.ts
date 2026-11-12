@@ -142,7 +142,8 @@ export function makeDiscordIo(opts: {
       if (opts.hooks?.gate) {
         const g = await opts.hooks.gate(callKind).catch((): GateAnswer => ({ ok: false, reason: "gate", retryAfter: 60 }));
         if (!g.ok) {
-          const e = g.reason === "breaker" ? "DISCORD_PAUSED" : g.reason === "paused" ? "RATE_LIMITED_GLOBAL" : "PLATFORM_LIMIT";
+          const e = g.reason === "breaker" ? "DISCORD_PAUSED" : g.reason === "org_paused" ? "ORG_PAUSED"
+            : g.reason === "paused" ? "RATE_LIMITED_GLOBAL" : "PLATFORM_LIMIT";
           if (method !== "GET") opts.steps.push({ op: "planned", method, path: shown, ok: false, error: e });
           return { ok: false, status: 0, body: null, error: e, retryAfter: g.retryAfter ?? 60, notSent: true };
         }

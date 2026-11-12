@@ -283,6 +283,11 @@ Deno.test("breaker: the gate stops calls before fetch; refusals are reported wit
   const shut = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: true, bound: { guildId: GUILD, webhookId: HOOK }, botToken: BOT, steps, hooks: hooks(false) });
   const g = await shut.req("POST", `/guilds/${GUILD}/scheduled-events`, {});
   assertEquals([g.ok, g.error, g.notSent, g.retryAfter, calls.length], [false, "DISCORD_PAUSED", true, 600, 0]);
+  // The org's own pause: refused before fetch, retried after it.
+  const orgShut = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: true, bound: { webhookId: HOOK }, steps: [],
+    hooks: { gate: () => Promise.resolve({ ok: false, reason: "org_paused", retryAfter: 1800 }) } });
+  const op = await postAnnouncement(orgShut, discordEvent(ROW, APP)!, "publish", HOOK, TOKEN, []);
+  assertEquals([op.state, op.retrySeconds, calls.length], ["retry", 1800, 0]);
   // 401 on the bot: reported as bot (SQL trips the breaker); the pass says so.
   steps = [];
   const ev = discordEvent(ROW, APP)!;

@@ -9,7 +9,7 @@ import { MessageSquare } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
   fetchDiscordConfig, fetchDiscordStatus, removeDiscordWebhook, saveDiscordWebhook, setDiscordOptions, startDiscordInstall,
-  unlinkDiscordServer, webhookUrlOk, type DiscordConfig, type DiscordStatus,
+  orgPausedLine, unlinkDiscordServer, webhookUrlOk, type DiscordConfig, type DiscordStatus,
 } from '../lib/discord';
 
 const LBL = 'block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1';
@@ -60,6 +60,11 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
       {st.paused && (
         <p role="status" className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded px-3 py-2">
           Discord is paused on this Exos server (Discord refused too many requests). Nothing is sent until an operator clears it.
+        </p>
+      )}
+      {orgPausedLine(st.orgPausedUntil) && (
+        <p role="status" className="text-[11px] text-rose-800 bg-rose-50 border border-rose-200 rounded px-3 py-2">
+          {orgPausedLine(st.orgPausedUntil)}
         </p>
       )}
       {(!cfg.writes || !st.writesEnabled) && (

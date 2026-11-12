@@ -36,9 +36,14 @@
 --   DC10 the circuit breaker: 300 calls a minute across orgs; a 401 on the
 --       bot stops bot calls (not webhooks) until the token changes or the
 --       operator clears it; a global 429 pauses bot calls; over 500 invalid
---       answers in 10 minutes stops every call; a server or webhook Discord
+--       answers in 10 minutes from 5+ orgs stops every call (DC11); a server or webhook Discord
 --       refused is skipped until relinked / replaced; "sync now" waits out
 --       the backoff; the panels say so
+--   DC11 tenants can't trip the shared breaker: an org's 10th invalid answer
+--       in 10 minutes pauses that org (30 minutes, doubling, audited); its
+--       answers stop counting; one org never trips 'all', whatever the
+--       volume; re-saving a webhook or relinking doesn't reset the pause;
+--       5 orgs over the threshold do trip it; it cools down after 15 minutes
 -- Users: d1 owner A, d2 manager A, d3 finance A, d4 scanner A, d5 owner B,
 --        d6 outsider.
 -- ============================================================================
@@ -128,8 +133,8 @@ BEGIN
   FOREACH f IN ARRAY ARRAY[
       'public.exos_discord_post_claim(integer,uuid)', 'public.exos_discord_post_mark(uuid,uuid,text,text,text,jsonb,integer,boolean)',
       'public.exos_discord_sync_claim(integer,uuid,text)', 'public.exos_discord_sync_mark(uuid,uuid,bigint,jsonb)',
-      'public.exos_discord_call_gate(text,text)', 'public.exos_discord_call_result(text,integer,integer,boolean,text,numeric,text)',
-      'public.exos_discord_breaker_clear()', 'public._exos_discord_blocked(text,text)',
+      'public.exos_discord_call_gate(text,text,uuid)', 'public.exos_discord_call_result(text,integer,integer,boolean,text,numeric,text,uuid)',
+      'public.exos_discord_breaker_clear()', 'public._exos_discord_blocked(text,text,uuid)',
       'public.exos_discord_install_begin(uuid,uuid,text)', 'public.exos_discord_install_consume(text,uuid,text)',
       'public.exos_discord_guild_link(uuid,uuid,text,text)', 'public.exos_discord_webhook_parts(text)',
       'public._exos_discord_role(uuid,uuid)', 'public._exos_discord_event_json(uuid)', 'public.exos_tg_discord_event()'] LOOP
@@ -208,7 +213,7 @@ BEGIN
 
   PERFORM pg_temp.act(pg_temp.u('d2'));
   r := public.exos_discord_set_webhook(pg_temp.u('1'), pg_temp.hook('123456789012345678', pg_temp.tok('2')));
-  ASSERT r->>'hint' = '…5678' AND (r->>'replaced')::boolean = false, 'DC2 manager saves: ' || r;
+  ASSERT r->>'hint' = '…5678' AND (r->>'replaced')::boolean = false, 'DC2 manager saves: ' || r::text;
   PERFORM pg_temp.act(pg_temp.u('d1'));
   r := public.exos_discord_set_webhook(pg_temp.u('1'), 'https://discordapp.com/api/webhooks/223456789012345679/' || pg_temp.tok('3'));
   ASSERT (r->>'replaced')::boolean, 'DC2 owner replaces';
@@ -218,7 +223,7 @@ BEGIN
   ASSERT (SELECT webhook_id FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')) = '223456789012345679', 'DC2 id stored';
   r := public.exos_discord_status(pg_temp.u('1'));
   ASSERT (r->'webhook'->>'set')::boolean AND r->'webhook'->>'hint' = '…5679' AND position(pg_temp.tok('3') IN r::text) = 0
-     AND position('223456789012345679' IN r::text) = 0, 'DC2 status: hint only: ' || r;
+     AND position('223456789012345679' IN r::text) = 0, 'DC2 status: hint only: ' || r::text;
   -- The other org can't read or change org A's.
   PERFORM pg_temp.act(pg_temp.u('d5'));
   ASSERT pg_temp.st(format('SELECT public.exos_discord_remove_webhook(%L)', pg_temp.u('1'))) LIKE '42501%', 'DC2 B removes A''s';
@@ -282,7 +287,7 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_discord_request_post(%L, %L)', pg_temp.u('e3'), 'publish')) LIKE '22023%', 'DC4 over';
   ASSERT pg_temp.st(format('SELECT public.exos_discord_request_post(%L, %L)', pg_temp.u('e1'), 'blast')) LIKE '22023%', 'DC4 kind';
   r := public.exos_discord_request_post(pg_temp.u('e1'), 'publish');
-  ASSERT r->>'status' = 'queued' AND NOT (r->>'already')::boolean, 'DC4 queued: ' || r;
+  ASSERT r->>'status' = 'queued' AND NOT (r->>'already')::boolean, 'DC4 queued: ' || r::text;
   r := public.exos_discord_request_post(pg_temp.u('e1'), 'publish');
   ASSERT (r->>'already')::boolean AND r->>'status' = 'queued', 'DC4 twice: already';
   r := public.exos_discord_request_post(pg_temp.u('e1'), 'reminder');
@@ -587,12 +592,12 @@ BEGIN
   INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES ('discord_platform', date_trunc('minute', now()), 300)
   ON CONFLICT (bucket, window_start) DO UPDATE SET hits = 300;
   r := public.exos_discord_call_gate('webhook', NULL);
-  ASSERT NOT (r->>'ok')::boolean AND r->>'reason' = 'platform_cap' AND (r->>'retry_after')::int = 60, 'DC10 platform cap: ' || r;
+  ASSERT NOT (r->>'ok')::boolean AND r->>'reason' = 'platform_cap' AND (r->>'retry_after')::int = 60, 'DC10 platform cap: ' || r::text;
   DELETE FROM public.exos_rate_windows WHERE bucket = 'discord_platform';
 
   -- A 401 on the bot: bot calls stop, webhooks don't; the claim hands out nothing.
   r := public.exos_discord_call_result('bot', 401, 0, false, NULL, NULL, v_fp);
-  ASSERT r->>'tripped' = 'bot' AND (r->>'invalid')::boolean, 'DC10 401 trips: ' || r;
+  ASSERT r->>'tripped' = 'bot' AND (r->>'invalid')::boolean, 'DC10 401 trips: ' || r::text;
   ASSERT public.exos_discord_call_gate('bot', v_fp)->>'reason' = 'breaker', 'DC10 bot calls stop';
   ASSERT (public.exos_discord_call_gate('webhook', NULL)->>'ok')::boolean, 'DC10 webhooks unaffected';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_sync_claim(5, NULL, v_fp)), 'DC10 no bot passes';
@@ -623,7 +628,7 @@ BEGIN
   -- A global 429: bot calls pause for retry_after; webhooks go on.
   PERFORM public.exos_discord_call_result('bot', 429, NULL, true, 'global', 42, v_fp2);
   r := public.exos_discord_call_gate('bot', v_fp2);
-  ASSERT r->>'reason' = 'paused' AND (r->>'retry_after')::int BETWEEN 40 AND 43, 'DC10 global 429 pauses: ' || r;
+  ASSERT r->>'reason' = 'paused' AND (r->>'retry_after')::int BETWEEN 40 AND 43, 'DC10 global 429 pauses: ' || r::text;
   ASSERT (public.exos_discord_call_gate('webhook', NULL)->>'ok')::boolean, 'DC10 webhooks go on';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_sync_claim(5, NULL, v_fp2)), 'DC10 no passes while paused';
   -- A per-route 429 doesn't pause anything; a shared 429 isn't counted as invalid.
@@ -632,16 +637,8 @@ BEGIN
   ASSERT (public.exos_discord_call_gate('bot', v_fp2)->>'ok')::boolean, 'DC10 route 429: no pause';
   ASSERT NOT (public.exos_discord_call_result('bot', 429, NULL, false, 'shared', 3, v_fp2)->>'invalid')::boolean, 'DC10 shared 429 not invalid';
 
-  -- Over 500 invalid answers in 10 minutes: every call stops, the claims hand out nothing, until the operator clears it.
-  INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES
-    ('discord_invalid', date_trunc('minute', now()) - interval '3 minutes', 300), ('discord_invalid', date_trunc('minute', now()) - interval '20 minutes', 900)
-  ON CONFLICT (bucket, window_start) DO UPDATE SET hits = EXCLUDED.hits;
-  ASSERT public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL)->>'tripped' IS NULL, 'DC10 under 500 (old windows not counted)';
-  UPDATE public.exos_rate_windows SET hits = 500 WHERE bucket = 'discord_invalid' AND window_start = date_trunc('minute', now()) - interval '3 minutes';
-  r := public.exos_discord_call_result('webhook', 404, 10015, false, NULL, NULL, NULL);
-  ASSERT r->>'tripped' IS NULL, 'DC10 a 404 is not counted';
-  r := public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL);
-  ASSERT r->>'tripped' = 'all', 'DC10 over 500 trips everything: ' || r;
+  -- (Over 500 invalid answers from 5+ orgs: DC11.) A breaker set by hand stops posts too, until cleared.
+  UPDATE public.exos_discord_platform SET breaker_scope = 'all', breaker_at = now(), breaker_reason = 'test';
   ASSERT public.exos_discord_call_gate('webhook', NULL)->>'reason' = 'breaker' AND public.exos_discord_call_gate('bot', v_fp)->>'reason' = 'breaker',
     'DC10 every call stops';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_sync_claim(5, NULL, v_fp)), 'DC10 a new token does not clear it';
@@ -669,7 +666,80 @@ BEGIN
   PERFORM pg_temp.act(NULL);
   ASSERT (SELECT webhook_broken_at IS NULL FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')), 'DC10 a new URL clears it';
   DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
-  RAISE NOTICE 'OK  DC10 breaker: platform cap, 401 stops bot calls (new token clears), global 429 pause, 500 invalid stops all, broken links / webhooks skipped, sync now waits';
+  RAISE NOTICE 'OK  DC10 breaker: platform cap, 401 stops bot calls (new token clears), global 429 pause, a set breaker stops all, broken links / webhooks skipped, sync now waits';
+END $$;
+
+-- DC11 -----------------------------------------------------------------------
+DO $$
+DECLARE r jsonb; i int; v_until timestamptz; v_org uuid;
+BEGIN
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  PERFORM public.exos_discord_breaker_clear();
+  -- Org B has a link row (its server from DC8). Org A floods invalid answers.
+  FOR i IN 1..9 LOOP
+    r := public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL, pg_temp.u('1'));
+  END LOOP;
+  ASSERT (r->>'org_invalid_10min')::int = 9 AND r->>'org_paused_until' IS NULL, 'DC11 nine: not yet: ' || r::text;
+  r := public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL, pg_temp.u('1'));
+  v_until := (r->>'org_paused_until')::timestamptz;
+  ASSERT v_until BETWEEN now() + interval '29 minutes' AND now() + interval '31 minutes', 'DC11 the 10th pauses the org 30 minutes: ' || r::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE org_id = pg_temp.u('1') AND action = 'discord.org_paused'), 'DC11 audited';
+  -- Its calls stop; another org's don't; its claims hand out nothing.
+  r := public.exos_discord_call_gate('webhook', NULL, pg_temp.u('1'));
+  ASSERT r->>'reason' = 'org_paused' AND (r->>'retry_after')::int > 1700, 'DC11 org A refused: ' || r::text;
+  ASSERT (public.exos_discord_call_gate('webhook', NULL, pg_temp.u('2'))->>'ok')::boolean, 'DC11 org B goes on';
+  UPDATE public.exos_discord_event_syncs SET change_seq = change_seq + 1, next_try_at = now(), lease_id = NULL, lease_until = NULL
+   WHERE event_id = pg_temp.u('e1');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_sync_claim(5, NULL, repeat('cd', 16)) x WHERE x.org_id = pg_temp.u('1')), 'DC11 no passes for A';
+  UPDATE public.exos_discord_posts SET status = 'queued', next_try_at = now() WHERE event_id = pg_temp.u('e1') AND kind = 'reminder';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_post_claim(5, NULL) x WHERE x.org_id = pg_temp.u('1')), 'DC11 no posts for A';
+  ASSERT (SELECT next_try_at >= v_until - interval '1 second' FROM public.exos_discord_posts WHERE event_id = pg_temp.u('e1') AND kind = 'reminder'),
+    'DC11 the post waits for the pause';
+  PERFORM pg_temp.act(pg_temp.u('d1'));
+  ASSERT (public.exos_discord_status(pg_temp.u('1'))->>'org_paused_until')::timestamptz = v_until, 'DC11 the panel says until when';
+  -- Re-saving the webhook or relinking the server doesn't reset it.
+  PERFORM public.exos_discord_set_webhook(pg_temp.u('1'), pg_temp.hook('923456789012345677', pg_temp.tok('7')));
+  PERFORM pg_temp.act(NULL);
+  PERFORM public.exos_discord_guild_link(pg_temp.u('1'), pg_temp.u('d1'), '823456789012345676', 'D15 Again');
+  ASSERT (SELECT invalid_paused_until = v_until AND invalid_pause_count = 1 FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')),
+    'DC11 re-saving / relinking keeps the pause';
+  -- A paused org's answers don't count, and one org never trips 'all', whatever the volume.
+  INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES ('discord_invalid', date_trunc('minute', now()), 5000)
+  ON CONFLICT (bucket, window_start) DO UPDATE SET hits = 5000;
+  r := public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL, pg_temp.u('1'));
+  ASSERT (r->>'invalid_10min')::int = 0 AND r->>'tripped' IS NULL, 'DC11 a paused org counts for nothing: ' || r::text;
+  r := public.exos_discord_call_result('bot', 403, 50001, false, NULL, NULL, NULL, pg_temp.u('2'));
+  ASSERT (r->>'invalid_10min')::int > 500 AND (r->>'orgs_10min')::int = 1 AND r->>'tripped' IS NULL, 'DC11 one org never trips it: ' || r::text;
+  ASSERT (SELECT breaker_scope FROM public.exos_discord_platform) IS NULL, 'DC11 still open';
+  -- A repeat pause doubles (within a day of the last one).
+  UPDATE public.exos_discord_links SET invalid_paused_until = now() - interval '1 minute' WHERE org_id = pg_temp.u('1');
+  DELETE FROM public.exos_rate_windows WHERE bucket = 'discord_invalid:' || pg_temp.u('1')::text;
+  FOR i IN 1..10 LOOP
+    r := public.exos_discord_call_result('webhook', 401, NULL, false, NULL, NULL, NULL, pg_temp.u('1'));
+  END LOOP;
+  ASSERT (r->>'org_paused_until')::timestamptz BETWEEN now() + interval '59 minutes' AND now() + interval '61 minutes'
+     AND (SELECT invalid_pause_count FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')) = 2, 'DC11 the second pause is an hour: ' || r::text;
+  -- Five orgs over the threshold trip it.
+  FOR i IN 3..6 LOOP
+    v_org := pg_temp.u(i::text);
+    INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES (v_org, 'D15 Org ' || i, 'd15-org-' || i, pg_temp.u('d5'));
+    INSERT INTO public.exos_discord_links (org_id) VALUES (v_org);
+    INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES ('discord_invalid:' || v_org::text, date_trunc('minute', now()), 3);
+  END LOOP;
+  r := public.exos_discord_call_result('webhook', 403, 50013, false, NULL, NULL, NULL, pg_temp.u('2'));
+  ASSERT (r->>'orgs_10min')::int = 5 AND r->>'tripped' = 'all', 'DC11 five orgs trip it: ' || r::text;
+  ASSERT public.exos_discord_call_gate('webhook', NULL, pg_temp.u('2'))->>'reason' = 'breaker', 'DC11 every call stops';
+  -- It cools down by itself after 15 minutes.
+  UPDATE public.exos_discord_platform SET breaker_at = now() - interval '16 minutes';
+  ASSERT (public.exos_discord_call_gate('webhook', NULL, pg_temp.u('2'))->>'ok')::boolean, 'DC11 cooled down';
+  ASSERT (SELECT breaker_scope FROM public.exos_discord_platform) IS NULL, 'DC11 cleared';
+  -- The bot-token breaker doesn't cool down.
+  PERFORM public.exos_discord_call_result('bot', 401, NULL, false, NULL, NULL, repeat('ef', 16), NULL);
+  UPDATE public.exos_discord_platform SET breaker_at = now() - interval '2 hours';
+  ASSERT public.exos_discord_call_gate('bot', repeat('ef', 16), pg_temp.u('2'))->>'reason' = 'breaker', 'DC11 the 401 breaker stays';
+  PERFORM public.exos_discord_breaker_clear();
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  RAISE NOTICE 'OK  DC11 per-org pause (10 in 10 min, 30 min doubling, audited, kept on re-save), one org never trips, 5 orgs do, 15-minute cooldown';
 END $$;
 
 -- DC9 ------------------------------------------------------------------------
@@ -677,11 +747,11 @@ DO $$
 DECLARE m text;
 BEGIN
   FOREACH m IN ARRAY ARRAY['discord.webhook_set', 'discord.webhook_remove', 'discord.settings', 'discord.guild_link',
-                           'discord.guild_unlink', 'discord.event_show', 'discord.post'] LOOP
+                           'discord.guild_unlink', 'discord.event_show', 'discord.post', 'discord.org_paused'] LOOP
     ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
               AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0) = 1, 'DC9 marker ' || m;
   END LOOP;
-  RAISE NOTICE 'OK  DC9 seven audit markers';
+  RAISE NOTICE 'OK  DC9 eight audit markers';
 END $$;
 
 ROLLBACK;

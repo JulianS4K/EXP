@@ -44,6 +44,8 @@ export interface DiscordStatus {
   guild: { linked: boolean; name: string | null; broken: boolean };
   /** The platform's circuit breaker stopped Discord calls (an operator clears it). */
   paused: boolean;
+  /** Discord refused too many of this org's calls: they wait until then. */
+  orgPausedUntil: string | null;
   writesEnabled: boolean;
   autoPost: boolean;
   shownEvents: number;
@@ -57,6 +59,7 @@ export interface DiscordEventStatus {
   guildName: string | null;
   guildBroken: boolean;
   webhookBroken: boolean;
+  orgPausedUntil: string | null;
   writesEnabled: boolean;
   show: boolean;
   sync: { status: string; onDiscord: boolean; pending: boolean; lastError: string | null } | null;
@@ -73,6 +76,7 @@ export function parseDiscordStatus(d: any): DiscordStatus {
     webhook: { set: bool(d?.webhook?.set), hint: strOrNull(d?.webhook?.hint), setAt: strOrNull(d?.webhook?.set_at), broken: bool(d?.webhook?.broken) },
     guild: { linked: bool(d?.guild?.linked), name: strOrNull(d?.guild?.name), broken: bool(d?.guild?.broken) },
     paused: bool(d?.paused),
+    orgPausedUntil: strOrNull(d?.org_paused_until),
     writesEnabled: bool(d?.writes_enabled),
     autoPost: bool(d?.auto_post),
     shownEvents: Number(d?.shown_events) || 0,
@@ -89,6 +93,7 @@ export function parseDiscordEventStatus(d: any): DiscordEventStatus {
     guildName: strOrNull(d?.guild_name),
     guildBroken: bool(d?.guild_broken),
     webhookBroken: bool(d?.webhook_broken),
+    orgPausedUntil: strOrNull(d?.org_paused_until),
     writesEnabled: bool(d?.writes_enabled),
     show: bool(d?.show),
     sync: s && typeof s === 'object'
@@ -97,6 +102,13 @@ export function parseDiscordEventStatus(d: any): DiscordEventStatus {
     posts: (Array.isArray(d?.posts) ? d.posts : []).filter((p: any) => p?.kind === 'publish' || p?.kind === 'reminder')
       .map((p: any) => ({ kind: p.kind, status: String(p.status ?? ''), sentAt: strOrNull(p.sent_at), lastError: strOrNull(p.last_error) })),
   };
+}
+
+/** "Discord is paused for this organization until …" in the viewer's own time. */
+export function orgPausedLine(until: string | null, locale?: string): string | null {
+  if (!until || Number.isNaN(Date.parse(until))) return null;
+  const at = new Date(until).toLocaleString(locale ?? 'en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return `Discord refused too many of this organization's requests (a deleted webhook, or a server that removed the bot), so Exos paused Discord for it until ${at}. Fix the webhook or server meanwhile.`;
 }
 
 /** One line for a post's state, for the event panel. */

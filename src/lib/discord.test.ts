@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./supabase', () => ({ supabase: {} }));
 import {
-  isDiscordAuthorizeUrl, parseDiscordEventStatus, parseDiscordStatus, postLine, rpcMessage, syncLine, WEBHOOK_URL_RE, webhookUrlOk,
+  isDiscordAuthorizeUrl, orgPausedLine, parseDiscordEventStatus, parseDiscordStatus, postLine, rpcMessage, syncLine, WEBHOOK_URL_RE, webhookUrlOk,
 } from './discord';
 import { webhookUrlParts } from '../../supabase/functions/_shared/channels/discord.ts';
 import { confirmPrompt, readOAuthReturn, refusalMessage, stripOAuthHash, stripOAuthReturn } from './oauthReturn';
@@ -66,9 +66,12 @@ describe('status', () => {
     const s = parseDiscordStatus({ can_manage: true, is_owner: false, webhook: { set: true, hint: '…5679', set_at: '2026-11-12T10:00:00Z' },
       guild: { linked: true, id: '423456789012345671', name: 'Blue Room' }, writes_enabled: false, auto_post: true, shown_events: 2 });
     expect(s).toEqual({ canManage: true, isOwner: false, webhook: { set: true, hint: '…5679', setAt: '2026-11-12T10:00:00Z', broken: false },
-      guild: { linked: true, name: 'Blue Room', broken: false }, paused: false, writesEnabled: false, autoPost: true, shownEvents: 2 });
+      guild: { linked: true, name: 'Blue Room', broken: false }, paused: false, orgPausedUntil: null, writesEnabled: false, autoPost: true, shownEvents: 2 });
     const b = parseDiscordStatus({ paused: true, webhook: { set: true, broken: true }, guild: { linked: true, broken: true } });
     expect([b.paused, b.webhook.broken, b.guild.broken]).toEqual([true, true, true]);
+    expect(parseDiscordStatus({ org_paused_until: '2026-11-12T14:30:00Z' }).orgPausedUntil).toBe('2026-11-12T14:30:00Z');
+    expect(orgPausedLine('2026-11-12T14:30:00Z')).toMatch(/paused Discord for it until Nov 12/);
+    expect(orgPausedLine(null)).toBeNull();
     expect(parseDiscordStatus(null).webhook.set).toBe(false);
   });
   it('says what each post and the scheduled event are doing', () => {

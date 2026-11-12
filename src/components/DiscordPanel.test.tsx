@@ -98,4 +98,11 @@ describe('DiscordPanel', () => {
     expect(screen.getByText(/Discord refused this webhook/)).toBeTruthy();
     expect(screen.getByText(/Discord is paused on this Exos server/)).toBeTruthy();
   });
+
+  it('says when Discord is paused for this organization, and until when', async () => {
+    h.status = parseDiscordStatus({ can_manage: true, is_owner: true, webhook: { set: true, hint: '…5679' }, guild: { linked: false },
+      org_paused_until: '2026-11-12T14:30:00Z' });
+    render(<DiscordPanel orgId={ORG} />);
+    expect(await screen.findByText(/paused Discord for it until/)).toBeTruthy();
+  });
 });

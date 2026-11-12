@@ -82,8 +82,14 @@ it made.
   - a **401** on a bot call stops every bot call platform-wide until the bot token changes (its
     SHA-256 fingerprint differs) or the operator runs `SELECT public.exos_discord_breaker_clear();`.
     Webhook posts go on (they don't use the token);
-  - more than **500 invalid answers** (401, 403, a 429 that isn't scope `shared`) in 10 minutes stops
-    every Discord call, bot and webhook, until the operator clears it;
+  - **invalid answers** (401, 403, a 429 that isn't scope `shared`) count **per org** first: an org's
+    10th in 10 minutes pauses that org's Discord calls for 30 minutes, doubling on each repeat within a
+    day, at most 24 hours (audited `discord.org_paused`; the panels say until when). Re-saving a webhook
+    or relinking a server doesn't reset it. A paused org's calls aren't made, so they don't count further;
+  - only orgs that aren't paused feed the platform count: more than **500** in 10 minutes from **at
+    least 5 orgs** stops every Discord call, bot and webhook, for **15 minutes** (it clears itself and
+    re-trips if it happens again; the operator can clear it sooner). One org can never trip it,
+    whatever its volume (security review of `450b8f9`: tenants tripping the shared breaker);
   - a **global 429** pauses every bot call for its `retry_after`;
   - a server that refuses the bot (**403** 50001 / 50013, **unknown guild** 10004) is marked broken
     and skipped until it's linked again (the panel says "Reconnect the bot"); a webhook Discord
@@ -99,7 +105,7 @@ it made.
   and the bot leaves when someone removes it in Discord (Server settings → Integrations).
 - **Audit** (`exos_org_audit`): `discord.webhook_set`, `discord.webhook_remove`, `discord.settings`,
   `discord.guild_link`, `discord.guild_unlink`, `discord.event_show`, `discord.post` (sent or dry run,
-  with the person who asked). No token or full webhook id.
+  with the person who asked), `discord.org_paused`. No token or full webhook id.
 
 ## By design (reviewed, left as is)
 

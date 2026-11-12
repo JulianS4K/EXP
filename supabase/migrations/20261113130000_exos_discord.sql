@@ -63,10 +63,14 @@
 -- 10 minutes): every call to Discord goes through exos_discord_call_gate
 -- first (300 calls a minute across all orgs) and reports a refusal to
 -- exos_discord_call_result. A 401 on the bot token halts every bot call
--- until the token changes or an operator runs exos_discord_breaker_clear();
--- more than 500 invalid answers (401 / 403 / non-shared 429) in 10 minutes
--- halts every Discord call until an operator clears it; a global 429 pauses
--- bot calls for its retry_after. A server that refuses the bot (403
+-- until the token changes or an operator runs exos_discord_breaker_clear().
+-- Invalid answers (401 / 403 / non-shared 429) count per org first: 10 in 10
+-- minutes pause that org's Discord calls for 30 minutes, doubling on each
+-- repeat up to 24 hours (re-saving a webhook or relinking a server doesn't
+-- reset it). Only orgs that aren't paused count towards the platform: more
+-- than 500 in 10 minutes from at least 5 orgs halts every Discord call for 15
+-- minutes (it clears itself and re-trips if it happens again), so no single
+-- org can stop the others. A global 429 pauses bot calls for its retry_after. A server that refuses the bot (403
 -- 50001 / 50013, unknown guild 10004) is marked broken and skipped until it
 -- is linked again; a webhook that's gone (10015, 401 / 403 / 404) is marked
 -- broken and skipped until a new URL is saved.
@@ -138,6 +142,11 @@ CREATE TABLE IF NOT EXISTS public.exos_discord_links (
   webhook_broken_reason text CHECK (webhook_broken_reason IS NULL OR length(webhook_broken_reason) <= 200),
   guild_broken_at    timestamptz,
   guild_broken_reason text CHECK (guild_broken_reason IS NULL OR length(guild_broken_reason) <= 200),
+  -- Too many invalid answers from this org: its Discord calls wait until then
+  -- (30 minutes, doubling per repeat, at most 24 hours). Nothing an org can
+  -- do resets it.
+  invalid_paused_until timestamptz,
+  invalid_pause_count  integer NOT NULL DEFAULT 0,
   -- The org's switches: writes (owner) and the publish announcement (owner / manager).
   writes_enabled     boolean NOT NULL DEFAULT false,
   auto_post          boolean NOT NULL DEFAULT false,
@@ -157,7 +166,8 @@ COMMENT ON TABLE public.exos_discord_links IS
 
 -- One row: the platform-wide circuit breaker. scope 'bot' (the bot token got
 -- a 401: bot calls stop; cleared by a new token or the operator) or 'all'
--- (too many invalid answers: every Discord call stops; operator only).
+-- (too many invalid answers from 5+ orgs: every Discord call stops for 15
+-- minutes, or until the operator clears it).
 -- bot_paused_until: a global 429 (every bot call waits).
 CREATE TABLE IF NOT EXISTS public.exos_discord_platform (
   id               boolean PRIMARY KEY DEFAULT true CHECK (id),
@@ -286,15 +296,28 @@ GRANT EXECUTE ON FUNCTION public.exos_discord_webhook_parts(text) TO service_rol
 -- routes, the bot token) or 'webhook'. A 'bot' breaker set for another
 -- token (p_token_fp: the first hex of the token's SHA-256) is cleared: the
 -- operator rotated the token.
-CREATE OR REPLACE FUNCTION public._exos_discord_blocked(p_kind text, p_token_fp text DEFAULT NULL)
+CREATE OR REPLACE FUNCTION public._exos_discord_blocked(p_kind text, p_token_fp text DEFAULT NULL, p_org_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE b public.exos_discord_platform%ROWTYPE;
+DECLARE b public.exos_discord_platform%ROWTYPE; v_until timestamptz;
 BEGIN
   SELECT * INTO b FROM public.exos_discord_platform WHERE id;
+  -- The 'all' breaker cools down by itself after 15 minutes (it re-trips if the answers keep coming).
+  IF b.breaker_scope = 'all' AND b.breaker_at <= now() - interval '15 minutes' THEN
+    UPDATE public.exos_discord_platform SET breaker_scope = NULL, breaker_at = NULL, breaker_reason = NULL, updated_at = now()
+     WHERE id AND breaker_scope = 'all';
+    b.breaker_scope := NULL;
+  END IF;
   IF b.breaker_scope = 'all' THEN
-    RETURN jsonb_build_object('reason', 'breaker', 'detail', b.breaker_reason, 'retry_after', 600);
+    RETURN jsonb_build_object('reason', 'breaker', 'detail', b.breaker_reason,
+      'retry_after', greatest(ceil(extract(epoch FROM b.breaker_at + interval '15 minutes' - now()))::int, 5));
+  END IF;
+  IF p_org_id IS NOT NULL THEN
+    SELECT invalid_paused_until INTO v_until FROM public.exos_discord_links WHERE org_id = p_org_id;
+    IF v_until > now() THEN
+      RETURN jsonb_build_object('reason', 'org_paused', 'until', v_until, 'retry_after', ceil(extract(epoch FROM v_until - now()))::int);
+    END IF;
   END IF;
   IF p_kind = 'bot' AND b.breaker_scope = 'bot' THEN
     IF p_token_fp IS NOT NULL AND b.breaker_fp IS NOT NULL AND p_token_fp <> b.breaker_fp THEN
@@ -309,12 +332,13 @@ BEGIN
   END IF;
   RETURN NULL;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_discord_blocked(text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._exos_discord_blocked(text, text) TO service_role;
+REVOKE ALL ON FUNCTION public._exos_discord_blocked(text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_discord_blocked(text, text, uuid) TO service_role;
 
--- Before every request to Discord: the breaker, the pause, then 300 calls a
--- minute across every org (counted here, so refused calls count too).
-CREATE OR REPLACE FUNCTION public.exos_discord_call_gate(p_kind text, p_token_fp text DEFAULT NULL)
+-- Before every request to Discord: the breaker, the org's pause, the global
+-- pause, then 300 calls a minute across every org (counted here, so refused
+-- calls count too). p_org_id: the org the call is for.
+CREATE OR REPLACE FUNCTION public.exos_discord_call_gate(p_kind text, p_token_fp text DEFAULT NULL, p_org_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
@@ -323,7 +347,7 @@ BEGIN
   IF p_kind IS NULL OR p_kind NOT IN ('bot', 'webhook') THEN
     RAISE EXCEPTION 'exos_discord_call_gate: bot or webhook' USING ERRCODE = '22023';
   END IF;
-  v := public._exos_discord_blocked(p_kind, p_token_fp);
+  v := public._exos_discord_blocked(p_kind, p_token_fp, p_org_id);
   IF v IS NOT NULL THEN
     RETURN v || jsonb_build_object('ok', false);
   END IF;
@@ -332,34 +356,68 @@ BEGIN
   END IF;
   RETURN jsonb_build_object('ok', true);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_discord_call_gate(text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_discord_call_gate(text, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_discord_call_gate(text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_discord_call_gate(text, text, uuid) TO service_role;
 
--- After a refused request: count it if Discord counts it as invalid (401,
--- 403, a 429 that isn't scope 'shared'); over 500 in 10 minutes trips the
--- breaker for every call. A 401 on a bot call trips it for bot calls. A
--- global 429 on a bot call pauses bot calls for retry_after.
+-- After a refused request (p_org_id: the org the call was for). An invalid
+-- answer (401, 403, a 429 that isn't scope 'shared') counts for the org
+-- first: its 10th in 10 minutes pauses the org (30 minutes, doubling per
+-- repeat within a day, at most 24 hours; audited discord.org_paused), and a
+-- paused org's answers don't count for the platform. The platform's count
+-- trips the 'all' breaker only past 500 in 10 minutes from at least 5
+-- distinct orgs (one org never can). A 401 on a bot call trips the bot
+-- breaker (the bot token, not a tenant, is wrong). A global 429 on a bot
+-- call pauses bot calls for retry_after.
 CREATE OR REPLACE FUNCTION public.exos_discord_call_result(
   p_kind text, p_status int, p_code int DEFAULT NULL, p_global boolean DEFAULT false, p_scope text DEFAULT NULL,
-  p_retry_after numeric DEFAULT NULL, p_token_fp text DEFAULT NULL
+  p_retry_after numeric DEFAULT NULL, p_token_fp text DEFAULT NULL, p_org_id uuid DEFAULT NULL
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_invalid boolean := coalesce(p_status IN (401, 403) OR (p_status = 429 AND coalesce(p_scope, '') <> 'shared'), false);
+  l         public.exos_discord_links%ROWTYPE;
+  v_org_n   bigint := 0;
   v_n       bigint := 0;
+  v_orgs    bigint := 0;
   v_trip    text;
+  v_count   int;
+  v_until   timestamptz;
 BEGIN
-  IF v_invalid THEN
-    PERFORM public.exos_rate_hit('discord_invalid', 2147483647);
-    SELECT coalesce(sum(hits), 0) INTO v_n FROM public.exos_rate_windows
-     WHERE bucket = 'discord_invalid' AND window_start > now() - interval '10 minutes';
+  IF v_invalid AND p_org_id IS NOT NULL THEN
+    SELECT * INTO l FROM public.exos_discord_links WHERE org_id = p_org_id FOR UPDATE;
   END IF;
-  IF v_n > 500 THEN
+  -- A paused org (or no org) never feeds the platform count.
+  IF v_invalid AND l.org_id IS NOT NULL AND NOT coalesce(l.invalid_paused_until > now(), false) THEN
+    PERFORM public.exos_rate_hit('discord_invalid:' || p_org_id::text, 2147483647);
+    SELECT coalesce(sum(hits), 0) INTO v_org_n FROM public.exos_rate_windows
+     WHERE bucket = 'discord_invalid:' || p_org_id::text AND window_start > now() - interval '10 minutes';
+    IF v_org_n >= 10 THEN
+      -- Doubles per repeat; a day after its last pause ended an org starts again at 30 minutes.
+      v_count := CASE WHEN l.invalid_paused_until > now() - interval '1 day' THEN l.invalid_pause_count ELSE 0 END;
+      v_until := now() + least(interval '30 minutes' * (2 ^ least(v_count, 6))::int, interval '24 hours');
+      UPDATE public.exos_discord_links SET invalid_paused_until = v_until, invalid_pause_count = v_count + 1
+       WHERE org_id = p_org_id;
+      /* exos: audit discord.org_paused */
+      PERFORM public._exos_audit(p_org_id, 'discord.org_paused', 'discord_link', p_org_id::text, NULL,
+        jsonb_build_object('paused_until', v_until, 'pauses', v_count + 1), NULL, NULL,
+        'Discord refused 10 calls in 10 minutes', NULL, NULL, 'system');
+    ELSE
+      PERFORM public.exos_rate_hit('discord_invalid', 2147483647);
+      SELECT coalesce(sum(hits), 0) INTO v_n FROM public.exos_rate_windows
+       WHERE bucket = 'discord_invalid' AND window_start > now() - interval '10 minutes';
+      SELECT count(DISTINCT w.bucket) INTO v_orgs FROM public.exos_rate_windows w
+       WHERE w.bucket LIKE 'discord_invalid:%' AND w.window_start > now() - interval '10 minutes'
+         AND NOT EXISTS (SELECT 1 FROM public.exos_discord_links x
+                          WHERE w.bucket = 'discord_invalid:' || x.org_id::text AND x.invalid_paused_until > now());
+    END IF;
+  END IF;
+  IF v_n > 500 AND v_orgs >= 5 THEN
     UPDATE public.exos_discord_platform
        SET breaker_scope = 'all', breaker_at = coalesce(CASE WHEN breaker_scope = 'all' THEN breaker_at END, now()),
-           breaker_reason = 'more than 500 invalid Discord answers in 10 minutes', updated_at = now()
+           breaker_reason = 'more than 500 invalid Discord answers in 10 minutes from 5 or more organizations', updated_at = now()
      WHERE id;
+    DELETE FROM public.exos_rate_windows WHERE bucket = 'discord_invalid';
     v_trip := 'all';
   ELSIF p_kind = 'bot' AND p_status = 401 THEN
     UPDATE public.exos_discord_platform
@@ -375,10 +433,11 @@ BEGIN
            updated_at = now()
      WHERE id;
   END IF;
-  RETURN jsonb_build_object('invalid', v_invalid, 'invalid_10min', v_n, 'tripped', v_trip);
+  RETURN jsonb_build_object('invalid', v_invalid, 'org_invalid_10min', v_org_n, 'invalid_10min', v_n, 'orgs_10min', v_orgs,
+                            'tripped', v_trip, 'org_paused_until', v_until);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_discord_call_result(text, int, int, boolean, text, numeric, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_discord_call_result(text, int, int, boolean, text, numeric, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_discord_call_result(text, int, int, boolean, text, numeric, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_discord_call_result(text, int, int, boolean, text, numeric, text, uuid) TO service_role;
 
 -- Operator: clear the breaker and the pause (SELECT public.exos_discord_breaker_clear();).
 CREATE OR REPLACE FUNCTION public.exos_discord_breaker_clear()
@@ -421,6 +480,7 @@ BEGIN
     'guild', jsonb_build_object('linked', l.guild_id IS NOT NULL, 'id', l.guild_id, 'name', l.guild_name,
                                 'linked_at', l.guild_linked_at, 'broken', l.guild_broken_at IS NOT NULL AND l.guild_id IS NOT NULL),
     'paused', coalesce((SELECT b.breaker_scope IS NOT NULL FROM public.exos_discord_platform b WHERE b.id), false),
+    'org_paused_until', CASE WHEN l.invalid_paused_until > now() THEN l.invalid_paused_until END,
     'writes_enabled', coalesce(l.writes_enabled, false),
     'auto_post', coalesce(l.auto_post, false),
     'shown_events', (SELECT count(*) FROM public.exos_discord_event_syncs s WHERE s.org_id = p_org_id AND s.show),
@@ -617,6 +677,7 @@ BEGIN
     'guild_name', l.guild_name,
     'guild_broken', l.guild_broken_at IS NOT NULL,
     'webhook_broken', l.webhook_broken_at IS NOT NULL,
+    'org_paused_until', CASE WHEN l.invalid_paused_until > now() THEN l.invalid_paused_until END,
     'writes_enabled', coalesce(l.writes_enabled, false),
     'show', coalesce(s.show, false),
     'sync', CASE WHEN s.event_id IS NULL THEN NULL ELSE jsonb_build_object(
@@ -819,7 +880,7 @@ BEGIN
   FOR r IN
     SELECT p.id, p.org_id, p.event_id, p.kind, e.status AS ev_status,
            coalesce(e.ends_at, e.starts_at + interval '3 hours', now() + interval '1 day') AS ev_end,
-           l.webhook_id, l.webhook_secret_id, l.writes_enabled, l.webhook_broken_at
+           l.webhook_id, l.webhook_secret_id, l.writes_enabled, l.webhook_broken_at, l.invalid_paused_until
       FROM public.exos_discord_posts p
       JOIN public.exos_events e ON e.id = p.event_id
       LEFT JOIN public.exos_discord_links l ON l.org_id = p.org_id
@@ -831,6 +892,10 @@ BEGIN
   LOOP
     IF r.webhook_id IS NULL THEN
       UPDATE public.exos_discord_posts SET status = 'error', last_error = 'add a Discord webhook first' WHERE id = r.id;
+      CONTINUE;
+    END IF;
+    IF r.invalid_paused_until > now() THEN
+      UPDATE public.exos_discord_posts SET next_try_at = r.invalid_paused_until WHERE id = r.id;
       CONTINUE;
     END IF;
     IF r.webhook_broken_at IS NOT NULL THEN
@@ -944,6 +1009,7 @@ BEGIN
       FROM public.exos_discord_event_syncs s
       JOIN public.exos_events e ON e.id = s.event_id
       JOIN public.exos_discord_links l ON l.org_id = s.org_id AND l.guild_id IS NOT NULL AND l.guild_broken_at IS NULL
+                                     AND (l.invalid_paused_until IS NULL OR l.invalid_paused_until <= now())
      WHERE (s.lease_until IS NULL OR s.lease_until < now())
        AND (s.show OR s.status <> 'removed')
        AND coalesce(e.ends_at, e.starts_at + interval '3 hours', now()) > now() - interval '1 day'

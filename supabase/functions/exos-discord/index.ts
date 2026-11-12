@@ -197,7 +197,6 @@ interface ClaimedPost { post_id: string; org_id: string; event_id: string; kind:
 
 async function drainPosts(sb: SupabaseClient, app: string, postId: string | null, deadline: number) {
   const results: { state: string }[] = [];
-  const hooks = callHooks(sb, null);
   for (let i = 0; i < (postId ? 1 : MAX_ROWS) && Date.now() < deadline; i++) {
     const { data, error } = await sb.rpc("exos_discord_post_claim", { p_limit: 1, p_post_id: postId });
     if (error) {
@@ -217,7 +216,8 @@ async function drainPosts(sb: SupabaseClient, app: string, postId: string | null
       }
       const live = writesLive(c.payload?.writes_enabled, env("EXOS_DISCORD_WRITES"));
       const steps: DiscordStep[] = [];
-      const io = makeDiscordIo({ fetch, live, bound: { webhookId: c.payload.webhook.id }, steps, userAgent: `DiscordBot (${app}, 1.0)`, hooks });
+      const io = makeDiscordIo({ fetch, live, bound: { webhookId: c.payload.webhook.id }, steps, userAgent: `DiscordBot (${app}, 1.0)`,
+        hooks: callHooks(sb, null, c.org_id) });
       const out = await postAnnouncement(io, ev, c.kind, c.payload.webhook.id, token, steps);
       await sb.rpc("exos_discord_post_mark", {
         p_post_id: c.post_id, p_lease: c.lease_id, p_state: out.state, p_message_id: out.messageId ?? null,
@@ -242,7 +242,6 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
   const results: { state: string }[] = [];
   if (!botToken) return { ok: true, results };
   const fp = await tokenFingerprint(botToken);
-  const hooks = callHooks(sb, fp);
   const sbUrl = env("SUPABASE_URL") ?? "";
   for (let i = 0; i < (event ? 1 : MAX_ROWS) && Date.now() < deadline; i++) {
     const { data, error } = await sb.rpc("exos_discord_sync_claim", { p_limit: 1, p_event_id: event, p_token_fp: fp });
@@ -264,7 +263,8 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
       }
       const live = writesLive(c.payload?.writes_enabled, env("EXOS_DISCORD_WRITES"));
       const steps: DiscordStep[] = [];
-      const io = makeDiscordIo({ fetch, live, bound: { guildId: guild }, botToken, steps, userAgent: `DiscordBot (${app}, 1.0)`, hooks });
+      const io = makeDiscordIo({ fetch, live, bound: { guildId: guild }, botToken, steps, userAgent: `DiscordBot (${app}, 1.0)`,
+        hooks: callHooks(sb, fp, c.org_id) });
       const hash = await discordHash(ev);
       const out = await syncScheduledEvent(io, ev, guild, c.payload?.sync ?? { show: false, external_id: null, last_hash: null }, hash, steps,
         () => coverDataUri(storageLoader(sb), ev.imageUrl, sbUrl));
@@ -280,11 +280,15 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
   return { ok: true, results };
 }
 
-/** The breaker hooks: the gate before each call, the refusal report after (both in SQL). */
-function callHooks(sb: SupabaseClient, fp: string | null): CallHooks {
+/**
+ * The breaker hooks for one org's calls: the gate before each call, the
+ * refusal report after (both in SQL; refusals count for the org first, so one
+ * org can only pause itself).
+ */
+function callHooks(sb: SupabaseClient, fp: string | null, orgId: string): CallHooks {
   return {
     async gate(kind: CallKind) {
-      const { data, error } = await sb.rpc("exos_discord_call_gate", { p_kind: kind, p_token_fp: kind === "bot" ? fp : null });
+      const { data, error } = await sb.rpc("exos_discord_call_gate", { p_kind: kind, p_token_fp: kind === "bot" ? fp : null, p_org_id: orgId });
       if (error || !data) return { ok: false, reason: "gate", retryAfter: 60 };
       const d = data as { ok?: boolean; reason?: string; retry_after?: number };
       return { ok: d.ok === true, reason: d.reason, retryAfter: Number(d.retry_after) || 60 };
@@ -292,7 +296,7 @@ function callHooks(sb: SupabaseClient, fp: string | null): CallHooks {
     async report(kind: CallKind, r: DiscordResult) {
       await sb.rpc("exos_discord_call_result", {
         p_kind: kind, p_status: r.status, p_code: r.code ?? null, p_global: r.global === true, p_scope: r.scope ?? null,
-        p_retry_after: r.retryAfter ?? null, p_token_fp: kind === "bot" ? fp : null,
+        p_retry_after: r.retryAfter ?? null, p_token_fp: kind === "bot" ? fp : null, p_org_id: orgId,
       });
     },
   };
