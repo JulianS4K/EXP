@@ -114,6 +114,12 @@ it made.
   organizer deletes in Discord. Posts never do this (above).
 - **The webhook is the one the org saved.** Exos doesn't check that it belongs to the linked server
   (no extra GET); it only posts to that webhook.
+- **One org per server, first come.** A Discord server already linked to another org is refused
+  (no takeover path); the bot stays in the server until its admins remove it. Relinking an org to a
+  different server leaves the old server's events there, no longer managed.
+- **Managers can repoint.** With writes on, an owner or manager can save a different webhook or link
+  a different server (audited: `discord.webhook_set`, `discord.guild_link`); only the owner turns
+  writes on.
 
 ## What the operator sets up
 
