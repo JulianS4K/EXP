@@ -94,6 +94,8 @@ export interface WalkupOrder {
   /** A card sale's attempt (never card data: the PaymentIntent id and Stripe's decline code). */
   card?: { status: string; mode: 'reader' | 'sdk'; payment_intent: string | null; decline_code: string | null } | null;
   card_refund?: { status: string | null; amount_cents: number; error?: string } | null;
+  /** 'kiosk' for a sale on a self-serve kiosk (mig 20261113100000), else 'door'. */
+  channel?: 'door' | 'kiosk';
   /** The seller skipped required checkout questions (mig 20261108110000; logged). */
   questions_skipped?: boolean;
 }

@@ -38,6 +38,9 @@ export async function saveCheckinList(eventId: string, input: CheckinListInput, 
       admits: input.admits,
       addon_ids: input.admits !== 'tickets' && input.addonIds && input.addonIds.length > 0 ? input.addonIds : null,
     } : {}),
+    // A fair day (mig 20261113110000): only sent when set, so older databases and
+    // edits that don't touch it keep working.
+    ...(input.entryDay !== undefined ? { entry_day: input.admits === 'addons' ? null : input.entryDay } : {}),
   };
   if (id) {
     const { error } = await supabase.from('exos_checkin_lists').update(row).eq('id', id);

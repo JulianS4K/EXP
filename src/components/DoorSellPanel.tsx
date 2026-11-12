@@ -42,6 +42,7 @@ import { answersBody, EMPTY_DRAFT, hasQuestions, ticketTiersFor, type AnswerDraf
 import { qrSvg } from '../../supabase/functions/_shared/print/qr.ts';
 import type { PrintTicket } from '../../supabase/functions/_shared/print/tickets.ts';
 import CheckoutQuestionsForm from './CheckoutQuestionsForm';
+import KioskSetupPanel from './KioskSetupPanel'; // claude/exos-kiosk
 
 const BIG = 'min-h-[52px] px-4 rounded-xl text-sm font-black uppercase tracking-widest';
 const INPUT = 'w-full min-h-[48px] border border-slate-300 rounded-xl px-3 text-base bg-white';
@@ -605,6 +606,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                     {new Date(o.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} ·{' '}
                     {o.payment_method === 'comp' ? 'comp' : money(o.total_cents)} · {o.status}
                     {o.tickets_scanned > 0 ? ` · ${o.tickets_scanned} in` : ''}
+                    {o.channel === 'kiosk' ? ' · kiosk' : ''}
                   </span>
                 </span>
                 {o.status === 'paid' && o.can_hand_over && o.ticket_ids.length > 0 && (
@@ -692,6 +694,11 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
           </div>
           <button type="button" disabled={busy} onClick={() => void addReader()} className={`${BIG} w-full border border-slate-300`}>Add reader</button>
         </section>
+      )}
+
+      {/* Kiosk mode (mig 20261113100000): owners and managers set up a self-serve card-only screen. */}
+      {(cat.role === 'owner' || cat.role === 'manager') && (
+        <KioskSetupPanel eventId={eventId} readers={cat.card.readers ?? []} cardOn={cat.card.switched_on === true} />
       )}
     </div>
   );

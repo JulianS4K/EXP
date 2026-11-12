@@ -26,10 +26,15 @@ interface Form {
   admits: ListAdmits;
   allAddons: boolean;
   addonIds: string[];
+  /** YYYY-MM-DD fair day ('' = an ordinary list), mig 20261113110000. */
+  entryDay: string;
+  /** The list had a fair day when it was opened (so clearing it is sent). */
+  hadDay: boolean;
 }
 
 const BLANK: Form = {
   name: '', allTiers: true, tierIds: [], allowReentry: false, from: '', until: '', admits: 'tickets', allAddons: true, addonIds: [],
+  entryDay: '', hadDay: false,
 };
 
 const inputCls =
@@ -84,6 +89,8 @@ export default function CheckinListsEditor({
     validUntil: toIso(form.until),
     admits: form.admits,
     addonIds: form.admits === 'tickets' || form.allAddons ? null : form.addonIds,
+    // Only sent when set or cleared, so a database without fair days still saves.
+    ...(form.entryDay || form.hadDay ? { entryDay: form.admits === 'addons' ? null : form.entryDay || null } : {}),
   });
 
   const startNew = () => { setEditing(null); setForm(BLANK); setOpen(true); };
@@ -99,6 +106,8 @@ export default function CheckinListsEditor({
       admits: l.admits ?? 'tickets',
       allAddons: !l.addonIds,
       addonIds: l.addonIds ?? [],
+      entryDay: l.entryDay ?? '',
+      hadDay: !!l.entryDay,
     });
     setOpen(true);
   };
@@ -285,6 +294,17 @@ export default function CheckinListsEditor({
             </div>
           </div>
           <p className="text-xs text-white/40">Times are in the event's time zone ({tz}). Exits are allowed outside the window.</p>
+          {form.admits !== 'addons' && (
+            <div className="space-y-1 max-w-xs">
+              <label htmlFor="cl-day" className="type text-[10px] text-white/60 uppercase tracking-widest">Fair day (optional)</label>
+              <input id="cl-day" type="date" value={form.entryDay} onChange={(e) => setForm({ ...form, entryDay: e.target.value })}
+                aria-describedby="cl-day-help" className={inputCls} />
+              <p id="cl-day-help" className="text-xs text-white/50">
+                For multi-day events: a ticket used on another day may enter here, once this day (lists with the same day
+                share it), and a pass's day limit is checked.
+              </p>
+            </div>
+          )}
           <div className="flex gap-3">
             <button
               type="button"

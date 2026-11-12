@@ -127,6 +127,9 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_public_tiers.available` (mig 20261014160000) | OK | The public tiers view (SECURITY DEFINER, `security_barrier`) adds `exos_effective_available`: a count of what Exos can sell, no more revealing than the capacity and sold it already shows. Grants and options unchanged |
 | `exos_event_checkin_roster_since` (mig 20261008090000) | OK | The roster's rows and gate (owner / manager / scanner + `exos_can_door_event`), only for tickets changed at or after `p_since` (ticket, pending transfer, holder profile, or a scan); `p_since` must be set and within 7 days (`22023`). Same columns, so no buyer email |
 | `exos_event_door_summary` (mig 20261008090000) | OK | Aggregates only (counts, times, ticket type / list / gate names, override reasons). Owner / manager / finance of the event's org, a scanner assigned to the event, or admin. Staff appear by display name, else masked email (`exos_mask_email`); no buyer names or emails |
+| `exos_fair_setup` (mig 20261113110000) | OK | The editor's fair / multi-day preset. Owner / manager of the event's org (looked up from the event; an unknown event and another org's give the same 42501) or admin, signed in; not on a cancelled event. One transaction, under the event's row lock, refused (23505) once the event has fair-day lists, so a double click or a second tab writes nothing. The plan is validated in SQL (at most 64 KB, 30 types, 10 add-ons, 40 lists; integer cents to $100,000; keys; dates; windows within 31 days; every key a list names is one of the plan's) before each insert, and the rows go through the tables' own triggers (org from the event, tier ids of the event). One `_exos_audit` row `event.fair_setup` (`/* exos: audit event.fair_setup */`). No anon grant; helpers `_exos_fair_text`, `_exos_fair_int` have no client grant |
+| `exos_door_throughput` (mig 20261113110000) | OK | Aggregates only (counts per bucket, gate and list names, device counts, refusal reasons): no ticket ids, buyer names or emails, and a refusal's free-text detail is never echoed (only `^[a-z][a-z-]{1,39}$` reasons, else the reason code). Owner / manager / finance of the event's org, a scanner assigned to the event, or admin (`exos_event_door_summary`'s rule); 42501 otherwise, the same for an unknown event. Every read is filtered to the event; window at most 14 days, bucket 5 / 10 / 15 / 30 / 60 minutes (22023) |
+| `_exos_checkin_day_refusal`, `_exos_event_tz` (mig 20261113110000) | Internal | The fair-day rule (a day list admits a ticket once that day; a ticket type's `max_entry_days`). Every prior entry of the ticket for the event counts, whatever its list: its day is the list's `entry_day`, else the scan's local date in the event's zone (`_exos_event_tz`, UTC when unset or unknown), so a no-list, ordinary-list or deleted-list entry can't be used to get in twice a day or add a day. On a re-entry day list, inside / outside is the last scan on any list of that day (two gates can't each admit the pass once); the day limit applies with or without re-entry; and the scan's local date must be the list's day (else `invalid-time` with `wrong_day`, after midnight only inside a window that opens that day), so an old offline scan time can't open another day's list. No client grant; called from `exos_check_in_ticket` (10 args), which on a day or re-entry list re-reads the ticket's status and pending transfer under its row lock first (voided / mid-transfer between the first read and the lock is refused), and from `exos_door_checkin_by_name` (8 args), which reads the ticket `FOR UPDATE` from the start (`tests/exos/race_fair_day.sh` races 1-5) |
 | `_exos_scan_time_ok`, `_exos_checkin_list_refusal`, `_exos_list_inside`, `_exos_post_transfer_code`, `_exos_record_forced_checkin`, `exos_tg_checkin_list_scope` (mig 20260929140000) | Internal | No client grant; called only from the definer door functions (and the trigger) |
 | `exos_checkin_lists` (table, mig 20260929140000) | OK | RLS: owner / manager of the event's org insert, update, delete; door staff of the event read (`exos_can_door_event`, so a scanner assigned to other events sees none). A trigger sets `org_id` from the event, refuses moving a list to another event, and checks the ticket types are the event's. No anon access |
 | `exos_record_payment_fees` (mig 20260929131000) | OK | Service role only (stripe-webhook, exos-reconcile-checkouts): stores Stripe's actual fee, net, transfer and balance-transaction ids on `exos_order_payments`; validates ids and never overwrites a value with null. `exos_order_money` is `security_invoker`, readable by owner / manager / finance |
@@ -265,6 +268,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
+| `exos_pos_kiosk_configure`, `exos_pos_kiosk_enter`, `exos_pos_kiosk_end` and the kiosk cores (mig 20261113100000) | OK | Kiosk mode ("Kiosk mode" below). The three RPCs: owner / manager of the device's org only (`_exos_member_role`; anyone else, a platform admin included, `P0002`), rate-limited. Every `_exos_pos_kiosk_*` core is service role only (`exos-pos`, with the kiosk credential): each resolves the credential first, then reaches the card walk-up cores as the member who started the kiosk |
 | `exos_journal_trial_balance`, `exos_sales_tax_report` (mig 20261108100000) | OK | Money journal reads, authenticated: owner / manager / finance of the passed org (`exos_has_org_role`), platform admins, or the service role (exos-api, scoped to the key's org); anyone else `42501`. Every row read is filtered by that org (and the event, when given, must be the org's). Counts and cents only: no buyer email, name or order holder. The writers (`exos_journal_post_*`, `_exos_journal_post`, `_exos_journal_sync`, `_exos_journal_backfill`) are service role only and run from triggers on the money tables |
 | `exos_stripe_org_payouts_record`, `exos_journal_post_stripe_org_payout`, `_exos_journal_gc_refund_fee` (mig 20261111130000) | Service role | `exos-reconcile-stripe` (cron secret) records each connected account's payouts as Stripe lists them (reads only at Stripe); the account must be the org's own connected account (`exos_org_secrets`), a payout id recorded for another org or account is never moved, fields are validated, at most 1,000 a call, status forward only. The posting functions run from triggers; `exos_sales_tax_report` (same readers as above) now reads its amounts from the org's journal lines |
 | `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
@@ -762,6 +766,72 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
 - **Out of scope.** Door scans (`exos_checkins` records them) and buyer
   self-service (transfers, refund asks, profile edits).
 
+### Kiosk mode (mig 20261113100000)
+
+A self-serve screen sells one event's public ticket types by card on its own
+reader (`docs/pos.md` "Kiosk mode"). The screen holds no staff session: the
+member who starts kiosk mode is signed out there, and the browser keeps only
+the **kiosk credential**.
+
+- **The credential** (`exk_` + 32 random bytes) is returned once by
+  `exos_pos_kiosk_enter`; only its SHA-256 is stored
+  (`exos_pos_kiosk_sessions.token_hash`, no client column grant). One live
+  session per device (a unique partial index), 24 hours. It is a bearer
+  secret for that one kiosk: it can sell that event's public types by card on
+  that kiosk's reader, show / email that session's own sales for 10 minutes,
+  and leave with the PIN. Nothing else accepts it.
+- **Resolved in SQL on every call** (`_exos_pos_kiosk_resolve`): a live,
+  unexpired session; the device's kiosk flag still set to the same event; the
+  device active; the event the org's and not cancelled; and the member who
+  started it still an owner or manager of the org. Any failure is `42501`
+  `kiosk-ended`, with nothing about why.
+- **Locked to its event, in SQL.** The begin checks the type is the session's
+  event's, public and not a table, and the quantity within `maxPerOrder`; the
+  order trigger (`exos_pos_orders_zkiosk`) re-checks the session's event and
+  device on the insert and stamps `channel = 'kiosk'` + `kiosk_session_id`
+  from a transaction-local setting only `_exos_pos_kiosk_begin` sets (a
+  client insert's own `channel` is overwritten with `door`). Charge, poll,
+  cancel, codes and email take only orders with that session id (`P0002`
+  otherwise), and the charge always uses the kiosk's own reader. An order key
+  another session (or the door) used is `23505` (the walk-up's key lock is
+  taken before the check).
+- **Card only.** No cash, comp, skip, void or refund path exists for the
+  credential; the trigger refuses a comp under the kiosk flag and any door
+  sale on a kiosk device; `_exos_pos_walkup_complete` refuses a kiosk order
+  completed by anything but the card (`0A000`). Required checkout questions
+  are always required (skip = false).
+- **The admin PIN** is 6-12 digits, not trivial, stored as bcrypt
+  (`extensions.crypt`, cost 8) in `exos_pos_kiosks.pin_hash` (no client
+  column grant, never in the audit row). The exit allows 10 tries a minute
+  per device and locks for 5 minutes after 5 wrong in a row; a wrong PIN
+  returns an answer instead of raising, so the count and the rate-limit hit
+  are committed (`race_pos_kiosk.sh` race 4: ten at once count at most 4
+  before the lock).
+- **Rate limits per session** before any Stripe call: state 60, begin 6,
+  charge 10, poll 90, codes 10, email 6 a minute. The card begin's 20 a
+  minute counts on the kiosk session for kiosk charges (marker
+  `/* exos: pos kiosk card limit */` on `_exos_pos_card_begin`; the setting
+  is set only by `_exos_pos_kiosk_charge`), not on the starting member.
+- **A copied credential** (24 h, in the kiosk's storage, not bound to the
+  device: a fingerprint next to it would be copied with it) can't hold places
+  or take tickets: one open sale per session (`kiosk-busy` while it holds
+  places, released once lapsed; begins serialized on the session row), a hold
+  never past 10 minutes from the begin however often it's charged, and
+  hand-over (codes, email) only for the session's latest paid sale within 10
+  minutes. Staff end a session from the dashboard.
+- **Questions.** The kiosk shows and accepts the public's questions only:
+  answers are validated with online checkout's rules (hidden excluded) before
+  the walk-up path; an answer to a hidden / staff-only question is `22023`
+  `kiosk-answers`.
+- **What the screen sees.** `exos-pos` trims the order to id, status, total,
+  type, quantity and ticket count (no seller, device, order key or buyer
+  data); the state carries no secret.
+- **Tables.** `exos_pos_kiosks`, `exos_pos_kiosk_sessions`: RLS on, owner /
+  manager SELECT on the non-secret columns (column grants), no client writes.
+  No sequences.
+- **Audit:** `pos.kiosk_set`, `pos.kiosk_off`, `pos.kiosk_enter`,
+  `pos.kiosk_exit` (`via` pin / staff), `pos.kiosk_lockout`.
+
 ### Neighborhood pages and followers (mig 20261111110000)
 
 Three anon RPCs, listed above and in H3. The rest:
@@ -808,6 +878,47 @@ Three anon RPCs, listed above and in H3. The rest:
 - **`exos_announce_to_followers`** is redefined to go through the same
   consent-gated path (before, it mailed every follower with no opt-out check,
   no unsubscribe link and no dedupe). Same caller check.
+
+### Attendance report (mig 20261113120000)
+
+Nothing new is granted to anon (H3 unchanged); no table, no sequence. Points
+to review:
+
+- **Who reads it.** `exos_event_attendance(event, compare)` (authenticated):
+  `auth.uid()` first, then owner / manager / finance of the event's org (or a
+  platform admin), else 42501; an unknown event answers the same 42501 (no
+  existence oracle). `_exos_api_attendance` (service role, exos-api
+  `GET /v1/events/:id/attendance`, scope `orders:read`): an API key acts as its
+  creator, who must hold one of those roles now (`_exos_api_key_actor`); a
+  personal / OAuth token's user must hold one now
+  (`_exos_member_role`); any other credential kind is 42501. The scope still
+  decides at the edge: a role never stands in for `orders:read`.
+- **Scoped lookups.** The core `_exos_attendance_report(org, event, compare)`
+  (service role) names the org in every read; the event and the comparison
+  must be the org's (P0002 "event not found" / "comparison event not found",
+  echoing nothing about the other org's event).
+- **Rate limits before work.** 20 a minute per user (`attendance:<uid>`) and
+  per credential (`attendance-api:<id>`), 54000 (the API answers 429), checked
+  after the role and before the report is built.
+- **Aggregate only, small groups suppressed.** No row describes one buyer: per
+  (country, postal area) buyers, orders, live tickets and checked in, with the
+  area coarsened (US ZIP+4 to the ZIP, CA to the FSA, GB to the outward code).
+  An area with fewer than 5 distinct buyers is never named: it folds into
+  "Other (fewer than 5)" inside SQL (AR1 checks the small codes appear nowhere
+  in the answer). No email, name, city, street or order id. Every live order
+  is in exactly one row (named area, Other, No postal code; NULL-safe on
+  country), and an order with neither account nor email is its own buyer
+  (AR8). Owners, managers and finance can already read each order's postal
+  code (`exos_order_locations` RLS, `GET /v1/orders/:id`'s
+  `buyer_location`); that is unchanged, so the under-5 rule protects what is
+  shared: this report, its XLSX and the API route.
+- **Exports.** The XLSX workbooks (attendance, settlement, sales tax, journal)
+  are built in the browser, and the browser logs them after the download
+  through `exos_audit_export` (best effort, as for the CSV exports: a failed
+  log row doesn't block the file), which now
+  accepts those four kinds and counts them toward its 200-a-day cap (markers
+  `exos: attendance export kinds`, `exos: attendance export cap`). Text cells
+  are inline strings, which a spreadsheet never evaluates as formulas.
 
 ### Search path
 

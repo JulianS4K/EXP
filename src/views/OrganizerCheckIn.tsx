@@ -79,12 +79,17 @@ import {
   effectiveDirection,
   loadDirection,
   loadListChoice,
+  enteredOnDay,
+  dayInsideKey,
+  localDayKey,
   pickList,
   saveDirection,
   saveListChoice,
   sortLists,
   withDirection,
+  type DoorCheckinList,
   type DoorDirection,
+  type ListState,
 } from '../lib/door/lists';
 import { classifyReplayError, conflictText, syncHealth, type ReplayConflict } from '../lib/door/health';
 import {
@@ -187,6 +192,9 @@ const REFUSAL_TEXT: Record<string, string> = {
   // Add-on entry codes (mig 20261107110000).
   'tickets-only-list': "This is an add-on's own entry code (a VIP lounge, a merch pickup). It scans at that add-on's check-in list, not here. Switch the list if this device covers it.",
   'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
+  // Fair days (mig 20261113110000).
+  'day-limit': 'This pass has used all its days (an any-day pass gets one day). It was already used on another day of the fair.',
+  'wrong-day': "This check-in list is for another day of the fair. Switch to today's list.",
 };
 // Name check-in off, for a ticket nobody has claimed yet (it has no live code).
 const UNCLAIMED_OFF_TEXT =
@@ -326,6 +334,22 @@ export default function OrganizerCheckIn() {
   const nameAccess = nameMode ? nameCheckinAccess(nameMode, canOverride) : 'off';
   // null = the database has no lists yet: the old RPCs, exactly as before.
   const checkinLists = event?.checkinLists ?? null;
+  // For callbacks that outlive a render (the realtime channel).
+  const doorListsRef = useRef<{ lists: DoorCheckinList[] | null; tz?: string }>({ lists: null });
+  doorListsRef.current = { lists: checkinLists, tz: event?.timezone };
+  /** A ticket's list state after a scan at `at`: the list's last direction,
+   *  and for an entry off the fair-day lists (no list, an ordinary list) a
+   *  day key for its local date, so fair-day lists count it (as the server). */
+  const nextListState = (cur: ListState | undefined, listId: string | null, dir: DoorDirection, at: number): ListState | undefined => {
+    const { lists, tz } = doorListsRef.current;
+    const l = listId ? lists?.find((x) => x.id === listId) : undefined;
+    let st = cur;
+    if (listId) st = withDirection(st, listId, dir);
+    if (dir === 'entry' && !l?.entryDay) st = withDirection(st, localDayKey(at, tz), 'entry');
+    // A fair day's re-entry lists share in / out across their gates.
+    if (l?.entryDay && l.allowReentry) st = withDirection(st, dayInsideKey(l.entryDay), dir);
+    return st;
+  };
   const activeList = pickList(checkinLists, listChoice);
   const direction = effectiveDirection(activeList, wantedDirection);
   const doorTarget: DoorScanTarget | undefined = checkinLists ? { listId: activeList?.id ?? null, direction } : undefined;
@@ -336,8 +360,12 @@ export default function OrganizerCheckIn() {
   };
   // Nothing more to do for this ticket on this list: used (no re-entry), or
   // inside and scanning entries (re-entry list).
+  // A fair-day list (no re-entry): entered on this day, at any of its gates.
   const doneHere = (e: DoorRosterEntry): boolean =>
-    activeList?.allowReentry ? direction === 'entry' && e.lists?.[activeList.id] === 'entry' : e.used;
+    activeList?.allowReentry
+      ? direction === 'entry' && (activeList.entryDay && e.lists?.[dayInsideKey(activeList.entryDay)] !== undefined
+        ? e.lists?.[dayInsideKey(activeList.entryDay)] === 'entry' : e.lists?.[activeList.id] === 'entry')
+      : activeList?.entryDay && !e.addon ? enteredOnDay(activeList, e.lists, checkinLists) : e.used;
   const chooseDirection = (d: DoorDirection) => {
     setWantedDirection(d);
     if (eventId) saveDirection(safeLocalStorage(), eventId, d);
@@ -436,9 +464,13 @@ export default function OrganizerCheckIn() {
         if (ev) {
           // Lists that failed to load (undefined) keep the ones we had.
           const saved = ev.checkinLists === undefined ? loadDoorEvent(safeLocalStorage(), eventId, Date.now()) : null;
-          setEvent((prev) =>
-            ev.checkinLists !== undefined ? ev : { ...ev, checkinLists: prev?.checkinLists ?? saved?.event.checkinLists ?? null },
-          );
+          setEvent((prev) => {
+            const next = ev.checkinLists !== undefined ? ev : { ...ev, checkinLists: prev?.checkinLists ?? saved?.event.checkinLists ?? null };
+            // Day limits that failed to load keep the ones we had (fair days).
+            return next.dayLimits === undefined && next.checkinLists?.some((l) => l.entryDay)
+              ? { ...next, dayLimits: prev?.dayLimits ?? saved?.event.dayLimits }
+              : next;
+          });
           setEventLoad('ready');
           return;
         }
@@ -828,10 +860,11 @@ export default function OrganizerCheckIn() {
         // An add-on scan undone offline: usable again (mig 20261108110000).
         if (q.kind === 'addon-undo') { merged[q.ticketId] = { ...cur, used: false, lists: undefined }; continue; }
         const dir = q.direction ?? 'entry';
+        const lists = nextListState(cur.lists, q.listId ?? null, dir, q.scannedAt);
         merged[q.ticketId] = {
           ...cur,
           ...(dir === 'entry' ? { used: true } : {}),
-          ...(q.listId ? { lists: withDirection(cur.lists, q.listId, dir) } : {}),
+          ...(lists ? { lists } : {}),
         };
       }
       setOfflineRegistry(merged);
@@ -874,10 +907,16 @@ export default function OrganizerCheckIn() {
     const ch = joinCheckinChannel(eventId, (row: RemoteCheckin) => {
       // An exit on a re-entry list re-opens the ticket on that list only.
       if (row.direction === 'exit') {
-        if (row.listId) markListDirection(row.ticketId, row.listId, 'exit');
-      } else if (!row.forced) {
-        markLocal(row.ticketId, { used: true });
-        if (row.listId) markListDirection(row.ticketId, row.listId, 'entry');
+        const cur = offlineRegistryRef.current[row.ticketId];
+        const lists = cur && row.listId ? nextListState(cur.lists, row.listId, 'exit', row.at ?? Date.now()) : undefined;
+        if (lists) markLocal(row.ticketId, { lists });
+      } else {
+        // A forced row (offline admission the server refused) doesn't use the
+        // ticket, but it came in: it counts as a day entered, as on the server.
+        const cur = offlineRegistryRef.current[row.ticketId];
+        const lists = cur ? nextListState(cur.lists, row.listId, 'entry', row.at ?? Date.now()) : undefined;
+        if (!row.forced) markLocal(row.ticketId, { used: true, ...(lists ? { lists } : {}) });
+        else if (lists) markLocal(row.ticketId, { lists });
       }
       // "In" counts tickets checked in, not scan rows (exits, re-entries and
       // forced records are rows too): re-count once the burst settles rather
@@ -1074,11 +1113,22 @@ export default function OrganizerCheckIn() {
       }
       return;
     }
+    if (result.reason === 'day-limit') {
+      setStatus('invalid-barcode');
+      setInvalidReason(REFUSAL_TEXT['day-limit']);
+      void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: 'day-limit' });
+      return;
+    }
     if (result.reason === 'used' || result.reason === 'already-inside') {
       const inside = result.reason === 'already-inside';
       setUsedInfo({ at: result.check_in_at, device: result.device, inside });
       markLocal(ticketId, { used: true });
-      if (inside && activeList) markListDirection(ticketId, activeList.id, 'entry');
+      if (activeList?.entryDay) {
+        // A fair-day list: this list (so this day) entered, and inside the day on a re-entry one.
+        const cur = offlineRegistryRef.current[ticketId];
+        const lists = cur ? nextListState(cur.lists, activeList.id, 'entry', serverNow()) : undefined;
+        if (lists) markLocal(ticketId, { lists });
+      } else if (inside && activeList) markListDirection(ticketId, activeList.id, 'entry');
       setStatus('already-used');
       void writeScanReject('used', src, { ticketIdAttempted: ticketId, reasonDetail: inside ? 'already-inside' : undefined });
       return;
@@ -1107,7 +1157,9 @@ export default function OrganizerCheckIn() {
       'event-cancelled': 'This event was cancelled. Nobody can be checked in.',
     };
     setStatus('invalid-barcode');
-    setInvalidReason(text[result.reason] || 'The server did not accept this ticket. Re-download the offline list and retry.');
+    // Fair days: the server's invalid-time with wrong_day is the list's day, not its hours.
+    const wrongDay = result.reason === 'invalid-time' && (result as CheckInResult & { wrong_day?: boolean }).wrong_day === true;
+    setInvalidReason((wrongDay ? REFUSAL_TEXT['wrong-day'] : text[result.reason]) || 'The server did not accept this ticket. Re-download the offline list and retry.');
     if (result.reason === 'doors-not-open') {
       setDoorsBlocked(true);
       return;
@@ -1134,8 +1186,13 @@ export default function OrganizerCheckIn() {
     setFoundTicket(ticket);
     if (!test) {
       pushScan(ticket.id, name, dir === 'exit' ? 'OUT' : 'SUCCESS');
-      if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false });
-      if (activeList?.allowReentry) markListDirection(ticket.id, activeList.id, dir);
+      // Re-entry and fair-day lists: which list (so which day) it entered; an
+      // entry anywhere else: its local date (one patch, so neither is lost).
+      const cur = offlineRegistryRef.current[ticket.id];
+      const listId = activeList && (activeList.allowReentry || activeList.entryDay) ? activeList.id : null;
+      const lists = cur ? nextListState(cur.lists, listId, dir, serverNow()) : undefined;
+      if (dir === 'entry') markLocal(ticket.id, { used: true, pendingTransferId: null, voided: false, parked: false, ...(lists ? { lists } : {}) });
+      else if (lists) markLocal(ticket.id, { lists });
     }
     setStatus('success');
     setSearchId('');
@@ -1229,6 +1286,13 @@ export default function OrganizerCheckIn() {
           });
         }
         return;
+      case 'day-limit':
+        setStatus('invalid-barcode');
+        setInvalidReason(REFUSAL_TEXT['day-limit']);
+        if (id) pushScan(id, ctx.name, 'DENIED');
+        if (canAudit) void writeScanReject('used', ctx.src, { ticketIdAttempted: id, reasonDetail: 'day-limit' });
+        return;
+      case 'wrong-day':
       case 'wrong-list':
       case 'tickets-only-list':
       case 'addon-only-list':
@@ -1342,6 +1406,9 @@ export default function OrganizerCheckIn() {
       recent: lastReadRef.current,
       list: activeList,
       direction,
+      lists: checkinLists,
+      dayLimits: event?.dayLimits ?? null,
+      timezone: event?.timezone ?? null,
     };
     // Duplicate camera reads are dropped before anything changes on screen.
     const first = decideScan({ ...base, verify: null, network });

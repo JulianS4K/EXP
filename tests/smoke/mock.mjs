@@ -233,3 +233,55 @@ export async function handle(route, log, over = {}) {
   }
   return json({ message: 'unmocked' }, 404);
 }
+
+// --- claude/exos-kiosk: kiosk mode (mig 20261113100000) ----------------------
+// A kiosk screen: signed out, only the kiosk credential in localStorage, and
+// exos-pos's kiosk_* actions mocked. kioskPos(state) answers them; state
+// { polls, cardOn, questions } drives the card poll and the variants.
+export const KIOSK_TOKEN = 'exk_' + 'c'.repeat(64);
+export const KIOSK_CRED = {
+  token: KIOSK_TOKEN, device_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', event_id: EV,
+  session_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+};
+export const KIOSK_TIER = 'f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1';
+const KIOSK_ORDER = 'f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2';
+export function kioskPos(st) {
+  return (b) => {
+    if (b.kiosk_token !== KIOSK_TOKEN) return { status: 403, body: { error: 'kiosk-ended', message: 'This kiosk session has ended.' } };
+    const order = (paid) => ({ id: KIOSK_ORDER, status: paid ? 'paid' : 'pending', currency: 'usd', total_cents: 1500 * (st.qty ?? 1),
+      tier_name: 'Adult', quantity: st.qty ?? 1, ticket_count: paid ? st.qty ?? 1 : 0 });
+    switch (b.action) {
+      case 'kiosk_state': return { body: { data: {
+        kiosk: { session_id: KIOSK_CRED.session_id, device_id: KIOSK_CRED.device_id, device_name: 'Gate kiosk 1', printer: true,
+          expires_at: new Date(Date.now() + 86400e3).toISOString() },
+        event: { id: EV, name: 'County Fair', starts_at: null, venue_name: 'Fairgrounds', currency: 'USD' },
+        tiers: [
+          { tier_id: KIOSK_TIER, name: 'Adult', description: 'Ages 13 and up', price_cents: 1500, price_source: 'door', tax: null, unit_total_cents: 1500, remaining: 40 },
+          { tier_id: 'f3f3f3f3-f3f3-4f3f-8f3f-f3f3f3f3f3f3', name: 'Child', description: null, price_cents: 500, price_source: 'door', tax: null, unit_total_cents: 500, remaining: 0 },
+        ],
+        questions: st.questions === false ? [] : [{ id: 'q-zip', label: 'ZIP code', kind: 'text', required: true, scope: 'order' }],
+        max_per_order: 4, reader: { label: 'Gate reader', ready: st.cardOn !== false },
+        card: st.cardOn === false
+          ? { on: false, available: false, message: 'This kiosk is unavailable: card payments are switched off. Please buy at the box office.' }
+          : { on: true, available: true, message: 'Pay by card on the reader.' } } } };
+      case 'kiosk_begin':
+        if (b.tier_id !== KIOSK_TIER || !b.order_key || b.skip_questions !== undefined) {
+          return { status: 400, body: { error: 'refused', message: 'unexpected kiosk sale ' + JSON.stringify(b) } };
+        }
+        st.qty = b.quantity;
+        return { body: { data: order(false) } };
+      case 'kiosk_charge': return { body: { data: { order_id: KIOSK_ORDER, state: 'waiting', status: 'processing' } } };
+      case 'kiosk_status':
+        st.polls = (st.polls ?? 0) + 1;
+        return { body: { data: st.polls < 2 ? { state: 'waiting', order_id: KIOSK_ORDER }
+          : { state: 'succeeded', order_id: KIOSK_ORDER, order: order(true) } } };
+      case 'kiosk_cancel': return { body: { data: { state: 'canceled', order_id: KIOSK_ORDER } } };
+      case 'kiosk_codes': return { body: { data: { tickets: Array.from({ length: st.qty ?? 1 }, (_, i) => ({
+        ticket_id: `t-${i}`, print_code: `P-t${i}:KioskCodeAbCdEfGhIjKl${i}`, event_name: 'County Fair', starts_at: null, tier_name: 'Adult' })),
+        skipped: [] } } };
+      case 'kiosk_email': return { body: { data: { emailed: st.qty ?? 1 } } };
+      case 'kiosk_exit': return { body: { data: b.pin === '482913' ? { ok: true } : { ok: false, error: 'wrong-pin', attempts_left: 4 } } };
+      default: return { status: 400, body: { error: 'unknown action' } };
+    }
+  };
+}

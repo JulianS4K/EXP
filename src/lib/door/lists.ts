@@ -7,6 +7,12 @@
 // 2026-09-29, "Keep reentry optional"). On a re-entry list a ticket is inside
 // when its last scan on that list was an entry; an exit scan lets it back in.
 //
+// A list can be for one fair day (mig 20261113110000, entryDay): without
+// re-entry a ticket enters once that DAY (every list with the same day, so
+// several gates share it) instead of once per event, and a ticket type's
+// max_entry_days caps how many different days it enters (an any-day pass is
+// 1). See dayListRefusal.
+//
 // A list can also admit add-on entry codes (mig 20261107110000; DICE
 // Extra.hasSeparateAccessBarcode): admits 'tickets' (the default), 'addons'
 // (a VIP lounge, a merch pickup: add-on codes only) or 'both', and addonIds
@@ -36,6 +42,8 @@ export interface DoorCheckinList {
   admits?: ListAdmits;
   /** The add-ons an add-on list takes; null = every add-on with its own code. */
   addonIds?: string[] | null;
+  /** YYYY-MM-DD: a list for one fair day (mig 20261113110000); null / absent = ordinary. */
+  entryDay?: string | null;
 }
 
 export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
@@ -53,6 +61,7 @@ export function mapCheckinListRow(r: Record<string, unknown>): DoorCheckinList {
     sortOrder: Number(r.sort_order ?? 0) || 0,
     admits,
     addonIds: admits !== 'tickets' && addons && addons.length > 0 ? addons : null,
+    ...(typeof r.entry_day === 'string' && /^\d{4}-\d{2}-\d{2}/.test(r.entry_day) ? { entryDay: r.entry_day.slice(0, 10) } : {}),
   };
 }
 
@@ -156,6 +165,89 @@ export function parseListState(v: unknown): ListState | undefined {
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** Fair days: a ticket's list state also has a 'day:YYYY-MM-DD' key for each
+ *  local date (the event's zone) it entered on no list, an ordinary list or a
+ *  deleted list (the roster sends them; the device adds its own). */
+export const DAY_KEY_PREFIX = 'day:';
+/** 'dayin:YYYY-MM-DD': the last direction across a fair day's re-entry lists
+ *  (the roster sends it; the device keeps it): in at gate A, out at gate B. */
+export const DAY_INSIDE_PREFIX = 'dayin:';
+export const dayInsideKey = (day: string) => `${DAY_INSIDE_PREFIX}${day}`;
+
+/** The day key for an entry at `ms` in the event's zone (UTC when unset or
+ *  unknown, as the server's _exos_event_tz). */
+export function localDayKey(ms: number, timezone: string | null | undefined): string {
+  const fmt = (tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .format(new Date(ms));
+  let d: string;
+  try {
+    d = fmt(timezone || 'UTC');
+  } catch {
+    d = fmt('UTC');
+  }
+  return `${DAY_KEY_PREFIX}${d}`;
+}
+
+/** The fair day of each state key: a day list's entryDay, or a day key's date. */
+function stateDays(state: ListState | undefined, dayOf: Map<string, string>): Set<string> {
+  const days = new Set<string>();
+  for (const k of Object.keys(state ?? {})) {
+    const d = k.startsWith(DAY_KEY_PREFIX) ? k.slice(DAY_KEY_PREFIX.length)
+      : k.startsWith(DAY_INSIDE_PREFIX) ? k.slice(DAY_INSIDE_PREFIX.length) : dayOf.get(k);
+    if (d) days.add(d);
+  }
+  return days;
+}
+
+/** Fair days (mig 20261113110000): why a day list refuses a ticket's ENTRY,
+ *  or null. `state` is the ticket's per-list last direction (roster
+ *  list_state, which covers day lists and has day keys for every other
+ *  entry, plus this device's marks); a list with a state was entered, and
+ *  an entry anywhere else counts as its local date. Without re-entry: once that day, whichever of
+ *  the day's lists ('used'). The ticket type's day limit counts the other
+ *  days entered ('day-limit'). On a re-entry list the inside / outside rule
+ *  is the caller's (as before). Mirrors SQL _exos_checkin_day_refusal. */
+export function dayListRefusal(
+  list: DoorCheckinList | null,
+  state: ListState | undefined,
+  allLists: DoorCheckinList[] | null | undefined,
+  dayLimit: number | null | undefined,
+): 'used' | 'already-inside' | 'day-limit' | null {
+  if (!list?.entryDay) return null;
+  // Re-entry: inside / outside is the day's, across its gates.
+  if (list.allowReentry && state?.[dayInsideKey(list.entryDay)] === 'entry') return 'already-inside';
+  const dayOf = new Map((allLists ?? []).filter((l) => l.entryDay).map((l) => [l.id, l.entryDay as string]));
+  dayOf.set(list.id, list.entryDay);
+  const days = stateDays(state, dayOf);
+  if (!list.allowReentry && days.has(list.entryDay)) return 'used';
+  days.delete(list.entryDay);
+  if (dayLimit != null && dayLimit > 0 && days.size >= dayLimit) return 'day-limit';
+  return null;
+}
+
+/** Is the scan on another day than the list's? Its local date (event zone)
+ *  must be the list's day, unless it is after midnight inside a window that
+ *  opens on that day (a rodeo till 1 am). Mirrors the SQL 'wrong_day'. */
+export function dayListWrongDay(list: DoorCheckinList | null, now: number, timezone: string | null | undefined): boolean {
+  if (!list?.entryDay) return false;
+  if (localDayKey(now, timezone) === `${DAY_KEY_PREFIX}${list.entryDay}`) return false;
+  const from = list.validFrom ? Date.parse(list.validFrom) : NaN;
+  const until = list.validUntil ? Date.parse(list.validUntil) : NaN;
+  const overnight = Number.isFinite(from) && Number.isFinite(until)
+    && localDayKey(from, timezone) === `${DAY_KEY_PREFIX}${list.entryDay}` && now >= from && now <= until;
+  return !overnight;
+}
+
+/** Has this ticket entered on the list's fair day (any of the day's lists)? */
+export function enteredOnDay(list: DoorCheckinList, state: ListState | undefined, allLists: DoorCheckinList[] | null | undefined): boolean {
+  if (!list.entryDay) return false;
+  const ids = new Set((allLists ?? []).filter((l) => l.entryDay === list.entryDay).map((l) => l.id));
+  ids.add(list.id);
+  ids.add(`${DAY_KEY_PREFIX}${list.entryDay}`);
+  ids.add(dayInsideKey(list.entryDay));
+  return Object.keys(state ?? {}).some((id) => ids.has(id));
+}
+
 /** A ticket's list state after a scan on `listId`. */
 export function withDirection(state: ListState | undefined, listId: string, d: DoorDirection): ListState {
   return { ...(state ?? {}), [listId]: d };
@@ -174,6 +266,8 @@ export interface CheckinListInput {
   admits?: ListAdmits;
   /** null = every add-on with its own entry code (add-on lists only). */
   addonIds?: string[] | null;
+  /** YYYY-MM-DD fair day; undefined = leave it as it is. */
+  entryDay?: string | null;
 }
 
 /** Problems with a list before it's saved, or null. */
@@ -197,5 +291,6 @@ export function describeList(l: DoorCheckinList, tierName: (id: string) => strin
   const addons = l.addonIds && addonName ? l.addonIds.map(addonName).join(', ') : 'all add-on codes';
   const what = l.admits === 'addons' ? `Add-on codes only (${addons})`
     : l.admits === 'both' ? `${tiers} + ${addons}` : tiers;
-  return `${what} · ${l.allowReentry ? 're-entry allowed' : 'no re-entry'}`;
+  const day = l.entryDay ? ` · fair day ${l.entryDay}` : '';
+  return `${what} · ${l.allowReentry ? (l.entryDay ? 're-entry the same day' : 're-entry allowed') : (l.entryDay ? 'once that day' : 'no re-entry')}${day}`;
 }

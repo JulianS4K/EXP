@@ -4,6 +4,7 @@
 import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
+import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 // Group pay v2 is paused (mig 20261111120000): its steps run against a build
 // with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
@@ -602,6 +603,78 @@ await run('event report: where buyers are (countries, cities, unknown; org-wide)
   exos_event_buyer_geo: () => GEO(4), exos_org_buyer_geo: () => GEO(10),
 } }) });
 
+// ── claude/exos-attendance-report (mig 20261113120000): postal rollup, pacing, XLSX ──
+const PREV_EV = '99999999-9999-4999-8999-99999999e0e0';
+const paceDay = (day, before, paid, gross, free, cum) => ({ day, days_before: before, paid_orders: paid ? 1 : 0, paid_tickets: paid,
+  gross_cents: gross, free_orders: free ? 1 : 0, free_tickets: free, cum_paid_tickets: cum[0], cum_gross_cents: cum[1], cum_free_tickets: cum[2] });
+const ATTENDANCE = (compare) => ({
+  org_id: ORG, event_id: EV, generated_at: '2026-12-12T15:00:00Z', min_buyers: 5,
+  attendance: {
+    totals: { buyers: 17, orders: 18, tickets: 24, checked_in: 2, located_orders: 16 },
+    postal: [{ country: 'US', postal_code: '10001', buyers: 5, orders: 5, tickets: 5, checked_in: 1 }],
+    postal_other: { label: 'Other (fewer than 5)', buyers: 5, orders: 6, tickets: 11, checked_in: 0 },
+    postal_unknown: { label: 'No postal code', buyers: 2, orders: 2, tickets: 3, checked_in: 1 },
+    other_tickets: 1,
+  },
+  pacing: {
+    event: { event_id: EV, name: 'Fall Party', starts_at: '2026-12-21T01:00:00Z', timezone: 'America/New_York', currency: 'USD',
+      event_day: '2026-12-20', on_sale_day: '2026-11-20', on_sale_days_before: 30, days_out_now: 7,
+      totals: { paid_orders: 3, paid_tickets: 4, gross_cents: 8000, free_orders: 1, free_tickets: 3 },
+      rows: [paceDay('2026-12-10', 10, 3, 5500, 0, [3, 5500, 0]), paceDay('2026-12-13', 7, 1, 2500, 3, [4, 8000, 3])] },
+    comparison: compare ? { event_id: PREV_EV, name: 'Fall Party 2025', starts_at: '2025-12-20T01:00:00Z', timezone: 'America/New_York',
+      currency: 'USD', event_day: '2025-12-19', on_sale_day: '2025-11-21', on_sale_days_before: 28, days_out_now: -358,
+      totals: { paid_orders: 2, paid_tickets: 5, gross_cents: 10000, free_orders: 0, free_tickets: 0 },
+      rows: [paceDay('2025-12-09', 10, 4, 8000, 0, [4, 8000, 0]), paceDay('2025-12-18', 1, 1, 2000, 0, [5, 10000, 0])] } : null,
+  },
+  comparison_candidates: [{ event_id: PREV_EV, name: 'Fall Party 2025', starts_at: '2025-12-20T01:00:00Z' }],
+});
+const attendanceMock = ownerMock({ tables: reportMock.tables, rpcs: {
+  exos_event_attendance: (b) => ATTENDANCE(b.p_compare_event_id === PREV_EV),
+  exos_audit_export: () => true,
+  // The Attendees tab's other panels, empty.
+  exos_event_refund_orders: () => [],
+} });
+async function downloadBytes(page, click) {
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 8000 }), click()]);
+  return { name: dl.suggestedFilename(), bytes: readFileSync(await dl.path()) };
+}
+await run('event report: attendance by postal code, pace against last year, XLSX', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=attendees');
+  const section = page.locator('#attendance-report');
+  await section.getByRole('table', { name: 'Attendees by postal code' }).waitFor({ timeout: 8000 });
+  let text = (await section.innerText()).replace(/\s+/g, ' ');
+  for (const want of ['10001', 'Other (fewer than 5)', 'No postal code', '16 of 18', '4 paid tickets sold, $80.00 gross',
+    '3 $0 tickets', '1 more ticket came from door sales']) {
+    assert(text.includes(want), `panel shows "${want}": ` + text);
+  }
+  assert(log.some((l) => l.startsWith('rpc exos_event_attendance') && l.includes(EV) && l.includes('"p_compare_event_id":null')), 'report RPC');
+  await section.getByLabel('Compare with').selectOption(PREV_EV);
+  await section.getByText('against 4 for Fall Party 2025').waitFor({ timeout: 8000 });
+  text = (await section.innerText()).replace(/\s+/g, ' ');
+  assert(text.includes('At 7 days out: 4 paid tickets, against 4 for Fall Party 2025 (0%).'), 'pace line: ' + text);
+  assert(await section.getByRole('img', { name: /Paid tickets sold so far/ }).count() === 1, 'chart has a text alternative');
+  assert(log.some((l) => l.startsWith('rpc exos_event_attendance') && l.includes(PREV_EV)), 'comparison sent');
+  const { name, bytes } = await downloadBytes(page, () => section.getByRole('button', { name: 'Download XLSX' }).click());
+  assert(/^attendance-fall-party-\d{4}-\d{2}-\d{2}\.xlsx$/.test(name), 'file name ' + name);
+  assert(bytes[0] === 0x50 && bytes[1] === 0x4b, 'a ZIP');
+  const raw = bytes.toString('latin1');
+  for (const part of ['xl/workbook.xml', 'xl/worksheets/sheet3.xml', 'name="Postal codes"', 'Other (fewer than 5)', 'Fall Party 2025']) {
+    assert(raw.includes(part), 'workbook has ' + part);
+  }
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_audit_export') && l.includes('"p_kind":"attendance"') && l.includes(EV)),
+    'the XLSX logs export.run');
+}, { signedIn: true, mock: attendanceMock });
+
+await run('event report: Money orders XLSX logs export.run', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  await page.getByRole('heading', { name: 'Money' }).waitFor({ timeout: 8000 });
+  const { name, bytes } = await downloadBytes(page, () => page.getByRole('button', { name: /Orders XLSX/ }).click());
+  assert(/^settlement-fall-party-.*\.xlsx$/.test(name), 'file name ' + name);
+  const raw = bytes.toString('latin1');
+  assert(raw.includes('name="Summary"') && raw.includes('name="Orders"') && raw.includes('cs_1'), 'Summary + Orders sheets');
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_audit_export') && l.includes('"p_kind":"settlement"')), 'logged');
+}, { signedIn: true, mock: attendanceMock });
+
 await run('home: genre chips filter the events', async (page, log) => {
   await page.goto(BASE + '/');
   const chips = page.getByRole('group', { name: 'Filter by genre' });
@@ -954,6 +1027,71 @@ await run('door: with card on, the Sell tab charges on a reader and shows the QR
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
 }, fns: { 'exos-pos': cardPos } }) });
+
+// --- claude/exos-kiosk: kiosk mode (mig 20261113100000) ---------------------
+const kioskSt = {};
+await run('kiosk: locked to /kiosk, a card sale with a required question, QR, email, reset, PIN exit', async (page, log) => {
+  await page.addInitScript((cred) => {
+    if (!sessionStorage.getItem('kiosk-smoke')) {
+      sessionStorage.setItem('kiosk-smoke', '1');
+      localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred));
+      localStorage.setItem('exos.checkout.draft', '{"email":"left@behind.test"}');
+    }
+  }, KIOSK_CRED);
+  // Any other page goes back to the kiosk; no site navigation there.
+  await page.goto(BASE + '/dashboard');
+  await page.waitForURL(/\/kiosk$/, { timeout: 8000 });
+  await expectText(page, 'County Fair');
+  assert(await page.getByRole('navigation').count() === 0, 'no navigation on the kiosk');
+  assert(await page.getByRole('radio', { name: /Child/ }).isDisabled(), 'a sold-out type is disabled');
+  await page.getByRole('radio', { name: /Adult/ }).click();
+  await page.getByRole('button', { name: 'One more' }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  // The required question can't be skipped: there is no skip button.
+  assert(await page.getByRole('button', { name: /skip/i }).count() === 0, 'no skip at a kiosk');
+  await page.getByRole('button', { name: /Pay \$30\.00 by card/ }).click();
+  await expectText(page, 'answer');
+  assert(!log.some((l) => l.includes('"kiosk_begin"')), 'nothing sent with the question unanswered');
+  await page.getByLabel(/ZIP code/).fill('86001');
+  await page.getByRole('button', { name: /Pay \$30\.00 by card/ }).click();
+  await expectText(page, 'Tap, insert or swipe your card');
+  await expectText(page, 'Paid. Here are your tickets.', 12000);
+  await page.getByRole('img', { name: /Ticket QR code 1 of 2/ }).waitFor({ timeout: 8000 });
+  await page.getByRole('button', { name: 'Next ticket' }).click();
+  await page.getByRole('img', { name: /Ticket QR code 2 of 2/ }).waitFor({ timeout: 8000 });
+  assert(await page.getByRole('button', { name: /Print my tickets/ }).count() === 1, 'print offered (the kiosk has a printer)');
+  await page.getByLabel(/Email it to me/).fill('fan@example.com');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expectText(page, 'Sent to fan@example.com');
+  const calls = log.filter((l) => l.startsWith('fn exos-pos'));
+  assert(calls.length > 0 && calls.every((l) => l.includes('"kiosk_token":"exk_')), 'every call carries the kiosk credential');
+  assert(!calls.some((l) => /card_number|cvc|"pan"|exp_month|skip_questions|payment"|drawer_id|comp_quantity/.test(l)), 'no card data, cash, comp or skip');
+  assert(calls.some((l) => l.includes('"kiosk_begin"') && l.includes('86001')), 'the answer went with the sale');
+  assert(!log.some((l) => l.startsWith('rpc ') || /^(GET|POST|PATCH) exos_/.test(l)), 'nothing but kiosk calls: ' + log.filter((l) => !l.startsWith('fn ')).join(' | '));
+  // Done: back to the start; what the buyer typed is gone, the credential stays.
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expectText(page, '1. Choose your tickets');
+  assert(await page.getByRole('radio', { name: /Adult/ }).getAttribute('aria-checked') === 'false', 'nothing chosen after reset');
+  const stored = await page.evaluate(() => Object.keys(localStorage).sort());
+  assert(!stored.includes('exos.checkout.draft') && stored.includes('exos.kiosk.v1'), 'buyer data wiped, credential kept: ' + stored.join(','));
+  // Staff leave with the PIN.
+  await page.getByRole('button', { name: 'Staff' }).click();
+  await page.getByLabel('Admin PIN').fill('111111');
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await expectText(page, 'Wrong PIN');
+  await page.getByLabel('Admin PIN').fill('482913');
+  await page.getByRole('button', { name: 'Exit' }).click();
+  await page.waitForURL(/\/door$/, { timeout: 8000 });
+  assert(await page.evaluate(() => localStorage.getItem('exos.kiosk.v1')) === null, 'the credential is gone after the exit');
+}, { mock: { fns: { 'exos-pos': kioskPos(kioskSt) } } });
+
+await run('kiosk: card payments off, the kiosk says it is unavailable', async (page) => {
+  await page.addInitScript((cred) => localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred)), KIOSK_CRED);
+  await page.goto(BASE + '/kiosk');
+  await expectText(page, 'Kiosk unavailable');
+  await expectText(page, 'card payments are switched off');
+  assert(await page.getByRole('radio', { name: /Adult/ }).count() === 0, 'nothing to sell');
+}, { mock: { fns: { 'exos-pos': kioskPos({ cardOn: false }) } } });
 
 await run('payouts page lists payouts and their lines', async (page) => {
   await page.goto(BASE + '/orgs/' + ORG + '/payouts');
@@ -1774,6 +1912,57 @@ await run('fans: Followers tab shows names, never an address; the CSV comes from
     { email: 'ann@example.com', first_name: 'Ann', last_name: 'Lee', followed_at: '2026-11-01T12:00:00Z', email_list: 'subscribed', gets_new_event_mail: true },
     { email: 'b@example.com', first_name: null, last_name: null, followed_at: '2026-10-20T12:00:00Z', email_list: 'unsubscribed', gets_new_event_mail: false },
   ] }),
+} }) });
+
+// claude/exos-fair-day (mig 20261113110000): the editor's fair / multi-day
+// setup sends one plan (day passes, multi-day and any-day passes, a list per
+// day with its hours and fair day, parking and camping on a lot list).
+await run('edit event: fair / multi-day setup creates day passes, day lists and a lot list in one call', async (page, log) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('fair-setup');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByRole('button', { name: 'Set up a fair or multi-day event' }).click();
+  await panel.getByLabel('Day 1', { exact: true }).fill('2027-08-20');
+  await panel.getByLabel('Day 2', { exact: true }).fill('2027-08-21');
+  await panel.getByLabel('Day 3', { exact: true }).fill('2027-08-22');
+  await panel.getByLabel('Close', { exact: true }).nth(2).fill('23:30');
+  await panel.getByRole('radio', { name: /No re-entry/ }).check();
+  await panel.getByLabel('Price ($)').first().fill('12');
+  await panel.getByRole('checkbox', { name: /Sell camping/ }).check();
+  // A bad answer blocks the button and says why.
+  await panel.getByLabel('Per day').fill('0');
+  await panel.getByText('Day pass: set how many per day.').waitFor({ timeout: 5000 });
+  assert(await panel.getByRole('button', { name: 'Create passes and lists' }).isDisabled(), 'disabled while wrong');
+  await panel.getByLabel('Per day').fill('4000');
+  const preview = await panel.getByTestId('fair-setup-preview').innerText();
+  assert(preview.includes('Day pass · Fri, Aug 20: $12.00, 4,000 available'), 'preview: ' + preview);
+  assert(preview.includes('Any-day pass: $18.00, 2,000 available, one day'), 'preview any-day: ' + preview);
+  assert(preview.includes('Check-in list "Parking & camping": parking and camping codes only, in and out'), 'preview lot: ' + preview);
+  await panel.getByRole('button', { name: 'Create passes and lists' }).click();
+  const done = panel.getByTestId('fair-setup-done');
+  await done.waitFor({ timeout: 8000 });
+  assert((await done.innerText()).includes('Created 5 ticket types, 4 check-in lists and 2 add-ons.'), 'done: ' + (await done.innerText()));
+  const call = log.find((l) => l.startsWith('rpc exos_fair_setup '));
+  assert(call, 'one setup call');
+  assert(log.filter((l) => l.startsWith('rpc exos_fair_setup ')).length === 1, 'exactly one call');
+  const body = JSON.parse(call.slice('rpc exos_fair_setup '.length));
+  assert(body.p_event_id === EV, 'this event');
+  const plan = body.p_plan;
+  assert(plan.tiers.map((t) => t.key).join() === 'day-1,day-2,day-3,multi,any', 'tiers ' + plan.tiers.map((t) => t.key));
+  assert(plan.tiers[0].price_cents === 1200 && plan.tiers[0].capacity === 4000, 'cents and capacity');
+  assert(plan.tiers[4].max_entry_days === 1 && plan.tiers[3].max_entry_days === undefined, 'day limits');
+  assert(plan.addons.map((a) => a.key).join() === 'parking,camping', 'add-ons');
+  const [d1, d2, d3, lot] = plan.lists;
+  assert(d1.entry_day === '2027-08-20' && d1.allow_reentry === false && d1.tier_keys.join() === 'day-1,multi,any', 'day 1 list ' + JSON.stringify(d1));
+  // New York, EDT: 9:00 is 13:00 UTC; 23:30 on day 3 is 03:30 UTC the next day.
+  assert(d1.valid_from === '2027-08-20T13:00:00.000Z' && d3.valid_until === '2027-08-23T03:30:00.000Z', 'hours ' + d1.valid_from + ' ' + d3.valid_until);
+  assert(d2.tier_keys.join() === 'day-2,multi,any', 'day 2 list');
+  assert(lot.admits === 'addons' && lot.addon_keys.join() === 'parking,camping' && lot.allow_reentry === true && !lot.tier_keys, 'lot ' + JSON.stringify(lot));
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+  exos_fair_setup: (b) => ({ ok: true, tier_ids: Object.fromEntries(b.p_plan.tiers.map((t, i) => [t.key, `t${i}`])),
+    addon_ids: { parking: 'a1', camping: 'a2' }, list_ids: ['l1', 'l2', 'l3', 'l4'], ends_at: '2027-08-23T03:30:00Z' }),
 } }) });
 
 await run('unfollow link: one click, signed out', async (page, log) => {

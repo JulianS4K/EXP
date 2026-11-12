@@ -3,6 +3,7 @@
 import { supabase } from '../supabase';
 import { DOOR_REQUEST_TIMEOUT_MS, isMissingRpc, withDeadline } from './net';
 import { parseDoorSummary, type DoorSummary } from './summary';
+import { parseThroughput, type DoorThroughput } from './throughput';
 import type { ImportRow } from './imports';
 import { buildAddonRoster, mapDoorEventRow, type DoorEvent, type DoorRoster } from './roster';
 import { listCheckinLists } from '../checkinLists';
@@ -24,7 +25,36 @@ export async function fetchDoorEvent(eventId: string, signal?: AbortSignal): Pro
     console.warn('check-in lists unavailable', err);
     ev.checkinLists = undefined;
   }
+  // Fair days (mig 20261113110000): the ticket types' day limits, saved with
+  // the header so the device applies them offline. Only read for an event
+  // with fair-day lists; a failed read keeps the ones the page had.
+  if (ev.checkinLists?.some((l) => l.entryDay)) {
+    try {
+      ev.dayLimits = await fetchDayLimits(eventId, signal);
+    } catch (err) {
+      console.warn('ticket type day limits unavailable', err);
+    }
+  }
   return ev;
+}
+
+/** Ticket type id → max_entry_days for the event's types that have one. Door
+ *  staff read the event's types (staff RLS); {} before the column exists. */
+export async function fetchDayLimits(eventId: string, signal?: AbortSignal): Promise<Record<string, number>> {
+  let q = supabase.from('exos_ticket_tiers').select('id, max_entry_days').eq('event_id', eventId).not('max_entry_days', 'is', null);
+  if (signal) q = q.abortSignal(signal);
+  const { data, error } = await q;
+  if (error) {
+    const code = (error as { code?: string }).code;
+    if (code === '42703' || code === 'PGRST204') return {};
+    throw error;
+  }
+  const out: Record<string, number> = {};
+  for (const r of (data ?? []) as { id: string; max_entry_days: unknown }[]) {
+    const n = Number(r.max_entry_days);
+    if (typeof r.id === 'string' && Number.isInteger(n) && n > 0) out[r.id] = n;
+  }
+  return out;
 }
 
 /** Is the server answering? A cheap call used to leave "unreachable" mode. */
@@ -49,6 +79,21 @@ export async function fetchDoorSummary(eventId: string): Promise<DoorSummary | n
     throw error;
   }
   return parseDoorSummary(data);
+}
+
+/** Per-gate throughput (exos_door_throughput, mig 20261113110000). null when
+ *  this database doesn't have it yet, or the caller may not see it. */
+export async function fetchDoorThroughput(
+  eventId: string, from: string | null, until: string | null, bucketMinutes: number,
+): Promise<DoorThroughput | null> {
+  const { data, error } = await supabase.rpc('exos_door_throughput', {
+    p_event_id: eventId, p_from: from, p_until: until, p_bucket_minutes: bucketMinutes,
+  });
+  if (error) {
+    if (isMissingRpc(error) || (error as { code?: string }).code === '42501') return null;
+    throw error;
+  }
+  return parseThroughput(data);
 }
 
 export interface ImportResult {

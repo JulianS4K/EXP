@@ -59,6 +59,7 @@ an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own t
 | Register UI: walk-up tickets on a phone | ✅ | `/checkin/:event` → Sell (`components/DoorSellPanel`) |
 | Register UI: bar and merch | ⬜ later | SPA route |
 | Card at the door on smart readers (S700, WisePOS E), from the web door app | ✅ authored, off until `EXOS_POS_CARD=on` | "Card at the door" below; the Sell tab |
+| Kiosk mode: a self-serve screen, one event, card only on its reader, PIN exit, auto-reset | ✅ authored, sells only with `EXOS_POS_CARD=on` | mig 20261113100000, "Kiosk mode" below, `/kiosk` |
 | Tap to Pay on iPhone, Bluetooth readers | ⬜ later (server side ready: `connection_token`, `card_payment` mode `sdk`) | needs the native wrapper app |
 
 ## Data model
@@ -131,6 +132,9 @@ The database, not the register, is the source of truth for anything to do with m
 | Recount a closed drawer (within 7 days of the close, at most 3 times, not after a final settlement) | owner, manager |
 | Read the settlement | owner, manager, finance |
 | Record a settlement (draft or final) | owner, manager |
+| Mark a device as a kiosk, start kiosk mode on a screen, end a kiosk session, turn it off | owner, manager (`exos_pos_kiosk_*`; a platform admin is not enough) |
+| Sell at a kiosk | the kiosk's credential only: its event's public types, card on its own reader; no cash, comps, skip, voids or refunds |
+| Leave kiosk mode | whoever has the admin PIN (10 tries a minute, 5 wrong lock it 5 minutes) |
 | Anyone outside the org | nothing (`test_pos_scaffold.sql` P3 and P9b check this) |
 
 Orders, lines and tenders can't be updated or deleted from the client. Voids and refunds go through
@@ -316,6 +320,108 @@ Stripe, iPhone XS or newer on a current iOS, the wrapper app on the App Store.
 
 **Still open:** offline card capture (below), tips on the reader (decision 3), Interac in Canada (`card_present`
 only today), and whether card walk-ups count toward promoter commissions (decision 8).
+
+## Kiosk mode
+
+Mig `20261113100000`, `src/views/Kiosk.tsx`, `exos-pos` (`kiosk_*`). A **self-serve screen** at a fair gate: the
+public buys tickets for one event by card on the kiosk's own reader, with no staff at the screen. An RFP pass / fail
+line (county and state fairs). Sales need `EXOS_POS_CARD=on` like every card at the door; with it off, the kiosk
+screen says it's unavailable.
+
+**Setting one up** (the Sell tab, owners and managers: "Kiosk mode"). A kiosk is a POS device (`exos_pos_devices`,
+kind `register`, active) marked for **one event** in `exos_pos_kiosks`: its card reader (one of the org's registered
+readers, org-wide or set to that event), whether a ticket printer is attached, and an **admin PIN** (6 to 12 digits,
+not one digit repeated or a run like 123456; kept as a bcrypt hash, never the PIN; re-saving without a PIN keeps
+it). `exos_pos_kiosk_configure(device, event, reader, pin, printer)`; `event` null turns the kiosk off. Then, on the
+screen itself, "Start kiosk mode on this screen" (`exos_pos_kiosk_enter`): Exos mints the **kiosk credential**
+(`exk_` + 256 random bits, shown once, kept as its SHA-256 in `exos_pos_kiosk_sessions`, valid 24 hours), the
+browser keeps it and **signs the staff member out** there. One live session per device; starting it again elsewhere
+ends the old one. Owners and managers end a session from the dashboard (`exos_pos_kiosk_end`) or turn the kiosk off;
+moving the kiosk to another event ends its session too.
+
+**What the screen does.** `/kiosk` only: the app sends every other path back there while the credential is stored
+(no navbar, no dashboard, no other event, no settings, no sign-in). The flow:
+
+1. Pick a ticket type and a quantity: the event's **public** types (never hidden ones, never tables) at the **door
+   price** (`exos_tier_current_price(..., 'door')`: `door_price_cents`, else the current price step), what's left
+   (shared limits, the house cap), at most the event's `purchase_limits.maxPerOrder` (and 10).
+2. The event's checkout questions, **the public's only**, as online checkout: hidden (staff-only) questions such as
+   a wristband number or "ID checked" are never shown, and an answer to one (or to anything the kiosk doesn't ask)
+   is refused (`kiosk-answers`); the answers are checked with online checkout's rules (`_exos_validate_answers`,
+   hidden excluded). **Required ones must be answered: a kiosk has no "Skip questions"** (`questions-required`).
+3. Pay on the reader: the card walk-up begin (`_exos_pos_walkup_begin_card`, places held 5 minutes) and the charge
+   on **the kiosk's own reader** (`_exos_pos_card_begin`), polled every 2 s; capture and completion as in "Card at
+   the door", with the same webhook fallback.
+4. The tickets: the **QR on screen** (one-time print codes, as the Sell tab's), **"Email it to me"** (queued mail:
+   the account if the address is confirmed, else a claim link; `_exos_pos_deliver_email`), and **"Print my tickets"**
+   when the kiosk has a printer (the same 4 × 8 in PDF, to the browser's print dialog; a kiosk browser prints it
+   straight away). Only for the session's own sale, within 10 minutes of paying.
+
+**Auto-reset** (`src/lib/kiosk.ts`, tested in `kiosk.test.ts`): after a sale, "Done" or 30 s untouched; mid-sale,
+60 s idle; a declined card, 10 s. A reset clears every buyer field from memory, wipes local storage except the kiosk
+credential and the cookie choice, clears session storage, and takes a new order key. A card sale left at the reader
+(90 s untouched, or past the 5-minute hold) is **cancelled on the reader** (`kiosk_cancel` → the card cancel path:
+places back, nothing charged).
+
+**Card only, and nothing else.** No cash, comps, "skip questions", voids or refunds at a kiosk: those stay with
+staff in the door app. In SQL: the kiosk cores only reach the card begin; the order trigger
+(`exos_pos_orders_zkiosk`) stamps `channel = 'kiosk'` and the session, refuses an order for another event or device
+and any comp, and refuses any door sale (cash, comp or card) on a kiosk device outside kiosk mode;
+`_exos_pos_walkup_complete` refuses to complete a kiosk order with anything but the card (`0A000`, `kiosk-card-only`).
+
+**Leaving** (staff, the corner "Staff" button): the admin PIN (`_exos_pos_kiosk_exit`). 10 tries a minute per
+device; 5 wrong in a row lock the PIN for 5 minutes (`pos.kiosk_lockout` in the audit log). A wrong PIN answers
+rather than raises, so the count sticks. The right PIN ends the session (`pos.kiosk_exit`), cancels a card sale
+still on the reader, clears the credential and returns to the door app's sign-in.
+
+**Who the sale is by.** The member who started the kiosk is the seller of record (`rung_by`): the tickets are theirs
+until handed over (as at the door), their door app lists the sale ("· kiosk") and can void or refund it. Every
+kiosk call re-checks that this member is still an owner or manager of the org, that the device is active and the
+event not cancelled; otherwise the kiosk reads "switched off".
+
+**Money and reports.** A kiosk sale is a walk-up card sale (`exos_pos_orders.channel = 'kiosk'`): the same card
+tender, the same journal entry (`pos_card_sale`), the same Exos fee and settlement; `exos_pos_settlement_summary`
+adds a `kiosk` block (orders, tickets, gross) and the order JSON carries `channel`.
+
+**Audit:** `pos.kiosk_set`, `pos.kiosk_off`, `pos.kiosk_enter`, `pos.kiosk_exit` (`via` pin or staff),
+`pos.kiosk_lockout`; never the PIN, its hash or the credential.
+
+**PCI:** still SAQ A for the web (`docs/pci.md`): the kiosk page has no card field and loads no payment script;
+the reader takes the card.
+
+**API** (`exos-pos`, POST JSON with `kiosk_token`, no staff JWT): `kiosk_state`, `kiosk_begin`, `kiosk_charge`,
+`kiosk_status`, `kiosk_cancel`, `kiosk_codes`, `kiosk_email`, `kiosk_exit`. Only `kiosk_state` and `kiosk_exit`
+answer with `EXOS_POS_CARD` off. Each goes through a service-role core that resolves the credential first
+(`_exos_pos_kiosk_resolve`), then applies its limits before any Stripe call, all keyed on the kiosk session:
+state 60, begin 6, charge 10, poll 90, codes 10, email 6 a minute; the card begin's own 20 a minute is counted
+on the kiosk session too (`pos:card:kiosk:<session>`, marker `/* exos: pos kiosk card limit */`), so kiosks never use
+up the starting member's door app charges. Print codes (`_exos_print_mint`, 60 a minute) still count on that member.
+
+**Limits on the credential** (a 24-hour bearer in the kiosk browser's storage, so a copied one must not be able to
+tie up places or take another buyer's tickets):
+- **One open sale per session.** A new begin is refused (`kiosk-busy`) while the session's last unpaid sale still
+  holds its places: it may be on the reader with a buyer paying, so it is never cancelled from under them. Once its
+  hold has lapsed the next begin releases it (cancelled, places back). The screen cancels its own abandoned sale
+  (`kiosk_cancel`), so a working kiosk never meets this. Begins on one session run one at a time (the session row's
+  lock); `race_pos_kiosk.sh` race 5.
+- **A hold never outlives 10 minutes from the begin.** A charge extends the places while the guest is at the reader,
+  but never past the begin + 10 minutes, and no charge is taken after that (`expired`); race 6.
+- **Hand-over only for the session's latest paid sale**, for 10 minutes: an earlier buyer's tickets can't be called
+  back (`kiosk-too-late`).
+- **Not bound to the device.** A device fingerprint stored next to the credential was considered and left out: both
+  would sit in the same local storage, so whoever can copy one copies the other. The protection is the tablet's
+  single-app mode, the 24-hour lifetime and ending the session from the dashboard.
+
+Tests: `tests/exos/test_pos_kiosk.sql` (K1-K13), `tests/exos/race_pos_kiosk.sh` (by hand: two kiosks and the last
+ticket, a kiosk against a door sale, a double tap, ten wrong PINs at once), `src/lib/kiosk.test.ts`, the smoke tests
+"kiosk: …" and the blocking a11y scan "kiosk screen" (`tests/smoke/a11y.mjs`: axe, plus visible focus and 48 px
+targets).
+
+**Operator steps:** `EXOS_POS_CARD=on` (the card at the door setup), one smart reader per kiosk, a tablet in the
+OS's single-app mode (iPad Guided Access, Android screen pinning, or Chrome `--kiosk` with `--kiosk-printing` for
+silent printing). Kiosk calls carry no staff JWT: `exos-pos` keeps JWT verification on, which passes the project's
+anon key (a JWT); if the project moves to the new publishable keys, `exos-pos` needs `--no-verify-jwt` (it checks
+every caller itself).
 
 ## Settlement math
 

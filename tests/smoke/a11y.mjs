@@ -8,6 +8,7 @@
 import { chromium, devices } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { handle, EV, TIER, TIER2, ORG, UID, TICKET, EVENT_ROW, ownerTables, tables } from './mock.mjs';
+import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -34,7 +35,9 @@ const SETTLE_CSS = `*, *::before, *::after {
   animation-duration: 0s !important; animation-delay: 0s !important;
   transition-duration: 0s !important; transition-delay: 0s !important; }`;
 
-async function scan(page, name, advisory) {
+// include: scan only that part of the page (a panel added to a page whose
+// other panels are scanned, or not yet, elsewhere).
+async function scan(page, name, advisory, include) {
   await page.addStyleTag({ content: SETTLE_CSS });
   // JS animations (motion/react: the ticket card fades in from opacity 0)
   // ignore CSS. Wait for every Web Animation to finish and for inline
@@ -54,7 +57,9 @@ async function scan(page, name, advisory) {
       prev = now;
     }
   });
-  const r = await new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE).analyze();
+  let builder = new AxeBuilder({ page }).withTags(TAGS).exclude(EXCLUDE);
+  if (include) builder = builder.include(include);
+  const r = await builder.analyze();
   // An advisory page (a known gap, docs/pci.md) prints its violations as
   // warnings until it's fixed, then moves to the blocking list.
   const blocking = advisory ? [] : r.violations.filter((v) => BLOCKING.has(v.impact));
@@ -82,7 +87,7 @@ async function check(name, fn, opts = {}) {
   if (opts.signedIn) await ctx.addInitScript((s) => localStorage.setItem('sb-mock-auth-token', JSON.stringify(s)), SESSION);
   const page = await ctx.newPage();
   try {
-    await fn(page, (label) => scan(page, label ? `${name}: ${label}` : name, opts.advisory));
+    await fn(page, (label) => scan(page, label ? `${name}: ${label}` : name, opts.advisory, opts.include));
   } catch (e) {
     results.push({ name, error: String(e.message || e).split('\n')[0] });
     await page.screenshot({ path: 'tests/smoke/fail-a11y-' + name.replace(/\W+/g, '_') + '.png' }).catch(() => {});
@@ -308,6 +313,90 @@ await check('door scanner (/checkin)', async (page, run) => {
   exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
   exos_server_time: () => new Date().toISOString(),
 } }) });
+
+// claude/exos-attendance-report (mig 20261113120000): the attendance report
+// panel on the event report (postal table, the comparison picker, the pace
+// chart and its checkpoints), blocking. Only the panel: the rest of the event
+// report isn't in this gate yet.
+const pace = (day, before, paid, gross, cum) => ({ day, days_before: before, paid_orders: paid ? 1 : 0, paid_tickets: paid,
+  gross_cents: gross, free_orders: 0, free_tickets: 0, cum_paid_tickets: cum, cum_gross_cents: cum * 2000, cum_free_tickets: 0 });
+const PREV_EV = '99999999-9999-4999-8999-99999999e0e0';
+const series = (id, name, day, rows) => ({ event_id: id, name, starts_at: day + 'T23:00:00Z', timezone: 'America/New_York',
+  currency: 'USD', event_day: day, on_sale_day: null, on_sale_days_before: 30, days_out_now: id === EV ? 5 : -300,
+  totals: { paid_orders: rows.length, paid_tickets: 9, gross_cents: 18000, free_orders: 1, free_tickets: 2 }, rows });
+await check('event report: attendance report', async (page, run) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=attendees');
+  await page.locator('#attendance-report').getByRole('img').waitFor({ timeout: 8000 });
+  await page.waitForLoadState('networkidle');
+  await run();
+}, { signedIn: true, include: '#attendance-report', mock: ownerMock({ rpcs: {
+  exos_event_attendance: () => ({
+    event_id: EV, generated_at: '2026-12-12T15:00:00Z', min_buyers: 5,
+    attendance: {
+      totals: { buyers: 12, orders: 13, tickets: 20, checked_in: 0, located_orders: 11 },
+      postal: [{ country: 'US', postal_code: '11211', buyers: 6, orders: 6, tickets: 10, checked_in: 0 }],
+      postal_other: { label: 'Other (fewer than 5)', buyers: 4, orders: 5, tickets: 7, checked_in: 0 },
+      postal_unknown: { label: 'No postal code', buyers: 2, orders: 2, tickets: 3, checked_in: 0 }, other_tickets: 0,
+    },
+    pacing: {
+      event: series(EV, 'Fall Party', '2026-12-20', [pace('2026-12-01', 19, 4, 8000, 4), pace('2026-12-10', 10, 5, 10000, 9)]),
+      comparison: series(PREV_EV, 'Fall Party 2025', '2025-12-19', [pace('2025-11-30', 19, 6, 12000, 6), pace('2025-12-12', 7, 4, 8000, 10)]),
+    },
+    comparison_candidates: [{ event_id: PREV_EV, name: 'Fall Party 2025', starts_at: '2025-12-19T23:00:00Z' }],
+  }),
+} }) });
+
+// claude/exos-fair-day: the editor's fair / multi-day setup, open with a
+// preview and with an error (blocking; the panel only, the editor around it
+// isn't in this gate yet).
+await check('event editor: fair / multi-day setup', async (page, run) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('fair-setup');
+  await panel.waitFor({ timeout: 8000 });
+  await run('closed');
+  await panel.getByRole('button', { name: 'Set up a fair or multi-day event' }).click();
+  await panel.getByRole('checkbox', { name: /Sell camping/ }).check();
+  await panel.getByTestId('fair-setup-preview').waitFor({ timeout: 5000 });
+  await run('open, preview');
+  await panel.getByLabel('Per day').fill('0');
+  await panel.getByTestId('fair-setup-errors').waitFor({ timeout: 5000 });
+  await run('open, error');
+}, { signedIn: true, include: '[data-testid="fair-setup"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+} }) });
+
+// Kiosk mode (mig 20261113100000): the self-serve screen, blocking. Big touch
+// targets and visible focus are its own rules (src/views/Kiosk.tsx); axe
+// checks names, contrast, labels and the PIN dialog.
+await check('kiosk screen', async (page, run) => {
+  await page.addInitScript((cred) => localStorage.setItem('exos.kiosk.v1', JSON.stringify(cred)), KIOSK_CRED);
+  await page.goto(BASE + '/kiosk');
+  await text(page, 'County Fair');
+  await run('pick');
+  await page.getByRole('radio', { name: /Adult/ }).click();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByLabel(/ZIP code/).waitFor({ timeout: 8000 });
+  await run('questions');
+  await page.getByLabel(/ZIP code/).fill('86001');
+  await page.getByRole('button', { name: /by card/ }).click();
+  await text(page, 'Paid. Here are your tickets.');
+  await page.getByRole('img', { name: /Ticket QR code/ }).waitFor({ timeout: 8000 });
+  await run('paid');
+  // Focus is visible on the kiosk's buttons (a ring, not the browser default only).
+  await page.getByRole('button', { name: 'Done' }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  const ring = await page.getByRole('button', { name: 'Done' }).evaluate((el) => getComputedStyle(el).boxShadow);
+  if (!ring || ring === 'none') throw new Error('no visible focus ring on the kiosk button');
+  const small = await page.evaluate(() => [...document.querySelectorAll('main button')]
+    .filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.height < 48 || r.width < 48); })
+    .map((b) => b.textContent?.trim() || b.getAttribute('aria-label')));
+  if (small.length) throw new Error('kiosk touch targets under 48 px: ' + small.join(', '));
+  await page.getByRole('button', { name: 'Staff' }).click();
+  await page.getByLabel('Admin PIN').waitFor({ timeout: 5000 });
+  await run('staff PIN');
+}, { mock: { fns: { 'exos-pos': kioskPos({}) } } });
 
 await browser.close();
 
