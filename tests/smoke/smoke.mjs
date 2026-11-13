@@ -1979,7 +1979,8 @@ await run('unfollow link: one click, signed out', async (page, log) => {
 const DISCORD_HOOK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
 const discordMock = (st) => ownerMock({ rpcs: {
   exos_discord_status: () => ({ can_manage: true, is_owner: true, webhook: st.saved ? { set: true, hint: '…5679' } : { set: false },
-    guild: { linked: false }, writes_enabled: false, auto_post: !!st.auto, shown_events: 0 }),
+    guild: { linked: false }, writes_enabled: false, auto_post: !!st.auto, reminder_hours: st.rem ?? null, shown_events: 0 }),
+  exos_discord_set_reminder: (b) => { st.rem = b.p_hours; return { reminder_hours: b.p_hours, changed: true }; },
   exos_discord_set_webhook: (b) => { st.saved = b.p_url; return { ok: true, hint: '…5679', replaced: false }; },
   exos_discord_set_options: (b) => { st.auto = b.p_auto_post; return { writes_enabled: false, auto_post: b.p_auto_post }; },
   exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true,
@@ -1992,6 +1993,7 @@ const discordMock = (st) => ownerMock({ rpcs: {
   'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: false } }),
   'exos-discord/sync': () => ({ body: { state: 'dry_run' } }),
   'exos-discord/post': () => { st.posted = true; return { body: { status: 'dry_run', already: false } }; },
+  'exos-discord/test': () => ({ body: { status: 'dry_run', error: null, tests_left: 2 } }),
 } });
 await run('org settings: Discord webhook checked and never shown back, announce on publish, dry run', async (page, log) => {
   await page.goto(BASE + '/orgs/' + ORG + '/settings');
@@ -2014,6 +2016,13 @@ await run('org settings: Discord webhook checked and never shown back, announce 
   await panel.getByRole('checkbox', { name: /Announce each event/ }).click();
   await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_options') && l.includes('"p_auto_post":true')), 'announce on publish');
   assert(await panel.getByRole('button', { name: 'Add Exos bot to your server' }).count() === 1, 'the bot button');
+  // mig 20261114100000: Send a test (a dry run here, and the panel says so) and the automatic reminder.
+  await panel.getByText(/Send a test is a dry run too/).waitFor({ timeout: 5000 });
+  await panel.getByRole('button', { name: 'Send a test' }).click();
+  await expectText(page, 'Dry run: Exos recorded the test message');
+  assert(log.some((l) => l.startsWith('fn exos-discord/test') && l.includes(ORG)), 'the test call names the org');
+  await panel.getByLabel('Automatic reminder').selectOption('24');
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_reminder') && l.includes('"p_hours":24')), 'reminder 24 hours');
 }, { signedIn: true, mock: discordMock({}) });
 await run('edit event: Show on Discord and Post to Discord (dry run)', async (page, log) => {
   await page.goto(BASE + '/edit-event/' + EV);
@@ -2108,6 +2117,67 @@ await run('edit event: Event tokens adds a product with a bundle and shows the r
     exceptions: [{ id: 'x1', kind: 'overspent', product: 'Drink token', credits_asked: 4, credits_short: 2, reason: 'insufficient',
       device: 'Door 1A2B', offline_at: new Date().toISOString(), synced_at: new Date().toISOString(), card_last4: 'L33H', on_ticket: false }] }),
 } }) });
+// --- claude/exos-spanish: the buyer path and the door in Spanish (mig 20261114130000) ---
+// The visitor picked ES on the switcher (it sticks in localStorage); the
+// organizer wrote a Spanish title. <html lang="es">, Spanish copy, the order
+// carries lang 'es' (its mail and Stripe's page follow it).
+const spanish = async (page) => page.addInitScript(() => localStorage.setItem('exos.lang', 'es'));
+const esEvent = { ...baseTables.exos_public_events[0], i18n: { es: { title: 'Fiesta de Otoño', description: 'Baile toda la noche.' } } };
+const esCheckout = {};
+await run('es: event page and guest checkout in Spanish, the order carries lang es', async (page, log) => {
+  await spanish(page);
+  await stubStripe(page, esCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fiesta de Otoño');
+  await expectText(page, 'Baile toda la noche.');
+  assert(await page.evaluate(() => document.documentElement.lang) === 'es', '<html lang="es">');
+  await expectText(page, 'SOBRE EL EVENTO');
+  await expectText(page, 'precio final');
+  await page.getByRole('button', { name: /Comprar Entradas/i }).first().click();
+  const dlg = page.getByRole('dialog').filter({ hasText: '¿A dónde te enviamos tus entradas?' });
+  await dlg.waitFor({ timeout: 8000 });
+  await dlg.getByRole('button', { name: 'Continuar al pago' }).click();
+  await dlg.getByText('Ingresa un correo válido.').waitFor({ timeout: 5000 });
+  await dlg.getByLabel('Correo').fill('fan@example.com');
+  await dlg.getByRole('button', { name: 'Continuar al pago' }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(esCheckout.body?.lang === 'es', 'checkout body lang: ' + JSON.stringify(esCheckout.body?.lang));
+}, { mock: { ...checkoutFn(esCheckout), tables: { exos_public_events: [esEvent] } } });
+
+const enCheckout = {};
+await run('es: an English visitor still sees the default title and sends lang en', async (page) => {
+  await stubStripe(page, enCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  assert(!(await page.locator('body').innerText()).includes('Fiesta de Otoño'), 'no Spanish title for an English visitor');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(enCheckout.body?.lang === 'en', 'checkout body lang en');
+}, { mock: { ...checkoutFn(enCheckout), tables: { exos_public_events: [esEvent] } } });
+
+await run('es: the door scanner and the Sell tab in Spanish', async (page, log) => {
+  walkupSold = false;
+  await spanish(page);
+  await page.goto(BASE + '/checkin/' + EV);
+  await expectText(page, 'Acceso en puerta');
+  await expectText(page, 'ABRIR ESCÁNER DE CÁMARA');
+  assert(await page.evaluate(() => document.documentElement.lang) === 'es', '<html lang="es">');
+  await page.getByRole('tab', { name: 'Vender' }).click();
+  await expectText(page, 'Vender en la puerta');
+  await expectText(page, 'Quedan 42');
+  await page.getByRole('button', { name: '$25.00', exact: true }).first().click();
+  await page.getByRole('button', { name: '$50.00', exact: true }).click();
+  await expectText(page, 'Cambio $25.00');
+  await page.getByRole('button', { name: /Cobrar \$25\.00 · vender 1/ }).click();
+  await expectText(page, 'Vendidas 1 × Door GA');
+  await page.getByRole('button', { name: 'Mostrar QR' }).click();
+  await page.getByRole('img', { name: 'Código QR de la entrada' }).waitFor({ timeout: 8000 });
+  await expectText(page, 'Sirve para entrar una vez');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupPos } }) });
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

@@ -5,7 +5,7 @@
 // else en). English is the fallback for any missing key.
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { DICTS, en, type DictKey, type Lang } from '../lib/i18n/dict';
+import { translate, type DictKey, type Lang } from '../lib/i18n/dict';
 
 const STORAGE_KEY = 'exos.lang';
 
@@ -26,11 +26,6 @@ function detectInitial(): Lang {
   return nav.toLowerCase().startsWith('es') ? 'es' : 'en';
 }
 
-function interpolate(template: string, vars?: Record<string, string | number>): string {
-  if (!vars) return template;
-  return template.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`));
-}
-
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Lang>(detectInitial);
 
@@ -39,21 +34,32 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     if (typeof document !== 'undefined') document.documentElement.lang = lang;
   }, [lang]);
 
-  const setLang = useCallback((l: Lang) => setLangState(l), []);
+  // A choice made on the switcher is also saved on a signed-in account
+  // (user_metadata.lang), so mail queued later by the server, for orders
+  // without a recorded language, can be in Spanish (mig 20261114130000).
+  // Best effort: a failure or a signed-out visitor changes nothing.
+  const setLang = useCallback((l: Lang) => {
+    setLangState(l);
+    void (async () => {
+      try {
+        const { supabase } = await import('../lib/supabase');
+        const { data } = await supabase.auth.getSession();
+        if (data.session && data.session.user.user_metadata?.lang !== l) await supabase.auth.updateUser({ data: { lang: l } });
+      } catch { /* not signed in, or offline */ }
+    })();
+  }, []);
 
-  const t = useCallback<LanguageCtx['t']>((key, vars) => {
-    const table = DICTS[lang] ?? en;
-    const str = table[key] ?? en[key] ?? key;
-    return interpolate(str, vars);
-  }, [lang]);
+  const t = useCallback<LanguageCtx['t']>((key, vars) => translate(lang, key, vars), [lang]);
 
   return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
 }
 
+// Outside a LanguageProvider (a component rendered on its own, in a test or
+// an embed): English, and the switch does nothing.
+const ENGLISH: LanguageCtx = { lang: 'en', setLang: () => {}, t: (key, vars) => translate('en', key, vars) };
+
 export function useLanguage(): LanguageCtx {
-  const ctx = useContext(Ctx);
-  if (!ctx) throw new Error('useLanguage must be used within LanguageProvider');
-  return ctx;
+  return useContext(Ctx) ?? ENGLISH;
 }
 
 /** Convenience hook — just the translator. */

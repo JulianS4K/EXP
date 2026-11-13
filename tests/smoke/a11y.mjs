@@ -416,10 +416,12 @@ await check('org settings: Discord', async (page, run) => {
 await check('org settings: Discord connected', async (page, run) => {
   await page.goto(BASE + '/orgs/' + ORG + '/settings');
   await page.getByTestId('discord-panel').getByText(/Linked to Blue Room/).waitFor({ timeout: 8000 });
+  // mig 20261114100000: Send a test + the automatic reminder are in this scan.
+  await page.getByTestId('discord-panel').getByRole('button', { name: 'Send a test' }).waitFor({ timeout: 5000 });
   await run();
 }, { signedIn: true, include: '[data-testid="discord-panel"]', mock: ownerMock({ rpcs: {
   exos_discord_status: () => ({ ...DISCORD_ST, is_owner: true, webhook: { set: true, hint: '…5679' }, guild: { linked: true, name: 'Blue Room' },
-    writes_enabled: true, auto_post: true, shown_events: 2 }),
+    writes_enabled: true, auto_post: true, reminder_hours: 24, shown_events: 2 }),
 }, fns: { 'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: true } }) } }) });
 await check('edit event: Promote on Discord', async (page, run) => {
   await page.goto(BASE + '/edit-event/' + EV);
@@ -427,7 +429,7 @@ await check('edit event: Promote on Discord', async (page, run) => {
   await run();
 }, { signedIn: true, include: '[data-testid="discord-event-panel"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
   exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true, guild_name: 'Blue Room',
-    show: true, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] }),
+    show: true, reminder_hours: 48, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] }),
   exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
   exos_event_quotas: () => [],
 }, fns: discordFns }) });
@@ -481,6 +483,48 @@ await check('edit event: Event tokens', async (page, run) => {
     refundable: [{ lot_id: 'l1', product: 'Drink token', source: 'online', credits_left: 3, value_left: 1300,
       bought_at: new Date().toISOString(), card_id: 'c', card_last4: null, on_ticket: true }] }),
 } }) });
+// claude/exos-spanish (mig 20261114130000): the buyer checkout and the door in
+// Spanish, blocking, with <html lang="es"> checked (axe's html-has-lang /
+// valid-lang rules read it too).
+const esInit = (page) => page.addInitScript(() => localStorage.setItem('exos.lang', 'es'));
+const assertEs = async (page) => {
+  const l = await page.evaluate(() => document.documentElement.lang);
+  if (l !== 'es') throw new Error('<html lang> is ' + l);
+};
+await check('es: checkout (guest email dialog)', async (page, run) => {
+  await esInit(page);
+  await page.goto(BASE + '/checkout?products=' + TIER2 + ':2');
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  await text(page, 'Fall Party');
+  await page.getByRole('button', { name: /Comprar Entradas/i }).first().click();
+  await page.getByRole('dialog').filter({ hasText: '¿A dónde te enviamos tus entradas?' }).waitFor({ timeout: 8000 });
+  await assertEs(page);
+  await run();
+}, { mock: checkoutMock });
+
+await check('es: door scanner (/checkin)', async (page, run) => {
+  await esInit(page);
+  await page.goto(BASE + '/checkin/' + EV);
+  await text(page, 'Acceso en puerta');
+  await page.waitForLoadState('networkidle');
+  await assertEs(page);
+  await run('tickets');
+  await page.getByRole('tab', { name: 'Vender' }).click();
+  await text(page, 'Vender en la puerta');
+  await page.waitForLoadState('networkidle');
+  await run('sell');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': (b) => (b.action === 'walkup_catalog'
+  ? { body: { data: { event: { id: EV, name: 'Fall Party', status: 'published', currency: 'USD' }, role: 'owner', can_comp: true,
+      card: { connected: false, message: null }, fee_base: 'card-tickets', questions: [],
+      tiers: [{ tier_id: 'f0f0f0f0-0000-4000-8000-000000000001', name: 'Door GA', price_cents: 2500, price_source: 'door', step_name: null,
+        step_remaining: null, tax: null, unit_total_cents: 2500, remaining: 42 }],
+      drawers: [{ id: 'f0f0f0f0-0000-4000-8000-0000000000d1', device_id: null, mine: true, opened_at: new Date().toISOString(),
+        open_float_cents: 10000, cash_cents: 10000 }] } } }
+  : { body: { data: [] } }) } }) });
 
 await browser.close();
 

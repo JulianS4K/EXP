@@ -27,6 +27,7 @@ import TicketBackendPanel from '../components/TicketBackendPanel';
 import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
 import DiscordEventPanel from '../components/DiscordEventPanel';
+import EventSpanishFields from '../components/EventSpanishFields'; // claude/exos-spanish
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
@@ -1150,6 +1151,9 @@ export default function EditEvent() {
             <StoreContentEditor idPrefix="ee-store" uploaderUid={user?.uid} value={store} onChange={setStore} />
           </section>
         )}
+
+        {/* Spanish title / description (mig 20261114130000): saved on its own. */}
+        {eventId && <EventSpanishFields eventId={eventId} />}
 
         {onlineSupported && (
           <section className="bg-[#111] border border-white/10 p-6 md:p-8 space-y-6">

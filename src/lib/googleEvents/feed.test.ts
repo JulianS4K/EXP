@@ -3,6 +3,7 @@ import {
   buildGoogleFeed,
   feedBlocker,
   offerUrl,
+  spanishRow,
   zonedIso,
   type FeedEventRow,
   type FeedTierRow,
@@ -180,5 +181,35 @@ describe('Google events feed', () => {
     const json = JSON.stringify(build([ev()], [tier()]).feed);
     expect(json).not.toMatch(/barcode|secret|email/i);
     expect(json).not.toMatch(/tickets_sold|capacity|"sold"/);
+  });
+});
+
+// exos: Spanish (mig 20261114130000): ?lang=es swaps in the organizer's Spanish fields.
+describe('Spanish feed (?lang=es)', () => {
+  const tier: FeedTierRow = {
+    id: '22222222-2222-4222-8222-222222222222', event_id: '11111111-1111-4111-8111-111111111111', name: 'GA', price: 20,
+    capacity: 100, sold: 0, visibility: 'public', sales_start: null, sales_end: null, price_schedule: null,
+    exclusive_tax_percent: 0,
+  } as unknown as FeedTierRow;
+  const input = (e: FeedEventRow) => ({ events: [e], tiers: [tier], geo: new Map(), orgs: new Map(), buy: new Map() });
+  const es = { es: { title: 'Jazz de Medianoche', description: 'Dos sets. El bar abre temprano.' } };
+
+  it('uses the Spanish title and description and marks the language', () => {
+    const { feed } = buildGoogleFeed(input(ev({ i18n: es })), { appBase: BASE, now: NOW, lang: 'es' });
+    const item = feed.events[0].event;
+    expect(item.name).toBe('Jazz de Medianoche');
+    expect(item.description).toBe('Dos sets. El bar abre temprano.');
+    expect(item.inLanguage).toBe('es');
+  });
+
+  it('keeps the default fields where there is no Spanish, and in the default feed', () => {
+    const plain = buildGoogleFeed(input(ev({ i18n: es })), { appBase: BASE, now: NOW }).feed.events[0].event;
+    expect(plain.name).not.toBe('Jazz de Medianoche');
+    expect(plain.inLanguage).toBeUndefined();
+    const half = buildGoogleFeed(input(ev({ i18n: { es: { description: 'Solo descripción' } } })), { appBase: BASE, now: NOW, lang: 'es' })
+      .feed.events[0].event;
+    expect(half.name).toBe(plain.name);
+    expect(half.description).toBe('Solo descripción');
+    expect(spanishRow(ev({ i18n: 'nope' })).name).toBe(ev().name);
   });
 });

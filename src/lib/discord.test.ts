@@ -5,8 +5,9 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('./supabase', () => ({ supabase: {} }));
 import {
   isDiscordAuthorizeUrl, orgPausedLine, parseDiscordEventStatus, parseDiscordStatus, postLine, rpcMessage, syncLine, WEBHOOK_URL_RE, webhookUrlOk,
+  autoReminderLine, REMINDER_HOURS, testResultLine,
 } from './discord';
-import { webhookUrlParts } from '../../supabase/functions/_shared/channels/discord.ts';
+import { REMINDER_HOURS as SHARED_REMINDER_HOURS, webhookUrlParts } from '../../supabase/functions/_shared/channels/discord.ts';
 import { confirmPrompt, readOAuthReturn, refusalMessage, stripOAuthHash, stripOAuthReturn } from './oauthReturn';
 
 const HOOK = '223456789012345679';
@@ -66,7 +67,7 @@ describe('status', () => {
     const s = parseDiscordStatus({ can_manage: true, is_owner: false, webhook: { set: true, hint: '…5679', set_at: '2026-11-12T10:00:00Z' },
       guild: { linked: true, id: '423456789012345671', name: 'Blue Room' }, writes_enabled: false, auto_post: true, shown_events: 2 });
     expect(s).toEqual({ canManage: true, isOwner: false, webhook: { set: true, hint: '…5679', setAt: '2026-11-12T10:00:00Z', broken: false },
-      guild: { linked: true, name: 'Blue Room', broken: false }, paused: false, orgPausedUntil: null, writesEnabled: false, autoPost: true, shownEvents: 2 });
+      guild: { linked: true, name: 'Blue Room', broken: false }, paused: false, orgPausedUntil: null, writesEnabled: false, autoPost: true, reminderHours: null, shownEvents: 2 });
     const b = parseDiscordStatus({ paused: true, webhook: { set: true, broken: true }, guild: { linked: true, broken: true } });
     expect([b.paused, b.webhook.broken, b.guild.broken]).toEqual([true, true, true]);
     expect(parseDiscordStatus({ org_paused_until: '2026-11-12T14:30:00Z' }).orgPausedUntil).toBe('2026-11-12T14:30:00Z');
@@ -91,5 +92,31 @@ describe('status', () => {
     expect(rpcMessage({ message: 'exos_discord_request_post: only a published event that isn\'t over can be posted' }))
       .toBe('only a published event that isn\'t over can be posted');
     expect(rpcMessage(null)).toBe('Something went wrong.');
+  });
+});
+
+// mig 20261114100000: the automatic reminder and Send a test.
+describe('automatic reminder and test message', () => {
+  it('offers the same hours as the SQL and the edge function, and reads only those', () => {
+    expect([...REMINDER_HOURS]).toEqual([...SHARED_REMINDER_HOURS]);
+    expect(parseDiscordStatus({ reminder_hours: 24 }).reminderHours).toBe(24);
+    expect(parseDiscordStatus({ reminder_hours: 48 }).reminderHours).toBe(48);
+    for (const v of [null, undefined, 12, '24', 72]) expect(parseDiscordStatus({ reminder_hours: v }).reminderHours).toBeNull();
+    expect(parseDiscordEventStatus({ reminder_hours: 48 }).reminderHours).toBe(48);
+  });
+  it('says when the reminder goes out by itself, and not once it was asked for', () => {
+    const base = { reminderHours: 24 as const, eventStatus: 'published', posts: [] };
+    expect(autoReminderLine(base)).toBe('Exos posts it by itself 24 hours before the start.');
+    expect(autoReminderLine({ ...base, reminderHours: null })).toBeNull();
+    expect(autoReminderLine({ ...base, eventStatus: 'draft' })).toBeNull();
+    expect(autoReminderLine({ ...base, posts: [{ kind: 'reminder', status: 'dry_run', sentAt: null, lastError: null }] })).toBeNull();
+    expect(autoReminderLine({ ...base, posts: [{ kind: 'publish', status: 'sent', sentAt: null, lastError: null }] })).not.toBeNull();
+  });
+  it('words the test result, dry run included', () => {
+    expect(testResultLine({ status: 'sent' })).toMatch(/^Test message sent/);
+    expect(testResultLine({ status: 'dry_run' })).toMatch(/^Dry run: .*didn’t send it/);
+    expect(testResultLine({ status: 'retry' })).toMatch(/try the test again/);
+    expect(testResultLine({ status: 'error', error: 'Discord: the webhook was deleted or its URL is wrong; paste a new one' }))
+      .toBe('The test didn’t go through: Discord: the webhook was deleted or its URL is wrong; paste a new one.');
   });
 });

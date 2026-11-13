@@ -30,6 +30,8 @@ import type { Html5Qrcode } from 'html5-qrcode';
 import { useAuth } from '../context/AuthContext';
 import { useOrganization } from '../context/OrganizationContext';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
+import type { DictKey } from '../lib/i18n/dict';
 import { isAddonCode, verifyBarcode, type VerifyResult } from '../lib/barcode';
 import TicketAnswersCard from '../components/TicketAnswersCard';
 import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
@@ -206,6 +208,19 @@ const VOIDED_TEXT =
 const IN_TRANSFER_TEXT =
   'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.';
 
+// claude/exos-spanish: the component shows the texts above in the device's
+// language (lib/i18n/door.ts, keys door.refuse.<reason>); a reason without a
+// Spanish key stays in English.
+const REFUSAL_TEXT_EN = REFUSAL_TEXT;
+const DOOR_TEXT_EN = { unclaimedOff: UNCLAIMED_OFF_TEXT, voided: VOIDED_TEXT, inTransfer: IN_TRANSFER_TEXT };
+function refusalTexts(t: (k: DictKey) => string): Record<string, string> {
+  return Object.fromEntries(Object.entries(REFUSAL_TEXT_EN).map(([r, en]) => {
+    const key = `door.refuse.${r}` as DictKey;
+    const text = t(key);
+    return [r, text === key ? en : text];
+  }));
+}
+
 // addon: an add-on's entry code (mig 20261107110000); its undo has its own
 // rules (lib/addonUndo: the scanner within 10 minutes, online or queued offline).
 type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' | 'OUT'; addon?: boolean };
@@ -217,6 +232,12 @@ export default function OrganizerCheckIn() {
   const { user, isAdmin } = useAuth();
   const { orgs } = useOrganization();
   const { toast } = useToast();
+  // Door copy in the device's language (lib/i18n/door.ts); English is the texts above.
+  const { t, lang } = useLanguage();
+  const REFUSAL_TEXT = lang === 'en' ? REFUSAL_TEXT_EN : refusalTexts(t);
+  const UNCLAIMED_OFF_TEXT = lang === 'en' ? DOOR_TEXT_EN.unclaimedOff : t('door.unclaimedOff');
+  const VOIDED_TEXT = lang === 'en' ? DOOR_TEXT_EN.voided : t('door.voided');
+  const IN_TRANSFER_TEXT = lang === 'en' ? DOOR_TEXT_EN.inTransfer : t('door.inTransfer');
   const [event, setEvent] = useState<DoorEvent | null>(null);
   // 'unavailable': no network and no saved copy of this event on this device.
   const [eventLoad, setEventLoad] = useState<'loading' | 'ready' | 'unavailable' | 'missing'>('loading');
@@ -1063,18 +1084,8 @@ export default function OrganizerCheckIn() {
   // the wrong time window is a clock problem (or a screenshot): say by how much.
   const localRejectText = (v: VerifyResult, now: number): string => {
     if (v.reason === 'bucket-expired' && v.signatureValid && v.bucket != null) return describeSkew(v.bucket, now);
-    const reasonText: Record<string, string> = {
-      'malformed': 'Could not read this code.',
-      'bad-bucket': 'Code is malformed.',
-      'bucket-expired': 'This code expired. Ask the attendee to refresh their ticket and rescan.',
-      'signature-mismatch':
-        "Signature didn't match this ticket — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded (re-download it).",
-      'legacy-no-secret':
-        'This is an old-format ticket. Ask the attendee to open the app and refresh their ticket, then rescan.',
-      'no-key':
-        "This phone can't check this code offline (the saved list has no key for it). Reconnect or re-download the list, or a manager can check them in by name.",
-    };
-    return reasonText[v.reason || ''] || 'Code rejected.';
+    const known = ['malformed', 'bad-bucket', 'bucket-expired', 'signature-mismatch', 'legacy-no-secret', 'no-key'];
+    return known.includes(v.reason || '') ? t(`door.local.${v.reason}` as DictKey) : t('door.local.other');
   };
 
   const denyLocal = (ticketId: string, name: string, v: VerifyResult, src: DoorSource) => {
@@ -1147,21 +1158,20 @@ export default function OrganizerCheckIn() {
     const opensMs = opensAt ? Date.parse(opensAt) : NaN;
     const text: Record<string, string> = {
       ...REFUSAL_TEXT,
-      'barcode-expired': 'This code expired. Ask the attendee to refresh their ticket and rescan.',
-      'barcode-rejected':
-        "Signature didn't match this ticket (server check) — a screenshot, a tampered code, or a ticket transferred since the offline list was downloaded.",
+      'barcode-expired': t('door.refuse.barcode-expired'),
+      'barcode-rejected': t('door.refuse.barcode-rejected'),
       'doors-not-open': Number.isFinite(opensMs)
-        ? `Doors are not open yet. Check-in opens at ${eventTime(opensMs, event?.timezone)}.`
-        : 'Doors are not open yet for this event. Check-in opens at the event’s doors time.',
+        ? t('door.refuse.doors-not-open-at', { time: eventTime(opensMs, event?.timezone) })
+        : t('door.refuse.doors-not-open'),
       'voided': VOIDED_TEXT,
       'in-transfer': IN_TRANSFER_TEXT,
-      'wrong-event': 'This ticket is for a different event.',
-      'event-cancelled': 'This event was cancelled. Nobody can be checked in.',
+      'wrong-event': t('door.refuse.wrong-event'),
+      'event-cancelled': t('door.refuse.event-cancelled'),
     };
     setStatus('invalid-barcode');
     // Fair days: the server's invalid-time with wrong_day is the list's day, not its hours.
     const wrongDay = result.reason === 'invalid-time' && (result as CheckInResult & { wrong_day?: boolean }).wrong_day === true;
-    setInvalidReason((wrongDay ? REFUSAL_TEXT['wrong-day'] : text[result.reason]) || 'The server did not accept this ticket. Re-download the offline list and retry.');
+    setInvalidReason((wrongDay ? REFUSAL_TEXT['wrong-day'] : text[result.reason]) || t('door.refuse.other'));
     if (result.reason === 'doors-not-open') {
       setDoorsBlocked(true);
       return;
@@ -1709,12 +1719,10 @@ export default function OrganizerCheckIn() {
             <>
               <WifiOff className="w-8 h-8 text-slate-500 mx-auto mb-4" aria-hidden="true" />
               <h1 className="text-xl font-bold text-slate-900 mb-2">
-                {eventLoad === 'missing' ? 'Event not found' : 'No saved copy of this event'}
+                {eventLoad === 'missing' ? t('door.eventMissing') : t('door.noSavedCopy')}
               </h1>
               <p className="text-sm text-slate-600 mb-6">
-                {eventLoad === 'missing'
-                  ? "This event doesn't exist or you're not door staff for it."
-                  : "This device is offline and hasn't saved this event yet. Connect once and open this page to save the list for offline check-in."}
+                {eventLoad === 'missing' ? t('door.eventMissingBody') : t('door.noSavedCopyBody')}
               </p>
               <button
                 type="button"
@@ -1764,16 +1772,16 @@ export default function OrganizerCheckIn() {
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 md:gap-4 mb-4 md:mb-8">
         <div>
-          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Door Check-In</p>
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">{t('door.kicker')}</p>
           <span className="inline-flex items-baseline gap-3 flex-wrap">
             <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-slate-900">{event.title}</h1>
-            <span className="marker text-brand-secondary-ink text-lg rotate-[-3deg] leading-none whitespace-nowrap">at the door ✦</span>
+            <span className="marker text-brand-secondary-ink text-lg rotate-[-3deg] leading-none whitespace-nowrap">{t('door.atTheDoor')}</span>
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
            <div className={`flex items-center space-x-2 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest ${effectiveOffline ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
               {effectiveOffline ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
-              <span>{isOffline ? 'Offline' : serverDown ? 'No server' : 'Online'}</span>
+              <span>{isOffline ? t('door.offline') : serverDown ? t('door.noServer') : t('door.online')}</span>
            </div>
            <button
              onClick={() => downloadRegistry()}
@@ -1781,16 +1789,16 @@ export default function OrganizerCheckIn() {
              className="flex items-center space-x-2 px-3 py-2 bg-slate-900 text-white rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all disabled:opacity-50"
            >
               <Download className={`w-3 h-3 ${downloading ? 'animate-bounce' : ''}`} aria-hidden="true" />
-              <span>{downloading ? 'Downloading…' : 'Download for offline'}</span>
+              <span>{downloading ? t('door.downloading') : t('door.download')}</span>
            </button>
            <button
              type="button"
              onClick={exportAttendeesCsv}
-             aria-label="Export CSV of attendees"
+             aria-label={t('door.exportCsvLabel')}
              className="flex items-center space-x-2 px-3 py-2 bg-white text-slate-900 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
            >
               <Download className="w-3 h-3" aria-hidden="true" />
-              <span>Export CSV</span>
+              <span>{t('door.exportCsv')}</span>
            </button>
            {canOverride && eventId && (
              <button
@@ -1798,7 +1806,7 @@ export default function OrganizerCheckIn() {
                onClick={() => navigate(`/dashboard/event/${eventId}`)}
                className="flex items-center space-x-2 px-3 py-2 bg-white text-slate-900 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
              >
-                <span>Door summary</span>
+                <span>{t('door.summary')}</span>
              </button>
            )}
         </div>
@@ -1809,11 +1817,11 @@ export default function OrganizerCheckIn() {
           <WifiOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
           {rosterSavedAt != null && rosterCount > 0 ? (
             <span>
-              {isOffline ? 'Offline' : "Server not answering"}, using list saved at {eventTime(rosterSavedAt, event?.timezone)} ({rosterCount} ticket{rosterCount === 1 ? '' : 's'}). Check-ins upload when the connection is back.
+              {t(rosterCount === 1 ? 'door.offlineSavedOne' : 'door.offlineSaved', { state: isOffline ? t('door.offline') : t('door.serverDown'), time: eventTime(rosterSavedAt, event?.timezone), n: rosterCount })}
             </span>
           ) : (
             <span>
-              {isOffline ? 'Offline' : "Server not answering"}, and there is no saved list on this device: tickets can't be checked until the connection is back.
+              {t('door.offlineNoList', { state: isOffline ? t('door.offline') : t('door.serverDown') })}
             </span>
           )}
         </div>
@@ -1869,21 +1877,21 @@ export default function OrganizerCheckIn() {
             >
               {sortLists(checkinLists).map((l) => (
                 <option key={l.id} value={l.id}>
-                  {l.name}{l.allowReentry ? ' · re-entry' : ''}
+                  {l.name}{l.allowReentry ? t('door.reentry') : ''}
                 </option>
               ))}
-              <option value={NO_LIST}>Any ticket, no list</option>
+              <option value={NO_LIST}>{t('door.anyTicket')}</option>
             </select>
             <p className="text-[11px] text-slate-600 mt-1">
               {activeList
-                ? `${activeList.tierIds ? `${activeList.tierIds.length} ticket type${activeList.tierIds.length === 1 ? '' : 's'}` : 'All ticket types'} · ${
-                    activeList.allowReentry ? 'people can leave and come back (scan them out)' : 'one entry per ticket'
+                ? `${activeList.tierIds ? t(activeList.tierIds.length === 1 ? 'door.typeCountOne' : 'door.typeCount', { n: activeList.tierIds.length }) : t('door.allTypes')} · ${
+                    activeList.allowReentry ? t('door.canLeave') : t('door.oneEntry')
                   }`
-                : 'Every ticket, one entry each (as without lists).'}
+                : t('door.everyTicket')}
             </p>
           </div>
           {activeList?.allowReentry && (
-            <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="radiogroup" aria-label="Scan direction">
+            <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="radiogroup" aria-label={t('door.scanDirection')}>
               {(['entry', 'exit'] as const).map((d) => (
                 <button
                   key={d}
@@ -1895,14 +1903,14 @@ export default function OrganizerCheckIn() {
                     direction === d ? (d === 'exit' ? 'bg-sky-600 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  {d === 'entry' ? 'Entry' : 'Exit'}
+                  {d === 'entry' ? t('door.entry') : t('door.exit')}
                 </button>
               ))}
             </div>
           )}
         </div>
       )}
-      <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label="Door mode">
+      <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label={t('door.mode')}>
         {(['tickets', 'guests', 'sell', 'tokens'] as const).map((m) => (
           <button
             key={m}
@@ -1919,7 +1927,7 @@ export default function OrganizerCheckIn() {
             }}
             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
           >
-            {m === 'tickets' ? 'Tickets' : m === 'sell' ? 'Sell' : m === 'tokens' ? 'Tokens' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+            {m === 'tickets' ? t('door.tabTickets') : m === 'sell' ? t('door.tabSell') : m === 'tokens' ? t('door.tabTokens') : `${t('door.tabGuests')}${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
           </button>
         ))}
       </div>
@@ -1930,7 +1938,7 @@ export default function OrganizerCheckIn() {
       ) : mode === 'sell' && eventId ? (
       <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {effectiveOffline
-          ? <p role="alert" className="text-sm text-amber-700">Selling needs a connection: the sale, the tickets and the cash are recorded on the server.</p>
+          ? <p role="alert" className="text-sm text-amber-700">{t('door.sellNeedsNet')}</p>
           : <DoorSellPanel eventId={eventId} />}
       </div>
       ) : mode === 'guests' && eventId ? (
@@ -1963,19 +1971,19 @@ export default function OrganizerCheckIn() {
                 </div>
                 <div className="pointer-events-none absolute top-4 left-4 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-white/80">
                   <span className="w-2 h-2 bg-brand-primary rounded-full animate-ping"></span>{' '}
-                  {direction === 'exit' ? 'Scanning OUT…' : activeList ? `Scanning · ${activeList.name}` : 'Scanning…'}
+                  {direction === 'exit' ? t('door.scanningOut') : activeList ? t('door.scanningList', { list: activeList.name }) : t('door.scanning')}
                 </div>
-                <div className="pointer-events-none absolute bottom-4 left-0 right-0 text-center type text-[11px] uppercase tracking-widest text-white/40">point camera at the rotating QR pass</div>
+                <div className="pointer-events-none absolute bottom-4 left-0 right-0 text-center type text-[11px] uppercase tracking-widest text-white/40">{t('door.pointCamera')}</div>
               </div>
               <button
                 onClick={() => {
                   void stopScanner();
                   setScanning(false);
                 }}
-                aria-label="Stop the QR code scanner"
+                aria-label={t('door.stopScanner')}
                 className="mt-4 w-full py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 transition-colors"
               >
-                Abort Scanning
+                {t('door.abort')}
               </button>
            </div>
         ) : (
@@ -1985,12 +1993,12 @@ export default function OrganizerCheckIn() {
                className="w-full bg-slate-900 hover:bg-black text-white rounded-2xl py-8 flex flex-col items-center justify-center transition-all border border-slate-800"
              >
                 <ScanLine className="w-8 h-8 mb-2 text-brand-primary" />
-                <span className="disp text-2xl tracking-wide">OPEN CAMERA SCANNER</span>
+                <span className="disp text-2xl tracking-wide">{t('door.openCamera')}</span>
              </button>
 
              <div className="relative">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-                <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-500"><span className="bg-white px-4">Manual Entry — no camera?</span></div>
+                <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-500"><span className="bg-white px-4">{t('door.manual')}</span></div>
              </div>
 
              <form
@@ -2013,8 +2021,8 @@ export default function OrganizerCheckIn() {
              >
                 <input
                   type="text"
-                  placeholder="Name, last 6 of pass ID, or full ID"
-                  aria-label="Search by name or pass ID"
+                  placeholder={t('door.searchPlaceholder')}
+                  aria-label={t('door.searchLabel')}
                   autoComplete="off"
                   className="w-full bg-slate-50 border-2 border-transparent rounded-2xl py-5 pl-14 pr-24 text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-tm-blue transition-all"
                   value={searchId}
@@ -2032,13 +2040,13 @@ export default function OrganizerCheckIn() {
                const matches = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
                if (searchId.trim().length < 2 || isFullTicketId(searchId)) return null;
                if (Object.keys(offlineRegistry).length === 0) {
-                 return <p className="text-xs text-slate-600 px-2">Tap “Download for offline” to search by name.</p>;
+                 return <p className="text-xs text-slate-600 px-2">{t('door.downloadToSearch')}</p>;
                }
                if (matches.length === 0) {
                  return <p className="text-xs text-slate-600 px-2">No one on the list matches “{searchId.trim()}”.</p>;
                }
                return (
-                 <ul className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden" aria-label="Matching tickets">
+                 <ul className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden" aria-label={t('door.matches')}>
                    {matches.map(([id, entry]) => (
                      <li key={id} className="flex items-center gap-3 px-4 py-3">
                        <div className="min-w-0 flex-1">
@@ -2048,7 +2056,7 @@ export default function OrganizerCheckIn() {
                          </p>
                          {entry.parked && !entry.used && !entry.voided && (
                            <p className="text-[11px] text-slate-500 truncate">
-                             Not claimed yet{entry.claimEmailMasked ? ` · ${entry.claimEmailMasked}` : ''}
+                             {t('door.notClaimed')}{entry.claimEmailMasked ? ` · ${entry.claimEmailMasked}` : ''}
                            </p>
                          )}
                          {(doorExtras?.ticketAccess?.[id]?.length ?? 0) > 0 && (
@@ -2056,10 +2064,10 @@ export default function OrganizerCheckIn() {
                          )}
                        </div>
                        {entry.voided ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-red-700">Void</span>
+                         <span className="text-[10px] font-black uppercase tracking-widest text-red-700">{t('door.void')}</span>
                        ) : doneHere(entry) ? (
                          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
-                           {activeList?.allowReentry ? 'Inside' : 'In'}
+                           {activeList?.allowReentry ? t('door.inside') : t('door.in')}
                          </span>
                        ) : nameAccess === 'allowed' ? (
                          // Claimed or not: the event lets this person check in by name.
@@ -2068,7 +2076,7 @@ export default function OrganizerCheckIn() {
                            onClick={() => { setSearchId(''); openByName(id); }}
                            className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700 whitespace-nowrap"
                          >
-                           {direction === 'exit' ? 'Check out by name' : 'Check in by name'}
+                           {direction === 'exit' ? t('door.checkOutByName') : t('door.checkInByName')}
                          </button>
                        ) : nameMode === null && canOverride ? (
                          // The database doesn't have name check-in yet: the
@@ -2078,15 +2086,15 @@ export default function OrganizerCheckIn() {
                            onClick={() => { setSearchId(''); void handleCheckIn(undefined, id); }}
                            className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
                          >
-                           Admit…
+                           {t('door.admit')}
                          </button>
                        ) : nameAccess === 'needs-manager' ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title="This event lets only owners and managers check people in by name">
-                           Ask a manager
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title={t('door.askManagerTitle')}>
+                           {t('door.askManager')}
                          </span>
                        ) : (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title="Check-in by name is off for this event: scan their live code">
-                           Scan code
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title={t('door.scanCodeTitle')}>
+                           {t('door.scanCode')}
                          </span>
                        )}
                      </li>
@@ -2106,7 +2114,7 @@ export default function OrganizerCheckIn() {
               className="flex flex-col items-center justify-center py-10"
             >
               <Loader2 className="w-12 h-12 text-brand-primary animate-spin mb-4" />
-              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Verifying Ticket...</p>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">{t('door.verifying')}</p>
             </motion.div>
           )}
 
@@ -2120,21 +2128,21 @@ export default function OrganizerCheckIn() {
                  <CheckCircle2 className="w-10 h-10" />
               </div>
               <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">
-                {testScan ? 'Test scan OK' : exitScan ? 'Exit recorded' : 'Entry Allowed'}
+                {testScan ? t('door.testOk') : exitScan ? t('door.exitRecorded') : t('door.entryAllowed')}
               </h2>
               <p className="text-green-600 font-bold uppercase tracking-widest text-[10px] mb-6">
                 {testScan
-                  ? `Valid ticket · not checked in (test window${admittedOffline ? ', checked on the saved list' : ''})`
+                  ? t(admittedOffline ? 'door.testValidSaved' : 'door.testValid')
                   : exitScan
-                  ? `Can come back in${activeList ? ` on ${activeList.name}` : ''}${admittedOffline ? ' · uploads when online' : ''}`
+                  ? `${activeList ? t('door.canComeBackOn', { list: activeList.name }) : t('door.canComeBack')}${admittedOffline ? t('door.uploadsLater') : ''}`
                   : admittedOffline
-                  ? 'Checked on the saved list · uploads when online'
-                  : checkedByName ? 'Checked in by name' : manualEntry ? 'Manual entry · check ID if unsure' : 'Pass verified'}
+                  ? t('door.savedList')
+                  : checkedByName ? t('door.byName') : manualEntry ? t('door.manualEntry') : t('door.verified')}
               </p>
 
               {(doorExtras?.ticketAccess?.[foundTicket.id]?.length ?? 0) > 0 && (
                 <div role="note" className="w-full mb-4 p-4 rounded-2xl bg-sky-50 border border-sky-200 text-left">
-                  <p className="text-[11px] font-black uppercase tracking-widest text-sky-800 mb-2">Access needs</p>
+                  <p className="text-[11px] font-black uppercase tracking-widest text-sky-800 mb-2">{t('door.accessNeeds')}</p>
                   <AccessNeedBadges needs={doorExtras!.ticketAccess![foundTicket.id]} />
                 </div>
               )}
@@ -2157,12 +2165,12 @@ export default function OrganizerCheckIn() {
                     </div>
                  </div>
                  <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
-                    <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.ticketType')}</p>
+                    <p className="font-bold text-slate-900">{foundTicket.tierName || t('door.standard')}</p>
                  </div>
                  {seatByTicket[foundTicket.id] && (
                    <div className="p-4 bg-white rounded-2xl border border-green-50 text-left" data-testid="door-seat">
-                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
+                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.seat')}</p>
                      <p className="font-bold text-slate-900">{seatByTicket[foundTicket.id]}</p>
                    </div>
                  )}
@@ -2170,8 +2178,8 @@ export default function OrganizerCheckIn() {
                    const tb = tableByTicket[foundTicket.id];
                    return (
                      <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
-                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Table</p>
-                       <p className="font-bold text-slate-900">{tb.label || 'Not assigned yet'}</p>
+                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.table')}</p>
+                       <p className="font-bold text-slate-900">{tb.label || t('door.tableUnassigned')}</p>
                        <p className="text-xs text-slate-600 mt-1">
                          {tableSummary({ partySize: tb.partySize, minSpendCents: tb.minSpendCents, sectionLabel: tb.sectionLabel }, event?.currency || 'USD')}
                        </p>
@@ -2189,24 +2197,24 @@ export default function OrganizerCheckIn() {
               className="bg-green-50/50 p-8 rounded-[2.5rem] border border-green-100 flex flex-col items-center text-center"
             >
               <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">
-                {direction === 'exit' ? 'Check out by name' : 'Check in by name'}
+                {direction === 'exit' ? t('door.checkOutByName') : t('door.checkInByName')}
               </h2>
               <p className="text-green-700 font-bold uppercase tracking-widest text-[10px] mb-4">
-                No live code · …{nameFor.ticketId.slice(-6)}
+                {t('door.noLiveCode', { id: nameFor.ticketId.slice(-6) })}
               </p>
               <div className="w-full max-w-sm space-y-2 mb-4 text-left">
                 <div className="p-4 bg-white rounded-2xl border border-green-50">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Name</p>
-                  <p className="font-bold text-slate-900">{nameFor.name || 'Name not given'}</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.name')}</p>
+                  <p className="font-bold text-slate-900">{nameFor.name || t('door.nameMissing')}</p>
                   {nameFor.unclaimed && (
                     <p className="text-xs text-slate-600 mt-1">
-                      Not claimed yet{nameFor.emailMasked ? ` · ${nameFor.emailMasked}` : ''}. Checking in closes the claim link.
+                      {t('door.unclaimedClose', { email: nameFor.emailMasked ? ` · ${nameFor.emailMasked}` : '' })}
                     </p>
                   )}
                 </div>
                 {nameFor.tier && (
                   <div className="p-4 bg-white rounded-2xl border border-green-50">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.ticketType')}</p>
                     <p className="font-bold text-slate-900">{nameFor.tier}</p>
                   </div>
                 )}
@@ -2216,8 +2224,8 @@ export default function OrganizerCheckIn() {
                   type="text"
                   value={nameNote}
                   onChange={(e) => setNameNote(e.target.value)}
-                  placeholder="Note (optional), e.g. checked ID"
-                  aria-label="Note for this check-in (optional)"
+                  placeholder={t('door.notePlaceholder')}
+                  aria-label={t('door.noteLabel')}
                   maxLength={300}
                   className="w-full bg-white border border-green-100 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
                 />
@@ -2227,7 +2235,7 @@ export default function OrganizerCheckIn() {
                     autoFocus
                     className="flex-1 px-4 py-3 bg-green-600 text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-green-700"
                   >
-                    {direction === 'exit' ? 'Check out' : 'Check in'}
+                    {direction === 'exit' ? t('door.checkOut') : t('door.checkIn')}
                   </button>
                   <button
                     type="button"
@@ -2247,7 +2255,7 @@ export default function OrganizerCheckIn() {
               initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-sky-50/60 p-8 rounded-[2.5rem] border border-sky-200 flex flex-col items-center text-center"
             >
-              <h2 className="text-2xl font-bold text-sky-900 mb-1 leading-none uppercase tracking-tight">Manual override</h2>
+              <h2 className="text-2xl font-bold text-sky-900 mb-1 leading-none uppercase tracking-tight">{t('door.override')}</h2>
               <p className="text-sky-700 font-bold uppercase tracking-widest text-[10px] mb-4">
                 No live code was scanned{overrideFor.name ? ` · ${overrideFor.name}` : ''} · …{overrideFor.ticketId.slice(-6)}
               </p>
@@ -2259,8 +2267,8 @@ export default function OrganizerCheckIn() {
                   type="text"
                   value={overrideReason}
                   onChange={(e) => setOverrideReason(e.target.value)}
-                  placeholder="Reason, e.g. phone died — checked photo ID"
-                  aria-label="Reason for the override"
+                  placeholder={t('door.overridePlaceholder')}
+                  aria-label={t('door.overrideLabel')}
                   maxLength={300}
                   autoFocus
                   className="w-full bg-white border border-sky-200 rounded-xl px-4 py-3 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
@@ -2295,26 +2303,26 @@ export default function OrganizerCheckIn() {
                  <XCircle className="w-10 h-10" />
               </div>
               <h2 className="text-2xl font-bold text-orange-900 mb-1 leading-none uppercase tracking-tight">
-                {usedInfo?.inside ? 'Already inside' : 'Already Used'}
+                {usedInfo?.inside ? t('door.alreadyInside') : t('door.alreadyUsed')}
               </h2>
               <p className="text-orange-600 font-bold uppercase tracking-widest text-[10px] mb-6">
-                {usedInfo?.inside ? 'No exit since their last entry on this list' : 'Ticket already checked in'}
+                {usedInfo?.inside ? t('door.noExit') : t('door.alreadyChecked')}
               </p>
               
               <p className="text-slate-600 text-sm font-medium mb-4">
-                Checked in at: <br />
+                {t('door.checkedInAt')} <br />
                 <strong>
                   {usedInfo?.at
                     ? eventDateTime(new Date(usedInfo.at).getTime(), event?.timezone)
                     : foundTicket?.checkInDate && foundTicket.checkInDate.toMillis() > 0
                     ? eventDateTime(foundTicket.checkInDate.toMillis(), event?.timezone)
-                    : 'Earlier (time shows once online)'}
+                    : t('door.earlier')}
                 </strong>
                 {usedInfo?.device ? <><br />on <strong>{usedInfo.device}</strong></> : null}
               </p>
               
               <div className="w-full p-4 bg-white rounded-2xl border border-orange-100 text-left">
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Attendee Name</p>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">{t('door.attendeeName')}</p>
                  <p className="font-bold text-slate-900">{buyerName}</p>
               </div>
             </motion.div>
@@ -2329,8 +2337,8 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-red-200">
                  <XCircle className="w-10 h-10" aria-hidden="true" />
               </div>
-              <h2 className="text-2xl font-bold text-red-900 mb-1 leading-none uppercase tracking-tight">Invalid Ticket</h2>
-              <p className="text-red-600 font-bold uppercase tracking-widest text-[10px] mb-6">Ticket not found or invalid for this event</p>
+              <h2 className="text-2xl font-bold text-red-900 mb-1 leading-none uppercase tracking-tight">{t('door.invalid')}</h2>
+              <p className="text-red-600 font-bold uppercase tracking-widest text-[10px] mb-6">{t('door.invalidSub')}</p>
               {invalidReason && <p className="text-slate-600 text-sm max-w-sm">{invalidReason}</p>}
 
               {/*
@@ -2355,9 +2363,9 @@ export default function OrganizerCheckIn() {
               <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-amber-200">
                  <XCircle className="w-10 h-10" aria-hidden="true" />
               </div>
-              <h2 className="text-2xl font-bold text-amber-900 mb-1 leading-none uppercase tracking-tight">Code Rejected</h2>
+              <h2 className="text-2xl font-bold text-amber-900 mb-1 leading-none uppercase tracking-tight">{t('door.rejected')}</h2>
               <p className="text-amber-700 font-bold uppercase tracking-widest text-[10px] mb-4">
-                {invalidReason || 'Signature did not match — possible screenshot or stale code.'}
+                {invalidReason || t('door.rejectedDefault')}
               </p>
               {doorsBlocked && !effectiveOffline ? (
                 <button
@@ -2366,7 +2374,7 @@ export default function OrganizerCheckIn() {
                   disabled={enablingTest}
                   className="mt-2 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors disabled:opacity-50"
                 >
-                  {enablingTest ? 'Enabling…' : 'Enable test scanning (3h)'}
+                  {enablingTest ? t('door.enabling') : t('door.enableTest')}
                 </button>
               ) : (
                 <p className="text-amber-600 text-[11px] font-medium mb-2">
@@ -2389,11 +2397,11 @@ export default function OrganizerCheckIn() {
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
               <p className="disp text-3xl tracking-tight text-slate-900" style={{ transform: 'skewX(-3deg)' }}>{event.ticketsSold}</p>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Sold</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{t('door.sold')}</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
               <p className="disp text-3xl tracking-tight text-rose-500" style={{ transform: 'skewX(-3deg)' }}>{rejectCount}</p>
-              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Rejects</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">{t('door.rejects')}</p>
             </div>
           </div>
 
@@ -2419,7 +2427,7 @@ export default function OrganizerCheckIn() {
             </dl>
             {conflicts.length > 0 && (
               <div className="px-5 pb-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Refused on upload</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">{t('door.refusedUpload')}</p>
                 <ul className="space-y-1.5 max-h-48 overflow-y-auto" aria-label="Scans the server refused on upload">
                   {conflicts.map((c, i) => (
                     <li key={`${c.ticketId}-${c.at}-${i}`} className="text-xs text-slate-700">
@@ -2461,11 +2469,11 @@ export default function OrganizerCheckIn() {
 
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Scan log</h2>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">live</span>
+              <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">{t('door.scanLog')}</h2>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{t('door.live')}</span>
             </div>
             {recentScans.length === 0 ? (
-              <p className="px-5 py-6 text-xs text-slate-500 font-bold uppercase tracking-widest">No scans yet.</p>
+              <p className="px-5 py-6 text-xs text-slate-500 font-bold uppercase tracking-widest">{t('door.noScans')}</p>
             ) : (
               <ul className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
                 {recentScans.map((scan) => {

@@ -195,7 +195,8 @@ CREATE TABLE IF NOT EXISTS public.exos_event_token_lots (
   credits_left   integer NOT NULL,
   value_left     integer NOT NULL,
   status         text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'refunded', 'expired')),
-  created_at     timestamptz NOT NULL DEFAULT now(),
+  -- clock_timestamp: lots bought in one order still spend in purchase order.
+  created_at     timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
   -- Never a negative balance: an overspend is an exception row instead.
   CONSTRAINT exos_event_token_lots_left_chk CHECK (credits_left BETWEEN 0 AND credits_bought
