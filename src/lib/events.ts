@@ -18,6 +18,7 @@ import { parseMarketSplit } from '../../supabase/functions/_shared/marketplace/l
 import { supabase } from './supabase';
 import { parseUnitFees } from './fees';
 import { listPublicFeeRules, withTierFees } from './feeRules';
+import type { EventI18n } from './i18n/dict';
 import { fetchPublicLinkOuts, type PublicLinkOut } from './linkOut';
 import { getCurrentAppUser } from './auth';
 import { utcToOccursAtLocal } from './datetime';
@@ -71,6 +72,8 @@ export function mapEvent(row: any, tiers?: any[], discounts?: any[]): Event {
     slug: row.slug ?? undefined,
     title: row.name,
     description: row.description ?? '',
+    // exos: Spanish (mig 20261114130000): per-language title / description.
+    i18n: row.i18n && typeof row.i18n === 'object' && !Array.isArray(row.i18n) ? row.i18n : undefined,
     date: toTs(row.starts_at ?? null),
     location: row.venue_name ?? row.venue_location ?? '',
     price: minPrice,
@@ -534,5 +537,23 @@ export async function updateTier(tierId: string, patch: Partial<TierInput>): Pro
 
 export async function deleteTier(tierId: string): Promise<void> {
   const { error } = await supabase.from('exos_ticket_tiers').delete().eq('id', tierId);
+  if (error) throw error;
+}
+
+// --- Spanish title / description (mig 20261114130000) ----------------------
+// exos_events.i18n, written with the event's own grants and RLS (owners and
+// managers of the org), validated by the database (_exos_event_i18n_ok). Its
+// own read and save, so the main form keeps working before the column exists.
+
+/** The event's per-language fields, or null when the column isn't there (yet). */
+export async function getEventI18n(eventId: string): Promise<EventI18n | null> {
+  const { data, error } = await supabase.from('exos_events').select('i18n').eq('id', eventId).maybeSingle();
+  if (error || !data) return null;
+  const v = (data as { i18n?: unknown }).i18n;
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as EventI18n) : {};
+}
+
+export async function updateEventI18n(eventId: string, i18n: EventI18n): Promise<void> {
+  const { error } = await supabase.from('exos_events').update({ i18n }).eq('id', eventId);
   if (error) throw error;
 }

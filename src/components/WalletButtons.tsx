@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Wallet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useT } from '../context/LanguageContext';
 import {
   detectWalletPlatform,
   unprobedWalletKinds,
@@ -240,6 +241,7 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
   className?: string;
 }) {
   const { user } = useAuth();
+  const t = useT();
   const { toast } = useToast();
   const [busy, setBusy] = useState<WalletKind | null>(null);
   const { platform, kinds, markUnavailable } = useAvailableWallets(walletEligible(ticket, user?.uid));
@@ -250,7 +252,7 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
       <EscapeHatch
         state={inApp}
         reasons={[]}
-        lead={`Apple Wallet can't add tickets from inside ${IN_APP_LABEL[inApp.kind]}. Open this page in Safari, sign in with the same email, then tap Add to Apple Wallet.`}
+        lead={t('wallet.inAppApple', { app: IN_APP_LABEL[inApp.kind] })}
         className={`type text-[11px] text-white/70 border border-white/10 p-3 ${className}`}
       />
     );
@@ -264,9 +266,9 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
     } catch (err) {
       if (err instanceof WalletUnavailableError) {
         markUnavailable(kind);
-        toast({ kind: 'warn', message: `${kind === 'apple' ? 'Apple' : 'Google'} Wallet isn't available right now.` });
+        toast({ kind: 'warn', message: t('wallet.unavailable', { wallet: kind === 'apple' ? 'Apple' : 'Google' }) });
       } else {
-        toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create the wallet pass.' });
+        toast({ kind: 'error', message: err instanceof Error ? err.message : t('wallet.failed') });
       }
     } finally {
       setBusy(null);
@@ -284,7 +286,7 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
           className={`inline-flex items-center justify-center gap-2 rounded-lg bg-black text-white border border-white/30 hover:border-white font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary ${compact ? 'px-3 py-2 text-xs' : 'flex-1 min-w-[12rem] px-4 py-3 text-sm'}`}
         >
           <Wallet className={compact ? 'w-3.5 h-3.5' : 'w-4 h-4'} aria-hidden="true" />
-          {busy === kind ? 'Preparing…' : LABEL[kind]}
+          {busy === kind ? t('wallet.preparing') : t(kind === 'apple' ? 'wallet.apple' : 'wallet.google')}
         </button>
       ))}
     </div>

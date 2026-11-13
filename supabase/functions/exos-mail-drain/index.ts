@@ -32,6 +32,11 @@
 // is marked failed and retried like a provider error. Scheduled follow-ups
 // are queued by exos_send_mail_followups(); its cron line is in docs/email.md.
 //
+// Spanish (mig 20261114130000, docs/i18n-review.md): a buyer mail whose row has
+// lang 'es' goes in Spanish when there's a Spanish version: payload rows from
+// mail-templates.ts (RENDERERS_ES), SQL-built rows from mail-es.ts (only when
+// every sentence is known; otherwise the English row is sent as queued).
+//
 // Cron (operator / A1 — cron.* is operator-gated):
 //   select cron.schedule('exos-mail-drain-2min', '*/2 * * * *', $cron$
 //     do $b$ begin
@@ -45,6 +50,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { normalizeAppUrl, renderMail } from "../_shared/mail-render.ts";
 import { renderTemplate } from "../_shared/mail-templates.ts";
+import { localizeMailEs } from "../_shared/mail-es.ts";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -109,11 +115,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     for (const e of (extra ?? []) as { id: string; list_unsubscribe: string }[]) unsubById.set(e.id, e.list_unsubscribe);
   }
 
+  // The recipient's language (mig 20261114130000), stamped on buyer mails.
+  // Not returned by the claim RPC either; best-effort (English without it).
+  const spanish = new Set<string>();
+  if (rows.length > 0) {
+    const { data: es, error: esErr } = await sb.from("exos_mail")
+      .select("id").in("id", rows.map((r) => r.id)).eq("lang", "es");
+    if (esErr) console.error("exos-mail-drain: lang read failed (non-fatal, sending English)", esErr.message);
+    for (const e of (es ?? []) as { id: string }[]) spanish.add(e.id);
+  }
+
   for (const row of rows) {
     let subject = row.subject;
     let html = row.html;
+    const lang = spanish.has(row.id) ? "es" : "en";
+    if (row.payload === null || row.payload === undefined) {
+      // A body SQL built in English: the Spanish one when every sentence of
+      // it is known (_shared/mail-es.ts), else the English row as queued.
+      const es = lang === "es" ? localizeMailEs(subject, html) : null;
+      if (es) ({ subject, html } = es);
+    }
     if (row.payload !== null && row.payload !== undefined) {
-      const t = renderTemplate(row.template ?? "", row.payload, appUrl);
+      const t = renderTemplate(row.template ?? "", row.payload, appUrl, lang);
       if ("error" in t) {
         await sb.rpc("exos_mail_mark", {
           p_id: row.id, p_ok: false, p_error: t.error, p_max_attempts: maxAttempts,

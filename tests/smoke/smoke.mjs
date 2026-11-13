@@ -2027,6 +2027,68 @@ await run('edit event: Show on Discord and Post to Discord (dry run)', async (pa
   assert(log.some((l) => l.startsWith('fn exos-discord/post') && l.includes('"kind":"publish"')), 'post call');
 }, { signedIn: true, mock: discordMock({}) });
 
+// --- claude/exos-spanish: the buyer path and the door in Spanish (mig 20261114130000) ---
+// The visitor picked ES on the switcher (it sticks in localStorage); the
+// organizer wrote a Spanish title. <html lang="es">, Spanish copy, the order
+// carries lang 'es' (its mail and Stripe's page follow it).
+const spanish = async (page) => page.addInitScript(() => localStorage.setItem('exos.lang', 'es'));
+const esEvent = { ...baseTables.exos_public_events[0], i18n: { es: { title: 'Fiesta de Otoño', description: 'Baile toda la noche.' } } };
+const esCheckout = {};
+await run('es: event page and guest checkout in Spanish, the order carries lang es', async (page, log) => {
+  await spanish(page);
+  await stubStripe(page, esCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fiesta de Otoño');
+  await expectText(page, 'Baile toda la noche.');
+  assert(await page.evaluate(() => document.documentElement.lang) === 'es', '<html lang="es">');
+  await expectText(page, 'SOBRE EL EVENTO');
+  await expectText(page, 'precio final');
+  await page.getByRole('button', { name: /Comprar Entradas/i }).first().click();
+  const dlg = page.getByRole('dialog').filter({ hasText: '¿A dónde te enviamos tus entradas?' });
+  await dlg.waitFor({ timeout: 8000 });
+  await dlg.getByRole('button', { name: 'Continuar al pago' }).click();
+  await dlg.getByText('Ingresa un correo válido.').waitFor({ timeout: 5000 });
+  await dlg.getByLabel('Correo').fill('fan@example.com');
+  await dlg.getByRole('button', { name: 'Continuar al pago' }).click();
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(esCheckout.body?.lang === 'es', 'checkout body lang: ' + JSON.stringify(esCheckout.body?.lang));
+}, { mock: { ...checkoutFn(esCheckout), tables: { exos_public_events: [esEvent] } } });
+
+const enCheckout = {};
+await run('es: an English visitor still sees the default title and sends lang en', async (page) => {
+  await stubStripe(page, enCheckout);
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  assert(!(await page.locator('body').innerText()).includes('Fiesta de Otoño'), 'no Spanish title for an English visitor');
+  await payAsGuest(page, 'fan@example.com');
+  await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+  assert(enCheckout.body?.lang === 'en', 'checkout body lang en');
+}, { mock: { ...checkoutFn(enCheckout), tables: { exos_public_events: [esEvent] } } });
+
+await run('es: the door scanner and the Sell tab in Spanish', async (page, log) => {
+  walkupSold = false;
+  await spanish(page);
+  await page.goto(BASE + '/checkin/' + EV);
+  await expectText(page, 'Acceso en puerta');
+  await expectText(page, 'ABRIR ESCÁNER DE CÁMARA');
+  assert(await page.evaluate(() => document.documentElement.lang) === 'es', '<html lang="es">');
+  await page.getByRole('tab', { name: 'Vender' }).click();
+  await expectText(page, 'Vender en la puerta');
+  await expectText(page, 'Quedan 42');
+  await page.getByRole('button', { name: '$25.00', exact: true }).first().click();
+  await page.getByRole('button', { name: '$50.00', exact: true }).click();
+  await expectText(page, 'Cambio $25.00');
+  await page.getByRole('button', { name: /Cobrar \$25\.00 · vender 1/ }).click();
+  await expectText(page, 'Vendidas 1 × Door GA');
+  await page.getByRole('button', { name: 'Mostrar QR' }).click();
+  await page.getByRole('img', { name: 'Código QR de la entrada' }).waitFor({ timeout: 8000 });
+  await expectText(page, 'Sirve para entrar una vez');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': walkupPos } }) });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

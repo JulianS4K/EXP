@@ -114,6 +114,7 @@ MIGRATIONS=(
   20261113110000_exos_fair_day  # claude/exos-fair-day: fair days (exos_checkin_lists.entry_day, exos_ticket_tiers.max_entry_days; patches on exos_check_in_ticket 10-arg, exos_door_checkin_by_name 8-arg, exos_check_in_offline 10-arg, exos_event_door_roster), exos_fair_setup, exos_door_throughput, 4 indexes; no cron; ship the SPA after
   20261113120000_exos_attendance_report  # claude/exos-attendance-report: attendance report (postal rollup, pacing; exos_event_attendance + _exos_api_attendance), XLSX export kinds (2 patches on exos_audit_export); no table, no cron; apply before deploying exos-api; ship the SPA after
   20261113130000_exos_discord  # claude/exos-discord: Discord promotion (4 tables incl. the circuit breaker, 2 triggers on exos_events, provider 'discord' on exos_oauth_states + 1 marker patch on exos_oauth_state_begin); cron exos-discord-2min created INACTIVE; deploy exos-discord (new, --no-verify-jwt) + ship the SPA after; dark until EXOS_DISCORD_ENABLED=on, dry run until EXOS_DISCORD_WRITES=on
+  20261114130000_exos_event_i18n  # claude/exos-spanish: exos_events.i18n (es title / description, CHECK + column grants; appended to exos_public_events), exos_checkout_sessions.lang, exos_mail.lang + BEFORE INSERT trigger (buyer mail language); no function patched, no cron; deploy exos-checkout + exos-mail-drain + ship the SPA after
 )
 
 # Functions that keep JWT verification; every other function deploys with --no-verify-jwt

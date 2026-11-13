@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS auth.users (
   email text,
   email_confirmed_at timestamptz
 );
+-- Supabase's own column (the account's user_metadata); mig 20261114130000
+-- reads its "lang" key.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS raw_user_meta_data jsonb;
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('app.uid', true), '')::uuid
 $$;
