@@ -285,7 +285,8 @@ for m in \
   20261113100000_exos_kiosk \
   20261113110000_exos_fair_day \
   20261113120000_exos_attendance_report \
-  20261113130000_exos_discord; do
+  20261113130000_exos_discord \
+  20261114110000_exos_event_tokens; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -530,7 +531,8 @@ for m in \
          20261113100000_exos_kiosk \
          20261113110000_exos_fair_day \
          20261113120000_exos_attendance_report \
-         20261113130000_exos_discord; do
+         20261113130000_exos_discord \
+         20261114110000_exos_event_tokens; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -676,5 +678,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_attendanc
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk.sql"
 # claude/exos-discord (mig 20261113130000): Discord promotion: the channel webhook URL check (discord.com / discordapp.com webhook paths only, never echoed), Vault-only token, roles (owner / manager; writes switch owner only), cross-org refusal, one post per event per kind (dry runs and errors re-queue, sent never), rate limits, lease-checked marks, the bot install state ('discord' provider, finish token), one server per org, Show on Discord re-sync, audit rows
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discord.sql"
+# claude/exos-event-tokens (mig 20261114110000): event tokens (drink tickets, ride credits, tasting tickets): configure roles + offers (add-ons, POS items), buy online onto the buyer's ticket, spend with the ticket's code or a token code (all or nothing, idempotent), undo (owner / manager, audited), door sales (cash / comp, void only before a spend), offline replays (overspent / rejected exceptions, never negative), expiry (breakage), refunds of unused credits (online partial refund, drawer cash), the journal (deferred revenue), report, cross-org, rate limits (race: race_event_tokens.sh, CI)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_event_tokens.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

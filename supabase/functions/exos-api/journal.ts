@@ -21,8 +21,9 @@ export const JOURNAL_ROUTES = new Set(["list-journal"]);
 /** The chart (exos_journal_accounts()); the API filter takes these codes. */
 export const JOURNAL_ACCOUNTS = [
   "stripe_clearing", "paypal_receivable", "pos_cash_drawer", "bank", "cash_on_hand", "marketplace_receivable",
-  "organizer_payable", "sales_tax_payable", "promoter_commissions_payable", "gift_cards_outstanding", "tips_payable",
-  "opening_balances", "ticket_revenue", "buyer_fees", "pos_other_sales", "donations", "gift_card_breakage", "refunds",
+  "organizer_payable", "sales_tax_payable", "promoter_commissions_payable", "gift_cards_outstanding",
+  "event_tokens_outstanding", "tips_payable", "opening_balances", "ticket_revenue", "buyer_fees", "pos_other_sales",
+  "donations", "gift_card_breakage", "event_token_redemptions", "event_token_breakage", "refunds",
   "exos_fee", "card_fees", "disputes", "promoter_commissions", "pos_paid_outs", "cash_over_short", "gift_card_comps",
 ] as const;
 
@@ -35,6 +36,8 @@ export const JOURNAL_SOURCES = [
   "paypal_org_remittances",
   // mig 20261111130000 (claude/exos-journal-3)
   "stripe_org_payouts",
+  // mig 20261114110000 (claude/exos-event-tokens)
+  "event_token_ledger",
 ] as const;
 
 const COLS =

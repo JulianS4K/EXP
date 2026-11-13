@@ -2,7 +2,7 @@
   "file": "journal",
   "name": "Journal",
   "order": 66.2,
-  "description": "The organization's double-entry journal (docs/journal.md): every paid order, refund, fee change, dispute the organization bears, marketplace sale and payout, promoter commission and cash movement at the door, posted as balanced entries in integer cents. Each row here is one line of an entry: exactly one of `debit_cents` / `credit_cents` is above zero, and the lines of one `entry_id` sum to zero. Entries are never edited or deleted: a change after the fact (a refund that fails, a re-priced marketplace order, a waived dispute recovery) is a further entry, and `reverses` names the entry a reversal undoes. Accounts: `stripe_clearing` (1000), `paypal_receivable` (1010), `pos_cash_drawer` (1020), `marketplace_receivable` (1100), `organizer_payable` (2000, owed to Exos), `sales_tax_payable` (2100), `promoter_commissions_payable` (2200), `gift_cards_outstanding` (2300), `tips_payable` (2400), `ticket_revenue` (4000), `buyer_fees` (4010), `pos_other_sales` (4020), `donations` (4030), `refunds` (4900), `exos_fee` (5000), `card_fees` (5010), `disputes` (5020), `promoter_commissions` (5030), `pos_paid_outs` (5040).",
+  "description": "The organization's double-entry journal (docs/journal.md): every paid order, refund, fee change, dispute the organization bears, marketplace sale and payout, promoter commission and cash movement at the door, posted as balanced entries in integer cents. Each row here is one line of an entry: exactly one of `debit_cents` / `credit_cents` is above zero, and the lines of one `entry_id` sum to zero. Entries are never edited or deleted: a change after the fact (a refund that fails, a re-priced marketplace order, a waived dispute recovery) is a further entry, and `reverses` names the entry a reversal undoes. Accounts: `stripe_clearing` (1000), `paypal_receivable` (1010), `pos_cash_drawer` (1020), `marketplace_receivable` (1100), `organizer_payable` (2000, owed to Exos), `sales_tax_payable` (2100), `promoter_commissions_payable` (2200), `gift_cards_outstanding` (2300), `event_tokens_outstanding` (2310, event tokens sold and not yet spent), `tips_payable` (2400), `ticket_revenue` (4000), `buyer_fees` (4010), `pos_other_sales` (4020), `donations` (4030), `event_token_redemptions` (4050), `event_token_breakage` (4060), `refunds` (4900), `exos_fee` (5000), `card_fees` (5010), `disputes` (5020), `promoter_commissions` (5030), `pos_paid_outs` (5040).",
   "endpoints": [
     {
       "id": "list-journal",
@@ -50,7 +50,7 @@
           "location": "query",
           "type": "string",
           "required": false,
-          "description": "Where the entry came from: checkout_sessions, order_refunds, fee_adjustments, disputes, marketplace_orders, org_payout_lines, promoter_commissions, pos_payments, pos_paid_outs, pos_reversals (card refunds at the door), gift_card_ledger, gift_card_redemptions, pos_drawer_sessions, org_instant_payouts, paypal_org_remittances or stripe_org_payouts (Stripe's payouts from the connected account to the bank).",
+          "description": "Where the entry came from: checkout_sessions, order_refunds, fee_adjustments, disputes, marketplace_orders, org_payout_lines, promoter_commissions, pos_payments, pos_paid_outs, pos_reversals (card refunds at the door), gift_card_ledger, gift_card_redemptions, pos_drawer_sessions, org_instant_payouts, paypal_org_remittances, stripe_org_payouts (Stripe's payouts from the connected account to the bank) or event_token_ledger (event tokens: sold, redeemed, expired, refunded; deferred revenue).",
           "example": "order_refunds"
         },
         {
@@ -133,7 +133,7 @@
           "status": 400,
           "description": "A bad page, per_page, date, event id, account or source.",
           "example": {
-            "error": "account must be one of stripe_clearing, paypal_receivable, pos_cash_drawer, bank, cash_on_hand, marketplace_receivable, organizer_payable, sales_tax_payable, promoter_commissions_payable, gift_cards_outstanding, tips_payable, opening_balances, ticket_revenue, buyer_fees, pos_other_sales, donations, gift_card_breakage, refunds, exos_fee, card_fees, disputes, promoter_commissions, pos_paid_outs, cash_over_short, gift_card_comps."
+            "error": "account must be one of stripe_clearing, paypal_receivable, pos_cash_drawer, bank, cash_on_hand, marketplace_receivable, organizer_payable, sales_tax_payable, promoter_commissions_payable, gift_cards_outstanding, event_tokens_outstanding, tips_payable, opening_balances, ticket_revenue, buyer_fees, pos_other_sales, donations, gift_card_breakage, event_token_redemptions, event_token_breakage, refunds, exos_fee, card_fees, disputes, promoter_commissions, pos_paid_outs, cash_over_short, gift_card_comps."
           }
         },
         {

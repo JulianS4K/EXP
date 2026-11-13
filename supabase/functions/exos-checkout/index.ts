@@ -616,7 +616,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (ids.length > 0) {
       const { data: catalog, error: addErr } = await sb
         .from("exos_event_addons")
-        .select("id, name, price, capacity, sold, max_per_order, visibility, event_id, tax_rate_id, exos_tax_rules(rate_percent, price_includes_tax)")
+        .select("id, name, price, capacity, sold, max_per_order, visibility, event_id, tax_rate_id, token_product_id, exos_tax_rules(rate_percent, price_includes_tax)")
         .eq("event_id", event_id).in("id", ids);
       if (addErr) return json({ error: "could not load add-ons" }, 500);
       const byId = new Map((catalog ?? []).map((a) => [a.id, a]));
@@ -650,6 +650,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
           line_tax: recordedTax - taxBefore, tax_included: addonRule?.price_includes_tax === true,
         });
         addonTotal += allIn * qty;
+      }
+      // exos: event tokens (mig 20261114110000): a token product's max per
+      // order counts its credits across its bundles, before any charge.
+      if ((catalog ?? []).some((a) => (a as { token_product_id?: string | null }).token_product_id)) {
+        const { data: tokNo, error: tokErr } = await sb.rpc("exos_event_token_order_check", {
+          p_event_id: event_id, p_addons: [...wanted].map(([addon_id, quantity]) => ({ addon_id, quantity })),
+        });
+        if (tokErr) return json({ error: "could not check the event tokens, try again" }, 503);
+        if (typeof tokNo === "string" && tokNo) return json({ error: tokNo }, 409);
       }
     }
   }

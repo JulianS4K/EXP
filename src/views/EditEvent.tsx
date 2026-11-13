@@ -31,6 +31,7 @@ import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
 import AddonsEditor from '../components/AddonsEditor';
+import EventTokensPanel from '../components/EventTokensPanel'; // claude/exos-event-tokens
 import QuestionBuilder from '../components/QuestionBuilder';
 import VouchersEditor from '../components/VouchersEditor';
 import QuotasEditor from '../components/QuotasEditor';
@@ -1711,6 +1712,8 @@ export default function EditEvent() {
 
         {/* Add-ons & Merch — self-contained CRUD (not part of the form submit). */}
         {eventId && <Fragment key={`addons-${fairKey}`}><AddonsEditor eventId={eventId} /></Fragment>}
+        {/* Event tokens: drink tickets, ride credits (mig 20261114110000). */}
+        {eventId && <EventTokensPanel eventId={eventId} eventName={eventData.title || ''} />}
         {/* Checkout questions (mig 20261106110000): saved ticket types only. */}
         {eventId && <QuestionBuilder eventId={eventId} tiers={originalTiers} />}
 

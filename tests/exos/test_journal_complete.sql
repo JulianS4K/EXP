@@ -107,7 +107,7 @@ INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold,
 DO $$
 DECLARE f text; t text;
 BEGIN
-  ASSERT (SELECT count(*) FROM public.exos_journal_accounts()) = 25, 'JC0 the chart has 25 accounts';
+  ASSERT (SELECT count(*) FROM public.exos_journal_accounts()) = 28, 'JC0 the chart has 28 accounts';  -- +3 event tokens (20261114110000)
   ASSERT (SELECT bool_and(public._exos_journal_account_ok(code)) FROM public.exos_journal_accounts()), 'JC0 every code accepted';
   ASSERT (SELECT type FROM public.exos_journal_accounts() WHERE code = 'opening_balances') = 'equity', 'JC0 equity account';
   FOREACH f IN ARRAY ARRAY['public.exos_journal_post_pos_reversal(uuid)', 'public.exos_journal_post_gift_card(bigint)',
@@ -129,7 +129,7 @@ BEGIN
          'JC0 the gift card ledger posts at commit';
   ASSERT position('exos_gift_card_ledger' in pg_get_constraintdef((SELECT oid FROM pg_constraint
            WHERE conname = 'exos_journal_entries_source_table_check'))) > 0, 'JC0 the source check takes the new tables';
-  RAISE NOTICE 'OK  JC0 shape: 25 accounts, writers service-role only + search_path, the new triggers (ledger deferred), sources';
+  RAISE NOTICE 'OK  JC0 shape: 28 accounts, writers service-role only + search_path, the new triggers (ledger deferred), sources';
 END $$;
 
 -- JC1 ------------------------------------------------------------------------

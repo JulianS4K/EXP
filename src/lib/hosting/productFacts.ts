@@ -359,6 +359,14 @@ export const PRODUCT_FACTS: ProductFact[] = [
       'supabase/migrations/20261113130000_exos_discord.sql'],
     note: 'Branch claude/exos-discord: not on main, migration not applied. Dark until EXOS_DISCORD_ENABLED=on; a dry run until the org switch and EXOS_DISCORD_WRITES=on; the bot needs the platform\'s Discord application (docs/discord.md).',
   },
+  {
+    // claude/exos-event-tokens
+    id: 'event-tokens', audience: 'organizer', status: 'off',
+    claim: 'Organizers can sell event tokens such as drink tickets, ride credits and tasting tickets, online with the order and at the door, and staff take them off the guest\'s ticket or token code in the door app, offline too.',
+    code: ['src/components/EventTokensPanel.tsx', 'src/components/TokenDoorPanel.tsx', 'src/components/EventTokensCard.tsx',
+      'src/lib/eventTokens.ts', 'src/lib/eventTokensApi.ts', 'supabase/migrations/20261114110000_exos_event_tokens.sql'],
+    note: 'Branch claude/exos-event-tokens: not on main, migration not applied. Cash and comps at the door only (no card for tokens yet); counsel to confirm stored-value / gift card rules (NY, CA) before launch (docs/pos.md "Event tokens").',
+  },
 ];
 
 const STATUS_LABEL: Record<FactStatus, string> = {

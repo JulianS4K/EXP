@@ -2027,6 +2027,88 @@ await run('edit event: Show on Discord and Post to Discord (dry run)', async (pa
   assert(log.some((l) => l.startsWith('fn exos-discord/post') && l.includes('"kind":"publish"')), 'post call');
 }, { signedIn: true, mock: discordMock({}) });
 
+const log_saved = { v: null };
+// ── claude/exos-event-tokens (mig 20261114110000): the door's Tokens tab, Edit event → Event tokens ──
+const TOK_PRODUCT = {
+  id: '88888888-8888-4888-8888-8888888888d1', event_id: EV, name: 'Drink token', unit_label: 'drink', price_cents: 500,
+  bundles: [{ credits: 10, price_cents: 4500 }], max_per_order: 20, refundable: false, grace_hours: 2, active: true,
+  rule: 'Event tokens, no cash value, valid for Fall Party only. They expire 2 hours after the event ends; unused tokens are not refundable.',
+  expires_at: null, offers: [{ credits: 1, price_cents: 500 }, { credits: 10, price_cents: 4500 }],
+};
+const TOK_CODE = 'NJZ63YHYMPS4QC25';
+const tokenDoorMock = (st) => ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+  exos_event_token_products: () => [TOK_PRODUCT],
+  exos_event_token_roster: () => ({ synced_at: new Date().toISOString(), cards: [] }),
+  exos_event_token_spend: (b) => {
+    if (b.p_credits > st.balance) return { ok: false, reason: 'insufficient', balance: st.balance };
+    st.balance -= b.p_credits;
+    return { ok: true, reason: 'spent', spent: b.p_credits, balance: st.balance, ledger_id: 7 };
+  },
+  exos_event_token_pos_sell: (b) => ({ order_id: '99999999-9999-4999-8999-9999999999a1', card_id: 'c', code: 'K-K3F7X8BBC36FL33H',
+    code_last4: 'L33H', credits: b.p_offer_credits * b.p_quantity, total_cents: 4500, payment: 'cash', balance: 10, replay: false }),
+} });
+await run('door: the Tokens tab takes 2 drinks off a code, then refuses when short', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Tokens' }).click();
+  const panel = page.getByTestId('token-door-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByRole('button', { name: 'One more' }).click();
+  await panel.getByPlaceholder('Scan or type a ticket or token code').fill(TOK_CODE.toLowerCase());
+  await panel.getByRole('button', { name: 'Take 2', exact: true }).click();
+  await expectText(page, 'Took 2 drinks. 1 left.');
+  const spend = log.find((l) => l.startsWith('rpc exos_event_token_spend'));
+  assert(spend && spend.includes('"p_code":"K-' + TOK_CODE + '"') && spend.includes('"p_credits":2') && /"p_client_ref":"[0-9a-f-]{36}"/.test(spend),
+    'spent through the RPC with a client ref: ' + spend);
+  await panel.getByPlaceholder('Scan or type a ticket or token code').fill(TOK_CODE);
+  await panel.getByRole('button', { name: 'Take 2', exact: true }).click();
+  await expectText(page, 'Not enough tokens on this code. 1 left.');
+  assert(log.some((l) => l.startsWith('rpc exos_event_token_roster')), 'downloaded for offline');
+}, { signedIn: true, mock: tokenDoorMock({ balance: 3 }) });
+await run('door: the Tokens tab sells a 10-pack for cash and shows the new code once', async (page, log) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Tokens' }).click();
+  const panel = page.getByTestId('token-door-panel');
+  await panel.getByRole('tab', { name: 'Sell tokens' }).click();
+  await panel.getByLabel('Bundle').selectOption('10');
+  await panel.getByRole('button', { name: /Take \$45\.00 · 10 drinks/ }).click();
+  await panel.getByTestId('token-code').waitFor({ timeout: 8000 });
+  assert((await panel.getByTestId('token-code').innerText()) === 'K3F7-X8BB-C36F-L33H', 'the code in words');
+  assert(await panel.getByRole('img', { name: 'Token code QR' }).count() === 1, 'the QR');
+  const sale = log.find((l) => l.startsWith('rpc exos_event_token_pos_sell'));
+  assert(sale && sale.includes('"p_offer_credits":10') && sale.includes('"p_payment":"cash"') && /"p_order_key":"[0-9a-f-]{36}"/.test(sale),
+    'sold through the RPC: ' + sale);
+}, { signedIn: true, mock: tokenDoorMock({ balance: 0 }) });
+await run('edit event: Event tokens adds a product with a bundle and shows the report', async (page, log) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  const panel = page.getByTestId('event-tokens-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await panel.getByLabel('Name').fill('Drink token');
+  await panel.getByLabel('One token is a').fill('drink');
+  await panel.getByRole('button', { name: 'Add a bundle' }).click();
+  await expectText(page, 'unused tokens are not refundable');
+  await panel.getByRole('button', { name: 'Add tokens' }).click();
+  await expectText(page, 'Event tokens added');
+  const save = log.find((l) => l.startsWith('rpc exos_event_token_product_save'));
+  assert(save && save.includes('"name":"Drink token"') && save.includes('"bundles":[{"credits":10,"price_cents":4500}]'), 'saved: ' + save);
+  await panel.getByTestId('event-tokens-report').waitFor({ timeout: 8000 });
+  await expectText(page, '2 overspent, 0 refused at sync');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+  exos_event_token_products: () => (log_saved.v ? [TOK_PRODUCT] : []),
+  exos_event_token_product_save: (b) => { log_saved.v = b.p_product; return { ...TOK_PRODUCT, ...b.p_product, id: TOK_PRODUCT.id }; },
+  exos_event_token_report: () => ({ event_id: EV, currency: 'USD', generated_at: new Date().toISOString(), refundable: [],
+    products: [{ product_id: TOK_PRODUCT.id, name: 'Drink token', unit_label: 'drink', refundable: false, expires_at: null,
+      sold_credits: 12, sold_cents: 5000, redeemed_credits: 9, redeemed_cents: 3700, expired_credits: 0, expired_cents: 0,
+      refunded_credits: 0, refunded_cents: 0, outstanding_credits: 3, outstanding_cents: 1300,
+      overspent_count: 1, overspent_credits: 2, rejected_count: 0, rejected_credits: 0 }],
+    exceptions: [{ id: 'x1', kind: 'overspent', product: 'Drink token', credits_asked: 4, credits_short: 2, reason: 'insufficient',
+      device: 'Door 1A2B', offline_at: new Date().toISOString(), synced_at: new Date().toISOString(), card_last4: 'L33H', on_ticket: false }] }),
+} }) });
+
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 

@@ -6,6 +6,7 @@ import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } 
 import { loadPasses, savePasses } from '../lib/passCache';
 import RefundAskCard from '../components/RefundAskCard';
 import AddonPassesCard from '../components/AddonPassesCard';
+import EventTokensCard from '../components/EventTokensCard'; // claude/exos-event-tokens
 import SmsOptIn from '../components/SmsOptIn';
 import { Ticket, Event } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -617,6 +618,8 @@ export default function TicketDetail() {
                     {event?.orgId && savedCopyAt === null && <SmsOptIn orgId={event.orgId} eventId={event.id} />}
                     {/* Add-ons with their own entry code (mig 20261107110000): hidden offline (it needs the server). */}
                     {event?.id && user?.uid && savedCopyAt === null && <AddonPassesCard eventId={event.id} ownerId={user.uid} />}
+                    {/* Event tokens on this event's tickets (mig 20261114110000): hidden offline. */}
+                    {event?.id && user?.uid && savedCopyAt === null && <EventTokensCard eventId={event.id} />}
                  </div>
               </div>
 

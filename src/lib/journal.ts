@@ -1,4 +1,4 @@
-// The money journal (migs 20261108100000, 20261110100000; docs/journal.md): the chart, the
+// The money journal (migs 20261108100000, 20261110100000, 20261114110000; docs/journal.md): the chart, the
 // trial balance, the journal CSV and the sales-tax report by jurisdiction.
 // PURE (no Supabase import, so it unit-tests without a client); the reads
 // live in ./journalApi.ts. Read-only: nothing here posts or changes an entry.
@@ -28,6 +28,7 @@ export const JOURNAL_ACCOUNTS: readonly JournalAccount[] = [
   { code: 'sales_tax_payable', number: 2100, name: 'Sales tax payable', type: 'liability', normal: 'credit' },
   { code: 'promoter_commissions_payable', number: 2200, name: 'Promoter commissions payable', type: 'liability', normal: 'credit' },
   { code: 'gift_cards_outstanding', number: 2300, name: 'Gift cards outstanding', type: 'liability', normal: 'credit' },
+  { code: 'event_tokens_outstanding', number: 2310, name: 'Event tokens outstanding', type: 'liability', normal: 'credit' },
   { code: 'tips_payable', number: 2400, name: 'Tips payable (POS)', type: 'liability', normal: 'credit' },
   { code: 'opening_balances', number: 3000, name: 'Opening balances (imported gift cards)', type: 'equity', normal: 'credit' },
   { code: 'ticket_revenue', number: 4000, name: 'Ticket revenue (face)', type: 'revenue', normal: 'credit' },
@@ -35,6 +36,8 @@ export const JOURNAL_ACCOUNTS: readonly JournalAccount[] = [
   { code: 'pos_other_sales', number: 4020, name: 'Bar and merch sales (POS)', type: 'revenue', normal: 'credit' },
   { code: 'donations', number: 4030, name: 'Donations', type: 'revenue', normal: 'credit' },
   { code: 'gift_card_breakage', number: 4040, name: 'Gift card breakage (voided balances)', type: 'revenue', normal: 'credit' },
+  { code: 'event_token_redemptions', number: 4050, name: 'Event tokens redeemed', type: 'revenue', normal: 'credit' },
+  { code: 'event_token_breakage', number: 4060, name: 'Event token breakage (expired)', type: 'revenue', normal: 'credit' },
   { code: 'refunds', number: 4900, name: 'Refunds', type: 'contra_revenue', normal: 'debit' },
   { code: 'exos_fee', number: 5000, name: 'Exos fee', type: 'expense', normal: 'debit' },
   { code: 'card_fees', number: 5010, name: 'Card processing fees', type: 'expense', normal: 'debit' },
@@ -174,6 +177,7 @@ const SOURCE_LABEL: Record<string, string> = {
   exos_org_instant_payouts: 'Instant payout',
   exos_paypal_org_remittances: 'PayPal remittance',
   exos_stripe_org_payouts: 'Stripe payout',
+  exos_event_token_ledger: 'Event tokens', // mig 20261114110000
 };
 
 export function sourceLabel(sourceTable: string): string {

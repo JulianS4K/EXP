@@ -423,6 +423,79 @@ silent printing). Kiosk calls carry no staff JWT: `exos-pos` keeps JWT verificat
 anon key (a JWT); if the project moves to the new publishable keys, `exos-pos` needs `--no-verify-jwt` (it checks
 every caller itself).
 
+## Event tokens
+
+Mig `20261114110000` (branch `claude/exos-event-tokens`): drink tickets, ride credits, tasting tickets. Fair RFPs
+sell ride tickets apart from admission, food fests run on tasting tickets, parties sell drink tickets. Code:
+`src/lib/eventTokens.ts` (pure: codes, the door's state machine, the offline ledger, report rows),
+`src/lib/eventTokensApi.ts`, `src/components/EventTokensPanel.tsx` (Edit event), `src/components/TokenDoorPanel.tsx`
+(the door's **Tokens** tab), `src/components/EventTokensCard.tsx` (the ticket page). Tests:
+`tests/exos/test_event_tokens.sql` (ET1-ET14, `run_p0.sh`), `tests/exos/race_event_tokens.sh` (CI),
+`src/lib/eventTokens.test.ts`, the smoke tests "door: the Tokens tab…" / "edit event: Event tokens…" and the a11y
+gate on both panels.
+
+**A token product** (`exos_event_token_products`, Edit event → Event tokens, owner / manager): a name and what one
+token is ("drink"), a price per token, up to five bundles (10 for $45), a max per order (tokens, across bundles), an
+expiry grace after the event's end, and whether unused tokens are refundable. Each offer (one token, each bundle) is an
+ordinary **add-on** online (`exos_event_addons.token_product_id` / `token_credits`) and an ordinary **POS item** at
+the door (`exos_pos_items`, category `merch`), kept in step by the save. So checkout, the all-in price (passed-on fees
+included, `docs/fees.md`), Stripe, fulfilment, full refunds, the drawer and the POS settlement are the existing paths.
+Clients can't change a token add-on or item (a guard trigger; only the save can), and a token item is rung only by the
+token sale. `exos-checkout` asks `exos_event_token_order_check` for the max per order before any charge.
+
+**Where tokens live** (`exos_event_token_cards`): on the buyer's **ticket** (online: the order's ticket the buyer owns,
+else its first; staff scan the ticket's own rotating QR) or on a **token code** for walk-ups without a ticket (16
+characters, the gift card alphabet with a check character; the screen shows it once as a QR `K-…` and in words for a
+wristband or paper; only its SHA-256 is kept). A ticket's tokens follow the ticket (a transfer moves them). No cash-out,
+no moving tokens between codes in v1. A lost code: owner / manager `exos_event_token_card_reissue` (a new code, the old
+one stops; audited; no UI yet). Why not the add-on entry codes (`exos_addon_passes`): a pass is one unit, used once at
+a list; tokens are a balance spent many times by several staff, and walk-ups have no account to own a pass.
+
+**Lots and the ledger.** Every purchase is a lot (`exos_event_token_lots`: credits and value, what is left); spends take
+the oldest lot first, valued at the lot's remaining value × taken / remaining (the last token takes the rest, so a lot
+always ends at 0). Every balance change is one `exos_event_token_ledger` row (purchase, spend, undo, refund, expire)
+with its value in cents and the balance after; the ledger is append-only. Balances never go below 0 (a CHECK).
+
+**Scan to spend** (`exos_event_token_spend`): door staff of the event (owner, manager, scanner org-wide or assigned)
+pick the token type and how many (1-50) and scan. The card is locked, the balance checked: all or nothing online
+("Not enough tokens on this code", with what is left). Idempotent on the device's client ref. Undo
+(`exos_event_token_undo`): owner / manager, a reason, once, audited (`token.undo`); the tokens go back to their lots.
+Lookups and spends: 120 a minute per member; a miss answers instead of raising, so it counts.
+
+**Offline.** The Tokens tab downloads `exos_event_token_roster` (each card with a balance: ticket id or code hash, and
+its balances; no names, no codes). Offline, a code may give at most its balance at that download minus what this
+device already gave (`offlineCap`); a code bought since isn't on the device and is refused. Spends are queued with a
+client ref and replayed (`p_offline_at`) once online. The server takes what is left and records any shortfall as an
+**`overspent`** row in `exos_event_token_exceptions` (audited `token.overspent`), never a negative balance; a code that
+no longer passes at sync (forged, refunded ticket, expired) is a **`rejected`** row. Both are on the report. A ticket's
+code is matched offline by its ticket id (the MAC is checked at sync), so a forged ticket code costs at most that
+ticket's offline cap.
+
+**Selling at the door** (`exos_event_token_pos_sell`, the Tokens tab → Sell tokens): a POS order with the offer's
+item, cash into the seller's open drawer (open it in the Sell tab) or a comp (owner / manager), onto a new code or onto
+a scanned ticket or code. Idempotent on the order key; 30 sales a minute per device or member; audited (`token.sell`).
+A void or refund of the sale (`exos_pos_void_order` / `_refund_order`) takes its tokens back, and is refused once any of
+them were spent or refunded ("refund the unused ones instead"). **Card for tokens at the door isn't built**: the card
+walk-up path is ticket-specific; tokens are cash or comp at the door, card online.
+
+**Expiry and refunds.** Tokens can't be spent or sold after the event's end (`ends_at`, else start + 12 hours) + the
+grace. Not refundable: owner / manager **Expire unused** (or the hourly job `exos-event-token-expire`, created
+**inactive**) writes `expire` rows (breakage). Refundable: the report lists each purchase with unused tokens and
+**Refund unused** (owner / manager, a reason, audited `token.refund`): online, the tokens come off and the existing
+partial refund (`exos-refund`, `amount_cents`, nonce = the returned key, so a retry is one refund) pays it back; door
+cash is paid out of the member's drawer (`exos_pos_paid_outs` kind `refund`); comps just come off. A full refund of an
+online order (any path) takes the tokens still on its lines. The rule, "Event tokens, no cash value, valid for <event>
+only", when they expire and refundable or not, is every offer's description (before purchase), on the ticket page and
+on the door's sale screen.
+
+**Report** (`exos_event_token_report`, owner / manager / finance, Edit event → Event tokens): per product sold /
+redeemed / expired / refunded / outstanding, tokens and money (they always add up), the offline exceptions, the
+refundable purchases. CSV and XLSX, logged as `export.run` (kind `event_tokens`). Money: `docs/journal.md` "Event
+tokens".
+
+**Before launch (operator):** have counsel confirm stored-value / gift card rules for tokens (New York, California:
+expiry, breakage and cash-out rules for stored value) before turning them on for a buyer-facing event.
+
 ## Settlement math
 
 `exos_pos_settlement_summary(event)` (SQL) and `buildSettlement` (TS) compute the same thing. The two

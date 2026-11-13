@@ -111,6 +111,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_eventbrite_inventory_status` (mig 20261014110000) | OK | The mapping panel: owner / manager of the event's org (or admin). Ticket types, mappings, counts; never the token |
 | `exos_discord_status`, `exos_discord_set_webhook`, `exos_discord_remove_webhook`, `exos_discord_set_options`, `exos_discord_unlink_guild`, `exos_discord_event_status`, `exos_discord_set_show`, `exos_discord_request_post` (mig 20261113130000) | OK (authenticated) | Discord promotion (docs/discord.md). `auth.uid()` must be owner / manager of the org (`_exos_discord_role`, active membership), looked up from the event for the event RPCs; another org's event and an unknown one answer the same 42501. The writes switch is owner only. The webhook URL is checked here (`exos_discord_webhook_parts`: `https://discord.com` or `discordapp.com`, `/api[/vN]/webhooks/<id>/<token>`, nothing else) and never echoed; its token goes only to Vault (`exos_discord_webhook:<org>`), the status shows `…1234`. Posts: published and not over, once per event per kind (`exos_discord_posts` unique), 10 requests a minute and 30 an hour per org; Show on Discord 30 changes a minute per user; webhook changes 10 a minute per user. Audited (`discord.*`). Tables `exos_discord_links`, `_posts`, `_event_syncs`: RLS on, no client grants |
 | `exos_discord_post_claim`, `exos_discord_post_mark`, `exos_discord_sync_claim`, `exos_discord_sync_mark`, `exos_discord_install_begin`, `exos_discord_install_consume`, `exos_discord_guild_link`, `exos_discord_webhook_parts`, `exos_discord_call_gate`, `exos_discord_call_result`, `exos_discord_breaker_clear`, `_exos_discord_blocked`, `_exos_discord_role`, `_exos_discord_event_json` (mig 20261113130000) | Service role | `exos-discord`. Claims hand out the webhook token (from Vault) and the org's guild with a 2-minute lease; marks are refused without it; a post left `sending` becomes an error, never resent; the sync claim rate-limits 20 passes a minute per org and never hands out a scheduled-event id made in another server. Install: the shared `exos_oauth_states` (provider `discord`, owner / manager, finish token, starting user only); the guild comes from Discord's token response, re-checked owner / manager at link, one org per guild (23505). The only Discord requests are `_shared/channels/discord.ts`'s allowlist (the org's guild scheduled events and the webhook it saved) plus the install's code exchange, each behind the call gate (300 a minute platform-wide; invalid answers count per org first, and an org's 10th in 10 minutes pauses only that org, 30 minutes doubling to 24 hours, not reset by re-saving; the platform-wide stop needs over 500 in 10 minutes from at least 5 unpaused orgs and cools down after 15 minutes; a 401 on the bot token or a global 429 stop bot calls; refused servers / webhooks are skipped until replaced; `exos_discord_platform`, RLS on, no client grants). The cover image is read only from this project's own `exos-media/event-images/` storage with the service client, never fetched over HTTP (no SSRF) |
+| `exos_event_token_product_save`, `exos_event_token_products`, `exos_event_token_lookup`, `exos_event_token_spend`, `exos_event_token_undo`, `exos_event_token_roster`, `exos_event_token_pos_sell`, `exos_event_token_card_reissue`, `exos_event_token_refund_unused`, `exos_event_token_expire`, `exos_event_token_report`, `exos_my_event_tokens` (mig 20261114110000) | OK (authenticated) | Event tokens ("Event tokens" below, docs/pos.md). Roles in SQL from the event: configure, undo, refund, expire and reissue owner / manager; spend, lookup, roster and door sales door staff (`_exos_pos_actor_role`); comps owner / manager; the report owner / manager / finance; the ticket page the ticket's holder. Everything else 42501. Codes never cross events or orgs (another event's ticket or code reads `not-found`). Rate limits: 120 lookups + spends a minute per member (a miss counts), 30 sales a minute, 10 roster downloads, 30 saves, 10 reissues. Audited (`token.*`). Tables RLS on, SELECT only (no code hash), no client writes |
+| `exos_event_token_order_check`, `exos_journal_post_event_token`, `_exos_event_token_*` helpers (mig 20261114110000) | Service role | `exos-checkout` (max per order before Stripe), the journal trigger and backfill, the inactive expiry cron |
 | `exos_guest_check_in`, `exos_event_door_extras` (mig 20261013100000) | OK | A guest voided by the sync (refunded / cancelled on Eventbrite) is refused (`voided`); the download carries `voided` / `void_reason` so an offline door refuses it too |
 | `exos_guest_undo_arrival`, `exos_guest_check_in`, `exos_check_in_offline`, `exos_door_checkin_by_name` (mig 20261104120000) | OK (authenticated) | Door mistake fixes (`tests/exos/sim_door.sql`). Undo a guest arrival: owner / manager of the entry's org (or admin), a 3+ character reason, at most what arrived; logged in `exos_guest_checkin_undos` (RLS: door staff of the org read, no client writes). A replay (offline upload / by-name with a client ref / guest `offline-sync`) by a scanner no longer on the event raises 42501 before anything is written, so the phone keeps the scan; a refused guest replay writes a scan-reject row. A re-entry exit for a ticket never admitted is refused `not-inside` |
 | `exos_set_channel_split`, `exos_channel_split_preview` (mig 20261014090000) | OK | Auto split of each ticket type across the marketplaces: owner / manager of the event's org (or admin). The reserve / taper are range-checked (0–90%, 0–720 h). Applying goes through `exos_sync_channel_hold`, so growth takes free seats only under the checkout locks and a live listing keeps its seats until the marketplace confirms |
@@ -767,6 +769,38 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   latest publish time only, never rows.
 - **Out of scope.** Door scans (`exos_checkins` records them) and buyer
   self-service (transfers, refund asks, profile edits).
+
+### Event tokens (mig 20261114110000)
+
+Drink tickets, ride credits, tasting tickets (`docs/pos.md` "Event tokens").
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **Codes.** On a ticket, tokens are spent with the ticket's own rotating
+  T- code (the day-key MAC, the 30-second window), never its id; a token code
+  is 75 random bits plus a check character and only its SHA-256 is stored
+  (no client column grant on `code_hash`); the door's offline roster carries
+  hashes and balances, no names and no codes. Every lookup names the event
+  first: another event's or org's ticket or code is `not-found`, and nothing
+  about it is said.
+- **Money is race-safe.** Every change locks the card row first, then its
+  lots (`credits_left >= 0` is a CHECK); the spend is all or nothing online
+  and idempotent on the client ref (an advisory lock per org + ref, a unique
+  index); a door sale is idempotent on the POS order key. An offline
+  overspend is an exception row, never a negative balance
+  (`tests/exos/race_event_tokens.sh`, in CI).
+- **The offers can't be edited around the rules.** A token add-on or POS item
+  changes only through the product save (a guard trigger refuses client and
+  API writes to its price, credits, visibility or tax), and a token item is
+  rung only by `exos_event_token_pos_sell` (a transaction-local setting the
+  line guard checks), so a client-rung POS line can't sell tokens without
+  issuing them or issue them without paying.
+- **Refunds use the existing paths.** Online: the existing organizer partial
+  refund (`exos-refund`, owner / manager / finance, its own claim and
+  idempotency), keyed on the returned `evtoken-refund:<ledger id>`; at the
+  door: a paid-out out of a drawer the member may use, refused after a final
+  settlement. A door sale whose tokens were used or refunded can't be voided.
+- **No new third-party call.** The only edge change is one RPC in
+  `exos-checkout` before any Stripe call.
 
 ### Kiosk mode (mig 20261113100000)
 
