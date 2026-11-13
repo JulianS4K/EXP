@@ -26,7 +26,11 @@
 //   POST /finish {state, finish} JWT of the user who started it: the code is exchanged at Discord's
 //                                token endpoint and the server named there is linked
 //                                (exos_discord_guild_link). The redirect's guild_id is ignored.
-//   POST /cron                   X-Cron-Secret: queued posts and due scheduled events (every 2 min).
+//   POST /test {org}             JWT, owner / manager: one test message through the org's webhook
+//                                (exos_discord_test_begin: role, webhook, breaker, 3 an hour per org,
+//                                audited); a dry run unless writes are on (mig 20261114100000).
+//   POST /cron                   X-Cron-Secret: the automatic reminders (queued first), queued posts,
+//                                due scheduled events, and deletes of deleted events (every 2 min).
 // Deploy with --no-verify-jwt (CORS preflight, Discord's redirect, the cron).
 //
 // Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET,
@@ -45,7 +49,7 @@ import { writesLive } from "../_shared/channels/model.ts";
 import {
   discordAppConfig, discordEvent, discordHash, type DiscordStep, exchangeInstallCode, installUrl,
   type CallHooks, type CallKind, coverDataUri, type CoverLoader, type DiscordResult,
-  makeDiscordIo, postAnnouncement, type PostKind, redactDiscord, syncScheduledEvent,
+  deleteScheduledEvent, makeDiscordIo, postAnnouncement, type PostKind, redactDiscord, sendTestMessage, syncScheduledEvent,
 } from "../_shared/channels/discord.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,9 +82,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const authErr = requireCronSecret(req);
     if (authErr) return authErr;
     const deadline = Date.now() + CRON_BUDGET_MS;
+    // The automatic reminders join the queue first; they then go out like the button's.
+    const { data: reminders, error: remErr } = await sb.rpc("exos_discord_reminder_queue", { p_limit: 50 });
+    if (remErr) console.error("exos-discord: reminder queue failed", redactError(remErr));
     const posts = await drainPosts(sb, app, null, deadline);
     const syncs = await runSyncs(sb, app, cfg?.botToken ?? null, null, deadline);
-    return json({ ok: true, posts, syncs });
+    const deletes = await runDeletes(sb, app, cfg?.botToken ?? null, deadline);
+    return json({ ok: true, reminders: remErr ? null : Number(reminders) || 0, posts, syncs, deletes });
   }
 
   if (route === "post" && req.method === "POST") {
@@ -111,6 +119,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!cfg) return json({ error: "The Exos bot isn't set up on this server yet", reason: "not_configured" }, 503, cors);
     const out = await runSyncs(sb, app, cfg.botToken, event, Date.now() + 20_000);
     return json({ state: out.results[0]?.state ?? "nothing to do" }, 200, cors);
+  }
+
+  // ---- "Send a test" (the channel webhook) ------------------------------------------
+  if (route === "test" && req.method === "POST") {
+    const user = await signedInUser(req);
+    if (!user) return json({ error: "sign in first", reason: "auth" }, 401, cors);
+    const body = await req.json().catch(() => ({}));
+    const org = String(body?.org ?? "");
+    if (!UUID.test(org)) return json({ error: "missing or bad org" }, 400, cors);
+    // The role, the webhook, the breaker and 3 an hour per org, all before anything goes to Discord.
+    const { data, error } = await sb.rpc("exos_discord_test_begin", {
+      p_org_id: org, p_user_id: user, p_env_writes: env("EXOS_DISCORD_WRITES") === "on",
+    });
+    if (error) return rpcError(error, cors);
+    const d = data as { webhook?: { id?: string; token?: string }; writes_enabled?: boolean; org_name?: string | null; tests_left?: number };
+    const hookId = String(d?.webhook?.id ?? "");
+    const token = String(d?.webhook?.token ?? "");
+    if (!hookId || !token) return json({ error: "Save a Discord webhook first.", reason: "invalid" }, 400, cors);
+    try {
+      const live = writesLive(d.writes_enabled, env("EXOS_DISCORD_WRITES"));
+      const steps: DiscordStep[] = [];
+      const io = makeDiscordIo({ fetch, live, bound: { webhookId: hookId }, steps, userAgent: `DiscordBot (${app}, 1.0)`,
+        hooks: callHooks(sb, null, org) });
+      const out = await sendTestMessage(io, hookId, token, d.org_name ?? null, steps);
+      if (out.webhookBroken) {
+        await sb.rpc("exos_discord_webhook_refused", { p_org_id: org, p_webhook_id: hookId, p_reason: out.error ?? null });
+      }
+      return json({ status: out.state, error: out.error ? redactDiscord(out.error, [token]) : null,
+                    tests_left: Number(d.tests_left) || 0 }, 200, cors);
+    } catch (err) {
+      console.error("exos-discord: test failed", redactDiscord(redactError(err), [token]).slice(0, 200));
+      return json({ error: "Couldn't send the test.", reason: "server" }, 500, cors);
+    }
   }
 
   // ---- "Add Exos bot to your server" ------------------------------------------
@@ -275,6 +316,42 @@ async function runSyncs(sb: SupabaseClient, app: string, botToken: string | null
       console.error("exos-discord: sync failed", msg);
       await mark({ state: "error", error: msg });
       results.push({ state: "error" });
+    }
+  }
+  return { ok: true, results };
+}
+
+// ---- deleted events: take their Discord events down -------------------------------
+interface ClaimedDelete { delete_id: string; org_id: string; lease_id: string; payload: any }
+
+async function runDeletes(sb: SupabaseClient, app: string, botToken: string | null, deadline: number) {
+  const results: { state: string }[] = [];
+  if (!botToken) return { ok: true, results };
+  const fp = await tokenFingerprint(botToken);
+  for (let i = 0; i < MAX_ROWS && Date.now() < deadline; i++) {
+    const { data, error } = await sb.rpc("exos_discord_delete_claim", { p_limit: 1, p_token_fp: fp });
+    if (error) {
+      console.error("exos-discord: delete claim failed", redactError(error));
+      return { ok: false, results };
+    }
+    const c = ((data ?? []) as ClaimedDelete[])[0];
+    if (!c) break;
+    const mark = (result: Record<string, unknown>) =>
+      sb.rpc("exos_discord_delete_mark", { p_delete_id: c.delete_id, p_lease: c.lease_id, p_result: result });
+    try {
+      const guild = String(c.payload?.guild_id ?? "");
+      const live = writesLive(c.payload?.writes_enabled, env("EXOS_DISCORD_WRITES"));
+      const steps: DiscordStep[] = [];
+      const io = makeDiscordIo({ fetch, live, bound: { guildId: guild }, botToken, steps, userAgent: `DiscordBot (${app}, 1.0)`,
+        hooks: callHooks(sb, fp, c.org_id) });
+      const out = await deleteScheduledEvent(io, guild, String(c.payload?.external_id ?? ""), steps);
+      await mark({ ...out, plan: safePlan(out.plan, [botToken]), ...(out.error ? { error: redactDiscord(out.error, [botToken]) } : {}) });
+      results.push({ state: out.state });
+    } catch (err) {
+      const msg = redactDiscord(redactError(err), [botToken]).slice(0, 200);
+      console.error("exos-discord: delete failed", msg);
+      await mark({ state: "retry", error: msg });
+      results.push({ state: "retry" });
     }
   }
   return { ok: true, results };

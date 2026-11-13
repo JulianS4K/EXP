@@ -5,8 +5,9 @@ Exos may send to Discord, and what the operator sets up first. Operator ask,
 2026-11-11: "find and add Discord events as a way to promote events".
 
 Code: `supabase/functions/exos-discord/` (routes, the cron), `supabase/functions/_shared/channels/discord.ts`
-(the allowlist, payloads, the scheduled-event pass, the bot install), mig
-`20261113130000_exos_discord.sql`, `src/components/DiscordPanel.tsx` (Org settings → Discord),
+(the allowlist, payloads, the scheduled-event pass, the bot install), migs
+`20261113130000_exos_discord.sql` and `20261114100000_exos_leftovers_15.sql` (the automatic reminder,
+delete on delete, Send a test), `src/components/DiscordPanel.tsx` (Org settings → Discord),
 `src/components/DiscordEventPanel.tsx` (Edit event → Promote on Discord), `src/lib/discord.ts`.
 Tests: `tests/exos/test_discord.sql`, `supabase/functions/_shared/channels/discord_test.ts`,
 `src/lib/discord.test.ts`, `src/components/DiscordPanel.test.tsx`, the smoke + a11y steps "org settings: Discord".
@@ -17,8 +18,8 @@ Tests: `tests/exos/test_discord.sql`, `supabase/functions/_shared/channels/disco
 |---|---|---|
 | What the server sees | One message in a channel: an embed with the event name (linked), date and time in the event's zone (plus Discord's relative time), venue, image (its URL; Discord fetches it), the org's name and a **Get tickets** link button | The event on the server's **Events** tab (an EXTERNAL scheduled event): name, start and end, location = the Exos event page, description starting "Get tickets: …", and the cover when it is one uploaded to Exos (below) |
 | How it's connected | An owner / manager pastes a channel webhook URL (channel settings → Integrations → Webhooks → Copy Webhook URL) | An owner / manager clicks **Add Exos bot to your server** (Discord's bot authorization; they need Manage Server there) |
-| When it happens | **Post to Discord** / **Post a reminder** on the event, or on publish when the org ticked "Announce each event on Discord when it's published" | **Show on Discord** on the event; Exos then creates it, updates it when the Exos event changes, cancels it when the Exos event is cancelled, deletes it when unticked or unpublished |
-| Limits | Once per event per kind (publish, reminder); 10 requests a minute and 30 posts an hour per org | 20 passes a minute per org; an edit is sent once it settles (15 seconds) |
+| When it happens | **Post to Discord** / **Post a reminder** on the event; on publish when the org ticked "Announce each event on Discord when it's published"; the reminder by itself 24 or 48 hours before the start when the org picked an **Automatic reminder** | **Show on Discord** on the event; Exos then creates it, updates it when the Exos event changes, cancels it when the Exos event is cancelled, deletes it when unticked, unpublished or the Exos event is deleted |
+| Limits | Once per event per kind (publish, reminder; the automatic reminder too); 10 requests a minute and 30 posts an hour per org; **Send a test** 3 an hour per org | 20 passes a minute per org (deletes included); an edit is sent once it settles (15 seconds) |
 | Needs | `EXOS_DISCORD_ENABLED=on` | the same, plus the platform's Discord application (below) |
 
 Nothing reaches Discord unless the org's owner ticks **Send to Discord** AND the
@@ -37,7 +38,7 @@ else throws before `fetch`), all to `https://discord.com/api/v10`:
 |---|---|---|
 | POST | `/guilds/{guild}/scheduled-events` | the org's linked guild |
 | GET / PATCH / DELETE | `/guilds/{guild}/scheduled-events/{id}` | the org's linked guild |
-| POST | `/webhooks/{id}/{token}?wait=true&with_components=true` | the org's own webhook id |
+| POST | `/webhooks/{id}/{token}?wait=true&with_components=true` | the org's own webhook id (announcements, reminders, the test message) |
 
 Plus, during the bot install, the OAuth code exchange at
 `https://discord.com/api/v10/oauth2/token` (writes nothing on Discord). No
@@ -102,10 +103,43 @@ it made.
   webhook token or the bot token (`redactDiscord`, `redactError`).
 - **Disconnect.** "Remove webhook" deletes the Vault secret (queued posts fail). "Disconnect server"
   unlinks the guild; Discord events already there stay (untick Show on Discord first to remove them),
-  and the bot leaves when someone removes it in Discord (Server settings → Integrations).
+  even for Exos events deleted afterwards (a queued delete for that server is skipped), and the bot
+  leaves when someone removes it in Discord (Server settings → Integrations).
 - **Audit** (`exos_org_audit`): `discord.webhook_set`, `discord.webhook_remove`, `discord.settings`,
   `discord.guild_link`, `discord.guild_unlink`, `discord.event_show`, `discord.post` (sent or dry run,
-  with the person who asked), `discord.org_paused`. No token or full webhook id.
+  with the person who asked; nobody for the automatic reminder), `discord.org_paused`, and (mig
+  20261114100000) `discord.reminder_set`, `discord.webhook_test` (dry run or not, who sent it),
+  `discord.event_delete` (done or dry run, who deleted the Exos event). No token or full webhook id.
+
+## The automatic reminder, delete on delete, Send a test (mig 20261114100000)
+
+- **Automatic reminder.** Org settings → Discord → **Automatic reminder**: Off (the default), 24 or 48
+  hours before the start (owner / manager, `exos_discord_set_reminder`, audited). The existing cron pass
+  (`exos-discord-2min`, no new job) first runs `exos_discord_reminder_queue`: a published event that
+  starts within that many hours and hasn't started gets its **reminder** post queued, once per event (a
+  reminder already asked for with the button, even a dry run or a failed one, is never queued again).
+  It counts against the button's limits (10 requests a minute, 30 posts an hour per org: over them it
+  waits for a later pass) and then goes out exactly like the button's (the breaker, the org's pause, the
+  webhook checks, the dry-run gate). It's skipped when the publish announcement was asked for inside the
+  window (it would repeat it). The event panel says when it will go.
+- **Deleting an Exos event deletes its Discord event.** The sync row is deleted with the event, so a
+  BEFORE DELETE trigger (`exos_events_zz_discord_del`) first records the server and the scheduled
+  event's id in `exos_discord_deletes`, only for an event Exos really made (not a dry run's) on the
+  server the org is linked to now. The cron pass then sends the allowlisted
+  `DELETE /guilds/{guild}/scheduled-events/{id}` (bound to that server) with the scheduled-event pass's
+  gates: the breaker, the org's pause, 20 a minute per org, the dry-run gate. A 404 means it's gone
+  already; a 429, a 5xx, a timeout or a 401 is retried (a DELETE is safe to repeat), at most 8 times; a
+  server that refused the bot is an error (delete it in Discord) and marks the link. A delete for a server
+  that's no longer linked, or an event Discord ended over a day ago, is skipped. If a pass was creating the
+  Discord event at the moment the Exos event was deleted, the create's answer queues its delete. A
+  **cancelled** Exos event keeps the cancel path (status 4 on Discord), not a delete.
+- **Send a test.** After saving a webhook, an owner / manager can send one message ("Exos is connected
+  to this channel", an embed, no content, no link, `allowed_mentions` empty). `POST /test` →
+  `exos_discord_test_begin` checks, before anything goes to Discord: the role, a webhook Discord hasn't
+  refused, the breaker and the org's pause (refusals there don't count), then **3 tests an hour per
+  org**, and audits `discord.webhook_test`. It's a dry run unless the org's writes switch and
+  `EXOS_DISCORD_WRITES=on`; the panel says so next to the button. A test Discord refuses (deleted
+  webhook) marks the webhook broken, as a post does.
 
 ## By design (reviewed, left as is)
 
@@ -113,8 +147,9 @@ it made.
   isn't posted again, even after the org saves a different webhook. A dry run or an error can be
   posted again.
 - **Disconnecting doesn't clean up Discord.** "Disconnect server" stops Exos managing the server's
-  events but leaves them there (untick Show on Discord first to remove them), and deleting an Exos
-  event leaves its Discord event; Discord ends an EXTERNAL event at its end time anyway.
+  events but leaves them there (untick Show on Discord first to remove them); Discord ends an EXTERNAL
+  event at its end time anyway. Deleting an Exos event while the server is linked does delete its
+  Discord event (below).
 - **A scheduled event's create may be repeated** if Discord accepted it but the answer was lost
   (a 5xx or a timeout on create): the pass retries with backoff, which can leave a duplicate the
   organizer deletes in Discord. Posts never do this (above).
@@ -129,8 +164,8 @@ it made.
 
 ## What the operator sets up
 
-1. Apply `20261113130000_exos_discord` (`scripts/rollout-prod.sh`), deploy `exos-discord` with
-   `--no-verify-jwt`, ship the SPA.
+1. Apply `20261113130000_exos_discord` and `20261114100000_exos_leftovers_15` (`scripts/rollout-prod.sh`),
+   deploy `exos-discord` with `--no-verify-jwt`, ship the SPA.
 2. For level 2, create a Discord application (discord.com/developers/applications): add a bot; turn
    **Public Bot** on (organizers add it to their servers) and **Requires OAuth2 Code Grant** on (so
    the server comes from the token response); under OAuth2 add the redirect URI
@@ -140,7 +175,8 @@ it made.
    `EXOS_APP_URL` must already be in `EXOS_REDIRECT_ORIGINS`.
 4. `EXOS_DISCORD_ENABLED=on` to show it; check a dry run; then `EXOS_DISCORD_WRITES=on`.
 5. Turn the cron on: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-discord-2min';`
-   (without it, posts still go out from the buttons; queued publish announcements and event edits wait).
+   (without it, posts still go out from the buttons; queued publish announcements, automatic reminders,
+   event edits and deletes wait).
 6. If the breaker trips (the org panels say "Discord is paused"): read
    `SELECT * FROM public.exos_discord_platform;`, fix the cause (a revoked bot token: set a new
    `DISCORD_BOT_TOKEN`, which clears a 401 by itself), then `SELECT public.exos_discord_breaker_clear();`.

@@ -123,7 +123,7 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 | `exos-eventbrite-sync-2min` | 2 min (odd) | `exos-eventbrite-sync/cron` |
 | `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events, Luma door sync) |
 | `exos-channel-sync-2min` | 2 min (odd) | `exos-channel-sync/cron` (Eventbrite / Luma mirrors, Luma's count) |
-| `exos-discord-2min` | 2 min | `exos-discord/cron` (queued Discord posts, Discord events). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-discord-2min';` |
+| `exos-discord-2min` | 2 min | `exos-discord/cron` (automatic reminders, queued Discord posts, Discord events and their deletes). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-discord-2min';` |
 | `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
 | `exos-event-import-check-15min` | 15 min (:07) | `exos-event-import/cron` (re-reads imported Eventbrite events: sold out, moved, cancelled). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-event-import-check-15min';` |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |

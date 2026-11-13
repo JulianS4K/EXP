@@ -3,13 +3,16 @@
 // platform's bot for Discord scheduled events, and the switches. Hidden
 // unless the operator turned Discord on (exos-discord /config). The webhook
 // URL is a secret: it's pasted once and never shown again (a hint only).
+// mig 20261114100000: "Send a test" once a webhook is saved, and the
+// automatic reminder (24 or 48 hours before each event, or off).
 
 import { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  fetchDiscordConfig, fetchDiscordStatus, removeDiscordWebhook, saveDiscordWebhook, setDiscordOptions, startDiscordInstall,
-  orgPausedLine, unlinkDiscordServer, webhookUrlOk, type DiscordConfig, type DiscordStatus,
+  fetchDiscordConfig, fetchDiscordStatus, removeDiscordWebhook, saveDiscordWebhook, sendDiscordTest, setDiscordOptions, setDiscordReminder,
+  startDiscordInstall, orgPausedLine, testResultLine, unlinkDiscordServer, webhookUrlOk, REMINDER_HOURS, type DiscordConfig, type DiscordStatus,
+  type ReminderHours,
 } from '../lib/discord';
 
 const LBL = 'block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1';
@@ -46,6 +49,19 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
     }
   };
   const urlBad = url.trim() !== '' && !webhookUrlOk(url);
+  const dryRun = !cfg.writes || !st.writesEnabled;
+  const sendTest = async () => {
+    setBusy(true);
+    try {
+      const r = await sendDiscordTest(orgId);
+      toast({ kind: r.status === 'sent' || r.status === 'dry_run' ? 'success' : 'error', message: testResultLine(r) });
+      load();
+    } catch (e) {
+      toast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <section data-testid="discord-panel" aria-labelledby="discord-title" className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8 space-y-5">
@@ -97,6 +113,12 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
                 onClick={() => void run(async () => { await saveDiscordWebhook(orgId, url); setUrl(''); }, 'Discord webhook saved.')}>
                 Save webhook
               </button>
+              {st.webhook.set && !st.webhook.broken && (
+                <button type="button" className={`${BTN} border border-slate-300 text-slate-700`} disabled={busy}
+                  aria-describedby="discord-test-note" onClick={() => void sendTest()}>
+                  Send a test
+                </button>
+              )}
               {st.webhook.set && (
                 <button type="button" className={`${BTN} border border-rose-200 text-rose-700`} disabled={busy}
                   onClick={() => void run(() => removeDiscordWebhook(orgId), 'Discord webhook removed.')}>
@@ -104,12 +126,35 @@ export default function DiscordPanel({ orgId }: { orgId: string }) {
                 </button>
               )}
             </div>
+            {st.webhook.set && !st.webhook.broken && (
+              <p id="discord-test-note" className="text-[11px] text-slate-600">
+                {dryRun
+                  ? 'Send a test is a dry run too: Exos records it and sends nothing to the channel.'
+                  : 'Send a test posts one message in the channel saying Exos is connected (3 an hour).'}
+              </p>
+            )}
             <label className="flex items-start gap-2 text-xs text-slate-700">
               <input type="checkbox" className="mt-0.5" checked={st.autoPost} disabled={busy || !st.webhook.set}
                 onChange={(e) => void run(() => setDiscordOptions(orgId, { autoPost: e.target.checked }),
                   e.target.checked ? 'New events will be announced on Discord.' : 'Automatic announcements off.')} />
               <span>Announce each event on Discord when it&apos;s published (once per event).</span>
             </label>
+            <label className="block max-w-xs">
+              <span className={LBL}>Automatic reminder</span>
+              <select className={FLD} value={st.reminderHours ?? ''} disabled={busy || !st.webhook.set}
+                aria-describedby="discord-reminder-note"
+                onChange={(e) => {
+                  const h = e.target.value ? (Number(e.target.value) as ReminderHours) : null;
+                  void run(() => setDiscordReminder(orgId, h),
+                    h ? `Exos will post a reminder ${h} hours before each event.` : 'Automatic reminders off.');
+                }}>
+                <option value="">Off</option>
+                {REMINDER_HOURS.map((h) => <option key={h} value={h}>{h} hours before the start</option>)}
+              </select>
+            </label>
+            <p id="discord-reminder-note" className="text-[11px] text-slate-600">
+              Posts the event&apos;s reminder once, before each published event starts, unless it was already posted.
+            </p>
           </>
         )}
       </div>
