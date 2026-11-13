@@ -34,6 +34,7 @@
 --   K16 a charge never extends the hold past 10 minutes from the begin; the
 --       card limit counts on the kiosk session, not on its starter
 --   K17 hand-over only for the session's most recent paid sale
+--   K18 kiosk prints count on the kiosk session, not on its starter (mig 20261114100000)
 -- Self-contained (BEGIN / ROLLBACK). Org …01: owner a1, manager a2, scanner a3,
 -- finance a4. Org …02: owner b9.
 -- ============================================================================
@@ -670,6 +671,42 @@ BEGIN
     'K17: nor emailed';
   ASSERT jsonb_array_length(public._exos_pos_kiosk_codes(pg_temp.v('tok5'), v_d) -> 'tickets') = 1, 'K17: the latest sale''s QR';
   RAISE NOTICE 'OK K17 hand-over only for the session''s most recent paid sale';
+END $$;
+
+
+-- ── K18 ─────────────────────────────────────────────────────────────────────
+-- mig 20261114100000: kiosk prints (the QR codes) count on the kiosk session,
+-- not on the member who started it, so a kiosk can't use up their door app's
+-- 60 prints a minute.
+DO $$
+DECLARE v_sess text; v_o uuid; v_org uuid; v_ids uuid[]; r jsonb;
+BEGIN
+  PERFORM pg_temp.act(NULL);
+  SELECT id::text, org_id INTO v_sess, v_org FROM public.exos_pos_kiosk_sessions
+   WHERE token_hash = encode(extensions.digest(pg_temp.v('tok5'), 'sha256'), 'hex');
+  SELECT id INTO v_o FROM public.exos_pos_orders WHERE kiosk_session_id = v_sess::uuid AND status = 'paid'
+   ORDER BY paid_at DESC, id DESC LIMIT 1;
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'print:%' OR bucket LIKE 'pos:kiosk:codes:%';
+  ASSERT position('/* exos: print kiosk limit */' in pg_get_functiondef('public._exos_print_mint(uuid,uuid,uuid[],text,uuid,boolean)'::regprocedure)) > 0
+     AND position('/* exos: pos kiosk print limit */' in pg_get_functiondef('public._exos_pos_kiosk_codes(text,uuid)'::regprocedure)) > 0,
+    'K18: both patches in place';
+  r := public._exos_pos_kiosk_codes(pg_temp.v('tok5'), v_o);
+  ASSERT jsonb_array_length(r -> 'tickets') = 1, 'K18: the QR ' || r::text;
+  ASSERT (SELECT hits FROM public.exos_rate_windows WHERE bucket = 'print:kiosk:' || v_sess AND window_start = date_trunc('minute', now())) = 1
+     AND NOT EXISTS (SELECT 1 FROM public.exos_rate_windows WHERE bucket = 'print:' || pg_temp.u('a2')),
+    'K18: the print counts on the kiosk session, not on the manager who started it';
+  ASSERT coalesce(current_setting('exos.pos_kiosk_session', true), '') = '', 'K18: the session setting is cleared after the call';
+  -- The kiosk at its 60: its own prints are refused (and the setting is still cleared) ...
+  UPDATE public.exos_rate_windows SET hits = 60 WHERE bucket = 'print:kiosk:' || v_sess;
+  ASSERT pg_temp.st(format('SELECT public._exos_pos_kiosk_codes(%L, %L)', pg_temp.v('tok5'), v_o)) = '54000', 'K18: the kiosk''s 61st';
+  ASSERT coalesce(current_setting('exos.pos_kiosk_session', true), '') = '', 'K18: cleared after a refusal too';
+  -- ... and the manager's own door-app prints still go (counted on them).
+  SELECT array_agg(x.id) INTO v_ids FROM public.exos_pos_order_lines l
+   CROSS JOIN LATERAL unnest(coalesce(l.ticket_ids, '{}'::uuid[])) x(id) WHERE l.order_id = v_o;
+  r := public._exos_print_mint(v_org, pg_temp.u('a2'), v_ids, 'pos', NULL, true);
+  ASSERT jsonb_array_length(r -> 'tickets') = 1
+     AND (SELECT hits FROM public.exos_rate_windows WHERE bucket = 'print:' || pg_temp.u('a2')) = 1, 'K18: the starter''s own prints go on';
+  RAISE NOTICE 'OK K18 kiosk prints count on the kiosk session (60 a minute), never on its starter''s door app';
 END $$;
 
 ROLLBACK;

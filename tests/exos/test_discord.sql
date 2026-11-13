@@ -44,6 +44,23 @@
 --       answers stop counting; one org never trips 'all', whatever the
 --       volume; re-saving a webhook or relinking doesn't reset the pause;
 --       5 orgs over the threshold do trip it; it cools down after 15 minutes
+--   DC12 the automatic reminder (mig 20261114100000): owner / manager set 24 /
+--       48 / off (audited); the cron's queue picks published events inside the
+--       window that haven't started, once per event (a reminder already asked
+--       for, even a dry run, is left alone), not right after the publish
+--       announcement, within the button's 10 a minute / 30 an hour; then the
+--       same claim / mark (dry run, audited discord.post)
+--   DC13 deleting an event deletes its Discord event: recorded before the
+--       delete (only the linked server's, only a real id); a cancel keeps the
+--       cancel path; claim / mark with a lease, backoff, 8 tries, the breaker,
+--       the org's pause, 20 a minute; a dry run audited discord.event_delete;
+--       a broken link; a create that raced the delete; disconnect skips; an
+--       org delete still works
+--   DC14 Send a test: owner / manager, a webhook first, paused / breaker
+--       refused (not counted), 3 an hour per org, discord.webhook_test (dry
+--       run or not, no token), a refused webhook marked broken
+--   DC15 the queue's RLS and grants, the new functions' grants, three audit
+--       markers, the patches, the trigger
 -- Users: d1 owner A, d2 manager A, d3 finance A, d4 scanner A, d5 owner B,
 --        d6 outsider.
 -- ============================================================================
@@ -752,6 +769,337 @@ BEGIN
               AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0) = 1, 'DC9 marker ' || m;
   END LOOP;
   RAISE NOTICE 'OK  DC9 eight audit markers';
+END $$;
+
+-- DC12 -----------------------------------------------------------------------
+-- The automatic reminder (mig 20261114100000).
+DO $$
+DECLARE r jsonb; c record; s text; k int;
+BEGIN
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  PERFORM public.exos_discord_breaker_clear();
+  UPDATE public.exos_discord_links SET invalid_paused_until = NULL, invalid_pause_count = 0 WHERE org_id = pg_temp.u('1');
+  -- Roles: owner / manager of the org only; 24 or 48 or off.
+  FOREACH s IN ARRAY ARRAY['d3', 'd4', 'd5', 'd6'] LOOP
+    PERFORM pg_temp.act(pg_temp.u(s));
+    ASSERT pg_temp.st(format('SELECT public.exos_discord_set_reminder(%L, 24)', pg_temp.u('1'))) LIKE '42501%', 'DC12 refused ' || s;
+  END LOOP;
+  PERFORM pg_temp.act(NULL);
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_set_reminder(%L, 24)', pg_temp.u('1'))) LIKE '42501%', 'DC12 signed out';
+  PERFORM pg_temp.act(pg_temp.u('d2'));
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_set_reminder(%L, 12)', pg_temp.u('1'))) LIKE '22023%', 'DC12 24 or 48 only';
+  r := public.exos_discord_set_reminder(pg_temp.u('1'), 24);
+  ASSERT (r->>'changed')::boolean AND (r->>'reminder_hours')::int = 24, 'DC12 manager sets 24: ' || r::text;
+  ASSERT NOT (public.exos_discord_set_reminder(pg_temp.u('1'), 24)->>'changed')::boolean, 'DC12 same again: no change';
+  ASSERT (SELECT changes->'reminder_hours' = '[null, 24]'::jsonb AND actor_uid = pg_temp.u('d2') FROM public.exos_org_audit
+           WHERE org_id = pg_temp.u('1') AND action = 'discord.reminder_set' ORDER BY id DESC LIMIT 1), 'DC12 audited';
+  ASSERT (public.exos_discord_status(pg_temp.u('1'))->>'reminder_hours')::int = 24, 'DC12 the panel shows it';
+  ASSERT (public.exos_discord_event_status(pg_temp.u('e1'))->>'reminder_hours')::int = 24, 'DC12 the event panel too';
+  PERFORM pg_temp.act(NULL);
+
+  -- e10 starts in 20 hours (due), e11 in 30 (not yet at 24), e12 started, e13 a draft, e14 announced
+  -- inside the window, e15 a reminder already asked for (a dry run), e19 org B's.
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e10'), pg_temp.u('1'), 'D15 Soon', 'd15-soon', 'published', now() + interval '20 hours', pg_temp.u('d1')),
+    (pg_temp.u('e11'), pg_temp.u('1'), 'D15 Later', 'd15-later', 'published', now() + interval '30 hours', pg_temp.u('d1')),
+    (pg_temp.u('e12'), pg_temp.u('1'), 'D15 Started', 'd15-started', 'published', now() - interval '1 hour', pg_temp.u('d1')),
+    (pg_temp.u('e13'), pg_temp.u('1'), 'D15 Soon Draft', 'd15-soon-draft', 'draft', now() + interval '20 hours', pg_temp.u('d1')),
+    (pg_temp.u('e14'), pg_temp.u('1'), 'D15 Just Announced', 'd15-just', 'published', now() + interval '20 hours', pg_temp.u('d1')),
+    (pg_temp.u('e15'), pg_temp.u('1'), 'D15 Asked', 'd15-asked', 'published', now() + interval '20 hours', pg_temp.u('d1')),
+    (pg_temp.u('e19'), pg_temp.u('2'), 'D15 B Soon', 'd15-b-soon', 'published', now() + interval '20 hours', pg_temp.u('d5'));
+  INSERT INTO public.exos_discord_posts (org_id, event_id, kind, status, requested_at, sent_at) VALUES
+    (pg_temp.u('1'), pg_temp.u('e14'), 'publish', 'sent', now() - interval '5 minutes', now() - interval '5 minutes'),
+    (pg_temp.u('1'), pg_temp.u('e15'), 'reminder', 'dry_run', now() - interval '2 days', NULL);
+  k := public.exos_discord_reminder_queue();
+  ASSERT k = 1 AND (SELECT count(*) FROM public.exos_discord_posts WHERE kind = 'reminder' AND requested_at > now() - interval '1 minute'
+                      AND event_id IN (pg_temp.u('e10'), pg_temp.u('e11'), pg_temp.u('e12'), pg_temp.u('e13'), pg_temp.u('e14'),
+                                       pg_temp.u('e15'), pg_temp.u('e19'))) = 1
+     AND EXISTS (SELECT 1 FROM public.exos_discord_posts WHERE event_id = pg_temp.u('e10') AND kind = 'reminder' AND status = 'queued'
+                   AND requested_by IS NULL), 'DC12 only e10 is due, got ' || k;
+  ASSERT (SELECT status FROM public.exos_discord_posts WHERE event_id = pg_temp.u('e15') AND kind = 'reminder') = 'dry_run',
+    'DC12 a reminder already asked for (even a dry run) is left alone';
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 once per event';
+  -- It goes out like the button's: claimed with the webhook, a dry run while writes are off, audited.
+  SELECT * INTO c FROM public.exos_discord_post_claim(5, NULL) x WHERE x.event_id = pg_temp.u('e10');
+  ASSERT c.kind = 'reminder' AND c.payload->'webhook'->>'id' = '923456789012345677' AND NOT (c.payload->>'writes_enabled')::boolean,
+    'DC12 claimed as a reminder';
+  r := public.exos_discord_post_mark(c.post_id, c.lease_id, 'dry_run', NULL, NULL, '{"steps": []}'::jsonb);
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE action = 'discord.post' AND event_id = pg_temp.u('e10')
+                   AND changes->>'kind' = 'reminder' AND (changes->>'dry_run')::boolean AND source = 'system'), 'DC12 audited as a post';
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 a dry-run reminder is not queued again';
+  -- 48 hours: e11 is due now.
+  PERFORM pg_temp.act(pg_temp.u('d1'));
+  PERFORM public.exos_discord_set_reminder(pg_temp.u('1'), 48);
+  PERFORM pg_temp.act(NULL);
+  ASSERT public.exos_discord_reminder_queue() = 1, 'DC12 48 hours: one more';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_discord_posts WHERE event_id = pg_temp.u('e11') AND kind = 'reminder'), 'DC12 48 hours: e11';
+  -- The button's limits: 10 a minute, 30 an hour per org; the reminder waits for a later pass.
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e16'), pg_temp.u('1'), 'D15 Limits', 'd15-limits', 'published', now() + interval '40 hours', pg_temp.u('d1'));
+  INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES ('discord_post:' || pg_temp.u('1')::text, date_trunc('minute', now()), 10)
+  ON CONFLICT (bucket, window_start) DO UPDATE SET hits = 10;
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 10 a minute';
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  INSERT INTO public.exos_discord_posts (org_id, event_id, kind, status, requested_at)
+  SELECT pg_temp.u('1'), ('d1500000-0000-0000-0002-' || lpad(n::text, 12, '0'))::uuid, kk, 'error', now() - interval '5 minutes'
+    FROM generate_series(1, 15) n CROSS JOIN (VALUES ('publish'), ('reminder')) v(kk);
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 30 an hour';
+  DELETE FROM public.exos_discord_posts WHERE event_id::text LIKE 'd1500000-0000-0000-0002-%';
+  ASSERT public.exos_discord_reminder_queue() = 1, 'DC12 under the limits: queued';
+  -- A refused webhook, or off: nothing.
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e17'), pg_temp.u('1'), 'D15 Off', 'd15-off', 'published', now() + interval '10 hours', pg_temp.u('d1'));
+  UPDATE public.exos_discord_links SET webhook_broken_at = now() WHERE org_id = pg_temp.u('1');
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 a refused webhook';
+  UPDATE public.exos_discord_links SET webhook_broken_at = NULL WHERE org_id = pg_temp.u('1');
+  PERFORM pg_temp.act(pg_temp.u('d2'));
+  PERFORM public.exos_discord_set_reminder(pg_temp.u('1'), NULL);
+  PERFORM pg_temp.act(NULL);
+  ASSERT public.exos_discord_reminder_queue() = 0, 'DC12 off: nothing';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_posts WHERE event_id = pg_temp.u('e17')), 'DC12 off: not e17';
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  RAISE NOTICE 'OK  DC12 automatic reminder: owner / manager, 24 / 48 / off, audited; due window, once per event, the button''s limits, dry run like the button';
+END $$;
+
+-- DC13 -----------------------------------------------------------------------
+-- Deleting an Exos event deletes its Discord event (mig 20261114100000).
+DO $$
+DECLARE r jsonb; c record; d record; v_fp text := repeat('ab', 16); v_lease uuid;
+BEGIN
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  PERFORM public.exos_discord_breaker_clear();
+  ASSERT (SELECT guild_id FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')) = '823456789012345676', 'DC13 linked';
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e20'), pg_temp.u('1'), 'D15 To Delete', 'd15-del', 'published', now() + interval '6 days', pg_temp.u('d1')),
+    (pg_temp.u('e21'), pg_temp.u('1'), 'D15 Old Server', 'd15-old-srv', 'published', now() + interval '6 days', pg_temp.u('d1')),
+    (pg_temp.u('e22'), pg_temp.u('1'), 'D15 Dry Only', 'd15-dry', 'published', now() + interval '6 days', pg_temp.u('d1')),
+    (pg_temp.u('e23'), pg_temp.u('1'), 'D15 Unlinked', 'd15-unl', 'published', now() + interval '6 days', pg_temp.u('d1')),
+    (pg_temp.u('e24'), pg_temp.u('1'), 'D15 Race', 'd15-race', 'published', now() + interval '6 days', pg_temp.u('d1'));
+  INSERT INTO public.exos_discord_event_syncs (event_id, org_id, show, guild_id, external_id, status, synced_seq) VALUES
+    (pg_temp.u('e20'), pg_temp.u('1'), true, '823456789012345676', '523456789012345690', 'synced', 1),
+    (pg_temp.u('e21'), pg_temp.u('1'), true, '999999999999999998', '523456789012345691', 'synced', 1),
+    (pg_temp.u('e22'), pg_temp.u('1'), true, NULL, NULL, 'dry_run', 1),
+    (pg_temp.u('e23'), pg_temp.u('1'), true, '823456789012345676', '523456789012345693', 'synced', 1),
+    (pg_temp.u('e24'), pg_temp.u('1'), true, NULL, NULL, 'pending', 0);
+  -- Cancelled is not deleted: the cancel path (a re-sync), no delete step.
+  UPDATE public.exos_events SET status = 'cancelled' WHERE id = pg_temp.u('e20');
+  ASSERT (SELECT synced_seq < change_seq FROM public.exos_discord_event_syncs WHERE event_id = pg_temp.u('e20'))
+     AND NOT EXISTS (SELECT 1 FROM public.exos_discord_deletes), 'DC13 cancel: re-synced, nothing to delete';
+  UPDATE public.exos_events SET status = 'published' WHERE id = pg_temp.u('e20');
+  -- Deleted: the sync row goes, the server and event id stay in the delete queue.
+  PERFORM pg_temp.act(pg_temp.u('d1'));
+  DELETE FROM public.exos_events WHERE id IN (pg_temp.u('e20'), pg_temp.u('e21'), pg_temp.u('e22'));
+  PERFORM pg_temp.act(NULL);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_event_syncs WHERE event_id IN (pg_temp.u('e20'), pg_temp.u('e21'))), 'DC13 sync rows gone';
+  ASSERT (SELECT count(*) FROM public.exos_discord_deletes) = 1, 'DC13 one delete: not another server''s, not a dry run''s';
+  SELECT * INTO d FROM public.exos_discord_deletes;
+  ASSERT d.org_id = pg_temp.u('1') AND d.event_id = pg_temp.u('e20') AND d.guild_id = '823456789012345676'
+     AND d.external_id = '523456789012345690' AND d.status = 'queued' AND d.requested_by = pg_temp.u('d1'), 'DC13 the delete row';
+
+  -- Claim: nothing while the bot breaker is set.
+  PERFORM public.exos_discord_call_result('bot', 401, NULL, false, NULL, NULL, v_fp);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 breaker: nothing';
+  PERFORM public.exos_discord_breaker_clear();
+  SELECT * INTO c FROM public.exos_discord_delete_claim(5, v_fp);
+  ASSERT c.delete_id = d.id AND c.payload->>'guild_id' = '823456789012345676' AND c.payload->>'external_id' = '523456789012345690'
+     AND NOT (c.payload->>'writes_enabled')::boolean AND c.org_id = pg_temp.u('1'), 'DC13 claimed: ' || c.payload::text;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 leased';
+  ASSERT public.exos_discord_delete_mark(d.id, gen_random_uuid(), '{"state": "done"}')->>'reason' = 'lease-lost', 'DC13 wrong lease';
+  ASSERT pg_temp.st(format($q$SELECT public.exos_discord_delete_mark(%L, %L, '{"state": "maybe"}')$q$, d.id, c.lease_id)) LIKE '22023%',
+    'DC13 bad state';
+  -- A 429: back off and try again.
+  r := public.exos_discord_delete_mark(d.id, c.lease_id, '{"state": "retry", "retry_seconds": 120, "error": "Discord: RATE_LIMITED"}');
+  ASSERT (SELECT status = 'queued' AND next_try_at > now() + interval '100 seconds' AND attempts = 1 AND lease_id IS NULL
+            FROM public.exos_discord_deletes WHERE id = d.id), 'DC13 retry backs off';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 not due yet';
+  UPDATE public.exos_discord_deletes SET next_try_at = now() WHERE id = d.id;
+  -- 20 a minute per org, shared with the scheduled-event pass.
+  INSERT INTO public.exos_rate_windows (bucket, window_start, hits) VALUES ('discord_sync:' || pg_temp.u('1')::text, date_trunc('minute', now()), 20)
+  ON CONFLICT (bucket, window_start) DO UPDATE SET hits = 20;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 20 a minute';
+  ASSERT (SELECT next_try_at > now() + interval '30 seconds' FROM public.exos_discord_deletes WHERE id = d.id), 'DC13 waits a minute';
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  -- A paused org waits.
+  UPDATE public.exos_discord_deletes SET next_try_at = now() WHERE id = d.id;
+  UPDATE public.exos_discord_links SET invalid_paused_until = now() + interval '20 minutes' WHERE org_id = pg_temp.u('1');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 paused org';
+  ASSERT (SELECT next_try_at > now() + interval '19 minutes' FROM public.exos_discord_deletes WHERE id = d.id), 'DC13 waits for the pause';
+  UPDATE public.exos_discord_links SET invalid_paused_until = NULL WHERE org_id = pg_temp.u('1');
+  UPDATE public.exos_discord_deletes SET next_try_at = now() WHERE id = d.id;
+  -- A dry run (writes off): final, audited with who deleted the event.
+  SELECT * INTO c FROM public.exos_discord_delete_claim(5, v_fp);
+  r := public.exos_discord_delete_mark(d.id, c.lease_id,
+         jsonb_build_object('state', 'dry_run', 'plan', jsonb_build_object('steps', jsonb_build_array(jsonb_build_object(
+           'op', 'planned', 'method', 'DELETE', 'path', '/guilds/823456789012345676/scheduled-events/523456789012345690')))));
+  ASSERT (SELECT status = 'dry_run' AND done_at IS NOT NULL AND plan->'steps'->0->>'method' = 'DELETE'
+            FROM public.exos_discord_deletes WHERE id = d.id), 'DC13 dry run recorded';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE action = 'discord.event_delete' AND org_id = pg_temp.u('1')
+                   AND entity_id = pg_temp.u('e20')::text AND actor_uid = pg_temp.u('d1') AND (changes->>'dry_run')::boolean
+                   AND position('523456789012345690' IN changes::text) = 0), 'DC13 audited, id hinted only';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 final';
+
+  -- At most 8 tries; a server that refused the bot marks the link.
+  INSERT INTO public.exos_discord_deletes (org_id, event_id, guild_id, external_id, ends_at)
+  VALUES (pg_temp.u('1'), gen_random_uuid(), '823456789012345676', '523456789012345694', now() + interval '1 day') RETURNING id INTO v_lease;
+  UPDATE public.exos_discord_deletes SET attempts = 7 WHERE id = v_lease;
+  SELECT * INTO c FROM public.exos_discord_delete_claim(5, v_fp);
+  ASSERT public.exos_discord_delete_mark(c.delete_id, c.lease_id, '{"state": "retry", "error": "Discord: HTTP_502"}')->>'state' = 'error',
+    'DC13 the 8th try is the last';
+  INSERT INTO public.exos_discord_deletes (org_id, event_id, guild_id, external_id, ends_at)
+  VALUES (pg_temp.u('1'), gen_random_uuid(), '823456789012345676', '523456789012345695', now() + interval '1 day');
+  SELECT * INTO c FROM public.exos_discord_delete_claim(5, v_fp);
+  PERFORM public.exos_discord_delete_mark(c.delete_id, c.lease_id, '{"state": "error", "link_broken": true, "error": "Discord: the Exos bot lost access"}');
+  ASSERT (SELECT guild_broken_at IS NOT NULL FROM public.exos_discord_links WHERE org_id = pg_temp.u('1')), 'DC13 link marked broken';
+  INSERT INTO public.exos_discord_deletes (org_id, event_id, guild_id, external_id, ends_at)
+  VALUES (pg_temp.u('1'), gen_random_uuid(), '823456789012345676', '523456789012345696', now() + interval '1 day') RETURNING id INTO v_lease;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 a broken link: nothing handed out';
+  ASSERT (SELECT status = 'error' AND last_error LIKE '%delete the event in Discord%' FROM public.exos_discord_deletes WHERE id = v_lease),
+    'DC13 it errors';
+  PERFORM public.exos_discord_guild_link(pg_temp.u('1'), pg_temp.u('d1'), '823456789012345676', 'D15 Again');
+  -- Over for a day: skipped (Discord ended it).
+  INSERT INTO public.exos_discord_deletes (org_id, event_id, guild_id, external_id, ends_at)
+  VALUES (pg_temp.u('1'), gen_random_uuid(), '823456789012345676', '523456789012345697', now() - interval '2 days') RETURNING id INTO v_lease;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 over: nothing handed out';
+  ASSERT (SELECT status FROM public.exos_discord_deletes WHERE id = v_lease) = 'skipped', 'DC13 over: skipped';
+
+  -- A create that raced the delete: its scheduled event is queued for deletion.
+  SELECT * INTO c FROM public.exos_discord_sync_claim(5, pg_temp.u('e24'), v_fp);
+  ASSERT c.lease_id IS NOT NULL, 'DC13 race: claimed';
+  DELETE FROM public.exos_events WHERE id = pg_temp.u('e24');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e24')), 'DC13 race: nothing known yet';
+  r := public.exos_discord_sync_mark(pg_temp.u('e24'), c.lease_id, c.change_seq,
+         '{"state": "synced", "external_id": "523456789012345698", "guild_id": "823456789012345676", "hash": "h"}');
+  ASSERT r->>'reason' = 'lease-lost', 'DC13 race: the mark finds no row';
+  ASSERT (SELECT status = 'queued' AND org_id = pg_temp.u('1') AND external_id = '523456789012345698'
+            FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e24')), 'DC13 race: its delete queued';
+  -- (An event that still exists is never queued that way.)
+  r := public.exos_discord_sync_mark(pg_temp.u('e1'), gen_random_uuid(), 1,
+         '{"state": "synced", "external_id": "523456789012345699", "guild_id": "823456789012345676"}');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_deletes WHERE external_id = '523456789012345699'), 'DC13 race: live event, no delete';
+  DELETE FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e24');
+
+  -- Disconnect leaves events in place: queued before the disconnect, skipped after it; none queued after it.
+  DELETE FROM public.exos_events WHERE id = pg_temp.u('e23');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e23') AND status = 'queued'), 'DC13 e23 queued';
+  PERFORM pg_temp.act(pg_temp.u('d2'));
+  PERFORM public.exos_discord_unlink_guild(pg_temp.u('1'));
+  PERFORM pg_temp.act(NULL);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_delete_claim(5, v_fp)), 'DC13 disconnected: nothing handed out';
+  ASSERT (SELECT status = 'skipped' AND last_error LIKE '%disconnected%' FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e23')),
+    'DC13 disconnected: skipped';
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e25'), pg_temp.u('1'), 'D15 After Unlink', 'd15-after', 'published', now() + interval '6 days', pg_temp.u('d1'));
+  INSERT INTO public.exos_discord_event_syncs (event_id, org_id, show, guild_id, external_id, status)
+  VALUES (pg_temp.u('e25'), pg_temp.u('1'), true, '823456789012345676', '523456789012345700', 'synced');
+  DELETE FROM public.exos_events WHERE id = pg_temp.u('e25');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e25')), 'DC13 disconnected: not queued';
+  PERFORM public.exos_discord_guild_link(pg_temp.u('1'), pg_temp.u('d1'), '823456789012345676', 'D15 Again');
+
+  -- Deleting a whole org still works (no foreign key on the queue); its rows are skipped.
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, created_by) VALUES
+    (pg_temp.u('e26'), pg_temp.u('3'), 'D15 Org3 Night', 'd15-o3', 'published', now() + interval '6 days', pg_temp.u('d5'));
+  UPDATE public.exos_discord_links SET guild_id = '1023456789012345678' WHERE org_id = pg_temp.u('3');
+  INSERT INTO public.exos_discord_event_syncs (event_id, org_id, show, guild_id, external_id, status)
+  VALUES (pg_temp.u('e26'), pg_temp.u('3'), true, '1023456789012345678', '523456789012345701', 'synced');
+  DELETE FROM public.exos_orgs WHERE id = pg_temp.u('3');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_orgs WHERE id = pg_temp.u('3')), 'DC13 org deleted';
+  PERFORM public.exos_discord_delete_claim(5, v_fp);
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_discord_deletes WHERE event_id = pg_temp.u('e26') AND status = 'queued'),
+    'DC13 org gone: nothing left to send';
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  RAISE NOTICE 'OK  DC13 delete: recorded before the delete (this server''s, real ids only), cancel unchanged, lease, backoff, 8 tries, breaker / pause / 20 a minute, dry run audited, broken link, raced create, disconnect skips';
+END $$;
+
+-- DC14 -----------------------------------------------------------------------
+-- Send a test (mig 20261114100000).
+DO $$
+DECLARE r jsonb; s text; i int;
+BEGIN
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  PERFORM public.exos_discord_breaker_clear();
+  FOREACH s IN ARRAY ARRAY['d3', 'd4', 'd5', 'd6'] LOOP
+    ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('1'), pg_temp.u(s))) LIKE '42501%',
+      'DC14 refused ' || s;
+  END LOOP;
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, NULL, false)', pg_temp.u('1'))) LIKE '42501%', 'DC14 nobody';
+  s := pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('2'), pg_temp.u('d5')));
+  ASSERT s LIKE '22023%webhook first%', 'DC14 B has no webhook: ' || s;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_rate_windows WHERE bucket LIKE 'discord_test:%'), 'DC14 refusals don''t count';
+  -- Paused (the org, or the breaker): refused before it counts.
+  UPDATE public.exos_discord_links SET invalid_paused_until = now() + interval '10 minutes' WHERE org_id = pg_temp.u('1');
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('1'), pg_temp.u('d2'))) LIKE '54000%paused%',
+    'DC14 org paused';
+  UPDATE public.exos_discord_links SET invalid_paused_until = NULL WHERE org_id = pg_temp.u('1');
+  UPDATE public.exos_discord_platform SET breaker_scope = 'all', breaker_at = now(), breaker_reason = 'test';
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('1'), pg_temp.u('d2'))) LIKE '54000%',
+    'DC14 breaker';
+  PERFORM public.exos_discord_breaker_clear();
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_rate_windows WHERE bucket LIKE 'discord_test:%'), 'DC14 paused doesn''t count';
+  -- The manager: the webhook to the service role, a dry run while writes are off, audited.
+  r := public.exos_discord_test_begin(pg_temp.u('1'), pg_temp.u('d2'), true);
+  ASSERT r->'webhook'->>'id' = '923456789012345677' AND r->'webhook'->>'token' = pg_temp.tok('7')
+     AND NOT (r->>'writes_enabled')::boolean AND r->>'org_name' = 'D15 Hall' AND (r->>'tests_left')::int = 2, 'DC14 begin: ' || r::text;
+  ASSERT (SELECT (changes->>'dry_run')::boolean AND actor_uid = pg_temp.u('d2') AND position(pg_temp.tok('7') IN changes::text) = 0
+            AND position('923456789012345677' IN changes::text) = 0
+            FROM public.exos_org_audit WHERE action = 'discord.webhook_test' AND org_id = pg_temp.u('1') ORDER BY id DESC LIMIT 1),
+    'DC14 audited as a dry run, no token or full id';
+  -- Writes on at both ends: not a dry run.
+  UPDATE public.exos_discord_links SET writes_enabled = true WHERE org_id = pg_temp.u('1');
+  r := public.exos_discord_test_begin(pg_temp.u('1'), pg_temp.u('d1'), true);
+  ASSERT (r->>'writes_enabled')::boolean AND NOT (SELECT (changes->>'dry_run')::boolean FROM public.exos_org_audit
+           WHERE action = 'discord.webhook_test' AND org_id = pg_temp.u('1') ORDER BY id DESC LIMIT 1), 'DC14 live';
+  -- 3 an hour per org (an earlier minute counts too).
+  UPDATE public.exos_rate_windows SET window_start = window_start - interval '30 minutes' WHERE bucket = 'discord_test:' || pg_temp.u('1')::text;
+  r := public.exos_discord_test_begin(pg_temp.u('1'), pg_temp.u('d2'), false);
+  ASSERT (r->>'tests_left')::int = 0, 'DC14 the third: ' || r::text;
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('1'), pg_temp.u('d1'))) LIKE '54000%3 test messages%',
+    'DC14 the fourth is refused';
+  ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE action = 'discord.webhook_test' AND org_id = pg_temp.u('1')) = 3, 'DC14 three audited';
+  UPDATE public.exos_rate_windows SET window_start = window_start - interval '2 hours' WHERE bucket = 'discord_test:' || pg_temp.u('1')::text;
+  ASSERT (public.exos_discord_test_begin(pg_temp.u('1'), pg_temp.u('d1'), false)->'webhook'->>'id') IS NOT NULL, 'DC14 an hour later';
+  -- Discord refused it: marked broken (only the webhook the test used), and no test until a new one.
+  ASSERT public.exos_discord_webhook_refused(pg_temp.u('1'), '123456789012345678', 'x') IS NULL, 'DC14 another webhook id: nothing';
+  ASSERT public.exos_discord_webhook_refused(pg_temp.u('1'), '923456789012345677', 'Discord: the webhook was deleted'), 'DC14 refused';
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  ASSERT pg_temp.st(format('SELECT public.exos_discord_test_begin(%L, %L, false)', pg_temp.u('1'), pg_temp.u('d1'))) LIKE '22023%paste a new one%',
+    'DC14 a refused webhook';
+  PERFORM pg_temp.act(pg_temp.u('d1'));
+  ASSERT (public.exos_discord_status(pg_temp.u('1'))->'webhook'->>'broken')::boolean, 'DC14 the panel says so';
+  PERFORM pg_temp.act(NULL);
+  UPDATE public.exos_discord_links SET writes_enabled = false, webhook_broken_at = NULL, webhook_broken_reason = NULL WHERE org_id = pg_temp.u('1');
+  DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'discord%';
+  RAISE NOTICE 'OK  DC14 send a test: owner / manager, a webhook first, paused / breaker refused uncounted, 3 an hour per org, audited (dry run or not), refused webhook marked';
+END $$;
+
+-- DC15 -----------------------------------------------------------------------
+DO $$
+DECLARE f text; m text;
+BEGIN
+  ASSERT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_discord_deletes'::regclass), 'DC15 RLS on the delete queue';
+  FOREACH f IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    ASSERT NOT has_table_privilege(f, 'public.exos_discord_deletes', 'SELECT,INSERT,UPDATE,DELETE,TRUNCATE'), 'DC15 ' || f || ' on the queue';
+  END LOOP;
+  ASSERT (SELECT prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp'] FROM pg_proc
+           WHERE oid = 'public.exos_discord_set_reminder(uuid,integer)'::regprocedure), 'DC15 definer set_reminder';
+  ASSERT has_function_privilege('authenticated', 'public.exos_discord_set_reminder(uuid,integer)', 'EXECUTE')
+     AND NOT has_function_privilege('anon', 'public.exos_discord_set_reminder(uuid,integer)', 'EXECUTE'), 'DC15 set_reminder signed in';
+  FOREACH f IN ARRAY ARRAY[
+      'public.exos_discord_reminder_queue(integer)', 'public.exos_discord_delete_claim(integer,text)',
+      'public.exos_discord_delete_mark(uuid,uuid,jsonb)', 'public.exos_discord_test_begin(uuid,uuid,boolean)',
+      'public.exos_discord_webhook_refused(uuid,text,text)', 'public.exos_tg_discord_event_delete()'] LOOP
+    ASSERT (SELECT prosecdef AND proconfig @> ARRAY['search_path=public, pg_temp'] FROM pg_proc WHERE oid = f::regprocedure), 'DC15 definer ' || f;
+    ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'), 'DC15 client runs ' || f;
+  END LOOP;
+  FOREACH m IN ARRAY ARRAY['discord.reminder_set', 'discord.event_delete', 'discord.webhook_test'] LOOP
+    ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
+              AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0) = 1, 'DC15 marker ' || m;
+  END LOOP;
+  ASSERT position('/* exos: discord reminder status */' IN pg_get_functiondef('public.exos_discord_status(uuid)'::regprocedure)) > 0
+     AND position('/* exos: discord reminder status */' IN pg_get_functiondef('public.exos_discord_event_status(uuid)'::regprocedure)) > 0
+     AND position('/* exos: discord delete race */' IN pg_get_functiondef('public.exos_discord_sync_mark(uuid,uuid,bigint,jsonb)'::regprocedure)) > 0,
+    'DC15 patches in place';
+  ASSERT (SELECT tgtype & 2 = 2 AND tgtype & 8 = 8 FROM pg_trigger WHERE tgname = 'exos_events_zz_discord_del'), 'DC15 BEFORE DELETE trigger';
+  RAISE NOTICE 'OK  DC15 delete queue RLS, no client grants; set_reminder signed in, the rest service role; three audit markers, the patches, the trigger';
 END $$;
 
 ROLLBACK;

@@ -1979,7 +1979,8 @@ await run('unfollow link: one click, signed out', async (page, log) => {
 const DISCORD_HOOK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
 const discordMock = (st) => ownerMock({ rpcs: {
   exos_discord_status: () => ({ can_manage: true, is_owner: true, webhook: st.saved ? { set: true, hint: '…5679' } : { set: false },
-    guild: { linked: false }, writes_enabled: false, auto_post: !!st.auto, shown_events: 0 }),
+    guild: { linked: false }, writes_enabled: false, auto_post: !!st.auto, reminder_hours: st.rem ?? null, shown_events: 0 }),
+  exos_discord_set_reminder: (b) => { st.rem = b.p_hours; return { reminder_hours: b.p_hours, changed: true }; },
   exos_discord_set_webhook: (b) => { st.saved = b.p_url; return { ok: true, hint: '…5679', replaced: false }; },
   exos_discord_set_options: (b) => { st.auto = b.p_auto_post; return { writes_enabled: false, auto_post: b.p_auto_post }; },
   exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true,
@@ -1992,6 +1993,7 @@ const discordMock = (st) => ownerMock({ rpcs: {
   'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: false } }),
   'exos-discord/sync': () => ({ body: { state: 'dry_run' } }),
   'exos-discord/post': () => { st.posted = true; return { body: { status: 'dry_run', already: false } }; },
+  'exos-discord/test': () => ({ body: { status: 'dry_run', error: null, tests_left: 2 } }),
 } });
 await run('org settings: Discord webhook checked and never shown back, announce on publish, dry run', async (page, log) => {
   await page.goto(BASE + '/orgs/' + ORG + '/settings');
@@ -2014,6 +2016,13 @@ await run('org settings: Discord webhook checked and never shown back, announce 
   await panel.getByRole('checkbox', { name: /Announce each event/ }).click();
   await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_options') && l.includes('"p_auto_post":true')), 'announce on publish');
   assert(await panel.getByRole('button', { name: 'Add Exos bot to your server' }).count() === 1, 'the bot button');
+  // mig 20261114100000: Send a test (a dry run here, and the panel says so) and the automatic reminder.
+  await panel.getByText(/Send a test is a dry run too/).waitFor({ timeout: 5000 });
+  await panel.getByRole('button', { name: 'Send a test' }).click();
+  await expectText(page, 'Dry run: Exos recorded the test message');
+  assert(log.some((l) => l.startsWith('fn exos-discord/test') && l.includes(ORG)), 'the test call names the org');
+  await panel.getByLabel('Automatic reminder').selectOption('24');
+  await waitFor(() => log.some((l) => l.startsWith('rpc exos_discord_set_reminder') && l.includes('"p_hours":24')), 'reminder 24 hours');
 }, { signedIn: true, mock: discordMock({}) });
 await run('edit event: Show on Discord and Post to Discord (dry run)', async (page, log) => {
   await page.goto(BASE + '/edit-event/' + EV);

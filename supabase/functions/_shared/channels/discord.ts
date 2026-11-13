@@ -5,7 +5,10 @@
 //      (POST /webhooks/{id}/{token}).
 //   2. Scheduled event: one EXTERNAL guild scheduled event per Exos event,
 //      made by the platform's bot in the org's linked server (POST / PATCH /
-//      DELETE /guilds/{guild}/scheduled-events[/{id}]).
+//      DELETE /guilds/{guild}/scheduled-events[/{id}]); deleted when the Exos
+//      event is deleted (mig 20261114100000).
+// Plus "Send a test" through the webhook and the automatic reminder's timing
+// (mig 20261114100000).
 //
 // Every request goes to DISCORD_API (https://discord.com/api/v10) and must be
 // in the allowlist below, bound to THIS org's guild id and webhook id; any
@@ -317,6 +320,11 @@ export interface PostOutcome {
 export async function postAnnouncement(io: DiscordIo, ev: DiscordEvent, kind: PostKind, webhookId: string, token: string,
                                        steps: DiscordStep[]): Promise<PostOutcome> {
   const r = await io.req("POST", webhookPath(webhookId, token), announcementBody(ev, kind));
+  return webhookOutcome(io, r, steps);
+}
+
+/** What a webhook post's answer means (shared by the announcement and the test message). */
+function webhookOutcome(io: DiscordIo, r: DiscordResult, steps: DiscordStep[]): PostOutcome {
   if (!io.live) return { state: "dry_run", plan: { steps } };
   if (r.ok) {
     const id = typeof r.body?.id === "string" && SNOWFLAKE.test(r.body.id) ? r.body.id : undefined;
@@ -332,6 +340,60 @@ export async function postAnnouncement(io: DiscordIo, ev: DiscordEvent, kind: Po
     return { state: "error", error: `Discord: ${r.error ?? "no answer"}; it may have posted, so check the channel before posting again`, plan: { steps } };
   }
   return { state: "error", error: `Discord: ${r.error ?? "refused"}`, plan: { steps } };
+}
+
+// ---- "Send a test" ---------------------------------------------------------------
+
+/**
+ * The test message (Org settings → Discord → Send a test): one embed saying
+ * Exos is connected, no content, no link, never a mention.
+ */
+export function testMessageBody(orgName: string | null) {
+  const org = str(orgName);
+  return {
+    allowed_mentions: { parse: [] as string[] },
+    embeds: [{
+      title: "Exos is connected",
+      description: `Exos is connected to this channel. ${org ? `Announcements for ${escapeMarkdown(clip(org, 100))}'s events` : "Event announcements"} will be posted here.`,
+    }],
+  };
+}
+
+/** Send the test through the org's webhook (or plan it, in a dry run); answers as an announcement does. */
+export async function sendTestMessage(io: DiscordIo, webhookId: string, token: string, orgName: string | null,
+                                      steps: DiscordStep[]): Promise<PostOutcome> {
+  const r = await io.req("POST", webhookPath(webhookId, token), testMessageBody(orgName));
+  return webhookOutcome(io, r, steps);
+}
+
+// ---- the automatic reminder -----------------------------------------------------
+
+/** What an org may pick for the automatic reminder (exos_discord_links.reminder_hours); null is off. */
+export const REMINDER_HOURS: readonly number[] = [24, 48];
+
+/** When the automatic reminder is due: `hours` before the start, or null (off, or a bad start). */
+export function reminderAt(startUtc: string, hours: number | null | undefined): string | null {
+  const start = Date.parse(startUtc);
+  if (!hours || !REMINDER_HOURS.includes(hours) || !Number.isFinite(start)) return null;
+  return new Date(start - hours * 3600_000).toISOString();
+}
+
+/**
+ * Whether the cron pass queues the reminder now; the same rule as
+ * exos_discord_reminder_queue, which decides: a published event, within
+ * `hours` of its start and not started, no reminder asked for yet, and no
+ * publish announcement asked for inside that window.
+ */
+export function reminderDue(o: {
+  status: string; startUtc: string; hours: number | null; now: number;
+  reminderAsked?: boolean; publishAskedAt?: string | null;
+}): boolean {
+  const at = reminderAt(o.startUtc, o.hours);
+  if (!at || o.status !== "published" || o.reminderAsked) return false;
+  const start = Date.parse(o.startUtc);
+  if (!(o.now >= Date.parse(at) && o.now < start)) return false;
+  const pub = o.publishAskedAt ? Date.parse(o.publishAskedAt) : NaN;
+  return !(Number.isFinite(pub) && pub >= Date.parse(at));
 }
 
 // ---- level 2: the scheduled event ----------------------------------------------
@@ -443,6 +505,37 @@ export async function syncScheduledEvent(io: DiscordIo, ev: DiscordEvent, guildI
   }
   if (!r.ok) return fail(r, "couldn't update the event");
   return done(ext);
+}
+
+export interface DeleteOutcome {
+  state: "done" | "dry_run" | "retry" | "error";
+  link_broken?: boolean;
+  error?: string;
+  retry_seconds?: number;
+  plan: { steps: DiscordStep[] };
+}
+
+/**
+ * The Exos event was deleted: delete its scheduled event (the allowlisted
+ * DELETE, bound to the org's server). Already gone (404) is done. A 429, a
+ * request that never left, a 5xx, a timeout or a 401 (the breaker) is tried
+ * again later: a DELETE is safe to repeat. A server that refused the bot is
+ * an error that marks the link.
+ */
+export async function deleteScheduledEvent(io: DiscordIo, guildId: string, externalId: string,
+                                           steps: DiscordStep[]): Promise<DeleteOutcome> {
+  if (!SNOWFLAKE.test(guildId) || !SNOWFLAKE.test(externalId)) return { state: "error", error: "bad Discord ids", plan: { steps } };
+  const r = await io.req("DELETE", `/guilds/${guildId}/scheduled-events/${externalId}`);
+  if (!io.live) return { state: "dry_run", plan: { steps } };
+  if (linkBroken(r)) {
+    return { state: "error", link_broken: true, error: "Discord: the Exos bot lost access to the server; delete the event in Discord", plan: { steps } };
+  }
+  if (r.ok || r.status === 404) return { state: "done", plan: { steps } };
+  if (r.status === 429 || r.notSent || r.status === 0 || r.status >= 500 || r.status === 401) {
+    return { state: "retry", error: `Discord: couldn't delete the event (${r.error ?? "no answer"})`,
+             retry_seconds: r.retryAfter ?? (r.status === 401 ? 600 : 60), plan: { steps } };
+  }
+  return { state: "error", error: `Discord: couldn't delete the event (${r.error ?? "refused"})`, plan: { steps } };
 }
 
 // ---- the cover image ------------------------------------------------------------
