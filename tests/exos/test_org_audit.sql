@@ -115,9 +115,9 @@ BEGIN
                      AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0), 'A0 marker ' || m;
   END LOOP;
   ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
-            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 54, 'A0 54 patched functions';  -- +8 exos_discord_* (20261113130000), +1 exos_fair_setup (20261113110000), +1 exos_org_followers_export (20261111110000), +1 exos_set_group_pay_enabled (20261111120000), +1 exos_stripe_org_payouts_record (20261111130000), +2 reservation answers replace / add-on wallet reissue (20261111140000), +4 exos_pos_kiosk_configure / _enter / _end / _exos_pos_kiosk_exit (20261113100000)
+            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 57, 'A0 57 patched functions';  -- +3 exos_discord_set_reminder / _delete_mark / _test_begin (20261114100000), +8 exos_discord_* (20261113130000), +1 exos_fair_setup (20261113110000), +1 exos_org_followers_export (20261111110000), +1 exos_set_group_pay_enabled (20261111120000), +1 exos_stripe_org_payouts_record (20261111130000), +2 reservation answers replace / add-on wallet reissue (20261111140000), +4 exos_pos_kiosk_configure / _enter / _end / _exos_pos_kiosk_exit (20261113100000)
   ASSERT (SELECT count(DISTINCT tgrelid) FROM pg_trigger WHERE tgname IN ('exos_audit_ins_del', 'exos_audit_upd')) = 10, 'A0 ten tables';
-  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 54 patched functions, 10 audited tables';
+  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 57 patched functions, 10 audited tables';
 END $$;
 
 -- A1 -------------------------------------------------------------------------

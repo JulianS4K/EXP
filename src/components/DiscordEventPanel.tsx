@@ -8,7 +8,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  fetchDiscordConfig, fetchDiscordEventStatus, orgPausedLine, postLine, postToDiscord, setDiscordShow, syncLine, type DiscordEventStatus, type PostKind,
+  autoReminderLine, fetchDiscordConfig, fetchDiscordEventStatus, orgPausedLine, postLine, postToDiscord, setDiscordShow, syncLine,
+  type DiscordEventStatus, type PostKind,
 } from '../lib/discord';
 
 const BTN = 'type text-[11px] uppercase tracking-widest border border-white/20 px-3 py-1.5 text-white/80 hover:border-brand-primary hover:text-brand-primary disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60';
@@ -65,7 +66,7 @@ export default function DiscordEventPanel({ eventId }: { eventId: string }) {
                 await setDiscordShow(eventId, e.target.checked);
                 return e.target.checked ? 'Showing on Discord.' : 'Taking it off Discord.';
               })} />
-            <span>Show on Discord ({st.guildName ?? 'your server'}&apos;s Events tab). Edits here go there; cancelling here cancels it there.</span>
+            <span>Show on Discord ({st.guildName ?? 'your server'}&apos;s Events tab). Edits here go there; cancelling or deleting the event here takes it off there.</span>
           </label>
           <p className="type text-[11px] text-white/60" aria-live="polite">{syncLine(st)}</p>
         </div>
@@ -88,6 +89,7 @@ export default function DiscordEventPanel({ eventId }: { eventId: string }) {
               </div>
             );
           })}
+          {autoReminderLine(st) && <p className="type text-[11px] text-white/60">{autoReminderLine(st)}</p>}
           <p className="type text-[11px] text-white/50">One announcement and one reminder per event, never with @everyone or other mentions.</p>
         </div>
       )}

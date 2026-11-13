@@ -4,6 +4,7 @@ import {
   discordEvent, discordHash, type DiscordStep, escapeMarkdown, eventLocation, exchangeInstallCode, installUrl,
   coverDataUri, coverObject, type CallKind, type DiscordResult, errorKind, linkBroken,
   makeDiscordIo, postAnnouncement, redactDiscord, redactPath, scheduledEventBody, syncScheduledEvent, webhookPath, webhookUrlParts,
+  deleteScheduledEvent, REMINDER_HOURS, reminderAt, reminderDue, sendTestMessage, testMessageBody,
 } from "./discord.ts";
 
 const GUILD = "423456789012345671";
@@ -377,4 +378,98 @@ Deno.test("webhook URL hint parse and redaction match the SQL", () => {
   assertEquals(redactPath(`/webhooks/${HOOK}/${TOKEN}?wait=true`), `/webhooks/${HOOK}/***?wait=true`);
   const text = redactDiscord(`failed https://discord.com/api/webhooks/${HOOK}/${TOKEN} with Bot ${BOT}`, [TOKEN]);
   assert(!text.includes(TOKEN) && !text.includes(BOT), text);
+});
+
+// ---- mig 20261114100000: the automatic reminder, delete on delete, Send a test ----
+
+Deno.test("reminder timing: 24 or 48 hours before the start, published, not started, once, not right after the announcement", () => {
+  const start = "2027-01-16T01:00:00.000Z";
+  const t = (iso: string) => Date.parse(iso);
+  assertEquals(REMINDER_HOURS, [24, 48]);
+  assertEquals(reminderAt(start, 24), "2027-01-15T01:00:00.000Z");
+  assertEquals(reminderAt(start, 48), "2027-01-14T01:00:00.000Z");
+  for (const h of [null, 0, 12, 72]) assertEquals(reminderAt(start, h), null, `off / not offered: ${h}`);
+  assertEquals(reminderAt("not a date", 24), null);
+  const base = { status: "published", startUtc: start, hours: 24 };
+  assertEquals(reminderDue({ ...base, now: t("2027-01-15T00:59:59Z") }), false, "a second early");
+  assertEquals(reminderDue({ ...base, now: t("2027-01-15T01:00:00Z") }), true, "on time");
+  assertEquals(reminderDue({ ...base, now: t("2027-01-16T00:59:00Z") }), true, "late (the cron was off): still before the start");
+  assertEquals(reminderDue({ ...base, now: t("2027-01-16T01:00:00Z") }), false, "started");
+  assertEquals(reminderDue({ ...base, hours: 48, now: t("2027-01-14T01:00:00Z") }), true, "48 hours");
+  assertEquals(reminderDue({ ...base, hours: null, now: t("2027-01-15T12:00:00Z") }), false, "off");
+  assertEquals(reminderDue({ ...base, status: "draft", now: t("2027-01-15T12:00:00Z") }), false, "a draft");
+  assertEquals(reminderDue({ ...base, status: "cancelled", now: t("2027-01-15T12:00:00Z") }), false, "cancelled");
+  assertEquals(reminderDue({ ...base, reminderAsked: true, now: t("2027-01-15T12:00:00Z") }), false, "once per event");
+  assertEquals(reminderDue({ ...base, publishAskedAt: "2027-01-15T11:00:00Z", now: t("2027-01-15T12:00:00Z") }), false,
+    "announced inside the window: no repeat");
+  assertEquals(reminderDue({ ...base, publishAskedAt: "2027-01-02T11:00:00Z", now: t("2027-01-15T12:00:00Z") }), true,
+    "announced long before: the reminder goes");
+});
+
+Deno.test("delete step: the allowlisted DELETE on the org's own server only; 404 is done; dry run sends nothing", async () => {
+  const EXT = "523456789012345690";
+  // Allowlisted for the bound server, refused for any other (before fetch).
+  assertEquals(allowedRequest("DELETE", `/guilds/${GUILD}/scheduled-events/${EXT}`, { guildId: GUILD }), "guild");
+  assertEquals(allowedRequest("DELETE", `/guilds/${GUILD}/scheduled-events/${EXT}`, { guildId: OTHER_GUILD }), null);
+  const calls: Call[] = [];
+  let steps: DiscordStep[] = [];
+  const other = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 204 }), calls), live: true, bound: { guildId: OTHER_GUILD }, botToken: BOT, steps });
+  await assertRejects(() => deleteScheduledEvent(other, GUILD, EXT, steps), Error, "not an allowed request");
+  assertEquals(calls.length, 0);
+  const bad = await deleteScheduledEvent(other, GUILD, "../channels", steps);
+  assertEquals([bad.state, calls.length], ["error", 0]);
+  // A dry run plans the DELETE and sends nothing.
+  const dry = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 204 }), calls), live: false, bound: { guildId: GUILD }, botToken: BOT, steps });
+  const d = await deleteScheduledEvent(dry, GUILD, EXT, steps);
+  assertEquals([d.state, calls.length, steps[0].method, steps[0].op], ["dry_run", 0, "DELETE", "planned"]);
+  for (const [status, body, want, broken] of [
+    [204, null, "done", false], [404, { code: 10070 }, "done", false], [429, { retry_after: 7 }, "retry", false],
+    [502, {}, "retry", false], [401, { code: 0 }, "retry", false], [403, { code: 50013 }, "error", true],
+    [404, { code: 10004 }, "error", true], [400, { code: 50035 }, "error", false],
+  ] as const) {
+    steps = [];
+    const io = makeDiscordIo({ fetch: fakeFetch(() => ({ status, body: body ?? undefined }), calls), live: true, bound: { guildId: GUILD },
+      botToken: BOT, steps });
+    const r = await deleteScheduledEvent(io, GUILD, EXT, steps);
+    assertEquals([r.state, r.link_broken === true], [want, broken], `${status} ${JSON.stringify(body)}`);
+    if (status === 429) assertEquals(r.retry_seconds, 7);
+    assert(!JSON.stringify(r).includes(BOT));
+  }
+  for (const c of calls) {
+    assertEquals([c.method, c.url, c.headers.Authorization], ["DELETE", `${DISCORD_API}/guilds/${GUILD}/scheduled-events/${EXT}`, `Bot ${BOT}`]);
+  }
+});
+
+Deno.test("test message: one embed, no content or link, no mentions, the org's name escaped; through the org's webhook only", async () => {
+  const body = testMessageBody("@everyone **Blue** Room");
+  assertEquals(body.allowed_mentions, { parse: [] });
+  assertEquals((body as Record<string, unknown>).content, undefined);
+  assertEquals((body as Record<string, unknown>).components, undefined);
+  assertEquals(body.embeds.length, 1);
+  assertEquals(body.embeds[0].title, "Exos is connected");
+  assert(body.embeds[0].description.startsWith("Exos is connected to this channel."));
+  assert(body.embeds[0].description.includes("\\@everyone \\*\\*Blue\\*\\* Room"), body.embeds[0].description);
+  assertEquals(testMessageBody(null).embeds[0].description, "Exos is connected to this channel. Event announcements will be posted here.");
+  const calls: Call[] = [];
+  let steps: DiscordStep[] = [];
+  const dry = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: false, bound: { webhookId: HOOK }, steps });
+  const d = await sendTestMessage(dry, HOOK, TOKEN, "Blue Room", steps);
+  assertEquals([d.state, calls.length], ["dry_run", 0]);
+  assert(!JSON.stringify(d).includes(TOKEN), "the plan hides the token");
+  // Another webhook than the org's: refused before fetch.
+  const wrong = makeDiscordIo({ fetch: fakeFetch(() => ({ status: 200 }), calls), live: true, bound: { webhookId: "323456789012345670" }, steps });
+  await assertRejects(() => sendTestMessage(wrong, HOOK, TOKEN, "x", steps), Error, "not an allowed request");
+  assertEquals(calls.length, 0);
+  for (const [status, resp, want, broken] of [
+    [200, { id: "723456789012345675" }, "sent", false], [404, { code: 10015 }, "error", true], [429, { retry_after: 3 }, "retry", false],
+  ] as const) {
+    steps = [];
+    const io = makeDiscordIo({ fetch: fakeFetch(() => ({ status, body: resp }), calls), live: true, bound: { webhookId: HOOK }, steps });
+    const r = await sendTestMessage(io, HOOK, TOKEN, "Blue Room", steps);
+    assertEquals([r.state, r.webhookBroken === true], [want, broken]);
+  }
+  const last = calls[calls.length - 1];
+  assertEquals(last.url, `${DISCORD_API}/webhooks/${HOOK}/${TOKEN}?wait=true&with_components=true`);
+  assertEquals(last.body.allowed_mentions, { parse: [] });
+  assertEquals(last.headers.Authorization, undefined, "no bot token to a webhook");
 });
