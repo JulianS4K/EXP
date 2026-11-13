@@ -41,8 +41,14 @@
 --    device keeps its own ledger and an offline cap per code (the balance at
 --    its last sync, exos_event_token_roster) and replays with p_offline_at;
 --    the server takes what is left and records the rest as 'overspent'.
+--    The claimed offline time is bounded by the server: not before the
+--    member's last roster download (exos_event_token_roster_syncs) nor 12
+--    hours back, not in the future; outside that the replay is a 'rejected'
+--    exception and the balance is untouched, so a stale ticket code or a
+--    backdated spend past the expiry can't pass.
 --    Undo (exos_event_token_undo): owner / manager, a reason, once per spend,
---    audited (token.undo). Lookups and spends are rate-limited per member
+--    within 24 hours and before the tokens expire; after the event's end the
+--    owner only. Audited (token.undo). Lookups and spends are rate-limited per member
 --    (120 a minute; a miss counts: misses answer instead of raising).
 -- 5. Buying: online through the add-ons (a trigger on exos_order_addons puts
 --    the credits on the order's ticket, the buyer's own first);
@@ -57,11 +63,15 @@
 --    else starts_at + 12 hours) + the grace. Not refundable: the expiry job
 --    (exos_event_token_expire, owner / manager; _exos_event_token_expire_due
 --    for an inactive cron) writes 'expire' rows (breakage). Refundable:
---    exos_event_token_refund_unused (owner / manager, audited token.refund)
---    takes a lot's unused credits; online it returns the order and amount for
---    the existing partial refund (exos-refund amount_cents, idempotent on the
---    returned key), at the door it pays the cash back out of a drawer
---    (exos_pos_paid_outs kind 'refund'). A full order refund (any path) takes
+--    exos_event_token_refund_unused (owner / manager, audited token.refund).
+--    Online, the lot goes 'refund_pending' (not spendable, still on the
+--    books) with a key for the existing partial refund (exos-refund
+--    amount_cents); only when that request succeeds does a trigger on
+--    exos_refund_requests close the lot (ledger + journal). A failed request
+--    leaves it pending: refund again (a new key) or put it back
+--    (exos_event_token_refund_cancel, audited token.refund_cancel). At the
+--    door it pays the cash back out of a drawer (exos_pos_paid_outs kind
+--    'refund'), in the same transaction. A full order refund (any path) takes
 --    the remaining credits of its lines. Labels: "Event tokens, no cash value,
 --    valid for <event> only"; the rule is in every offer's description.
 -- 7. Journal (docs/journal.md): tokens are deferred revenue. New accounts
@@ -79,7 +89,8 @@
 --
 -- Touches:  C: TABLE exos_event_token_products, exos_event_token_cards,
 --              exos_event_token_lots, exos_event_token_ledger,
---              exos_event_token_exceptions
+--              exos_event_token_exceptions, exos_event_token_roster_syncs
+--           T: exos_refund_requests (AFTER succeeded: closes a pending token refund)
 --           W: TABLE exos_event_addons (+token_product_id, +token_credits),
 --              exos_pos_items (+token_product_id, +token_credits),
 --              exos_journal_entries (source check + exos_event_token_ledger)
@@ -93,13 +104,15 @@
 --              exos_event_token_lookup, exos_event_token_spend,
 --              exos_event_token_undo, exos_event_token_roster,
 --              exos_event_token_pos_sell, exos_event_token_card_reissue,
---              exos_event_token_refund_unused, exos_event_token_expire,
+--              exos_event_token_refund_unused, exos_event_token_refund_cancel,
+--              exos_event_token_expire,
 --              exos_event_token_report, exos_my_event_tokens;
 --              (service role) exos_event_token_order_check,
 --              _exos_event_token_expire_due, exos_journal_post_event_token and
 --              the helpers / triggers named below
 -- Audit:    token.configure, token.sell, token.overspent, token.undo,
---           token.refund, token.expire, token.reissue (7 functions)
+--           token.refund, token.refund_cancel, token.expire, token.reissue
+--           (8 functions)
 -- Grants:   nothing for anon (H3 unchanged); tables: RLS on, SELECT only
 --           (owner / manager / finance; door staff read products), no client
 --           writes, no code hash readable by clients.
@@ -194,7 +207,13 @@ CREATE TABLE IF NOT EXISTS public.exos_event_token_lots (
   value_cents    integer NOT NULL CHECK (value_cents >= 0),
   credits_left   integer NOT NULL,
   value_left     integer NOT NULL,
-  status         text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'refunded', 'expired')),
+  -- refund_pending: an online refund of the unused tokens was asked for and
+  -- hasn't succeeded yet: not spendable, not yet off the books (S2 below).
+  status         text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'refund_pending', 'refunded', 'expired')),
+  refund_key     text UNIQUE CHECK (refund_key IS NULL OR refund_key ~ '^evtoken-refund:[0-9a-f-]{36}:[0-9]{1,4}$'),
+  refund_attempt integer NOT NULL DEFAULT 0 CHECK (refund_attempt BETWEEN 0 AND 9999),
+  refund_by      uuid,
+  refund_reason  text CHECK (refund_reason IS NULL OR char_length(refund_reason) <= 300),
   -- clock_timestamp: lots bought in one order still spend in purchase order.
   created_at     timestamptz NOT NULL DEFAULT clock_timestamp(),
   updated_at     timestamptz NOT NULL DEFAULT now(),
@@ -263,6 +282,21 @@ CREATE TABLE IF NOT EXISTS public.exos_event_token_exceptions (
 CREATE INDEX IF NOT EXISTS exos_event_token_exceptions_event_idx ON public.exos_event_token_exceptions (event_id, created_at);
 CREATE INDEX IF NOT EXISTS exos_event_token_exceptions_card_idx ON public.exos_event_token_exceptions (card_id) WHERE card_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS exos_event_token_exceptions_org_idx ON public.exos_event_token_exceptions (org_id);
+
+-- When each member last downloaded the event's offline roster (server time).
+-- An offline replay may not claim a time before it, nor more than 12 hours
+-- back: the client's clock never decides a code window or the expiry.
+CREATE TABLE IF NOT EXISTS public.exos_event_token_roster_syncs (
+  event_id  uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
+  user_id   uuid NOT NULL,
+  org_id    uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  synced_at timestamptz NOT NULL,
+  PRIMARY KEY (event_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS exos_event_token_roster_syncs_org_idx ON public.exos_event_token_roster_syncs (org_id);
+ALTER TABLE public.exos_event_token_roster_syncs ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_event_token_roster_syncs FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_event_token_roster_syncs TO service_role;
 
 -- updated_at
 DO $$
@@ -342,7 +376,7 @@ BEGIN
   FOREACH r IN ARRAY ARRAY['coworker_readonly', 'analyst_ro'] LOOP
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
       FOREACH t IN ARRAY ARRAY['exos_event_token_products', 'exos_event_token_cards', 'exos_event_token_lots',
-                               'exos_event_token_ledger', 'exos_event_token_exceptions'] LOOP
+                               'exos_event_token_ledger', 'exos_event_token_exceptions', 'exos_event_token_roster_syncs'] LOOP
         EXECUTE format('REVOKE ALL ON public.%I FROM %I', t, r);
       END LOOP;
     END IF;
@@ -381,10 +415,26 @@ COMMENT ON COLUMN public.exos_pos_items.token_product_id IS
 -- 2. Guards: the offers change only through the product save, and a token
 --    item is rung only by the token sale.
 -- ===========================================================================
+-- Both guards run as the caller (SECURITY INVOKER) and let a write through
+-- only when the transaction-local flag is set AND the statement runs as the
+-- role that owns the token functions, i.e. inside the definer function that
+-- set the flag. A client (authenticated, service_role over the API) that sets
+-- the flag itself still runs as itself and is refused.
+CREATE OR REPLACE FUNCTION public._exos_event_token_is_writer(p_flag text, p_value text)
+RETURNS boolean LANGUAGE sql STABLE SET search_path = public, pg_temp AS $$
+  SELECT coalesce(current_setting(p_flag, true), '') = p_value AND p_value <> ''
+     AND current_user = (SELECT pg_get_userbyid(p.proowner) FROM pg_proc p
+                          WHERE p.oid = to_regprocedure('public._exos_event_token_sync_offers(uuid)'))
+$$;
+REVOKE ALL ON FUNCTION public._exos_event_token_is_writer(text, text) FROM PUBLIC, anon;
+-- The guards call it as the writing role, so signed-in clients need EXECUTE;
+-- it says only whether the caller is the token functions' owner.
+GRANT EXECUTE ON FUNCTION public._exos_event_token_is_writer(text, text) TO authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION public._exos_tg_event_token_offer_guard()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
 BEGIN
-  IF coalesce(current_setting('exos.token_sync', true), '') = 'on' THEN
+  IF public._exos_event_token_is_writer('exos.token_sync', 'on') THEN
     RETURN NEW;
   END IF;
   IF TG_OP = 'INSERT' THEN
@@ -424,11 +474,13 @@ DROP TRIGGER IF EXISTS exos_pos_items_token_guard ON public.exos_pos_items;
 CREATE TRIGGER exos_pos_items_token_guard BEFORE INSERT OR UPDATE ON public.exos_pos_items
   FOR EACH ROW EXECUTE FUNCTION public._exos_tg_event_token_offer_guard();
 
+-- Invoker: whoever may insert a line at the event (exos_pos_can_ring) may
+-- read the event's items, so the lookup sees every token item.
 CREATE OR REPLACE FUNCTION public._exos_tg_event_token_line_guard()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM public.exos_pos_items i WHERE i.id = NEW.item_id AND i.token_product_id IS NOT NULL)
-     AND coalesce(current_setting('exos.token_sale', true), '') IS DISTINCT FROM NEW.order_id::text THEN
+     AND NOT public._exos_event_token_is_writer('exos.token_sale', NEW.order_id::text) THEN
     RAISE EXCEPTION 'event tokens are sold with the token sale (it puts the credits on a code)' USING ERRCODE = '42501';
   END IF;
   RETURN NEW;
@@ -722,7 +774,8 @@ RETURNS bigint LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_te
 DECLARE l public.exos_event_token_lots%ROWTYPE; v_id bigint;
 BEGIN
   SELECT * INTO l FROM public.exos_event_token_lots WHERE id = p_lot FOR UPDATE;
-  IF l.id IS NULL OR l.status <> 'active' THEN
+  -- A pending refund closes only as a refund (never expires under it).
+  IF l.id IS NULL OR NOT (l.status = 'active' OR (l.status = 'refund_pending' AND p_kind = 'refund')) THEN
     RETURN NULL;
   END IF;
   UPDATE public.exos_event_token_lots
@@ -902,6 +955,12 @@ BEGIN
   IF jsonb_typeof(p_addons) IS DISTINCT FROM 'array' THEN
     RETURN NULL;
   END IF;
+  -- Whole, positive quantities only: a refusal (409 at checkout), never an error.
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_addons) x
+              WHERE jsonb_typeof(x) <> 'object' OR coalesce(x ->> 'quantity', '') !~ '^[0-9]{1,4}$'
+                 OR (x ->> 'quantity')::int < 1) THEN
+    RETURN 'add-on quantities must be whole numbers from 1';
+  END IF;
   FOR r IN
     SELECT p.id, p.name, p.unit_label, p.max_per_order, p.active,
            sum(a.token_credits * greatest(coalesce((x ->> 'quantity')::int, 0), 0))::int AS credits,
@@ -969,7 +1028,8 @@ CREATE OR REPLACE FUNCTION public._exos_tg_event_token_order_addon_upd()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE l record;
 BEGIN
-  FOR l IN SELECT id, card_id FROM public.exos_event_token_lots WHERE order_addon_id = NEW.id AND status = 'active' LOOP
+  FOR l IN SELECT id, card_id FROM public.exos_event_token_lots
+            WHERE order_addon_id = NEW.id AND status IN ('active', 'refund_pending') LOOP
     PERFORM 1 FROM public.exos_event_token_cards WHERE id = l.card_id FOR UPDATE;
     PERFORM public._exos_event_token_close_lot(l.id, 'refund', NULL, 'order ' || NEW.status);
   END LOOP;
@@ -1061,6 +1121,7 @@ DECLARE
   v_x       public.exos_event_token_exceptions%ROWTYPE;
   lg        public.exos_event_token_ledger%ROWTYPE;
   v_exp     timestamptz;
+  v_floor   timestamptz;
   v_out     jsonb;
 BEGIN
   IF v_uid IS NULL THEN
@@ -1103,8 +1164,23 @@ BEGIN
   IF NOT public.exos_rate_hit('tok:door:' || v_uid::text, 120) THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'rate-limited');
   END IF;
-  IF v_offline AND (p_offline_at > clock_timestamp() + interval '2 minutes' OR p_offline_at < clock_timestamp() - interval '7 days') THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'bad-scan-time');
+  -- An offline time is the device's claim. It may not be later than now, nor
+  -- earlier than this member's last roster download for the event, nor more
+  -- than 12 hours back, whichever is later (server clock): a captured ticket
+  -- code from days ago, or a spend backdated to before the expiry after a
+  -- fresh download, can't pass. Outside that: a 'rejected' exception for
+  -- review, the balance untouched.
+  IF v_offline THEN
+    SELECT greatest(y.synced_at, clock_timestamp() - interval '12 hours') INTO v_floor
+      FROM (SELECT (SELECT s2.synced_at FROM public.exos_event_token_roster_syncs s2
+                     WHERE s2.event_id = ev.id AND s2.user_id = v_uid) AS synced_at) y;
+    IF p_offline_at > clock_timestamp() + interval '2 minutes' OR p_offline_at < v_floor THEN
+      INSERT INTO public.exos_event_token_exceptions (org_id, event_id, card_id, product_id, kind, credits_asked, credits_short,
+                                                      reason, client_ref, device, actor, offline_at)
+      VALUES (ev.org_id, ev.id, NULL, p.id, 'rejected', p_credits, p_credits, 'bad-scan-time', p_client_ref, v_dev, v_uid,
+              p_offline_at);
+      RETURN jsonb_build_object('ok', false, 'reason', 'rejected', 'short', p_credits, 'why', 'bad-scan-time');
+    END IF;
   END IF;
   v_exp := public._exos_event_token_expires_at(p.id);
 
@@ -1180,11 +1256,14 @@ DECLARE
   x        jsonb;
   v_bal    int;
   v_id     bigint;
+  v_role   text;
+  v_end    timestamptz;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501';
   END IF;
-  IF coalesce(public._exos_event_token_role(p_event_id), '') NOT IN ('owner', 'manager') THEN
+  v_role := coalesce(public._exos_event_token_role(p_event_id), '');
+  IF v_role NOT IN ('owner', 'manager') THEN
     RAISE EXCEPTION 'an owner or manager undoes a spend' USING ERRCODE = '42501';
   END IF;
   IF char_length(v_reason) NOT BETWEEN 3 AND 300 THEN
@@ -1198,6 +1277,17 @@ BEGIN
   SELECT * INTO u FROM public.exos_event_token_ledger WHERE undoes = lg.id AND kind = 'undo';
   IF u.id IS NOT NULL THEN
     RETURN jsonb_build_object('ok', true, 'duplicate', true, 'ledger_id', u.id, 'balance', u.balance_after);
+  END IF;
+  -- The window: 24 hours after the spend, and never after the tokens expire.
+  -- After the event's end an undo is the owner's alone: it is the step that
+  -- turns spent tokens of a refundable product back into refundable money.
+  IF clock_timestamp() > least(lg.created_at + interval '24 hours',
+                               coalesce(public._exos_event_token_expires_at(lg.product_id), 'infinity'::timestamptz)) THEN
+    RAISE EXCEPTION 'too late to undo this spend (24 hours, or once the tokens expire)' USING ERRCODE = '55000', HINT = 'undo-window';
+  END IF;
+  SELECT coalesce(e.ends_at, e.starts_at + interval '12 hours') INTO v_end FROM public.exos_events e WHERE e.id = lg.event_id;
+  IF v_end IS NOT NULL AND clock_timestamp() > v_end AND v_role <> 'owner' THEN
+    RAISE EXCEPTION 'after the event, only an owner undoes a spend' USING ERRCODE = '42501', HINT = 'owner-after-event';
   END IF;
   FOR x IN SELECT * FROM jsonb_array_elements(coalesce(lg.detail, '[]')) LOOP
     UPDATE public.exos_event_token_lots
@@ -1224,7 +1314,10 @@ GRANT EXECUTE ON FUNCTION public.exos_event_token_undo(uuid, bigint, text) TO au
 
 -- What a door device keeps for offline spends: every card with a balance,
 -- by ticket id or code hash, and its balances (the offline cap per code).
--- Door staff; 10 a minute per member.
+-- The code hash is needed: offline, the device matches a scanned walk-up
+-- code by hashing it (a 75-bit code's SHA-256 can't be reversed); no names,
+-- no codes. Each download records the member's sync time, the floor for
+-- their offline replays. Door staff; 10 a minute per member.
 CREATE OR REPLACE FUNCTION public.exos_event_token_roster(p_event_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
@@ -1237,6 +1330,10 @@ BEGIN
   IF NOT public.exos_rate_hit('tok:roster:' || auth.uid()::text, 10) THEN
     RAISE EXCEPTION 'too many downloads a minute' USING ERRCODE = '54000';
   END IF;
+  -- The floor for this member's offline replays (exos_event_token_spend).
+  INSERT INTO public.exos_event_token_roster_syncs (event_id, user_id, org_id, synced_at)
+  SELECT e.id, auth.uid(), e.org_id, clock_timestamp() FROM public.exos_events e WHERE e.id = p_event_id
+  ON CONFLICT (event_id, user_id) DO UPDATE SET synced_at = EXCLUDED.synced_at;
   RETURN jsonb_build_object(
     'synced_at', clock_timestamp(),
     'cards', coalesce((
@@ -1436,11 +1533,18 @@ GRANT EXECUTE ON FUNCTION public.exos_event_token_card_reissue(uuid, uuid, text)
 -- ===========================================================================
 -- 8. Refunds of unused credits and expiry
 -- ===========================================================================
--- Refundable products only. Online: the lot's unused credits leave the card
--- now and the caller refunds {session_id, amount_cents} with the existing
--- partial refund (exos-refund, nonce = refund_key: a retry is one refund).
--- Door cash: paid back out of a drawer (a paid-out of kind 'refund' on the
--- sale). A comp: the credits just leave. Repeated: the first answer.
+-- Refundable products only.
+-- Online (S2): the money must move before the tokens leave the books. The
+-- lot becomes 'refund_pending' (not spendable, still on the books, on the
+-- report) with a refund key; the caller refunds {session_id, amount_cents}
+-- with the existing partial refund (exos-refund, nonce = refund_key: a retry
+-- is one refund). When that request succeeds (exos_refund_requests.status,
+-- written by exos-refund's finalize or the Stripe webhook) a trigger closes
+-- the lot: the refund ledger row and its journal entry. A failed or
+-- cancelled request leaves the lot pending: "Refund" again takes a new key,
+-- "Put back" (exos_event_token_refund_cancel) makes the tokens spendable.
+-- Door cash: paid back out of a drawer in this transaction (a paid-out of
+-- kind 'refund' on the sale). A comp: the tokens just leave.
 CREATE OR REPLACE FUNCTION public.exos_event_token_refund_unused(
   p_event_id uuid, p_lot_id uuid, p_reason text, p_drawer_id uuid DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -1451,7 +1555,7 @@ DECLARE
   l        public.exos_event_token_lots%ROWTYPE;
   p        public.exos_event_token_products%ROWTYPE;
   lg       public.exos_event_token_ledger%ROWTYPE;
-  v_lid    bigint;
+  v_req    text;
   v_drawer uuid;
   v_po     uuid;
 BEGIN
@@ -1474,45 +1578,137 @@ BEGIN
     RAISE EXCEPTION '% are not refundable', p.name USING ERRCODE = '55000', HINT = 'not-refundable';
   END IF;
   PERFORM 1 FROM public.exos_event_token_cards WHERE id = l.card_id FOR UPDATE;
-  SELECT * INTO l FROM public.exos_event_token_lots WHERE id = l.id;
+  SELECT * INTO l FROM public.exos_event_token_lots WHERE id = l.id FOR UPDATE;
+  IF l.status = 'refund_pending' THEN
+    SELECT r.status INTO v_req FROM public.exos_refund_requests r WHERE r.org_id = l.org_id AND r.nonce = l.refund_key;
+    IF v_req = 'succeeded' THEN
+      -- The trigger closes it; a request recorded before this migration can't have fired it.
+      PERFORM public._exos_event_token_close_lot(l.id, 'refund', l.refund_by, coalesce(l.refund_reason, v_reason));
+      SELECT * INTO l FROM public.exos_event_token_lots WHERE id = l.id;
+    ELSIF v_req IN ('failed', 'canceled') THEN
+      -- That request is over: a new key for a new one (the old key answers its failure forever).
+      UPDATE public.exos_event_token_lots
+         SET refund_attempt = refund_attempt + 1,
+             refund_key = 'evtoken-refund:' || id || ':' || (refund_attempt + 1)
+       WHERE id = l.id
+      RETURNING * INTO l;
+    END IF;
+  END IF;
   IF l.status = 'refunded' THEN
     SELECT * INTO lg FROM public.exos_event_token_ledger WHERE lot_id = l.id AND kind = 'refund';
-    RETURN jsonb_build_object('replay', true, 'lot_id', l.id, 'source', l.source, 'credits', coalesce(-lg.credits, 0),
-                              'amount_cents', coalesce(-lg.amount_cents, 0), 'session_id', l.session_id,
-                              'refund_key', CASE WHEN lg.id IS NOT NULL AND l.source = 'online' THEN 'evtoken-refund:' || lg.id END);
+    RETURN jsonb_build_object('replay', true, 'pending', false, 'lot_id', l.id, 'source', l.source,
+                              'credits', coalesce(-lg.credits, 0), 'amount_cents', coalesce(-lg.amount_cents, 0),
+                              'session_id', l.session_id, 'refund_key', l.refund_key);
+  END IF;
+  IF l.status = 'refund_pending' THEN
+    RETURN jsonb_build_object('replay', true, 'pending', true, 'lot_id', l.id, 'source', l.source, 'credits', l.credits_left,
+                              'amount_cents', l.value_left, 'session_id', l.session_id, 'refund_key', l.refund_key,
+                              'request_status', v_req);
   END IF;
   IF l.status <> 'active' OR l.credits_left = 0 THEN
     RAISE EXCEPTION 'nothing left to refund on this purchase' USING ERRCODE = '55000', HINT = 'nothing-left';
   END IF;
-  IF l.source = 'pos' AND l.value_left > 0 THEN
-    IF EXISTS (SELECT 1 FROM public.exos_pos_settlements s WHERE s.event_id = l.event_id AND s.status = 'final') THEN
-      RAISE EXCEPTION 'the event''s settlement is final' USING ERRCODE = '55000', HINT = 'settlement-final';
+  IF l.source = 'online' AND l.value_left > 0 THEN
+    UPDATE public.exos_event_token_lots
+       SET status = 'refund_pending', refund_attempt = refund_attempt + 1,
+           refund_key = 'evtoken-refund:' || id || ':' || (refund_attempt + 1), refund_by = v_uid, refund_reason = left(v_reason, 300)
+     WHERE id = l.id
+    RETURNING * INTO l;
+  ELSE
+    IF l.source = 'pos' AND l.value_left > 0 THEN
+      IF EXISTS (SELECT 1 FROM public.exos_pos_settlements s WHERE s.event_id = l.event_id AND s.status = 'final') THEN
+        RAISE EXCEPTION 'the event''s settlement is final' USING ERRCODE = '55000', HINT = 'settlement-final';
+      END IF;
+      v_drawer := public._exos_pos_open_drawer(l.event_id, v_uid, NULL, p_drawer_id, true);
+      IF v_drawer IS NULL THEN
+        RAISE EXCEPTION 'open a cash drawer at this event to hand the cash back' USING ERRCODE = '55000', HINT = 'no-drawer';
+      END IF;
+      PERFORM 1 FROM public.exos_pos_drawer_sessions WHERE id = v_drawer FOR UPDATE;
+      IF public._exos_pos_drawer_cash(v_drawer) < l.value_left THEN
+        RAISE EXCEPTION 'the drawer only has % cents', public._exos_pos_drawer_cash(v_drawer) USING ERRCODE = '23514', HINT = 'drawer-short';
+      END IF;
     END IF;
-    v_drawer := public._exos_pos_open_drawer(l.event_id, v_uid, NULL, p_drawer_id, true);
-    IF v_drawer IS NULL THEN
-      RAISE EXCEPTION 'open a cash drawer at this event to hand the cash back' USING ERRCODE = '55000', HINT = 'no-drawer';
+    PERFORM public._exos_event_token_close_lot(l.id, 'refund', v_uid, v_reason);
+    IF v_drawer IS NOT NULL THEN
+      INSERT INTO public.exos_pos_paid_outs (org_id, event_id, drawer_session_id, kind, amount_cents, reason, order_id, created_by)
+      VALUES (l.org_id, l.event_id, v_drawer, 'refund', l.value_left, left('unused tokens: ' || v_reason, 300), l.pos_order_id, v_uid)
+      RETURNING id INTO v_po;
     END IF;
-    PERFORM 1 FROM public.exos_pos_drawer_sessions WHERE id = v_drawer FOR UPDATE;
-    IF public._exos_pos_drawer_cash(v_drawer) < l.value_left THEN
-      RAISE EXCEPTION 'the drawer only has % cents', public._exos_pos_drawer_cash(v_drawer) USING ERRCODE = '23514', HINT = 'drawer-short';
-    END IF;
-  END IF;
-  v_lid := public._exos_event_token_close_lot(l.id, 'refund', v_uid, v_reason);
-  IF v_drawer IS NOT NULL THEN
-    INSERT INTO public.exos_pos_paid_outs (org_id, event_id, drawer_session_id, kind, amount_cents, reason, order_id, created_by)
-    VALUES (l.org_id, l.event_id, v_drawer, 'refund', l.value_left, left('unused tokens: ' || v_reason, 300), l.pos_order_id, v_uid)
-    RETURNING id INTO v_po;
   END IF;
   /* exos: audit token.refund */
   PERFORM public._exos_audit(l.org_id, 'token.refund', 'event_token_lot', l.id::text, l.event_id,
-    jsonb_build_object('credits', jsonb_build_array(NULL, l.credits_left), 'source', jsonb_build_array(NULL, l.source)),
+    jsonb_build_object('credits', jsonb_build_array(NULL, l.credits_left), 'source', jsonb_build_array(NULL, l.source),
+                       'pending', jsonb_build_array(NULL, l.status = 'refund_pending')),
     l.value_left, NULL, v_reason, v_uid, NULL, 'dashboard');
-  RETURN jsonb_build_object('replay', false, 'lot_id', l.id, 'source', l.source, 'credits', l.credits_left,
-                            'amount_cents', l.value_left, 'session_id', l.session_id, 'paid_out_id', v_po,
-                            'refund_key', CASE WHEN l.source = 'online' AND l.value_left > 0 THEN 'evtoken-refund:' || v_lid END);
+  RETURN jsonb_build_object('replay', false, 'pending', l.status = 'refund_pending', 'lot_id', l.id, 'source', l.source,
+                            'credits', l.credits_left, 'amount_cents', l.value_left, 'session_id', l.session_id,
+                            'paid_out_id', v_po, 'refund_key', CASE WHEN l.status = 'refund_pending' THEN l.refund_key END);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_event_token_refund_unused(uuid, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_token_refund_unused(uuid, uuid, text, uuid) TO authenticated;
+
+-- "Put back": a pending online refund that didn't go through (no request, or
+-- it failed / was cancelled) makes the tokens spendable again. Refused while
+-- its request is in flight or done. Owner / manager; audited.
+CREATE OR REPLACE FUNCTION public.exos_event_token_refund_cancel(p_event_id uuid, p_lot_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE l public.exos_event_token_lots%ROWTYPE; v_req text;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501';
+  END IF;
+  IF coalesce(public._exos_event_token_role(p_event_id), '') NOT IN ('owner', 'manager') THEN
+    RAISE EXCEPTION 'an owner or manager refunds tokens' USING ERRCODE = '42501';
+  END IF;
+  SELECT * INTO l FROM public.exos_event_token_lots WHERE id = p_lot_id AND event_id = p_event_id;
+  IF l.id IS NULL THEN
+    RAISE EXCEPTION 'purchase not found' USING ERRCODE = 'P0002';
+  END IF;
+  PERFORM 1 FROM public.exos_event_token_cards WHERE id = l.card_id FOR UPDATE;
+  SELECT * INTO l FROM public.exos_event_token_lots WHERE id = l.id FOR UPDATE;
+  IF l.status <> 'refund_pending' THEN
+    RAISE EXCEPTION 'no refund is pending on this purchase' USING ERRCODE = '55000', HINT = 'not-pending';
+  END IF;
+  SELECT r.status INTO v_req FROM public.exos_refund_requests r WHERE r.org_id = l.org_id AND r.nonce = l.refund_key;
+  IF v_req IN ('claimed', 'pending', 'succeeded') THEN
+    RAISE EXCEPTION 'the refund is going through: wait for it' USING ERRCODE = '55000', HINT = 'refund-in-flight';
+  END IF;
+  UPDATE public.exos_event_token_lots SET status = 'active' WHERE id = l.id;
+  /* exos: audit token.refund_cancel */
+  PERFORM public._exos_audit(l.org_id, 'token.refund_cancel', 'event_token_lot', l.id::text, l.event_id,
+    jsonb_build_object('status', jsonb_build_array('refund_pending', 'active'), 'request', jsonb_build_array(NULL, v_req)),
+    NULL, NULL, NULL, auth.uid(), NULL, 'dashboard');
+  RETURN jsonb_build_object('lot_id', l.id, 'status', 'active', 'credits', l.credits_left,
+                            'balance', public._exos_event_token_balance(l.card_id, l.product_id));
+END $$;
+REVOKE ALL ON FUNCTION public.exos_event_token_refund_cancel(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_event_token_refund_cancel(uuid, uuid) TO authenticated;
+
+-- The refund went through (exos_refund_requests succeeded, by exos-refund's
+-- finalize or the Stripe webhook): the pending lot closes as a refund. Never
+-- blocks the refund's own write (a failure is a WARNING; "Refund" again
+-- closes it from the request).
+CREATE OR REPLACE FUNCTION public._exos_tg_event_token_refund_done()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE l public.exos_event_token_lots%ROWTYPE;
+BEGIN
+  BEGIN
+    SELECT * INTO l FROM public.exos_event_token_lots
+     WHERE refund_key = NEW.nonce AND org_id = NEW.org_id AND session_id = NEW.session_id AND status = 'refund_pending';
+    IF l.id IS NOT NULL THEN
+      PERFORM 1 FROM public.exos_event_token_cards WHERE id = l.card_id FOR UPDATE;
+      PERFORM public._exos_event_token_close_lot(l.id, 'refund', l.refund_by, coalesce(l.refund_reason, 'unused tokens'));
+    END IF;
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'exos event tokens: % closing the lot of refund %', SQLERRM, NEW.nonce;
+  END;
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_event_token_refund_done() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_refund_requests_event_tokens ON public.exos_refund_requests;
+CREATE TRIGGER exos_refund_requests_event_tokens AFTER INSERT OR UPDATE OF status ON public.exos_refund_requests
+  FOR EACH ROW WHEN (NEW.status = 'succeeded' AND NEW.nonce LIKE 'evtoken-refund:%')
+  EXECUTE FUNCTION public._exos_tg_event_token_refund_done();
 
 -- Expire what can't be spent any more (not refundable products, past expiry).
 -- Refundable products' unused credits stay on the report until refunded.
@@ -1654,12 +1850,16 @@ BEGIN
     'refundable', coalesce((
       SELECT jsonb_agg(jsonb_build_object('lot_id', l.id, 'product', p.name, 'source', l.source, 'credits_left', l.credits_left,
                                           'value_left', l.value_left, 'bought_at', l.created_at, 'card_id', l.card_id,
-                                          'card_last4', c.code_last4, 'on_ticket', c.ticket_id IS NOT NULL)
+                                          'card_last4', c.code_last4, 'on_ticket', c.ticket_id IS NOT NULL,
+                                          'status', l.status,
+                                          'request_status', (SELECT r.status FROM public.exos_refund_requests r
+                                                              WHERE l.status = 'refund_pending' AND r.org_id = l.org_id
+                                                                AND r.nonce = l.refund_key))
                        ORDER BY l.created_at)
         FROM public.exos_event_token_lots l
-        JOIN public.exos_event_token_products p ON p.id = l.product_id AND p.refundable
+        JOIN public.exos_event_token_products p ON p.id = l.product_id AND (p.refundable OR l.status = 'refund_pending')
         JOIN public.exos_event_token_cards c ON c.id = l.card_id
-       WHERE l.event_id = ev.id AND l.status = 'active' AND l.credits_left > 0), '[]'::jsonb));
+       WHERE l.event_id = ev.id AND l.status IN ('active', 'refund_pending') AND l.credits_left > 0), '[]'::jsonb));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_event_token_report(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_event_token_report(uuid) TO authenticated;

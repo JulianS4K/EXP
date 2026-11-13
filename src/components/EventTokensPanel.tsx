@@ -20,7 +20,7 @@ import {
   tokenReportRows, tokenRuleText, type TokenProductDraft, type TokenReport,
 } from '../lib/eventTokens';
 import {
-  expireTokens, listTokenProducts, refundUnusedTokens, saveTokenProduct, tokenReport, type TokenProduct,
+  cancelTokenRefund, expireTokens, listTokenProducts, refundUnusedTokens, saveTokenProduct, tokenReport, type TokenProduct,
 } from '../lib/eventTokensApi';
 
 const BLANK: TokenProductDraft = {
@@ -104,9 +104,37 @@ export default function EventTokensPanel({ eventId, eventName, orgId }: { eventI
       const r = await refundUnusedTokens(eventId, lotId, refundWhy.trim());
       toast({ kind: 'success', message: r.source === 'pos'
         ? `Hand back ${formatCents(r.amount_cents, currency)} from your drawer.`
-        : r.amount_cents > 0 ? `Refunding ${formatCents(r.amount_cents, currency)} to the buyer's payment.` : 'Tokens taken off.' });
+        : r.pending ? `Refunding ${formatCents(r.amount_cents, currency)} to the buyer's payment: the tokens come off once it goes through.`
+        : r.amount_cents > 0 ? `Refunded ${formatCents(r.amount_cents, currency)}.` : 'Tokens taken off.' });
       setRefundLot(null);
       setRefundWhy('');
+    } catch (e) {
+      toast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(false);
+      await load();
+    }
+  };
+
+  // A pending refund: ask again (the same key, or a new one once the last request failed).
+  const retry = async (lotId: string) => {
+    setBusy(true);
+    try {
+      await refundUnusedTokens(eventId, lotId, 'retry the refund');
+      toast({ kind: 'success', message: 'Refund sent again: the tokens come off once it goes through.' });
+    } catch (e) {
+      toast({ kind: 'error', message: (e as Error).message });
+    } finally {
+      setBusy(false);
+      await load();
+    }
+  };
+
+  const putBack = async (lotId: string) => {
+    setBusy(true);
+    try {
+      const r = await cancelTokenRefund(eventId, lotId);
+      toast({ kind: 'success', message: `Put back: ${r.credits} tokens can be spent again.` });
     } catch (e) {
       toast({ kind: 'error', message: (e as Error).message });
     } finally {
@@ -296,8 +324,21 @@ export default function EventTokensPanel({ eventId, eventName, orgId }: { eventI
                     <span className="flex-1 min-w-0">
                       {l.credits_left} {l.product} · {formatCents(l.value_left, currency)} · {l.source === 'online' ? 'bought online' : l.source === 'pos' ? 'cash at the door' : 'comp'}
                       {l.on_ticket ? ' · on a ticket' : ` · code …${l.card_last4 ?? ''}`}
+                      {l.status === 'refund_pending' && (l.request_status === 'failed' || l.request_status === 'canceled'
+                        ? ' · refund didn\'t go through' : ' · refund pending')}
                     </span>
-                    {refundLot === l.lot_id ? (
+                    {l.status === 'refund_pending' && (
+                      <>
+                        <button type="button" className={smallBtn} disabled={busy}
+                          onClick={() => void retry(l.lot_id)}>
+                          Try again
+                        </button>
+                        {l.request_status !== 'claimed' && l.request_status !== 'pending' && (
+                          <button type="button" className={smallBtn} disabled={busy} onClick={() => void putBack(l.lot_id)}>Put back</button>
+                        )}
+                      </>
+                    )}
+                    {l.status === 'refund_pending' ? null : refundLot === l.lot_id ? (
                       <>
                         <label className="sr-only" htmlFor={`refund-why-${l.lot_id}`}>Why</label>
                         <input id={`refund-why-${l.lot_id}`} value={refundWhy} maxLength={300} placeholder="Why"

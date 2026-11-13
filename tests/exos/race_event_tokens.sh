@@ -13,6 +13,10 @@
 #          refused): never both, and the balance is never negative
 #   race 4 offline replays of two devices (6 + 6 from a balance of 9) at the
 #          same time: 9 taken, 3 recorded as one 'overspent' exception
+#   race 5 an online spend of 3 held open on a code with 5 while a backdated
+#          replay (a code "from" 3 days ago) and a genuine one (4, 5 minutes
+#          ago) arrive: the backdated one is a 'rejected' exception and takes
+#          nothing; the genuine one takes the 2 left, 2 overspent; balance 0
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -137,5 +141,25 @@ if [[ "$taken" == 9 && "$short" == "3/1" && "$(balance "$CODE")" == 0 && "$(nega
   echo "OK   race 4 two offline replays at once: 9 taken, one overspent exception of 3, balance 0"
 else
   echo "FAIL race 4: taken $taken, short $short, balance $(balance "$CODE")"; fail=1
+fi
+
+# race 5: an online spend held open; a backdated replay and a genuine one meanwhile.
+read -r CODE ORDER <<<"$(sell 5)"
+$P -c "BEGIN; $SPEND SELECT public.exos_event_token_spend('$E','$CODE','$PROD',3,gen_random_uuid()); SELECT pg_sleep(1.5); COMMIT;" >/dev/null &
+sleep 0.4
+OLD=$($P -c "SELECT (clock_timestamp() - interval '3 days')::text")
+NEAR=$($P -c "SELECT (clock_timestamp() - interval '5 minutes')::text")
+bout=$(mktemp); gout=$(mktemp)
+$P -c "$SPEND SELECT public.exos_event_token_spend('$E','$CODE','$PROD',3,gen_random_uuid(),'$OLD','bar-old') ->> 'why';" >"$bout" 2>&1 &
+$P -c "$SPEND SELECT (r ->> 'reason') || '/' || (r ->> 'spent') || '/' || (r ->> 'short')
+         FROM (SELECT public.exos_event_token_spend('$E','$CODE','$PROD',4,gen_random_uuid(),'$NEAR','bar-new') AS r) x;" >"$gout" 2>&1 &
+wait
+b=$(tail -1 "$bout"); g=$(tail -1 "$gout"); rm -f "$bout" "$gout"
+kinds=$($P -c "SELECT string_agg(x.kind || ':' || x.credits_short, ',' ORDER BY x.kind) FROM exos_event_token_exceptions x
+               WHERE x.org_id='$O' AND x.device IN ('bar-old','bar-new')")
+if [[ "$b" == bad-scan-time && "$g" == overspent/2/2 && "$kinds" == "overspent:2,rejected:3" && "$(balance "$CODE")" == 0 && "$(negative)" == 0 ]]; then
+  echo "OK   race 5 a backdated replay and a genuine one during an online spend: backdated rejected, genuine takes what is left, balance 0"
+else
+  echo "FAIL race 5: backdated $b, genuine $g, exceptions $kinds, balance $(balance "$CODE")"; fail=1
 fi
 exit $fail

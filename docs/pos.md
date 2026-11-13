@@ -462,7 +462,9 @@ with its value in cents and the balance after; the ledger is append-only. Balanc
 **Scan to spend** (`exos_event_token_spend`): door staff of the event (owner, manager, scanner org-wide or assigned)
 pick the token type and how many (1-50) and scan. The card is locked, the balance checked: all or nothing online
 ("Not enough tokens on this code", with what is left). Idempotent on the device's client ref. Undo
-(`exos_event_token_undo`): owner / manager, a reason, once, audited (`token.undo`); the tokens go back to their lots.
+(`exos_event_token_undo`): owner / manager, a reason, once, within 24 hours of the spend and before the tokens expire;
+after the event's end only the owner (an undo then turns spent tokens of a refundable product back into refundable
+money). Audited (`token.undo`); the tokens go back to their lots.
 Lookups and spends: 120 a minute per member; a miss answers instead of raising, so it counts.
 
 **Offline.** The Tokens tab downloads `exos_event_token_roster` (each card with a balance: ticket id or code hash, and
@@ -472,7 +474,13 @@ client ref and replayed (`p_offline_at`) once online. The server takes what is l
 **`overspent`** row in `exos_event_token_exceptions` (audited `token.overspent`), never a negative balance; a code that
 no longer passes at sync (forged, refunded ticket, expired) is a **`rejected`** row. Both are on the report. A ticket's
 code is matched offline by its ticket id (the MAC is checked at sync), so a forged ticket code costs at most that
-ticket's offline cap.
+ticket's offline cap. **The device's clock never decides:** each roster download records the member's sync time on the
+server (`exos_event_token_roster_syncs`), and a replay's claimed time must be no earlier than that and no more than 12
+hours back (whichever is later), and not in the future. The ticket code's window and the expiry are checked at that
+time; anything else is a `rejected` exception (`bad-scan-time`) with the balance untouched, so a ticket QR captured days
+ago, or a spend backdated to before the expiry after a fresh download, can't pass. A device that stayed offline more
+than 12 hours, or whose member downloaded the roster again elsewhere before it synced, gets its older spends rejected
+for review. Upload what is queued before downloading again (the Tokens tab does).
 
 **Selling at the door** (`exos_event_token_pos_sell`, the Tokens tab → Sell tokens): a POS order with the offer's
 item, cash into the seller's open drawer (open it in the Sell tab) or a comp (owner / manager), onto a new code or onto
@@ -484,9 +492,13 @@ walk-up path is ticket-specific; tokens are cash or comp at the door, card onlin
 **Expiry and refunds.** Tokens can't be spent or sold after the event's end (`ends_at`, else start + 12 hours) + the
 grace. Not refundable: owner / manager **Expire unused** (or the hourly job `exos-event-token-expire`, created
 **inactive**) writes `expire` rows (breakage). Refundable: the report lists each purchase with unused tokens and
-**Refund unused** (owner / manager, a reason, audited `token.refund`): online, the tokens come off and the existing
-partial refund (`exos-refund`, `amount_cents`, nonce = the returned key, so a retry is one refund) pays it back; door
-cash is paid out of the member's drawer (`exos_pos_paid_outs` kind `refund`); comps just come off. A full refund of an
+**Refund unused** (owner / manager, a reason, audited `token.refund`). Online, the purchase goes **refund pending** (not
+spendable, still on the books and on the report) and the existing partial refund (`exos-refund`, `amount_cents`, nonce =
+the returned key, so a retry is one refund) pays it back; only when that request succeeds (exos-refund's finalize or the
+Stripe webhook) does a trigger on `exos_refund_requests` take the tokens off and post the journal entry. A refund that
+fails leaves them pending: **Try again** (a new key once the last request failed) or **Put back**
+(`exos_event_token_refund_cancel`, audited `token.refund_cancel`; refused while a request is in flight). Door cash is
+paid out of the member's drawer (`exos_pos_paid_outs` kind `refund`) in the same transaction; comps just come off. A full refund of an
 online order (any path) takes the tokens still on its lines. The rule, "Event tokens, no cash value, valid for <event>
 only", when they expire and refundable or not, is every offer's description (before purchase), on the ticket page and
 on the door's sale screen.

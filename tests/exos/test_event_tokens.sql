@@ -110,7 +110,7 @@ DO $$
 DECLARE t text; f text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['exos_event_token_products', 'exos_event_token_cards', 'exos_event_token_lots',
-                           'exos_event_token_ledger', 'exos_event_token_exceptions'] LOOP
+                           'exos_event_token_ledger', 'exos_event_token_exceptions', 'exos_event_token_roster_syncs'] LOOP
     ASSERT (SELECT relrowsecurity FROM pg_class WHERE oid = ('public.' || t)::regclass), 'ET1 RLS on ' || t;
     ASSERT NOT has_table_privilege('anon', 'public.' || t, 'SELECT'), 'ET1 anon reads ' || t;
     ASSERT NOT has_table_privilege('authenticated', 'public.' || t, 'INSERT')
@@ -135,6 +135,7 @@ BEGIN
       'public.exos_event_token_undo(uuid,bigint,text)', 'public.exos_event_token_roster(uuid)',
       'public.exos_event_token_pos_sell(uuid,uuid,integer,integer,text,uuid,text,uuid,uuid,text)',
       'public.exos_event_token_card_reissue(uuid,uuid,text)', 'public.exos_event_token_refund_unused(uuid,uuid,text,uuid)',
+      'public.exos_event_token_refund_cancel(uuid,uuid)',
       'public.exos_event_token_expire(uuid)', 'public.exos_event_token_report(uuid)', 'public.exos_my_event_tokens(uuid)'] LOOP
     ASSERT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE'), 'ET1 signed in only: ' || f;
     ASSERT (SELECT prosecdef AND proconfig::text LIKE '%search_path=public, pg_temp%' FROM pg_proc WHERE oid = f::regprocedure), 'ET1 pinned: ' || f;
@@ -200,9 +201,16 @@ BEGIN
   ASSERT pg_temp.st(format('UPDATE public.exos_pos_items SET price_cents = 1 WHERE token_product_id = %L', pg_temp.v('drink'))) = '42501', 'ET2 item price';
   ASSERT (SELECT count(*) FROM public.exos_event_token_products WHERE event_id = pg_temp.u('e1')) = 2, 'ET2 manager reads products';
   ASSERT pg_temp.st('SELECT code_hash FROM public.exos_event_token_cards') = '42501', 'ET2 no code hash';
+  -- Setting the product save's flag yourself doesn't help: the write must run as the token functions' owner.
+  PERFORM set_config('exos.token_sync', 'on', true);
+  ASSERT pg_temp.st(format('UPDATE public.exos_event_addons SET price = 1 WHERE token_product_id = %L', pg_temp.v('drink'))) = '42501', 'ET2 flag: add-on';
+  ASSERT pg_temp.st(format('UPDATE public.exos_pos_items SET price_cents = 1 WHERE token_product_id = %L', pg_temp.v('drink'))) = '42501', 'ET2 flag: item';
+  ASSERT pg_temp.st(format('INSERT INTO public.exos_event_addons (event_id, name, price, capacity, token_product_id, token_credits) VALUES (%L, %L, 1, 10, %L, 50)',
+           pg_temp.u('e1'), 'Cheap', pg_temp.v('drink'))) = '42501', 'ET2 flag: add-on insert';
+  PERFORM set_config('exos.token_sync', '', true);
 END $$;
 RESET ROLE;
-DO $$ BEGIN RAISE NOTICE 'OK ET2 client writes to token offers refused'; END $$;
+DO $$ BEGIN RAISE NOTICE 'OK ET2 client writes to token offers refused, the save''s flag set by a client too'; END $$;
 
 -- ── ET3 ─────────────────────────────────────────────────────────────────────
 DO $$
@@ -218,6 +226,13 @@ BEGIN
          = 'Drink token: at most 20 per order', 'ET3 max per order';
   ASSERT public.exos_event_token_order_check(pg_temp.u('e1'),
            jsonb_build_array(jsonb_build_object('addon_id', v_ten, 'quantity', 2))) IS NULL, 'ET3 20 is fine';
+  ASSERT public.exos_event_token_order_check(pg_temp.u('e1'),
+           jsonb_build_array(jsonb_build_object('addon_id', v_ten, 'quantity', 1.5))) = 'add-on quantities must be whole numbers from 1'
+     AND public.exos_event_token_order_check(pg_temp.u('e1'),
+           jsonb_build_array(jsonb_build_object('addon_id', v_ten, 'quantity', 'two'))) = 'add-on quantities must be whole numbers from 1'
+     AND public.exos_event_token_order_check(pg_temp.u('e1'),
+           jsonb_build_array(jsonb_build_object('addon_id', v_ten, 'quantity', 0))) = 'add-on quantities must be whole numbers from 1',
+    'ET3 a bad quantity is a refusal, not an error';
   ASSERT public.exos_event_token_order_check(pg_temp.u('e2'),
            jsonb_build_array(jsonb_build_object('addon_id', (SELECT id FROM public.exos_event_addons WHERE token_product_id = pg_temp.v('taste')::uuid), 'quantity', 1)))
          LIKE '%isn''t on sale', 'ET3 expired product not on sale';
@@ -313,6 +328,20 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.undo'
             AND entity_id = pg_temp.v('spend1') AND reason = 'rang the wrong guest') = 1, 'ET5 audited';
   ASSERT pg_temp.acct('event_token_redemptions') = 0, 'ET5 journal reversed';
+  -- More than 24 hours after a spend: too late (the ledger is append-only; replica mode just ages the row here).
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12')), pg_temp.v('drink')::uuid, 1, gen_random_uuid());
+  SET LOCAL session_replication_role = replica;
+  UPDATE public.exos_event_token_ledger SET created_at = clock_timestamp() - interval '25 hours' WHERE id = (r ->> 'ledger_id')::bigint;
+  SET LOCAL session_replication_role = origin;
+  PERFORM pg_temp.act(pg_temp.u('a1'));
+  ASSERT pg_temp.st(format('SELECT public.exos_event_token_undo(%L, %s, %L)', pg_temp.u('e1'), r ->> 'ledger_id', 'too late')) = '55000:undo-window',
+    'ET5 24-hour window';
+  -- Spend it back to 12 for the rest of the suite: an owner undoes it as an old spend can't be; balance stays 11 + undo below.
+  SET LOCAL session_replication_role = replica;
+  UPDATE public.exos_event_token_ledger SET created_at = clock_timestamp() WHERE id = (r ->> 'ledger_id')::bigint;
+  SET LOCAL session_replication_role = origin;
+  ASSERT (public.exos_event_token_undo(pg_temp.u('e1'), (r ->> 'ledger_id')::bigint, 'back for the suite') ->> 'balance')::int = 12, 'ET5 undo in time';
   -- Spend again for the rest of the suite: 3 drinks.
   PERFORM pg_temp.act(pg_temp.u('a3'));
   r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12')), pg_temp.v('drink')::uuid, 3, gen_random_uuid());
@@ -403,6 +432,19 @@ BEGIN
                     AND (c -> 'balances' ->> pg_temp.v('drink'))::int = 9)
      AND EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'cards') c
                   WHERE c ->> 'code_hash' = public._exos_event_token_hash(public._exos_event_token_code(pg_temp.v('kcode')))), 'ET7 roster';
+  ASSERT (SELECT synced_at > clock_timestamp() - interval '1 minute' FROM public.exos_event_token_roster_syncs
+           WHERE event_id = pg_temp.u('e1') AND user_id = pg_temp.u('a3')), 'ET7 the download is recorded';
+  -- Attack: a ticket code captured 3 days ago, replayed as an offline spend from then: refused for review, nothing taken.
+  r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12'), clock_timestamp() - interval '3 days'), pg_temp.v('drink')::uuid, 2,
+         gen_random_uuid(), clock_timestamp() - interval '3 days', 'bar-9');
+  ASSERT r ->> 'reason' = 'rejected' AND r ->> 'why' = 'bad-scan-time' AND pg_temp.bal('12', 'drink') = 9, 'ET7 stale code ' || r::text;
+  -- Even with an old download on record: never more than 12 hours back.
+  UPDATE public.exos_event_token_roster_syncs SET synced_at = clock_timestamp() - interval '4 days' WHERE event_id = pg_temp.u('e1') AND user_id = pg_temp.u('a3');
+  r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12'), clock_timestamp() - interval '3 days'), pg_temp.v('drink')::uuid, 2,
+         gen_random_uuid(), clock_timestamp() - interval '3 days', 'bar-9');
+  ASSERT r ->> 'why' = 'bad-scan-time' AND pg_temp.bal('12', 'drink') = 9, 'ET7 12 hours at most';
+  -- The device below downloaded an hour ago and spent 20 minutes ago: genuine.
+  UPDATE public.exos_event_token_roster_syncs SET synced_at = clock_timestamp() - interval '1 hour' WHERE event_id = pg_temp.u('e1') AND user_id = pg_temp.u('a3');
   -- Two devices took 6 drinks each offline from the 9 on ticket 12.
   r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12'), v_at), pg_temp.v('drink')::uuid, 6, v_ref, v_at, 'bar-2');
   ASSERT (r ->> 'ok')::boolean AND (r ->> 'balance')::int = 3, 'ET7 first replay ' || r::text;
@@ -425,9 +467,10 @@ BEGIN
   r := public.exos_event_token_spend(pg_temp.u('e1'), 'T-' || pg_temp.u('12') || ':' || pg_temp.u('a5') || ':1:bad', pg_temp.v('drink')::uuid, 1,
          gen_random_uuid(), v_at, 'bar-2');
   ASSERT r ->> 'reason' = 'rejected' AND r ->> 'why' = 'barcode-rejected', 'ET7 rejected ' || r::text;
-  -- A time from the future: refused, nothing recorded.
+  -- A time from the future: a rejected exception, nothing taken.
   ASSERT public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.v('kcode'), pg_temp.v('drink')::uuid, 1, gen_random_uuid(),
-           clock_timestamp() + interval '1 hour', 'bar-2') ->> 'reason' = 'bad-scan-time', 'ET7 future';
+           clock_timestamp() + interval '1 hour', 'bar-2') ->> 'why' = 'bad-scan-time'
+     AND public._exos_event_token_balance(pg_temp.v('kcard')::uuid, pg_temp.v('drink')::uuid) = 10, 'ET7 future';
   ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.overspent') = 2, 'ET7 audited';
   RAISE NOTICE 'OK ET7 offline: replays take what is left, the rest is an overspent exception (never negative), idempotent, rejected codes recorded';
 END $$;
@@ -453,6 +496,17 @@ BEGIN
   ASSERT pg_temp.acct('event_token_breakage') = v_out - 900, 'ET8 breakage';
   ASSERT (public.exos_event_token_expire(pg_temp.u('e2')) ->> 'lots')::int = 0, 'ET8 once';
   ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.expire') = 1, 'ET8 audited';
+  -- e1 ended an hour ago (drinks have 2 hours' grace): a manager can't undo a spend now, the owner can.
+  UPDATE public.exos_events SET ends_at = now() - interval '1 hour', starts_at = now() - interval '6 hours' WHERE id = pg_temp.u('e1');
+  PERFORM pg_temp.act(pg_temp.u('a3'));
+  r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.v('kcode'), pg_temp.v('drink')::uuid, 1, gen_random_uuid());
+  ASSERT (r ->> 'ok')::boolean, 'ET8 a spend in the grace ' || r::text;
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  ASSERT pg_temp.st(format('SELECT public.exos_event_token_undo(%L, %s, %L)', pg_temp.u('e1'), r ->> 'ledger_id', 'wrong guest'))
+         = '42501:owner-after-event', 'ET8 manager after the event';
+  PERFORM pg_temp.act(pg_temp.u('a1'));
+  ASSERT (public.exos_event_token_undo(pg_temp.u('e1'), (r ->> 'ledger_id')::bigint, 'wrong guest') ->> 'ok')::boolean, 'ET8 owner after the event';
+  PERFORM pg_temp.act(pg_temp.u('a2'));
   -- The cron's sweep: a refundable product past expiry is left for refunds.
   -- e1 ended 3 hours ago: drinks (grace 2 hours) and rides (grace 0) are past expiry.
   UPDATE public.exos_events SET ends_at = now() - interval '3 hours', starts_at = now() - interval '8 hours' WHERE id = pg_temp.u('e1');
@@ -462,7 +516,13 @@ BEGIN
   PERFORM pg_temp.act(pg_temp.u('a3'));
   ASSERT public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('12')), pg_temp.v('ride')::uuid, 1, gen_random_uuid()) ->> 'reason' = 'expired',
     'ET8 rides can''t be spent either';
-  -- An offline spend from before the end is still taken.
+  -- Attack: after the end, a fresh download, then a spend backdated to before the expiry: rejected, nothing taken.
+  PERFORM public.exos_event_token_roster(pg_temp.u('e1'));
+  r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('13'), now() - interval '4 hours'), pg_temp.v('ride')::uuid, 1,
+         gen_random_uuid(), now() - interval '4 hours', 'gate');
+  ASSERT r ->> 'why' = 'bad-scan-time' AND pg_temp.bal('13', 'ride') = 5, 'ET8 backdated past expiry ' || r::text;
+  -- A device that downloaded 5 hours ago and gave a ride 4 hours ago (before the end): taken.
+  UPDATE public.exos_event_token_roster_syncs SET synced_at = now() - interval '5 hours' WHERE event_id = pg_temp.u('e1') AND user_id = pg_temp.u('a3');
   r := public.exos_event_token_spend(pg_temp.u('e1'), pg_temp.tcode(pg_temp.u('13'), now() - interval '4 hours'), pg_temp.v('ride')::uuid, 1,
          gen_random_uuid(), now() - interval '4 hours', 'gate');
   ASSERT (r ->> 'ok')::boolean AND pg_temp.bal('13', 'ride') = 4, 'ET8 an offline spend before the end ' || r::text;
@@ -480,13 +540,40 @@ BEGIN
   -- Drinks aren't refundable.
   ASSERT pg_temp.st(format('SELECT public.exos_event_token_refund_unused(%L, %L, %L)', pg_temp.u('e1'),
            (SELECT id FROM public.exos_event_token_lots WHERE order_addon_id = pg_temp.u('22')), 'please')) = '55000:not-refundable', 'ET9 not refundable';
+  -- Online: pending first (not spendable, still on the books), the money moves, then the tokens leave.
   r := public.exos_event_token_refund_unused(pg_temp.u('e1'), v_lot, 'unused rides');
-  ASSERT r ->> 'source' = 'online' AND (r ->> 'credits')::int = 5 AND (r ->> 'amount_cents')::int = 900 AND r ->> 'session_id' = 'cs_e70c1'
-     AND r ->> 'refund_key' ~ '^evtoken-refund:[0-9]+$' AND pg_temp.bal('12', 'ride') = 0, 'ET9 online ' || r::text;
+  ASSERT (r ->> 'pending')::boolean AND r ->> 'source' = 'online' AND (r ->> 'credits')::int = 5 AND (r ->> 'amount_cents')::int = 900
+     AND r ->> 'session_id' = 'cs_e70c1' AND r ->> 'refund_key' = 'evtoken-refund:' || v_lot || ':1' AND pg_temp.bal('12', 'ride') = 0
+     AND NOT EXISTS (SELECT 1 FROM public.exos_event_token_ledger WHERE lot_id = v_lot AND kind = 'refund'), 'ET9 pending ' || r::text;
+  ASSERT (SELECT count(*) FROM public.exos_journal_entries WHERE kind = 'token_refund' AND org_id = pg_temp.u('01')) = 1, 'ET9 nothing posted yet';
+  ASSERT EXISTS (SELECT 1 FROM jsonb_array_elements(public.exos_event_token_report(pg_temp.u('e1')) -> 'refundable') x
+                  WHERE x ->> 'lot_id' = v_lot::text AND x ->> 'status' = 'refund_pending'), 'ET9 visible on the report';
+  -- The refund call failed: the lot stays pending; refunding again takes a new key; it can be put back.
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, org_id, buyer_uid, buyer_email, guest, quantity, amount_cents, currency, status)
+  VALUES ('cs_e70c1', pg_temp.u('e1'), pg_temp.u('01'), pg_temp.u('a5'), 'e70c-buyer@x.com', false, 2, 13900, 'usd', 'pending')
+  ON CONFLICT (session_id) DO NOTHING;
+  INSERT INTO public.exos_refund_requests (session_id, org_id, event_id, requested_by, scope, amount_cents, nonce, status)
+  VALUES ('cs_e70c1', pg_temp.u('01'), pg_temp.u('e1'), pg_temp.u('a2'), 'order', 900, r ->> 'refund_key', 'failed');
+  ASSERT (SELECT status FROM public.exos_event_token_lots WHERE id = v_lot) = 'refund_pending', 'ET9 a failed refund leaves it pending';
   r2 := public.exos_event_token_refund_unused(pg_temp.u('e1'), v_lot, 'unused rides');
-  ASSERT (r2 ->> 'replay')::boolean AND r2 ->> 'refund_key' = r ->> 'refund_key' AND (r2 ->> 'amount_cents')::int = 900, 'ET9 once';
+  ASSERT (r2 ->> 'pending')::boolean AND r2 ->> 'refund_key' = 'evtoken-refund:' || v_lot || ':2', 'ET9 a new key ' || r2::text;
+  r2 := public.exos_event_token_refund_cancel(pg_temp.u('e1'), v_lot);
+  ASSERT (r2 ->> 'balance')::int = 5 AND pg_temp.bal('12', 'ride') = 5, 'ET9 put back: spendable again';
+  ASSERT pg_temp.st(format('SELECT public.exos_event_token_refund_cancel(%L, %L)', pg_temp.u('e1'), v_lot)) = '55000:not-pending', 'ET9 nothing pending';
+  -- Again, and this time the refund goes through: claimed (can't be put back meanwhile), then succeeded.
+  r := public.exos_event_token_refund_unused(pg_temp.u('e1'), v_lot, 'unused rides');
+  ASSERT r ->> 'refund_key' = 'evtoken-refund:' || v_lot || ':3', 'ET9 third key';
+  INSERT INTO public.exos_refund_requests (session_id, org_id, event_id, requested_by, scope, amount_cents, nonce, status)
+  VALUES ('cs_e70c1', pg_temp.u('01'), pg_temp.u('e1'), pg_temp.u('a2'), 'order', 900, r ->> 'refund_key', 'claimed');
+  ASSERT pg_temp.st(format('SELECT public.exos_event_token_refund_cancel(%L, %L)', pg_temp.u('e1'), v_lot)) = '55000:refund-in-flight', 'ET9 in flight';
+  UPDATE public.exos_refund_requests SET status = 'succeeded' WHERE org_id = pg_temp.u('01') AND nonce = r ->> 'refund_key';
+  ASSERT (SELECT status FROM public.exos_event_token_lots WHERE id = v_lot) = 'refunded'
+     AND (SELECT -credits FROM public.exos_event_token_ledger WHERE lot_id = v_lot AND kind = 'refund') = 5, 'ET9 closed when the money moved';
+  r2 := public.exos_event_token_refund_unused(pg_temp.u('e1'), v_lot, 'unused rides');
+  ASSERT (r2 ->> 'replay')::boolean AND NOT (r2 ->> 'pending')::boolean AND (r2 ->> 'amount_cents')::int = 900, 'ET9 once';
   -- (the ET6 void's refund row posted the first one)
   ASSERT (SELECT count(*) FROM public.exos_journal_entries WHERE kind = 'token_refund' AND org_id = pg_temp.u('01')) = 2, 'ET9 journal';
+  ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.refund_cancel') = 1, 'ET9 put back audited';
   -- The ticket at the door bought 2 rides for cash: paid back from a drawer.
   SELECT id INTO v_lot FROM public.exos_event_token_lots WHERE card_id = (SELECT id FROM public.exos_event_token_cards WHERE ticket_id = pg_temp.u('11'));
   ASSERT pg_temp.st(format('SELECT public.exos_event_token_refund_unused(%L, %L, %L)', pg_temp.u('e1'), v_lot, 'left early')) = '55000:no-drawer',
@@ -504,8 +591,8 @@ BEGIN
   ASSERT pg_temp.bal('13', 'ride') = 0 AND (SELECT -credits FROM public.exos_event_token_ledger
                                              WHERE lot_id = (SELECT id FROM public.exos_event_token_lots WHERE order_addon_id = pg_temp.u('24'))
                                                AND kind = 'refund') = 4, 'ET9 order refund';
-  ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.refund') = 2, 'ET9 audited';
-  RAISE NOTICE 'OK ET9 refunds: refundable only, online -> order + amount + key (idempotent), cash -> a paid-out, a full order refund takes the rest';
+  ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'token.refund') = 3, 'ET9 audited';
+  RAISE NOTICE 'OK ET9 refunds: refundable only; online pending until the refund succeeds (a failed one stays recoverable: new key or put back); cash -> a paid-out; a full order refund takes the rest';
 END $$;
 
 -- ── ET10 ────────────────────────────────────────────────────────────────────
@@ -516,7 +603,7 @@ BEGIN
   SET CONSTRAINTS exos_journal_entries_balanced, exos_journal_lines_balanced DEFERRED;
   ASSERT (SELECT sum(debit_cents) = sum(credit_cents) FROM public.exos_journal_trial_balance(pg_temp.u('01'))), 'ET10 balanced';
   ASSERT -pg_temp.acct('event_tokens_outstanding') = (SELECT coalesce(sum(value_left), 0) FROM public.exos_event_token_lots
-                                                       WHERE org_id = pg_temp.u('01') AND status = 'active'),
+                                                       WHERE org_id = pg_temp.u('01') AND status IN ('active', 'refund_pending')),
     'ET10 outstanding = value on cards ' || pg_temp.acct('event_tokens_outstanding');
   ASSERT (SELECT count(*) FROM public.exos_event_token_ledger g WHERE g.org_id = pg_temp.u('01') AND g.amount_cents <> 0
             AND NOT EXISTS (SELECT 1 FROM public.exos_journal_entries e WHERE e.source_table = 'exos_event_token_ledger' AND e.source_id = g.id::text)
@@ -588,10 +675,11 @@ BEGIN
   ASSERT (d ->> 'sold_credits')::int = (d ->> 'redeemed_credits')::int + (d ->> 'expired_credits')::int + (d ->> 'refunded_credits')::int
                                         + (d ->> 'outstanding_credits')::int
      AND (d ->> 'outstanding_credits')::int = 0 AND (d ->> 'overspent_count')::int = 2 AND (d ->> 'overspent_credits')::int = 5
-     AND (d ->> 'rejected_count')::int = 1, 'ET13 drinks ' || d::text;
+     AND (d ->> 'rejected_count')::int = 4, 'ET13 drinks ' || d::text;  -- forged, from the future, two stale (ET7)
   ASSERT (d ->> 'sold_cents')::int = (d ->> 'redeemed_cents')::int + (d ->> 'expired_cents')::int + (d ->> 'refunded_cents')::int
                                      + (d ->> 'outstanding_cents')::int, 'ET13 cents';
-  ASSERT jsonb_array_length(r -> 'exceptions') = 3 AND NOT (r::text LIKE '%e70c-buyer%'), 'ET13 exceptions, no buyer data';
+  -- 2 overspent + 4 rejected drinks (ET7), 1 backdated ride (ET8).
+  ASSERT jsonb_array_length(r -> 'exceptions') = 7 AND NOT (r::text LIKE '%e70c-buyer%'), 'ET13 exceptions, no buyer data';
   ASSERT public.exos_audit_export(pg_temp.u('01'), 'event_tokens', 4, pg_temp.u('e1')), 'ET13 export.run';
   ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE org_id = pg_temp.u('01') AND action = 'export.run' AND entity_id = 'event_tokens') = 1,
     'ET13 export logged';

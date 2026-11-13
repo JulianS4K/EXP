@@ -117,25 +117,34 @@ export const expireTokens = (eventId: string) =>
   rpc<{ lots: number; credits: number; cents: number }>('exos_event_token_expire', { p_event_id: eventId });
 
 export interface TokenRefund {
-  replay: boolean; lot_id: string; source: 'online' | 'pos' | 'comp'; credits: number; amount_cents: number;
-  session_id: string | null; refund_key: string | null; paid_out_id?: string | null;
+  replay: boolean; pending: boolean; lot_id: string; source: 'online' | 'pos' | 'comp'; credits: number; amount_cents: number;
+  session_id: string | null; refund_key: string | null; paid_out_id?: string | null; request_status?: string | null;
 }
 
 /**
- * Refund a purchase's unused tokens (owner / manager, refundable products). An
- * online purchase is then refunded through the existing partial refund
- * (exos-refund, amount_cents), keyed on the returned refund_key so a retry is
- * one refund; door cash comes back out of the member's drawer in SQL.
+ * Refund a purchase's unused tokens (owner / manager, refundable products).
+ * Door cash and comps settle in SQL. An online purchase goes 'refund_pending'
+ * (not spendable, still on the books); then the existing partial refund
+ * (exos-refund, amount_cents) is asked for with the returned key, so a retry
+ * is one refund. The tokens leave only when that refund succeeds (a trigger on
+ * the refund request); if it fails they stay pending: "Try again" (a new key
+ * once a request has failed) or "Put back" (cancelTokenRefund).
  */
 export async function refundUnusedTokens(eventId: string, lotId: string, reason: string): Promise<TokenRefund & { stripe?: unknown }> {
   const r = await rpc<TokenRefund>('exos_event_token_refund_unused', { p_event_id: eventId, p_lot_id: lotId, p_reason: reason, p_drawer_id: null });
-  if (r.source !== 'online' || !r.session_id || !r.refund_key || r.amount_cents <= 0) return r;
+  if (!r.pending || !r.session_id || !r.refund_key || r.amount_cents <= 0) return r;
   const { data, error } = await supabase.functions.invoke('exos-refund', {
     body: { action: 'refund', session_id: r.session_id, nonce: r.refund_key, amount_cents: r.amount_cents, reason: 'Unused event tokens' },
   });
-  if (error) throw new TokenError('The tokens came off the card, but the refund didn\'t go through yet: try "Refund" again.', null, 'refund-pending');
+  if (error) {
+    throw new TokenError("The refund didn't go through yet. The tokens are held (not spendable): try again, or put them back.", null, 'refund-pending');
+  }
   return { ...r, stripe: data };
 }
+
+/** Put a pending refund's tokens back (no request, or it failed). */
+export const cancelTokenRefund = (eventId: string, lotId: string) =>
+  rpc<{ lot_id: string; status: string; credits: number; balance: number }>('exos_event_token_refund_cancel', { p_event_id: eventId, p_lot_id: lotId });
 
 export const myEventTokens = async (eventId: string | null): Promise<MyTicketTokens[]> => {
   const { data, error } = await supabase.rpc('exos_my_event_tokens', { p_event_id: eventId });

@@ -133,7 +133,7 @@ a door sale's `pos_cash_sale` puts it in bar and merch); each row of `exos_event
 | spend | `token_spend`: Dr tokens outstanding, Cr tokens redeemed (the value of the lots taken) |
 | undo | `token_undo`: the reverse of the spend |
 | expire | `token_expire`: Dr tokens outstanding, Cr token breakage |
-| refund (unused tokens, a void, a full order refund) | `token_refund`: Dr tokens outstanding, Cr the sale's account (the money itself posts from the refund or the paid-out, Dr refunds) |
+| refund (unused tokens, a void, a full order refund) | `token_refund`: Dr tokens outstanding, Cr the sale's account (the money itself posts from the refund or the paid-out, Dr refunds). An online refund of unused tokens posts only once the refund request succeeded; while it is pending the value stays outstanding |
 
 Tokens outstanding therefore always equals the value still on cards (`test_event_tokens.sql` ET10), and a refunded
 purchase nets to zero revenue like a refunded ticket. Tokens carry no tax rule: sales tax, where it applies, is charged

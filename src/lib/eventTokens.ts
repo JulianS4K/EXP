@@ -321,6 +321,9 @@ export interface TokenReportException {
 export interface TokenReportLot {
   lot_id: string; product: string; source: 'online' | 'pos' | 'comp'; credits_left: number; value_left: number;
   bought_at: string; card_id: string; card_last4: string | null; on_ticket: boolean;
+  /** 'refund_pending': an online refund was asked for and hasn't gone through (request_status says how it stands). */
+  status?: 'active' | 'refund_pending';
+  request_status?: string | null;
 }
 
 export interface TokenReport {
