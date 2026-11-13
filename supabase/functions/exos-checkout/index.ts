@@ -222,6 +222,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // exos: group pay (mig 20261108120000): a seat link's token, or the group (host's cover).
     group_seat?: string;
     group_cover?: string;
+    // exos: Spanish (mig 20261114130000): the language the buyer has the app in.
+    lang?: string;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -275,6 +277,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // Instagram / Facebook / ... in-app browser, or 'none' (mig 20261105140000):
   // the request's user agent first, then the page's hint (_shared/inAppBrowser.ts).
   const inAppBrowser = inAppRecordFor(req.headers.get("user-agent"), p.in_app_browser);
+  // exos: Spanish (mig 20261114130000): 'en' or 'es', else not recorded.
+  const buyerLang = p.lang === "es" || p.lang === "en" ? p.lang : null;
   if (embedded) {
     if (!event_id || !tier_id || !returnUrl) {
       return json({ error: "missing event_id / tier_id / return_url" }, 400);
@@ -917,6 +921,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     user_agent: userAgent,
     in_app_browser: inAppBrowser,
     ...(proofToken ? { proof_token_hash: await proofTokenHash(proofToken) } : {}),
+    // exos: Spanish: the order's language picks the language of its mail.
+    ...(buyerLang ? { lang: buyerLang } : {}),
   };
   const proofOut = proofToken ? { proof_token: proofToken } : {};
   // The same token on the way back, in the return URL's fragment (#pt=), for
@@ -1274,6 +1280,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // pool, and a late webhook still finds its seat.
       expires_at: stripeExpiresAt,
       customer_email: buyerEmail || undefined,
+      // exos: Spanish: Stripe's own page in the buyer's language (else Stripe's default, the browser's).
+      ...(buyerLang === "es" ? { locale: "es" as const } : {}),
       billing_address_collection: "auto", // buyer location (mig 20261106140000): country + postal code, never "required"
       metadata: {
         exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
@@ -1412,6 +1420,13 @@ async function insertSessionRow(
   if (missingColumn(error) && "in_app_browser" in row && /in_app_browser/.test(error?.message ?? "")) {
     console.error("exos-checkout: in_app_browser column missing (apply 20261105140000); recording without it");
     delete row.in_app_browser;
+    ({ error } = await sb.from("exos_checkout_sessions").insert(row));
+  }
+  // exos: Spanish: lang (mig 20261114130000) only picks the mail's language:
+  // before that migration, drop just it, even from a strict (PayPal) row.
+  if (missingColumn(error) && "lang" in row && /\blang\b/.test(error?.message ?? "")) {
+    console.error("exos-checkout: lang column missing (apply 20261114130000); recording without it");
+    delete row.lang;
     ({ error } = await sb.from("exos_checkout_sessions").insert(row));
   }
   if (error && opts.strict) return error;

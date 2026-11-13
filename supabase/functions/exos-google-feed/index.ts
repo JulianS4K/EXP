@@ -3,6 +3,10 @@
 // data and serves it; nothing is sent anywhere.
 //
 //   GET                 the feed: { feed_metadata, events: [schema.org Event …] }
+//   GET ?lang=es        the same feed with the organizers' Spanish titles and
+//                       descriptions where they wrote them (mig 20261114130000),
+//                       each event marked inLanguage "es"; the default ones
+//                       otherwise.
 //   GET ?report=1       operator only (Authorization: Bearer <service role
 //                       key>): counts and the events left out, with why. It
 //                       can name events that never went public, so it isn't
@@ -46,6 +50,8 @@ const EVENT_COLS =
 const STORE_COLS = ", summary, description_md, lineup, min_age";
 // Online / hybrid + noindex (mig 20261005090000), with the same fallback.
 const ONLINE_COLS = ", format, noindex";
+// exos: Spanish (mig 20261114130000): read only for ?lang=es.
+const I18N_COLS = ", i18n";
 // exclusive_tax_percent is computed by exos_public_tiers (it isn't a column of
 // exos_ticket_tiers), so published events read the view; a cancelled event's
 // tiers come from the table without it (its price is shown off sale anyway).
@@ -72,8 +78,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   try {
     const now = new Date();
-    const input = await readFeedInput(sb, now);
-    const { feed, skipped } = buildGoogleFeed(input, { appBase, now });
+    // ?lang=es: the organizers' Spanish titles / descriptions where they wrote them.
+    const lang = new URL(req.url).searchParams.get("lang") === "es" ? "es" : "en";
+    const input = await readFeedInput(sb, now, lang);
+    const { feed, skipped } = buildGoogleFeed(input, { appBase, now, lang });
     if (new URL(req.url).searchParams.get("report") === "1") {
       if (!(await isOperator(req))) return json({ error: "operator only" }, 401, { "WWW-Authenticate": 'Bearer realm="exos"' });
       return json({ generated_at: feed.feed_metadata.generated_at, listed: feed.events.length, skipped }, 200, { "Cache-Control": "no-store" });
@@ -85,14 +93,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 });
 
-async function readFeedInput(sb: SupabaseClient, now: Date) {
+async function readFeedInput(sb: SupabaseClient, now: Date, lang: "en" | "es" = "en") {
   // Anything that could still be happening: started within the last day (long
   // shows; feedBlocker drops the ones that are over) or later.
   const since = new Date(now.getTime() - 24 * 3600_000).toISOString();
   const readEvents = (cols: string) => sb.from("exos_events").select(cols)
     .in("status", ["published", "cancelled"]).gte("starts_at", since)
     .order("starts_at", { ascending: true }).limit(MAX_EVENTS);
-  let { data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS + ONLINE_COLS);
+  let { data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS + ONLINE_COLS + (lang === "es" ? I18N_COLS : ""));
+  if (error?.code === "42703" && lang === "es") ({ data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS + ONLINE_COLS));
   if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS + STORE_COLS)); // undefined_column
   if (error?.code === "42703") ({ data: evs, error } = await readEvents(EVENT_COLS));
   if (error) throw new Error(`events: ${error.message}`);

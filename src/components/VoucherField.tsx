@@ -14,6 +14,8 @@ import { Ticket, Check } from 'lucide-react';
 import { checkVoucher } from '../lib/vouchers';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { useT } from '../context/LanguageContext';
+import { translate, type DictKey } from '../lib/i18n/dict';
 
 export interface AppliedVoucher {
   code: string;
@@ -37,6 +39,7 @@ interface Props {
 
 export default function VoucherField({ eventId, email, onApplied, initialCode }: Props) {
   const { toast } = useToast();
+  const t = useT();
   const { user, openAuth } = useAuth();
   const [code, setCode] = useState(initialCode ?? '');
   const [busy, setBusy] = useState(false);
@@ -56,7 +59,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     try {
       const res = await checkVoucher(eventId, c, email);
       if (!res.valid) {
-        toast({ kind: 'error', message: voucherErrorMessage(res.reason) });
+        toast({ kind: 'error', message: t(voucherErrorKey(res.reason)) });
         setAppliedCode(null);
         onApplied(null);
         return;
@@ -66,9 +69,9 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
         code: c, canBypass: res.canBypass, overridePrice: res.overridePrice, restrictTierId: res.restrictTierId,
         discountPercent: res.discountPercent, discountAmount: res.discountAmount,
       });
-      toast({ kind: 'success', message: res.canBypass ? 'Code applied: you can buy this event.' : discountLabel(res) ? `Code applied: ${discountLabel(res)}.` : 'Code applied.' });
+      toast({ kind: 'success', message: res.canBypass ? t('checkout.promoAppliedBypass') : discountLabel(res) ? t('checkout.promoAppliedWith', { discount: discountLabel(res)! }) : t('checkout.promoApplied') });
     } catch (e: any) {
-      toast({ kind: 'error', message: e?.message || 'Could not check voucher.' });
+      toast({ kind: 'error', message: e?.message || t('checkout.promoCheckFailed') });
     } finally {
       setBusy(false);
     }
@@ -99,7 +102,7 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     return (
       <div className="mb-4 flex items-center gap-2 text-brand-primary text-xs font-black uppercase tracking-widest">
         <Check className="w-4 h-4" />
-        Code {appliedCode} applied
+        {t('checkout.promoCodeApplied', { code: appliedCode })}
       </div>
     );
   }
@@ -112,8 +115,8 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
           value={code}
           onChange={(e) => setCode(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') apply(); }}
-          placeholder="Promo code"
-          aria-label="Promo or access code"
+          placeholder={t('checkout.promoPlaceholder')}
+          aria-label={t('checkout.promoLabel')}
           className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 pl-9 pr-3 py-2 text-sm font-bold uppercase"
         />
       </div>
@@ -123,10 +126,10 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
         onClick={() => apply()}
         className="px-4 py-2 border-2 border-white/20 hover:border-brand-primary text-white/70 hover:text-brand-primary text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40"
       >
-        {busy ? '…' : user ? 'Apply' : 'Sign in to apply'}
+        {busy ? '…' : user ? t('checkout.promoApply') : t('checkout.promoSignIn')}
       </button>
       {!user && pendingCode && (
-        <span className="sr-only" role="status">Sign in to use the code {pendingCode}.</span>
+        <span className="sr-only" role="status">{t('checkout.promoSignInFor', { code: pendingCode })}</span>
       )}
     </div>
   );
@@ -139,15 +142,20 @@ export function discountLabel(v: { discountPercent?: number | null; discountAmou
   return null;
 }
 
-/** Buyer-facing copy for exos_check_voucher's reason codes. */
+/** Buyer-facing copy for exos_check_voucher's reason codes (English). */
 export function voucherErrorMessage(reason: string | null): string {
+  return translate('en', voucherErrorKey(reason));
+}
+
+/** The dictionary key for exos_check_voucher's reason codes (lib/i18n). */
+export function voucherErrorKey(reason: string | null): DictKey {
   switch (reason) {
-    case 'expired': return 'That code has expired.';
-    case 'already used': return 'That code has already been used.';
+    case 'expired': return 'checkout.promoExpired';
+    case 'already used': return 'checkout.promoUsed';
     // The per-account throttle (10 misses / 10 min) answers this even for a
     // right code: "check the spelling" sent buyers retyping a correct code.
-    case 'too many attempts': return 'Too many tries. Wait 10 minutes, then enter the code again.';
-    case 'reserved for another buyer': return 'That code has already been claimed.';
-    default: return "That code isn't valid for this event. Check the spelling and try again.";
+    case 'too many attempts': return 'checkout.promoTooMany';
+    case 'reserved for another buyer': return 'checkout.promoClaimed';
+    default: return 'checkout.promoInvalid';
   }
 }

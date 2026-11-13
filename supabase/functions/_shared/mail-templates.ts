@@ -908,6 +908,131 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
 
 export const PAYLOAD_TEMPLATES = Object.keys(RENDERERS);
 
+// ── Spanish (mig 20261114130000, docs/i18n-review.md) ────────────────────────
+// The buyer mails a row with lang 'es' gets in Spanish. A template missing
+// here goes in English. Same payload checks as the English renderer (the same
+// helpers throw the same PayloadErrors). Money and refund sentences are marked
+// REVIEW: a human checks them before launch.
+
+/** "viernes, 2 de octubre, 20:00 EDT" in the event's zone (UTC when unknown). */
+export function formatWhenEs(iso: string, tz?: string | null): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat("es-US", {
+      weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit",
+      timeZoneName: "short", timeZone: zone(tz),
+    }).format(d);
+  } catch {
+    return formatWhen(iso, tz);
+  }
+}
+function eventEs(p: Obj): Ev {
+  const ev = event(p);
+  const starts = opt(obj(p, "event"), "starts_at");
+  return { ...ev, name: str(obj(p, "event"), "name", "tu evento"), when: starts ? formatWhenEs(starts, opt(obj(p, "event"), "timezone")) : "" };
+}
+
+// REVIEW: money (refund timing and amounts).
+const REFUND_TEXT_ES: Record<string, (paid: string, refunded: string) => string> = {
+  refunded: (_p, r) => `Ya emitimos tu reembolso de ${r}. Puede tardar de 5 a 10 días en aparecer en tu estado de cuenta.`,
+  partial: (p, r) => `Hasta ahora te reembolsamos ${r} de los ${p} que pagaste. Te escribiremos cuando se emita el resto.`,
+  processing: (p) => `Estamos procesando tu reembolso de ${p}. Te escribiremos cuando se emita.`,
+  pending: (p) => `Pagaste ${p}. El organizador está reembolsando los pedidos y te escribiremos cuando se emita el tuyo.`,
+  not_buyer: () => `Cualquier reembolso va a la persona que compró las entradas.`,
+  none: () => `Esta entrada era gratis, así que no hay nada que reembolsar.`,
+};
+
+const RENDERERS_ES: Record<string, (ctx: Ctx) => Out> = {
+  "event-cancelled": (ctx) => {
+    const ev = eventEs(ctx.p);
+    const e = obj(ctx.p, "event");
+    const orgName = str(e, "org_name", "El organizador");
+    const reason = opt(ctx.p, "reason");
+    const refund = isObj(ctx.p.refund) ? ctx.p.refund : {};
+    const cur = str(refund, "currency", "usd");
+    const say = REFUND_TEXT_ES[str(refund, "status", "none")] ?? REFUND_TEXT_ES.none;
+    return {
+      audience: "buyer",
+      subject: `Cancelado: ${ev.name}`,
+      body:
+        `<p>Lo sentimos: ${esc(orgName)} canceló este evento.</p>` + eventBlock(ev) +
+        (reason ? `<p>Mensaje del organizador: “${esc(reason)}”</p>` : "") +
+        `<p>${esc(say(formatMoney(num(refund, "paid_cents", 0), cur), formatMoney(num(refund, "refunded_cents", 0), cur)))}</p>` +
+        button(ctx, "/my-tickets", "Tus entradas"),
+    };
+  },
+
+  "event-updated": (ctx) => {
+    const ev = eventEs(ctx.p);
+    const e = obj(ctx.p, "event");
+    const doors = opt(e, "doors_at");
+    return {
+      audience: "buyer",
+      subject: `Actualizado: ${ev.name}`,
+      body:
+        `<p>${esc(str(e, "org_name", "El organizador"))} cambió los detalles de un evento para el que tienes entradas. Así queda ahora:</p>` +
+        eventBlock(ev) +
+        (doors ? `<p>Las puertas abren el ${esc(formatWhenEs(doors, opt(e, "timezone")))}.</p>` : "") +
+        `<p>Tu entrada sigue siendo válida. No tienes que hacer nada.</p>` +
+        button(ctx, `/event/${ev.id}`, "Ver el evento"),
+    };
+  },
+
+  // REVIEW: money.
+  "refund-issued": (ctx) => {
+    const ev = eventEs(ctx.p);
+    const cur = str(ctx.p, "currency", "usd");
+    const amount = formatMoney(num(ctx.p, "amount_cents"), cur);
+    const partial = ctx.p.partial === true;
+    return {
+      audience: "buyer",
+      subject: `Reembolso emitido: ${amount} por ${ev.name}`,
+      body:
+        `<p>Reembolsamos <strong>${esc(amount)}</strong> de tu pedido para <strong>${esc(ev.name)}</strong>.</p>` +
+        `<p>Vuelve a la tarjeta con la que pagaste y puede tardar de 5 a 10 días en aparecer.</p>` +
+        (partial
+          ? `<p>Reembolsado hasta ahora: ${esc(formatMoney(num(ctx.p, "refunded_total_cents", 0), cur))} de ${esc(formatMoney(num(ctx.p, "paid_cents", 0), cur))}. Tus demás entradas siguen siendo válidas.</p>`
+          : "") +
+        `<p style="color:#666;font-size:13px">Referencia del pedido: ${esc(str(ctx.p, "order_ref", "-"))}</p>` +
+        button(ctx, "/my-tickets", "Tus entradas"),
+    };
+  },
+
+  "post-event": (ctx) => {
+    const ev = eventEs(ctx.p);
+    const o = org(ctx.p);
+    const next = list(ctx.p, "next_events").slice(0, 3);
+    const items = next.map((n) => {
+      const when = opt(n, "starts_at") ? formatWhenEs(String(n.starts_at), opt(n, "timezone")) : "";
+      return `<li><a href="${href(ctx, `/event/${uuid(n, "id")}`)}">${esc(str(n, "name", "Evento"))}</a>${when ? `, ${esc(when)}` : ""}</li>`;
+    }).join("");
+    return {
+      audience: "buyer",
+      orgName: o.name,
+      subject: `Gracias por venir a ${ev.name}`,
+      body:
+        `<p>Gracias por estar en <strong>${esc(ev.name)}</strong>. Esperamos que lo hayas disfrutado.</p>` +
+        (items ? `<p>Lo próximo de ${esc(o.name)}:</p><ul>${items}</ul>` : "") +
+        (ctx.p.following === true
+          ? ""
+          : `<p>Sigue a ${esc(o.name)} en Exos para enterarte primero de sus próximos eventos.</p>` +
+            button(ctx, `/organizer/${o.id}`, `Seguir a ${o.name}`)),
+    };
+  },
+};
+
+/** Templates with a Spanish version (the rest go in English). */
+export const SPANISH_TEMPLATES = Object.keys(RENDERERS_ES);
+
+function footerEs(ctx: Ctx): string {
+  if (ctx.p.marketing !== true) return "";
+  const token = ctx.p.unsubscribe_token;
+  if (typeof token !== "string" || !TOKEN.test(token)) throw new PayloadError("unsubscribe_token missing");
+  return `<p style="color:#888;font-size:12px"><a href="${href(ctx, `/unsubscribe?t=${token}`)}">Cancelar suscripción</a> ` +
+    `a correos de seguimiento como este. Las entradas, recibos y cambios del evento te siguen llegando.</p>`;
+}
+
 function footer(ctx: Ctx, out: Out): string {
   const lines: string[] = [];
   if (out.audience === "partner") {
@@ -933,17 +1058,23 @@ function footer(ctx: Ctx, out: Out): string {
  * Render a payload row. appUrl must already be normalized (normalizeAppUrl in
  * mail-render.ts): every template links into the app, so no URL = no send.
  */
-export function renderTemplate(template: string, payload: unknown, appUrl: string | null): RenderedTemplate {
+export function renderTemplate(
+  template: string, payload: unknown, appUrl: string | null, lang: "en" | "es" = "en",
+): RenderedTemplate {
   if (!appUrl) return { ok: false, error: "EXOS_APP_URL unset or invalid; mail links into the app" };
-  const fn = Object.prototype.hasOwnProperty.call(RENDERERS, template) ? RENDERERS[template] : undefined;
+  // Spanish when the row asks for it and this template has it (mig 20261114130000).
+  const es = lang === "es" && Object.prototype.hasOwnProperty.call(RENDERERS_ES, template);
+  const fn = es
+    ? RENDERERS_ES[template]
+    : Object.prototype.hasOwnProperty.call(RENDERERS, template) ? RENDERERS[template] : undefined;
   if (!fn) return { ok: false, error: `no renderer for template ${template}` };
   if (!isObj(payload)) return { ok: false, error: `${template}: payload is not an object` };
   const ctx: Ctx = { app: appUrl.replace(/\/+$/, ""), p: payload };
   try {
     const out = fn(ctx);
     const html =
-      `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#111;max-width:560px">` +
-      out.body + footer(ctx, out) + `</div>`;
+      `<div${es ? ' lang="es"' : ""} style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#111;max-width:560px">` +
+      out.body + (es ? footerEs(ctx) : footer(ctx, out)) + `</div>`;
     return { ok: true, subject: plainSubject(out.subject), html };
   } catch (e) {
     if (e instanceof PayloadError) return { ok: false, error: `${template}: ${e.message}` };

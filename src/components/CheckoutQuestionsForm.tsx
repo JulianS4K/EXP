@@ -19,6 +19,8 @@ import {
   maxLengthFor, problemText, visibleQuestionsFor, type AnswerProblem, type QuestionDef,
 } from '../../supabase/functions/_shared/questions.ts';
 import type { AnswerDraft, RawAnswer } from '../lib/checkoutQuestions';
+import { useLanguage } from '../context/LanguageContext';
+import type { DictKey } from '../lib/i18n/dict';
 
 interface Props {
   questions: readonly QuestionDef[];
@@ -39,6 +41,22 @@ const RADIO_MAX = 5;
 
 export default function CheckoutQuestionsForm({ questions, ticketTiers, value, onChange, problems, showErrors, ticketNames, tone = 'dark' }: Props) {
   const base = useId().replace(/:/g, '');
+  const { lang, t } = useLanguage();
+  // The problem under a field, in the page's language (English: the shared text).
+  const problemFor = (p: AnswerProblem, q: QuestionDef): string => {
+    if (lang === 'en') return problemText(p, q);
+    if (p.code === 'too_long') return t('questions.p.keepTo', { n: maxLengthFor(q) });
+    if (p.code === 'out_of_range') {
+      if (q.min_value != null && q.max_value != null) return t('questions.p.between', { min: q.min_value, max: q.max_value });
+      if (q.min_value != null) return t('questions.p.atLeast', { min: q.min_value });
+      if (q.max_value != null) return t('questions.p.atMost', { max: q.max_value });
+    }
+    if (p.code === 'too_many_choices' && q.max_choices != null) return t('questions.p.upTo', { n: q.max_choices });
+    if (p.code === 'too_few_choices' && q.min_choices != null) return t('questions.p.pickAtLeast', { n: q.min_choices });
+    const key = `questions.p.${p.code}` as DictKey;
+    const text = t(key);
+    return text === key ? problemText(p, q) : text;
+  };
   const f = visibleQuestionsFor(questions, ticketTiers, value);
   if (f.order.length === 0 && f.ticket.every((t) => t.length === 0)) return null;
   const dark = tone === 'dark';
@@ -80,7 +98,7 @@ export default function CheckoutQuestionsForm({ questions, ticketTiers, value, o
     const v = get(ticket, q.id);
     const star = q.required ? <span className={cls.star} aria-hidden="true"> *</span> : null;
     const help = q.help_text ? <span id={helpId} className={cls.help}>{q.help_text}</span> : null;
-    const err = problem ? <p id={errId} role="alert" className={cls.error}>{problemText(problem, q)}</p> : null;
+    const err = problem ? <p id={errId} role="alert" className={cls.error}>{problemFor(problem, q)}</p> : null;
     const inputCls = `${cls.input} ${problem ? cls.bad : ''}`;
     const common = {
       id, 'aria-required': q.required || undefined, 'aria-invalid': problem ? true : undefined, 'aria-describedby': describedBy,
@@ -142,7 +160,7 @@ export default function CheckoutQuestionsForm({ questions, ticketTiers, value, o
     if (q.kind === 'single_choice') {
       control = (
         <select {...common} value={text} onChange={(e) => set(ticket, q.id, e.target.value)} className={inputCls}>
-          <option value="">Choose…</option>
+          <option value="">{t('questions.choose')}</option>
           {(q.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       );
@@ -169,15 +187,15 @@ export default function CheckoutQuestionsForm({ questions, ticketTiers, value, o
   return (
     <section className={cls.box} aria-labelledby={`${base}-title`} data-testid="checkout-questions">
       <h3 id={`${base}-title`} className={cls.heading}>
-        A few questions from the organizer
+        {t('questions.title')}
       </h3>
       {f.order.length > 0 && <div className="space-y-4 mb-4">{f.order.map((q) => field(q, null))}</div>}
       {f.ticket.some((t) => t.length > 0) && (
         <div className="space-y-3">
           {f.ticket.map((list, i) => list.length === 0 ? null : (
-            <div key={i} className={cls.ticketBox} role="group" aria-label={`Ticket ${i + 1}`}>
+            <div key={i} className={cls.ticketBox} role="group" aria-label={t('questions.ticket', { n: i + 1 })}>
               <p className={cls.ticketTitle}>
-                Ticket {i + 1}{ticketNames?.[i]?.trim() ? ` · ${ticketNames[i].trim()}` : ''}
+                {t('questions.ticket', { n: i + 1 })}{ticketNames?.[i]?.trim() ? ` · ${ticketNames[i].trim()}` : ''}
               </p>
               {list.map((q) => field(q, i + 1))}
             </div>
@@ -185,7 +203,7 @@ export default function CheckoutQuestionsForm({ questions, ticketTiers, value, o
         </div>
       )}
       <p className={dark ? 'type text-[10px] text-white/40 mt-3' : 'text-[11px] text-slate-600 mt-3'}>
-        <span aria-hidden="true">*</span> required. The organizer sees your answers.
+        <span aria-hidden="true">*</span> {t('questions.footer')}
       </p>
     </section>
   );

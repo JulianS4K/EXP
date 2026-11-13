@@ -96,6 +96,12 @@ through `exos_feed_where_to_buy`.
   verified against Google's live docs in this change (the session couldn't reach developers.google.com); confirm
   the third-party ticket URL rules and the partner spec's seller field at onboarding.*
 
+## Spanish (`?lang=es`)
+
+The same feed with `?lang=es` swaps in each organizer's Spanish title and description where they wrote one
+(`exos_events.i18n`, mig 20261114130000) and marks every event `inLanguage: "es"`; events without them keep the
+default text. `docs/i18n-review.md`.
+
 ## Report (operator)
 
 `GET …/exos-google-feed?report=1` with `Authorization: Bearer <service role key>` returns the counts and every event
