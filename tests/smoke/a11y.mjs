@@ -434,6 +434,55 @@ await check('edit event: Promote on Discord', async (page, run) => {
   exos_event_quotas: () => [],
 }, fns: discordFns }) });
 
+// claude/exos-event-tokens (mig 20261114110000): the door's Tokens tab (take,
+// a refusal, sell with the new code) and Edit event → Event tokens with its
+// report (blocking; the panels only).
+const TOK = { id: '88888888-8888-4888-8888-8888888888d1', event_id: EV, name: 'Drink token', unit_label: 'drink', price_cents: 500,
+  bundles: [{ credits: 10, price_cents: 4500 }], max_per_order: 20, refundable: true, grace_hours: 2, active: true,
+  rule: 'Event tokens, no cash value, valid for Fall Party only. They expire 2 hours after the event ends; unused tokens are refunded on request to how you paid.',
+  expires_at: null, offers: [{ credits: 1, price_cents: 500 }, { credits: 10, price_cents: 4500 }] };
+await check('door scanner: Tokens tab', async (page, run) => {
+  await page.goto(BASE + '/checkin/' + EV);
+  await page.getByRole('tab', { name: 'Tokens' }).click();
+  const panel = page.getByTestId('token-door-panel');
+  await panel.waitFor({ timeout: 8000 });
+  await run('take');
+  await panel.getByPlaceholder('Scan or type a ticket or token code').fill('NJZ63YHYMPS4QC25');
+  await panel.getByRole('button', { name: 'Take 1', exact: true }).click();
+  await panel.getByText('Not enough tokens on this code.').waitFor({ timeout: 5000 });
+  await run('refused');
+  await panel.getByRole('tab', { name: 'Sell tokens' }).click();
+  await panel.getByRole('button', { name: /Take \$5\.00/ }).click();
+  await panel.getByTestId('token-code').waitFor({ timeout: 5000 });
+  await run('sold');
+}, { signedIn: true, include: '[data-testid="token-door-panel"]', mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+  exos_event_token_products: () => [TOK],
+  exos_event_token_roster: () => ({ synced_at: new Date().toISOString(), cards: [] }),
+  exos_event_token_spend: () => ({ ok: false, reason: 'insufficient', balance: 0 }),
+  exos_event_token_pos_sell: () => ({ order_id: 'o', card_id: 'c', code: 'K-K3F7X8BBC36FL33H', code_last4: 'L33H', credits: 1,
+    total_cents: 500, payment: 'cash', balance: 1, replay: false }),
+} }) });
+await check('edit event: Event tokens', async (page, run) => {
+  await page.goto(BASE + '/edit-event/' + EV);
+  await page.getByTestId('event-tokens-report').waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-testid="event-tokens-panel"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
+  exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
+  exos_event_quotas: () => [],
+  exos_event_token_products: () => [TOK],
+  exos_event_token_report: () => ({ event_id: EV, currency: 'USD', generated_at: new Date().toISOString(),
+    products: [{ product_id: TOK.id, name: 'Drink token', unit_label: 'drink', refundable: true, expires_at: null,
+      sold_credits: 12, sold_cents: 5000, redeemed_credits: 9, redeemed_cents: 3700, expired_credits: 0, expired_cents: 0,
+      refunded_credits: 0, refunded_cents: 0, outstanding_credits: 3, outstanding_cents: 1300,
+      overspent_count: 1, overspent_credits: 2, rejected_count: 0, rejected_credits: 0 }],
+    exceptions: [{ id: 'x1', kind: 'overspent', product: 'Drink token', credits_asked: 4, credits_short: 2, reason: 'insufficient',
+      device: 'Door 1A2B', offline_at: new Date().toISOString(), synced_at: new Date().toISOString(), card_last4: 'L33H', on_ticket: false }],
+    refundable: [{ lot_id: 'l1', product: 'Drink token', source: 'online', credits_left: 3, value_left: 1300,
+      bought_at: new Date().toISOString(), card_id: 'c', card_last4: null, on_ticket: true }] }),
+} }) });
 // claude/exos-spanish (mig 20261114130000): the buyer checkout and the door in
 // Spanish, blocking, with <html lang="es"> checked (axe's html-has-lang /
 // valid-lang rules read it too).

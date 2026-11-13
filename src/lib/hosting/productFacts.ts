@@ -365,6 +365,14 @@ export const PRODUCT_FACTS: ProductFact[] = [
       'supabase/functions/_shared/mail-es.ts', 'supabase/migrations/20261114130000_exos_event_i18n.sql'],
     note: 'Branch claude/exos-spanish: not on main, migration not applied. The money and legal wording waits for a human review (docs/i18n-review.md); organizer screens are English.',
   },
+  {
+    // claude/exos-event-tokens
+    id: 'event-tokens', audience: 'organizer', status: 'off',
+    claim: 'Organizers can sell event tokens such as drink tickets, ride credits and tasting tickets, online with the order and at the door, and staff take them off the guest\'s ticket or token code in the door app, offline too.',
+    code: ['src/components/EventTokensPanel.tsx', 'src/components/TokenDoorPanel.tsx', 'src/components/EventTokensCard.tsx',
+      'src/lib/eventTokens.ts', 'src/lib/eventTokensApi.ts', 'supabase/migrations/20261114110000_exos_event_tokens.sql'],
+    note: 'Branch claude/exos-event-tokens: not on main, migration not applied. Cash and comps at the door only (no card for tokens yet); counsel to confirm stored-value / gift card rules (NY, CA) before launch (docs/pos.md "Event tokens").',
+  },
 ];
 
 const STATUS_LABEL: Record<FactStatus, string> = {

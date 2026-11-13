@@ -80,6 +80,7 @@ export const doorEn = {
   'door.tabTickets': 'Tickets',
   'door.tabSell': 'Sell',
   'door.tabGuests': 'Guest list',
+  'door.tabTokens': 'Tokens', // claude/exos-event-tokens (the tab's own screen is English for now)
   'door.sellNeedsNet': 'Selling needs a connection: the sale, the tickets and the cash are recorded on the server.',
   // scanner
   'door.scanningOut': 'Scanning OUT…',
@@ -229,6 +230,7 @@ export const doorEs: Record<keyof typeof doorEn, string> = {
   'door.tabTickets': 'Entradas',
   'door.tabSell': 'Vender',
   'door.tabGuests': 'Lista de invitados',
+  'door.tabTokens': 'Fichas',
   'door.sellNeedsNet': 'Para vender se necesita conexión: la venta, las entradas y el efectivo se registran en el servidor.',
   'door.scanningOut': 'Escaneando SALIDA…',
   'door.scanningList': 'Escaneando · {list}',

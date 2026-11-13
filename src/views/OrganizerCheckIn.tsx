@@ -52,6 +52,7 @@ import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import ScanRejectAudit from '../components/ScanRejectAudit';
 import GuestListDoor from '../components/GuestListDoor';
 import DoorSellPanel from '../components/DoorSellPanel'; // claude/exos-pos-walkup
+import TokenDoorPanel from '../components/TokenDoorPanel'; // claude/exos-event-tokens
 import { EventScheduleReadOnly } from '../components/booking/EventBookingPanels';
 import { codeIndex, isExosCode, matchImported } from '../lib/door/imports';
 import {
@@ -409,7 +410,8 @@ export default function OrganizerCheckIn() {
   const lastReadRef = useRef<RecentRead | null>(null);
   // Door mode: ticket scanning, or the guest-list name search (mig 20260926050000).
   // + 'sell': walk-up sales at the door (mig 20261107100000).
-  const [mode, setMode] = useState<'tickets' | 'guests' | 'sell'>('tickets');
+  // + 'tokens': take / sell event tokens (mig 20261114110000).
+  const [mode, setMode] = useState<'tickets' | 'guests' | 'sell' | 'tokens'>('tickets');
   // Exos Door (mig 20261013090000): a code from another platform read in
   // Tickets mode is handed to the guest-list door, which checks it in.
   const [guestCode, setGuestCode] = useState<{ text: string; at: number } | null>(null);
@@ -1909,7 +1911,7 @@ export default function OrganizerCheckIn() {
         </div>
       )}
       <div className="inline-flex p-1 bg-slate-100 rounded-xl" role="tablist" aria-label={t('door.mode')}>
-        {(['tickets', 'guests', 'sell'] as const).map((m) => (
+        {(['tickets', 'guests', 'sell', 'tokens'] as const).map((m) => (
           <button
             key={m}
             type="button"
@@ -1925,11 +1927,15 @@ export default function OrganizerCheckIn() {
             }}
             className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
           >
-            {m === 'tickets' ? t('door.tabTickets') : m === 'sell' ? t('door.tabSell') : `${t('door.tabGuests')}${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
+            {m === 'tickets' ? t('door.tabTickets') : m === 'sell' ? t('door.tabSell') : m === 'tokens' ? t('door.tabTokens') : `${t('door.tabGuests')}${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
           </button>
         ))}
       </div>
-      {mode === 'sell' && eventId ? (
+      {mode === 'tokens' && eventId ? (
+      <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <TokenDoorPanel eventId={eventId} isOffline={effectiveOffline} canManage={canOverride} />
+      </div>
+      ) : mode === 'sell' && eventId ? (
       <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {effectiveOffline
           ? <p role="alert" className="text-sm text-amber-700">{t('door.sellNeedsNet')}</p>

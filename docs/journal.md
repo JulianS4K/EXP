@@ -1,8 +1,9 @@
 # Money journal, sales tax by jurisdiction, $0 orders
 
 Migrations `20261108100000_exos_money_journal.sql`, `20261110100000_exos_journal_complete.sql` (card at the door,
-gift cards, payouts, the drawer) and `20261111130000_exos_journal_payouts_tax.sql` (Stripe's scheduled payouts, the tax
-report read from the journal, the owed gift card fee handed back). Tests: `tests/exos/test_money_journal.sql`,
+gift cards, payouts, the drawer), `20261111130000_exos_journal_payouts_tax.sql` (Stripe's scheduled payouts, the tax
+report read from the journal, the owed gift card fee handed back) and `20261114110000_exos_event_tokens.sql` (event
+tokens as deferred revenue, below). Tests: `tests/exos/test_money_journal.sql`,
 `tests/exos/test_journal_complete.sql` and `tests/exos/test_journal_payouts_tax.sql` (run by `run_p0.sh`),
 `tests/exos/race_money_journal.sh` and `tests/exos/race_journal_payouts.sh` (CI, after `run_p0.sh`), the simulation's
 invariant I10 (`tests/exos/e2e_helpers.sql`), `src/lib/journal.test.ts`, `src/lib/payouts/orgPayouts.test.ts`. Code: `src/lib/journal.ts` (pure),
@@ -37,6 +38,7 @@ It follows the existing money model, never a second one: the settlement (`src/li
 | 2100 | Sales tax payable | liability |
 | 2200 | Promoter commissions payable | liability |
 | 2300 | Gift cards outstanding | liability |
+| 2310 | Event tokens outstanding | liability |
 | 2400 | Tips payable (POS) | liability |
 | 3000 | Opening balances (imported gift cards) | equity |
 | 4000 | Ticket revenue (face; add-ons included) | revenue |
@@ -44,6 +46,8 @@ It follows the existing money model, never a second one: the settlement (`src/li
 | 4020 | Bar and merch sales (POS) | revenue |
 | 4030 | Donations | revenue |
 | 4040 | Gift card breakage (voided balances) | revenue |
+| 4050 | Event tokens redeemed | revenue |
+| 4060 | Event token breakage (expired) | revenue |
 | 4900 | Refunds | contra revenue |
 | 5000 | Exos fee | expense |
 | 5010 | Card processing fees | expense |
@@ -113,6 +117,27 @@ before recorded a scheduled payout. Stripe does let a Connect platform read a co
 at the door, and how it would be collected (there is no charge to withhold it from), is open (docs/pos.md). Until it is
 decided, `pos_cash_sale` carries no Exos fee line and nothing records one as owed; when it is decided, post it as an
 `organizer_payable` line (Dr Exos fee, Cr organizer payable, like the gift card part of an online order).
+
+## Event tokens (mig 20261114110000)
+
+Drink tickets, ride credits and tasting tickets (`docs/pos.md` "Event tokens") are **deferred revenue**, like gift
+cards: money taken for tokens is a liability until they are spent, expire or are refunded. Three accounts:
+**2310 Event tokens outstanding** (liability), **4050 Event tokens redeemed**, **4060 Event token breakage (expired)**.
+The sale itself posts as it always did (an online order's `sale` entry puts the token add-on's face in ticket revenue;
+a door sale's `pos_cash_sale` puts it in bar and merch); each row of `exos_event_token_ledger` then posts one entry
+(source `exos_event_token_ledger`, posted as the row is written, WARNING on failure, in the backfill):
+
+| Ledger row | Entry |
+|---|---|
+| purchase | `token_purchase`: Dr ticket revenue (online) or bar and merch (door), Cr tokens outstanding: the value moves to the liability. A comp has no value and posts nothing |
+| spend | `token_spend`: Dr tokens outstanding, Cr tokens redeemed (the value of the lots taken) |
+| undo | `token_undo`: the reverse of the spend |
+| expire | `token_expire`: Dr tokens outstanding, Cr token breakage |
+| refund (unused tokens, a void, a full order refund) | `token_refund`: Dr tokens outstanding, Cr the sale's account (the money itself posts from the refund or the paid-out, Dr refunds). An online refund of unused tokens posts only once the refund request succeeded; while it is pending the value stays outstanding |
+
+Tokens outstanding therefore always equals the value still on cards (`test_event_tokens.sql` ET10), and a refunded
+purchase nets to zero revenue like a refunded ticket. Tokens carry no tax rule: sales tax, where it applies, is charged
+when they are redeemed for goods, outside Exos.
 
 ## Reads
 
