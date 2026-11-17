@@ -9,7 +9,7 @@ Primary ticketing platform for live events: organizers create events and tiered 
 - **Frontend:** React 19 + Vite 6, Tailwind, Framer Motion, lucide-react
 - **Auth + DB:** Supabase Auth + Supabase Postgres (migrated from Firebase)
 - **Payments:** Stripe Checkout (dormant — set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` to activate)
-- **QR Barcodes:** HMAC-SHA256 rotating codes (60s buckets), verified server-side via `exos_check_in_ticket` RPC
+- **QR Barcodes:** HMAC-SHA256 rotating codes (30-second buckets, ±2 accepted), verified server-side via `exos_check_in_ticket` RPC
 - **Hosted at:** `vibepass-storefront-test.onrender.com/bridge/` (same-origin with FastAPI shell)
 
 ## Build

@@ -24,14 +24,20 @@
 --     mailed link OR the 6-digit code typed on the page they signed up on; a
 --     256-bit browser token (only its hash stored) gates the code, 5 tries
 --     per code (_exos_proof_code / _exos_proof_hash reused).
---   * SMS consent rules (mig 20261016120000): texts only for a signed-in fan
---     (a stranger can't sign someone else's number up), the exact consent
---     words stored with the time, STOP honoured (exos_sms_stops, written by
---     exos_sms_inbound; a STOP after the consent wins), 8 texts per number per
---     30 days per org, 9:00-20:00 in the event's time zone, sent from the
---     org's own Twilio / Telnyx through the existing outbox + exos-sms-drain
---     (dry run until EXOS_SMS_LIVE=on). The blast queues one exos_sms_campaigns
---     row per event (new audience 'drop_list').
+--   * SMS consent rules (mig 20261016120000): texts only for a signed-in fan,
+--     and only for a number they PROVED: exos_drop_join texts a one-time
+--     6-digit code to it (the guest-proof SMS path: exos_rsvp_sms_outbox,
+--     drained by exos-sms-drain, dry run until EXOS_SMS_LIVE=on) and the
+--     consent words are stored only when exos_drop_verify_sms gets that code
+--     back. A STOP is a hard stop: any exos_sms_stops row for the number
+--     (written by exos_sms_inbound, cleared only by START) or an opt-out on
+--     exos_sms_subscribers blocks the text, at the blast AND in
+--     exos_sms_claim (marker /* exos: drop list stop */, drop_list
+--     campaigns only, so other audiences behave as before). 8 texts per
+--     number per 30 days per org, 9:00-20:00 in the event's time zone (an
+--     unknown zone falls back to America/New_York, the SMS default), from
+--     the org's own Twilio / Telnyx through the existing outbox. The blast
+--     queues one exos_sms_campaigns row per event (audience 'drop_list').
 --   * The mail queue (exos_mail_enqueue): templates 'drop-confirm' and
 --     'drop-on-sale', dedupe key per signup, List-Unsubscribe = the leave link.
 --   * Presale: the existing machinery, a hidden ticket type unlocked by a code
@@ -39,23 +45,27 @@
 --     Exos mints one voucher for it (valid until the public on-sale) and opens
 --     that type N minutes early. exos_check_voucher (marker patch
 --     /* exos: drop list code */) honours that code only for a confirmed list
---     member: a signed-in buyer whose account (or confirmed email) is on the
+--     member who confirmed BEFORE the presale opened (signups close when it
+--     opens): a signed-in buyer whose account (or confirmed email) is on the
 --     list, or, for the service role (exos-checkout), the verified email it
 --     passes. Anonymous callers never pass (codes need an account already).
 --     No new pricing path: the hidden type's own price applies.
 --   * Tracking: the first-touch promoter code and UTM tags the visitor arrived
 --     with (lib/attribution.ts), sanitized again here.
 --
--- Touches:  C: TABLE exos_drop_signups, exos_drop_confirms, exos_drop_settings
+-- Touches:  C: TABLE exos_drop_signups, exos_drop_confirms, exos_drop_settings,
+--              exos_drop_sms_codes
 --              (RLS on, no client grants: RPCs only)
 --           C: FUNCTION exos_drop_status, exos_drop_signup, exos_drop_confirm,
 --              exos_drop_confirm_code, exos_drop_leave (anon + authenticated);
---              exos_drop_join, exos_drop_leave_mine (authenticated);
+--              exos_drop_join, exos_drop_verify_sms, exos_drop_leave_mine
+--              (authenticated);
 --              exos_drop_list_summary (owner / manager / finance),
 --              exos_drop_list_export, exos_drop_list_set_presale (owner /
 --              manager; audited); exos_drop_list_blast, exos_drop_list_sweep
 --              (service role); helpers _exos_drop_*
---           W: FUNCTION exos_check_voucher (marker /* exos: drop list code */)
+--           W: FUNCTION exos_check_voucher (marker /* exos: drop list code */),
+--              exos_sms_claim (marker /* exos: drop list stop */)
 --           W: CONSTRAINT exos_mail_template_check (+ drop-confirm,
 --              drop-on-sale), exos_sms_campaigns_audience_check (+ drop_list)
 --           C: cron exos-drop-list-blast-5min, created INACTIVE
@@ -86,11 +96,19 @@ CREATE TABLE IF NOT EXISTS public.exos_drop_signups (
   utm_source         text CHECK (utm_source IS NULL OR length(utm_source) <= 100),
   utm_medium         text CHECK (utm_medium IS NULL OR length(utm_medium) <= 100),
   utm_campaign       text CHECK (utm_campaign IS NULL OR length(utm_campaign) <= 100),
-  -- The leave link in every mail (/drop/leave?t=…).
-  leave_token        text NOT NULL UNIQUE
-                       DEFAULT replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
-                       CHECK (leave_token ~ '^[0-9a-f]{64}$'),
+  -- The address folded for rate limits (lower case, +tag dropped).
+  email_key          text GENERATED ALWAYS AS (regexp_replace(email, '\+[^@]*@', '@')) STORED,
+  -- A number waiting for its one-time code (exos_drop_verify_sms); only the
+  -- code's hash. Nothing is consented until the code comes back.
+  sms_pending_phone  text CHECK (sms_pending_phone IS NULL OR sms_pending_phone ~ '^\+[1-9][0-9]{7,14}$'),
+  sms_code_hash      text CHECK (sms_code_hash IS NULL OR sms_code_hash ~ '^[0-9a-f]{64}$'),
+  sms_code_at        timestamptz,
+  sms_code_attempts  int NOT NULL DEFAULT 0 CHECK (sms_code_attempts >= 0),
+  sms_code_sends     int NOT NULL DEFAULT 0 CHECK (sms_code_sends >= 0),
   left_at            timestamptz,
+  -- The blast mail's leave link token, hashed (each confirm mail has its own,
+  -- in exos_drop_leave_tokens).
+  blast_leave_hash   text UNIQUE CHECK (blast_leave_hash IS NULL OR blast_leave_hash ~ '^[0-9a-f]{64}$'),
   -- The blast: claimed once (blasted_at), what went out, and the text's fate.
   blasted_at         timestamptz,
   blast_kind         text CHECK (blast_kind IS NULL OR blast_kind IN ('on_sale', 'presale')),
@@ -104,6 +122,8 @@ CREATE TABLE IF NOT EXISTS public.exos_drop_signups (
 );
 CREATE INDEX IF NOT EXISTS exos_drop_signups_org_idx ON public.exos_drop_signups (org_id);
 CREATE INDEX IF NOT EXISTS exos_drop_signups_user_idx ON public.exos_drop_signups (user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS exos_drop_signups_key_idx ON public.exos_drop_signups (email_key);
+CREATE INDEX IF NOT EXISTS exos_drop_signups_phone_idx ON public.exos_drop_signups (org_id, sms_phone) WHERE sms_phone IS NOT NULL;
 CREATE INDEX IF NOT EXISTS exos_drop_signups_due_idx ON public.exos_drop_signups (event_id, confirmed_at)
   WHERE confirmed_at IS NOT NULL AND left_at IS NULL AND blasted_at IS NULL;
 ALTER TABLE public.exos_drop_signups ENABLE ROW LEVEL SECURITY;
@@ -155,6 +175,40 @@ DROP TRIGGER IF EXISTS exos_drop_settings_touch ON public.exos_drop_settings;
 CREATE TRIGGER exos_drop_settings_touch BEFORE UPDATE ON public.exos_drop_settings
   FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
 
+-- The leave link of every confirm mail, hashed. Kept as long as the signup
+-- (the sweep's 8-day cut of exos_drop_confirms doesn't touch it), so an old
+-- mail's leave link always works.
+CREATE TABLE IF NOT EXISTS public.exos_drop_leave_tokens (
+  token_hash text PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  signup_id  uuid NOT NULL REFERENCES public.exos_drop_signups (id) ON DELETE CASCADE,
+  org_id     uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_drop_leave_tokens_signup_idx ON public.exos_drop_leave_tokens (signup_id);
+CREATE INDEX IF NOT EXISTS exos_drop_leave_tokens_org_idx ON public.exos_drop_leave_tokens (org_id);
+ALTER TABLE public.exos_drop_leave_tokens ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_drop_leave_tokens FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_drop_leave_tokens TO service_role;
+
+-- Every texted verification code (exos_drop_join), for its daily caps: per
+-- account, per number, per org, and the numbers a signup tried. Two days kept.
+CREATE TABLE IF NOT EXISTS public.exos_drop_sms_codes (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  org_id     uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  signup_id  uuid REFERENCES public.exos_drop_signups (id) ON DELETE SET NULL,
+  phone      text NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  fails      int NOT NULL DEFAULT 0 CHECK (fails >= 0),          -- wrong codes typed for this send
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_user_idx ON public.exos_drop_sms_codes (user_id, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_phone_idx ON public.exos_drop_sms_codes (phone, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_org_idx ON public.exos_drop_sms_codes (org_id, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_signup_idx ON public.exos_drop_sms_codes (signup_id);
+ALTER TABLE public.exos_drop_sms_codes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_drop_sms_codes FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_drop_sms_codes TO service_role;
+
 -- ---------------------------------------------------------------------------
 -- 2. Helpers
 -- ---------------------------------------------------------------------------
@@ -175,7 +229,7 @@ $$;
 REVOKE ALL ON FUNCTION public._exos_drop_open_at(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Taking signups: published, not cancelled, sold on Exos (not linked out),
--- not started, and not on sale yet.
+-- not started, not on sale yet, and no list presale open yet.
 CREATE OR REPLACE FUNCTION public._exos_drop_open(p_event_id uuid)
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -186,6 +240,12 @@ AS $$
            AND coalesce(e.ticket_backend, 'exos') = 'exos'
            AND (e.starts_at IS NULL OR e.starts_at > now())
            AND public._exos_drop_open_at(e.id) > now()
+           -- A list presale that has opened closes the list: only members who
+           -- were on it before it opened may use its code.
+           AND NOT EXISTS (SELECT 1 FROM public.exos_drop_settings ds
+                            WHERE ds.event_id = e.id AND ds.presale_minutes IS NOT NULL
+                              AND ds.public_on_sale_at = public._exos_drop_open_at(e.id)
+                              AND ds.public_on_sale_at - make_interval(mins => ds.presale_minutes) <= now())
       FROM public.exos_events e WHERE e.id = p_event_id), false)
 $$;
 REVOKE ALL ON FUNCTION public._exos_drop_open(uuid) FROM PUBLIC, anon, authenticated;
@@ -234,7 +294,9 @@ REVOKE ALL ON FUNCTION public._exos_drop_promoter(text) FROM PUBLIC, anon, authe
 
 -- Is this buyer a confirmed member of the event's list? Signed in: the
 -- account (or its confirmed email). The service role (exos-checkout, which
--- passes the verified account email): that email. Anonymous: never.
+-- passes the verified account email; the JWT role must be exactly
+-- service_role): that email. Anything else (anon, no claims): never. With a
+-- list presale set, only members confirmed before it opened.
 CREATE OR REPLACE FUNCTION public._exos_drop_member(p_event_id uuid, p_email text)
 RETURNS boolean
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -245,20 +307,77 @@ DECLARE
   v_role  text := coalesce(nullif(current_setting('request.jwt.claim.role', true), ''),
                            nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role', '');
   v_email text;
+  v_cut   timestamptz := (SELECT ds.public_on_sale_at - make_interval(mins => ds.presale_minutes)
+                            FROM public.exos_drop_settings ds
+                           WHERE ds.event_id = p_event_id AND ds.presale_minutes IS NOT NULL);
 BEGIN
   IF v_uid IS NOT NULL THEN
     SELECT lower(u.email) INTO v_email FROM auth.users u WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL;
     RETURN EXISTS (SELECT 1 FROM public.exos_drop_signups s
                     WHERE s.event_id = p_event_id AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL
+                      AND (v_cut IS NULL OR s.confirmed_at <= v_cut)
                       AND (s.user_id = v_uid OR (v_email IS NOT NULL AND s.email = v_email)));
   END IF;
-  IF v_role = 'anon' OR v_role = 'authenticated' THEN RETURN false; END IF;
+  IF v_role IS DISTINCT FROM 'service_role' THEN RETURN false; END IF;   -- fail closed
   v_email := public._exos_fan_email(p_email);
   RETURN v_email IS NOT NULL AND EXISTS (
     SELECT 1 FROM public.exos_drop_signups s
-     WHERE s.event_id = p_event_id AND s.email = v_email AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL);
+     WHERE s.event_id = p_event_id AND s.email = v_email AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL
+       AND (v_cut IS NULL OR s.confirmed_at <= v_cut));
 END $$;
 REVOKE ALL ON FUNCTION public._exos_drop_member(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- An event's zone for quiet hours, if Postgres knows it; else the SMS
+-- default (America/New_York, as exos_sms_create_campaign). An organizer-typed
+-- zone never makes the blast raise.
+CREATE OR REPLACE FUNCTION public._exos_drop_tz(p_tz text)
+RETURNS text
+LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce((SELECT z.name FROM pg_timezone_names z WHERE z.name = nullif(btrim(coalesce(p_tz, '')), '') LIMIT 1),
+                  'America/New_York')
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_tz(text) FROM PUBLIC, anon, authenticated;
+
+-- A 64-hex token and its hash.
+CREATE OR REPLACE FUNCTION public._exos_drop_hash(p text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$ SELECT encode(sha256(convert_to(coalesce(p, ''), 'UTF8')), 'hex') $$;
+REVOKE ALL ON FUNCTION public._exos_drop_hash(text) FROM PUBLIC, anon, authenticated;
+
+-- May this number get the drop-list text for this org? A hard stop: any
+-- STOP on record (exos_sms_stops, until START deletes it) or an opt-out on
+-- the org's subscriber row.
+CREATE OR REPLACE FUNCTION public._exos_drop_phone_stopped(p_org_id uuid, p_phone text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.exos_sms_stops st WHERE st.org_id = p_org_id AND st.phone = p_phone)
+      OR EXISTS (SELECT 1 FROM public.exos_sms_subscribers sb
+                  WHERE sb.org_id = p_org_id AND sb.phone = p_phone AND sb.opted_out_at IS NOT NULL)
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_phone_stopped(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- exos_sms_claim's last check for a queued drop_list text: skip it when the
+-- number is stopped, or no signup of that event still consents with it
+-- (left, opted out). Other audiences: false (unchanged).
+CREATE OR REPLACE FUNCTION public._exos_drop_sms_blocked(p_campaign_id uuid, p_org_id uuid, p_phone text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce((
+    SELECT public._exos_drop_phone_stopped(p_org_id, p_phone)
+           OR NOT EXISTS (SELECT 1 FROM public.exos_drop_signups s
+                           WHERE s.event_id = c.event_id AND s.sms_phone = p_phone
+                             AND s.left_at IS NULL AND s.sms_opted_out_at IS NULL)
+      FROM public.exos_sms_campaigns c WHERE c.id = p_campaign_id AND c.audience = 'drop_list'), false)
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_sms_blocked(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
 -- The staff role on the event's org (admin counts as owner), or NULL.
 CREATE OR REPLACE FUNCTION public._exos_drop_staff(p_event_id uuid, p_roles text[])
@@ -335,7 +454,10 @@ BEGIN
       v_out := v_out || jsonb_build_object(
         'joined', s.confirmed_at IS NOT NULL AND s.left_at IS NULL,
         'sms', s.sms_phone IS NOT NULL AND s.sms_opted_out_at IS NULL AND s.left_at IS NULL,
-        'phone_hint', CASE WHEN s.sms_phone IS NOT NULL THEN '…' || right(s.sms_phone, 4) END);
+        'phone_hint', CASE WHEN s.sms_phone IS NOT NULL THEN '…' || right(s.sms_phone, 4) END,
+        -- A number waiting for its code (nothing consented yet).
+        'sms_pending', s.sms_pending_phone IS NOT NULL AND s.left_at IS NULL,
+        'pending_hint', CASE WHEN s.sms_pending_phone IS NOT NULL THEN '…' || right(s.sms_pending_phone, 4) END);
     ELSE
       v_out := v_out || jsonb_build_object('joined', false, 'sms', false);
     END IF;
@@ -345,13 +467,16 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_status(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_drop_status(uuid) TO anon, authenticated, service_role;
 
--- A guest's signup (anon or signed in). ALWAYS answers {ok, status:
--- 'check_email'} for a well-formed request to an open list: whether the
--- address is new, pending, already on the list, or held back by a limit. A
--- confirm mail (link + 6-digit code) goes out unless the address is already
--- on the list or over its limits. Limits, before any work: 10 a minute per
--- network, 120 a minute per event, 5 a minute per address; then 3 confirm
--- mails a day per address and event.
+-- A guest's signup (anon or signed in). For a well-formed request to an
+-- open list it answers {ok, status: 'check_email'} whether the address is
+-- new, pending, already on the list, or held back by a per-address limit:
+-- nothing says who is on a list. A confirm mail (link + 6-digit code +
+-- leave link) goes out unless the address is already listed or over its
+-- limits. Limits, before any work: 10 a minute per network; 5 a minute per
+-- address (folded: lower case, +tag dropped); 120 a minute per event, which
+-- answers {ok: false, status: 'try_again'} (per event, so it says nothing
+-- about an address); then 3 confirm mails a day per address and event and
+-- 10 a day per address across events.
 CREATE OR REPLACE FUNCTION public.exos_drop_signup(
   p_event_id uuid, p_email text, p_browser_token text, p_source jsonb DEFAULT NULL
 ) RETURNS jsonb
@@ -361,11 +486,13 @@ AS $$
 DECLARE
   v_ok     constant jsonb := jsonb_build_object('ok', true, 'status', 'check_email');
   v_email  text := public._exos_fan_email(p_email);
+  v_key    text;
   v_src    jsonb := CASE WHEN jsonb_typeof(p_source) = 'object' THEN p_source ELSE '{}'::jsonb END;
   e        record;
   s        public.exos_drop_signups%ROWTYPE;
   v_cid    uuid := gen_random_uuid();
   v_token  text;
+  v_leave  text;
   v_code   text;
 BEGIN
   IF NOT public.exos_rate_hit('drop-ip:' || md5(public._exos_request_ip_bucket()), 10) THEN
@@ -374,15 +501,18 @@ BEGIN
   IF v_email IS NULL THEN
     RAISE EXCEPTION 'exos_drop_signup: enter a valid email address' USING ERRCODE = '22023';
   END IF;
+  v_key := regexp_replace(v_email, '\+[^@]*@', '@');
   IF coalesce(p_browser_token, '') !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'exos_drop_signup: reload the page and try again' USING ERRCODE = '22023';
   END IF;
   IF NOT public._exos_drop_open(p_event_id) THEN
     RAISE EXCEPTION 'exos_drop_signup: this event isn''t taking signups' USING ERRCODE = 'P0002';
   END IF;
-  IF NOT public.exos_rate_hit('drop-ev:' || p_event_id::text, 120)
-     OR NOT public.exos_rate_hit('drop-em:' || md5(v_email), 5) THEN
+  IF NOT public.exos_rate_hit('drop-em:' || md5(v_key), 5) THEN
     RETURN v_ok;
+  END IF;
+  IF NOT public.exos_rate_hit('drop-ev:' || p_event_id::text, 120) THEN
+    RETURN jsonb_build_object('ok', false, 'status', 'try_again');
   END IF;
   SELECT ev.id, ev.org_id, ev.name, ev.starts_at, ev.timezone, ev.venue_name, ev.venue_location, o.name AS org_name
     INTO e FROM public.exos_events ev JOIN public.exos_orgs o ON o.id = ev.org_id WHERE ev.id = p_event_id;
@@ -391,6 +521,11 @@ BEGIN
   SELECT * INTO s FROM public.exos_drop_signups WHERE event_id = p_event_id AND email = v_email FOR UPDATE;
   IF s.id IS NOT NULL AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL THEN
     RETURN v_ok;                                   -- already on the list: nothing to send
+  END IF;
+  -- 10 confirm mails a day per (folded) address across every list.
+  IF (SELECT count(*) FROM public.exos_drop_confirms c JOIN public.exos_drop_signups x ON x.id = c.signup_id
+       WHERE x.email_key = v_key AND c.created_at > now() - interval '1 day') >= 10 THEN
+    RETURN v_ok;
   END IF;
   IF s.id IS NULL THEN
     INSERT INTO public.exos_drop_signups (org_id, event_id, email, email_consent_text,
@@ -405,53 +540,64 @@ BEGIN
   END IF;
 
   v_token := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+  v_leave := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
   v_code  := public._exos_proof_code();
   INSERT INTO public.exos_drop_confirms (id, signup_id, org_id, token_hash, code_hash, browser_token_hash)
-  VALUES (v_cid, s.id, s.org_id, encode(sha256(convert_to(v_token, 'UTF8')), 'hex'),
-          public._exos_proof_hash(v_cid, 'drop', v_code), encode(sha256(convert_to(p_browser_token, 'UTF8')), 'hex'));
+  VALUES (v_cid, s.id, s.org_id, public._exos_drop_hash(v_token), public._exos_proof_hash(v_cid, 'drop', v_code),
+          public._exos_drop_hash(p_browser_token));
+  INSERT INTO public.exos_drop_leave_tokens (token_hash, signup_id, org_id) VALUES (public._exos_drop_hash(v_leave), s.id, s.org_id);
   PERFORM public.exos_mail_enqueue('drop-confirm', v_email,
     jsonb_build_object('org', jsonb_build_object('id', e.org_id, 'name', e.org_name),
                        'event', jsonb_build_object('id', e.id, 'name', e.name, 'starts_at', e.starts_at,
                                                    'timezone', e.timezone, 'venue_name', e.venue_name,
                                                    'venue_location', e.venue_location),
-                       'token', v_token, 'code', v_code, 'leave_token', s.leave_token),
+                       'token', v_token, 'code', v_code, 'leave_token', v_leave),
     'drop-confirm:' || v_cid::text, NULL, false, NULL);
   RETURN v_ok;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_signup(uuid, text, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_drop_signup(uuid, text, text, jsonb) TO anon, authenticated, service_role;
 
--- Mark a signup confirmed (the person proved the address).
-CREATE OR REPLACE FUNCTION public._exos_drop_confirm_signup(p_signup_id uuid)
-RETURNS void
-LANGUAGE sql SECURITY DEFINER
+-- Mark a signup confirmed (the person proved the address with a confirm
+-- made at p_since). A confirm made before the person left never re-joins
+-- them: leaving spends the open confirms, and this refuses an older one.
+CREATE OR REPLACE FUNCTION public._exos_drop_confirm_signup(p_signup_id uuid, p_since timestamptz)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+BEGIN
   UPDATE public.exos_drop_signups
      SET confirmed_at = CASE WHEN confirmed_at IS NULL OR left_at IS NOT NULL THEN now() ELSE confirmed_at END,
          left_at = NULL
-   WHERE id = p_signup_id
-$$;
-REVOKE ALL ON FUNCTION public._exos_drop_confirm_signup(uuid) FROM PUBLIC, anon, authenticated;
+   WHERE id = p_signup_id AND (left_at IS NULL OR left_at <= p_since);
+  RETURN FOUND;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_drop_confirm_signup(uuid, timestamptz) FROM PUBLIC, anon, authenticated;
 
 -- The mail's link (anon; the page takes a click so a mail scanner confirms
--- nothing). Answers the event and org name only.
+-- nothing). Answers the event and org name only. A link already used
+-- answers ok only while that signup is still on the list.
 CREATE OR REPLACE FUNCTION public.exos_drop_confirm(p_token text)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE c public.exos_drop_confirms%ROWTYPE; v_ev uuid; v_name text; v_org text;
+DECLARE c public.exos_drop_confirms%ROWTYPE; v_ok boolean; v_ev uuid; v_name text; v_org text;
 BEGIN
   IF coalesce(p_token, '') !~ '^[0-9a-f]{64}$' THEN RETURN jsonb_build_object('ok', false); END IF;
   SELECT * INTO c FROM public.exos_drop_confirms
-   WHERE token_hash = encode(sha256(convert_to(p_token, 'UTF8')), 'hex') AND created_at > now() - interval '7 days'
+   WHERE token_hash = public._exos_drop_hash(p_token) AND created_at > now() - interval '7 days'
    FOR UPDATE;
   IF c.id IS NULL THEN RETURN jsonb_build_object('ok', false); END IF;
   IF c.used_at IS NULL THEN
     UPDATE public.exos_drop_confirms SET used_at = now() WHERE id = c.id;
-    PERFORM public._exos_drop_confirm_signup(c.signup_id);
+    v_ok := public._exos_drop_confirm_signup(c.signup_id, c.created_at);
+  ELSE
+    v_ok := EXISTS (SELECT 1 FROM public.exos_drop_signups s
+                     WHERE s.id = c.signup_id AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL);
   END IF;
+  IF NOT v_ok THEN RETURN jsonb_build_object('ok', false); END IF;
   SELECT e.id, e.name, o.name INTO v_ev, v_name, v_org
     FROM public.exos_drop_signups s JOIN public.exos_events e ON e.id = s.event_id JOIN public.exos_orgs o ON o.id = e.org_id
    WHERE s.id = c.signup_id;
@@ -462,8 +608,8 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm(text) TO anon, authenticated,
 
 -- The 6-digit code, typed on the page the guest signed up on (its browser
 -- token gates it). 5 wrong tries spend the code; 20 tries a minute per
--- network. Answers only {ok}: the same false for a wrong code, a spent one
--- or no signup from this browser.
+-- network. Answers only {ok}: the same false for a wrong code, a spent one,
+-- one made before the person left, or no signup from this browser.
 CREATE OR REPLACE FUNCTION public.exos_drop_confirm_code(p_event_id uuid, p_browser_token text, p_code text)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -479,7 +625,7 @@ BEGIN
   END IF;
   SELECT c2.* INTO c FROM public.exos_drop_confirms c2
     JOIN public.exos_drop_signups s ON s.id = c2.signup_id AND s.event_id = p_event_id
-   WHERE c2.browser_token_hash = encode(sha256(convert_to(p_browser_token, 'UTF8')), 'hex')
+   WHERE c2.browser_token_hash = public._exos_drop_hash(p_browser_token)
      AND c2.used_at IS NULL AND c2.attempts < 5 AND c2.created_at > now() - interval '1 day'
    ORDER BY c2.created_at DESC LIMIT 1
    FOR UPDATE OF c2;
@@ -489,15 +635,29 @@ BEGIN
     RETURN jsonb_build_object('ok', false);
   END IF;
   UPDATE public.exos_drop_confirms SET used_at = now() WHERE id = c.id;
-  PERFORM public._exos_drop_confirm_signup(c.signup_id);
-  RETURN jsonb_build_object('ok', true);
+  RETURN jsonb_build_object('ok', public._exos_drop_confirm_signup(c.signup_id, c.created_at));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO anon, authenticated, service_role;
 
 -- One click for a signed-in fan with a confirmed email (it is their proof).
--- Texts: their own number with the consent words, 10 numbers a day per
--- account (exos_sms_opt_in's limit). 10 joins a minute per account.
+-- Texts: never stored on the word of the form. A number gets a one-time
+-- 6-digit code by text (exos_rsvp_sms_outbox, the guest-proof SMS path;
+-- dry run until EXOS_SMS_LIVE=on); only exos_drop_verify_sms with that code
+-- stores the consent. Code limits (SMS pumping), every one checked before
+-- the outbox under per-account, per-org and per-number locks, over actual
+-- sends logged in exos_drop_sms_codes: 5 a day per account, 5 a day per
+-- number (all accounts and orgs), 300 a day per org, 3 per number per 10
+-- minutes (shared with the order proofs), 60 s apart and 5 in all per
+-- signup, at most 2 different numbers per signup (the second replaces the
+-- first), and no new code to a number with 10 wrong codes typed in a day
+-- across signups. Over any of them: sms_code 'try_again', the same whichever
+-- cap. Quiet hours don't apply to the code: the person asked for it on the
+-- page that very moment and it works for 10 minutes, so a held code is
+-- useless (user-requested one-time codes are exempt in the usual practice,
+-- as are the order-proof codes on the same outbox).
+-- A number that replied STOP gets no text but counts as a send and answers
+-- 'sent' (so the answer doesn't reveal a STOP). 10 joins a minute per account.
 CREATE OR REPLACE FUNCTION public.exos_drop_join(
   p_event_id uuid, p_sms boolean DEFAULT false, p_phone text DEFAULT NULL, p_source jsonb DEFAULT NULL
 ) RETURNS jsonb
@@ -508,6 +668,7 @@ DECLARE
   v_uid   uuid := auth.uid();
   v_email text;
   v_phone text;
+  v_code  text;
   v_src   jsonb := CASE WHEN jsonb_typeof(p_source) = 'object' THEN p_source ELSE '{}'::jsonb END;
   e       record;
   s       public.exos_drop_signups%ROWTYPE;
@@ -530,10 +691,6 @@ BEGIN
     IF v_phone IS NULL THEN
       RAISE EXCEPTION 'exos_drop_join: enter a mobile number, e.g. +1 212 555 0100' USING ERRCODE = '22023';
     END IF;
-    IF (SELECT count(*) FROM public.exos_drop_signups x
-         WHERE x.user_id = v_uid AND x.sms_consented_at > now() - interval '1 day') >= 10 THEN
-      RAISE EXCEPTION 'exos_drop_join: too many text sign-ups today' USING ERRCODE = '54000';
-    END IF;
   END IF;
   SELECT ev.id, ev.org_id, ev.name, o.name AS org_name INTO e
     FROM public.exos_events ev JOIN public.exos_orgs o ON o.id = ev.org_id WHERE ev.id = p_event_id;
@@ -550,33 +707,126 @@ BEGIN
          confirmed_at = CASE WHEN x.confirmed_at IS NULL OR x.left_at IS NOT NULL THEN now() ELSE x.confirmed_at END,
          left_at = NULL
   RETURNING * INTO s;
-  IF v_phone IS NOT NULL THEN
+  -- A join is the person's own act: confirms still open for this signup are spent.
+  UPDATE public.exos_drop_confirms SET used_at = now() WHERE signup_id = s.id AND used_at IS NULL;
+
+  -- A new number, or the same one after leaving (its consent ended): a code.
+  IF v_phone IS NOT NULL AND (v_phone IS DISTINCT FROM s.sms_phone OR s.sms_opted_out_at IS NOT NULL) THEN
+    -- Locks in one order (account, org, number), then every cap, then send.
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-acct:' || v_uid::text, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-org:' || e.org_id::text, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-proof-phone:' || v_phone, 0));
+    SELECT * INTO s FROM public.exos_drop_signups WHERE id = s.id;
+    IF (s.sms_code_at IS NOT NULL AND s.sms_code_at >= now() - interval '60 seconds')
+       OR s.sms_code_sends >= 5
+       OR (NOT EXISTS (SELECT 1 FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id AND l.phone = v_phone)
+           AND (SELECT count(DISTINCT l.phone) FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id) >= 2)
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.user_id = v_uid AND l.created_at > now() - interval '1 day') >= 5
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.phone = v_phone AND l.created_at > now() - interval '1 day') >= 5
+       OR (SELECT coalesce(sum(l.fails), 0) FROM public.exos_drop_sms_codes l
+            WHERE l.phone = v_phone AND l.created_at > now() - interval '1 day') >= 10
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.org_id = e.org_id AND l.created_at > now() - interval '1 day') >= 300
+       OR (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
+            WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') >= 3 THEN
+      RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'try_again');
+    END IF;
+    v_code := public._exos_proof_code();
+    INSERT INTO public.exos_drop_sms_codes (user_id, org_id, signup_id, phone) VALUES (v_uid, e.org_id, s.id, v_phone);
     UPDATE public.exos_drop_signups
-       SET sms_phone = v_phone, sms_consent_text = public.exos_drop_sms_consent_text(e.org_name, e.name),
-           sms_consented_at = now(), sms_opted_out_at = NULL
+       SET sms_pending_phone = v_phone, sms_code_hash = public._exos_proof_hash(id, 'drop_sms', v_code),
+           sms_code_at = now(), sms_code_attempts = 0, sms_code_sends = sms_code_sends + 1
      WHERE id = s.id;
+    IF NOT public._exos_drop_phone_stopped(e.org_id, v_phone) THEN
+      INSERT INTO public.exos_rsvp_sms_outbox (org_id, phone, body)
+      VALUES (e.org_id, v_phone, v_code || ' is your code to get one text when tickets for '
+              || left(coalesce(e.name, 'the event'), 60) || ' go on sale. It works for 10 minutes. Don''t share it.');
+    END IF;
+    RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'sent');
   END IF;
   RETURN public.exos_drop_status(p_event_id);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_join(uuid, boolean, text, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_drop_join(uuid, boolean, text, jsonb) TO authenticated, service_role;
 
--- Leave by the mail's link (anon, 64-hex). Email and texts both stop.
+-- The code texted by exos_drop_join: only now are the number and the consent
+-- words stored. 10 minutes, 5 tries; signed in, the caller's own signup.
+CREATE OR REPLACE FUNCTION public.exos_drop_verify_sms(p_event_id uuid, p_code text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_uid uuid := auth.uid(); s public.exos_drop_signups%ROWTYPE; v_code text := btrim(coalesce(p_code, ''));
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'exos_drop_verify_sms: sign in first' USING ERRCODE = '42501'; END IF;
+  IF NOT public.exos_rate_hit('drop-smsv:' || v_uid::text, 10) THEN
+    RAISE EXCEPTION 'exos_drop_verify_sms: too many tries, wait a minute' USING ERRCODE = '54000';
+  END IF;
+  SELECT * INTO s FROM public.exos_drop_signups
+   WHERE event_id = p_event_id AND user_id = v_uid AND left_at IS NULL AND sms_pending_phone IS NOT NULL
+   FOR UPDATE;
+  IF s.id IS NULL OR s.sms_code_at < now() - interval '10 minutes' OR s.sms_code_attempts >= 5 OR v_code !~ '^[0-9]{6}$' THEN
+    RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('verified', false);
+  END IF;
+  IF s.sms_code_hash <> public._exos_proof_hash(s.id, 'drop_sms', v_code) THEN
+    UPDATE public.exos_drop_signups SET sms_code_attempts = sms_code_attempts + 1 WHERE id = s.id;
+    -- Counted per number too: 10 wrong codes in a day across signups stop new codes to it.
+    UPDATE public.exos_drop_sms_codes l SET fails = l.fails + 1
+     WHERE l.id = (SELECT l2.id FROM public.exos_drop_sms_codes l2
+                    WHERE l2.signup_id = s.id AND l2.phone = s.sms_pending_phone ORDER BY l2.created_at DESC LIMIT 1);
+    RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('verified', false);
+  END IF;
+  UPDATE public.exos_drop_signups x
+     SET sms_phone = x.sms_pending_phone,
+         sms_consent_text = public.exos_drop_sms_consent_text(o.name, e.name),
+         sms_consented_at = now(), sms_opted_out_at = NULL,
+         sms_pending_phone = NULL, sms_code_hash = NULL, sms_code_attempts = 0
+    FROM public.exos_events e JOIN public.exos_orgs o ON o.id = e.org_id
+   WHERE x.id = s.id AND e.id = x.event_id;
+  RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('verified', true);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_drop_verify_sms(uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_drop_verify_sms(uuid, text) TO authenticated, service_role;
+
+-- Leaving (email and texts). The signup's open confirms are spent FIRST
+-- (the same lock order as a confirm: confirm row, then signup), so an
+-- unused link or code can't re-join the person afterwards.
+CREATE OR REPLACE FUNCTION public._exos_drop_leave_signups(p_ids uuid[])
+RETURNS int
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_n int;
+BEGIN
+  UPDATE public.exos_drop_confirms SET used_at = now() WHERE signup_id = ANY (p_ids) AND used_at IS NULL;
+  UPDATE public.exos_drop_signups
+     SET left_at = coalesce(left_at, now()),
+         sms_opted_out_at = CASE WHEN sms_phone IS NOT NULL THEN coalesce(sms_opted_out_at, now()) END,
+         sms_pending_phone = NULL, sms_code_hash = NULL
+   WHERE id = ANY (p_ids);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  RETURN v_n;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_drop_leave_signups(uuid[]) FROM PUBLIC, anon, authenticated;
+
+-- Leave by a mail's link (anon, 64-hex; only hashes are stored).
 CREATE OR REPLACE FUNCTION public.exos_drop_leave(p_token text)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE v_ev uuid;
+DECLARE v_sid uuid; v_h text;
 BEGIN
   IF coalesce(p_token, '') !~ '^[0-9a-f]{64}$' THEN RETURN jsonb_build_object('ok', false); END IF;
-  UPDATE public.exos_drop_signups
-     SET left_at = coalesce(left_at, now()),
-         sms_opted_out_at = CASE WHEN sms_phone IS NOT NULL THEN coalesce(sms_opted_out_at, now()) END
-   WHERE leave_token = p_token
-  RETURNING event_id INTO v_ev;
-  IF v_ev IS NULL THEN RETURN jsonb_build_object('ok', false); END IF;
-  RETURN jsonb_build_object('ok', true, 'event_name', (SELECT name FROM public.exos_events WHERE id = v_ev));
+  v_h := public._exos_drop_hash(p_token);
+  SELECT coalesce((SELECT lt.signup_id FROM public.exos_drop_leave_tokens lt WHERE lt.token_hash = v_h),
+                  (SELECT s.id FROM public.exos_drop_signups s WHERE s.blast_leave_hash = v_h)) INTO v_sid;
+  IF v_sid IS NULL THEN RETURN jsonb_build_object('ok', false); END IF;
+  PERFORM public._exos_drop_leave_signups(ARRAY[v_sid]);
+  RETURN jsonb_build_object('ok', true, 'event_name',
+    (SELECT e.name FROM public.exos_drop_signups s JOIN public.exos_events e ON e.id = s.event_id WHERE s.id = v_sid));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_leave(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_drop_leave(text) TO anon, authenticated, service_role;
@@ -586,16 +836,13 @@ RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE v_uid uuid := auth.uid(); v_email text; v_n int;
+DECLARE v_uid uuid := auth.uid(); v_email text; v_ids uuid[];
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'exos_drop_leave_mine: sign in first' USING ERRCODE = '42501'; END IF;
   SELECT lower(u.email) INTO v_email FROM auth.users u WHERE u.id = v_uid AND u.email_confirmed_at IS NOT NULL;
-  UPDATE public.exos_drop_signups
-     SET left_at = coalesce(left_at, now()),
-         sms_opted_out_at = CASE WHEN sms_phone IS NOT NULL THEN coalesce(sms_opted_out_at, now()) END
-   WHERE event_id = p_event_id AND (user_id = v_uid OR (v_email IS NOT NULL AND email = v_email));
-  GET DIAGNOSTICS v_n = ROW_COUNT;
-  RETURN v_n > 0;
+  SELECT array_agg(s.id) INTO v_ids FROM public.exos_drop_signups s
+   WHERE s.event_id = p_event_id AND (s.user_id = v_uid OR (v_email IS NOT NULL AND s.email = v_email));
+  RETURN coalesce(public._exos_drop_leave_signups(coalesce(v_ids, '{}'::uuid[])), 0) > 0;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_leave_mine(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_drop_leave_mine(uuid) TO authenticated, service_role;
@@ -642,7 +889,10 @@ BEGIN
           FROM public.exos_drop_signups s WHERE s.event_id = p_event_id
          GROUP BY s.promoter, s.utm_source, s.utm_medium, s.utm_campaign
          ORDER BY count(*) DESC LIMIT 20) q), '[]'::jsonb),
-    'presale', public._exos_drop_presale(p_event_id),
+    -- The code is for owners / managers (finance sees that a presale is set).
+    'presale', CASE WHEN public.exos_is_admin() OR public.exos_has_org_role(v_org, ARRAY['owner', 'manager'])
+                    THEN public._exos_drop_presale(p_event_id)
+                    ELSE public._exos_drop_presale(p_event_id) - 'code' END,
     'can_manage', public.exos_is_admin() OR public.exos_has_org_role(v_org, ARRAY['owner', 'manager']));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_list_summary(uuid) FROM PUBLIC, anon;
@@ -798,6 +1048,25 @@ BEGIN
   EXECUTE replace(v_def, v_old, v_new);
 END $$;
 
+-- exos_sms_claim: a queued drop_list text is skipped at send time when the
+-- number has any STOP on record or its signup no longer consents. Other
+-- audiences: the same test as before (subscriber opt-out only).
+DO $$
+DECLARE
+  v_def text := pg_get_functiondef('public.exos_sms_claim(integer)'::regprocedure);
+  v_old text := '     AND EXISTS (SELECT 1 FROM public.exos_sms_subscribers s
+                  WHERE s.org_id = o.org_id AND s.phone = o.phone AND s.opted_out_at IS NOT NULL);';
+  v_new text := '     AND (EXISTS (SELECT 1 FROM public.exos_sms_subscribers s
+                  WHERE s.org_id = o.org_id AND s.phone = o.phone AND s.opted_out_at IS NOT NULL)
+          /* exos: drop list stop */ OR public._exos_drop_sms_blocked(o.campaign_id, o.org_id, o.phone));';
+BEGIN
+  IF position('/* exos: drop list stop */' in v_def) > 0 THEN RETURN; END IF;
+  IF (length(v_def) - length(replace(v_def, v_old, ''))) / length(v_old) <> 1 THEN
+    RAISE EXCEPTION 'exos_sms_claim: expected one subscriber opt-out check';
+  END IF;
+  EXECUTE replace(v_def, v_old, v_new);
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- 6. The blast (service role; cron below, INACTIVE)
 -- ---------------------------------------------------------------------------
@@ -807,9 +1076,12 @@ END $$;
 -- signup is claimed once (blasted_at, under a per-event lock and SKIP LOCKED)
 -- and its mail keyed 'drop-on-sale:<id>' in exos_mail_dedupe, so a re-run or a
 -- parallel run never mails twice. Texts: one exos_sms_campaigns row per event
--- (audience 'drop_list'), consent re-checked (opted out, STOP after consent,
--- 8 a month, the org's provider connected), 9:00-20:00 local; a presale text
--- that quiet hours push past the public on-sale says "on sale" instead.
+-- (audience 'drop_list'), consent re-checked (opted out, any STOP on record,
+-- 8 a month, the org's provider connected), 9:00-20:00 in the event's zone
+-- (_exos_drop_tz: an unknown zone falls back to America/New_York); a presale
+-- text that quiet hours push past the public on-sale says "on sale" instead.
+-- Each event runs in its own subtransaction: one that fails is skipped (a
+-- WARNING, counted in failed_events) and retried next run.
 CREATE OR REPLACE FUNCTION public.exos_drop_list_blast(p_limit int DEFAULT 500)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -819,14 +1091,20 @@ DECLARE
   v_left    int := greatest(1, least(coalesce(p_limit, 500), 5000));
   v_mails   int := 0;
   v_texts   int := 0;
+  v_errors  int := 0;
+  s_left    int;
+  s_mails   int;
+  s_texts   int;
   ev        record;
   r         record;
   v_at      timestamptz;
   ps        jsonb;
   v_presale boolean;
+  v_opens   timestamptz;
   v_kind    text;
   v_code    text;
   v_mail    uuid;
+  v_leave   text;
   v_tz      text;
   v_send    timestamptz;
   v_local   timestamp;
@@ -845,114 +1123,128 @@ BEGIN
      ORDER BY e.starts_at NULLS LAST, e.id
   LOOP
     EXIT WHEN v_left <= 0;
-    v_at := public._exos_drop_open_at(ev.id);
-    CONTINUE WHEN v_at IS NULL;
-    ps := public._exos_drop_presale(ev.id);
-    v_presale := ps ->> 'status' = 'set';
-    CONTINUE WHEN now() < CASE WHEN v_presale THEN v_at - make_interval(mins => (ps ->> 'minutes')::int) ELSE v_at END;
-    IF v_presale AND now() >= v_at THEN v_presale := false; END IF;   -- presale over: plain on-sale
-    v_kind := CASE WHEN v_presale THEN 'presale' ELSE 'on_sale' END;
-    v_code := CASE WHEN v_presale THEN ps ->> 'code' END;
+    s_left := v_left; s_mails := v_mails; s_texts := v_texts;
+    -- One event at a time: a failure (anything) rolls back that event only
+    -- and the others still go out.
+    BEGIN
+      -- The lock first, then the presale settings (exos_drop_list_set_presale
+      -- takes the same lock), so a presale change can't slip in between.
+      PERFORM pg_advisory_xact_lock(hashtextextended('exos_drop_blast:' || ev.id::text, 0));
+      v_at := public._exos_drop_open_at(ev.id);
+      CONTINUE WHEN v_at IS NULL;
+      ps := public._exos_drop_presale(ev.id);
+      v_presale := ps ->> 'status' = 'set';
+      v_opens := CASE WHEN v_presale THEN v_at - make_interval(mins => (ps ->> 'minutes')::int) END;
+      CONTINUE WHEN now() < coalesce(v_opens, v_at);
+      IF v_presale AND now() >= v_at THEN v_presale := false; END IF;   -- presale over: plain on-sale
+      v_kind := CASE WHEN v_presale THEN 'presale' ELSE 'on_sale' END;
+      v_code := CASE WHEN v_presale THEN ps ->> 'code' END;
 
-    PERFORM pg_advisory_xact_lock(hashtextextended('exos_drop_blast:' || ev.id::text, 0));
-    v_tz := coalesce(nullif(ev.timezone, ''), 'America/New_York');
-    v_send := now();
-    v_local := v_send AT TIME ZONE v_tz;
-    IF v_local::time < time '09:00' THEN
-      v_send := (date_trunc('day', v_local) + interval '9 hours') AT TIME ZONE v_tz;
-    ELSIF v_local::time >= time '20:00' THEN
-      v_send := (date_trunc('day', v_local) + interval '1 day 9 hours') AT TIME ZONE v_tz;
-    END IF;
-    v_body := left(ev.org_name, 40) || ': ' || CASE
-      WHEN v_presale AND v_send < v_at THEN 'The list presale for ' || left(ev.name, 80) || ' is open now with code ' || v_code
-      ELSE 'Tickets for ' || left(ev.name, 80) || ' are on sale now' END
-      || ': {{app_url}}/event/' || ev.id::text
-      || CASE WHEN v_presale AND v_send < v_at THEN '?code=' || v_code ELSE '' END || ' Reply STOP to opt out.';
-    SELECT i.provider INTO v_prov FROM public.exos_org_integrations i
-     WHERE i.org_id = ev.org_id AND i.provider IN ('twilio', 'telnyx') AND i.status = 'connected'
-     ORDER BY (i.provider = 'twilio') DESC LIMIT 1;
-    v_camp := NULL;
-
-    FOR r IN
-      WITH c AS (
-        SELECT s.id FROM public.exos_drop_signups s
-         WHERE s.event_id = ev.id AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL AND s.blasted_at IS NULL
-         ORDER BY s.confirmed_at, s.id
-         LIMIT v_left
-         FOR UPDATE SKIP LOCKED)
-      UPDATE public.exos_drop_signups s SET blasted_at = now(), blast_kind = v_kind
-        FROM c WHERE s.id = c.id AND s.blasted_at IS NULL
-      RETURNING s.*
-    LOOP
-      v_left := v_left - 1;
-      -- Email: an account that opted out of follow-up mail since gets none.
-      IF r.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_mail_prefs mp
-                                            WHERE mp.user_id = r.user_id AND mp.marketing_opt_out) THEN
-        UPDATE public.exos_drop_signups SET blast_skip = 'opted_out' WHERE id = r.id;
-      ELSE
-        v_mail := public.exos_mail_enqueue('drop-on-sale', r.email,
-          jsonb_build_object('org', jsonb_build_object('id', ev.org_id, 'name', ev.org_name),
-                             'event', jsonb_build_object('id', ev.id, 'name', ev.name, 'starts_at', ev.starts_at,
-                                                         'timezone', ev.timezone, 'venue_name', ev.venue_name,
-                                                         'venue_location', ev.venue_location),
-                             'kind', v_kind, 'code', v_code, 'on_sale_at', v_at, 'leave_token', r.leave_token),
-          'drop-on-sale:' || r.id::text, r.user_id, false, NULL);
-        IF v_mail IS NOT NULL THEN
-          UPDATE public.exos_mail SET list_unsubscribe = '{{app_url}}/drop/leave?t=' || r.leave_token WHERE id = v_mail;
-          v_mails := v_mails + 1;
-        END IF;
-        UPDATE public.exos_drop_signups
-           SET blast_mail_id = v_mail, blast_skip = CASE WHEN v_mail IS NULL THEN 'no_address' END
-         WHERE id = r.id;
+      v_tz := public._exos_drop_tz(ev.timezone);
+      v_send := now();
+      v_local := v_send AT TIME ZONE v_tz;
+      IF v_local::time < time '09:00' THEN
+        v_send := (date_trunc('day', v_local) + interval '9 hours') AT TIME ZONE v_tz;
+      ELSIF v_local::time >= time '20:00' THEN
+        v_send := (date_trunc('day', v_local) + interval '1 day 9 hours') AT TIME ZONE v_tz;
       END IF;
+      v_body := left(ev.org_name, 40) || ': ' || CASE
+        WHEN v_presale AND v_send < v_at THEN 'The list presale for ' || left(ev.name, 80) || ' is open now with code ' || v_code
+        ELSE 'Tickets for ' || left(ev.name, 80) || ' are on sale now' END
+        || ': {{app_url}}/event/' || ev.id::text
+        || CASE WHEN v_presale AND v_send < v_at THEN '?code=' || v_code ELSE '' END || ' Reply STOP to opt out.';
+      SELECT i.provider INTO v_prov FROM public.exos_org_integrations i
+       WHERE i.org_id = ev.org_id AND i.provider IN ('twilio', 'telnyx') AND i.status = 'connected'
+       ORDER BY (i.provider = 'twilio') DESC LIMIT 1;
+      v_camp := NULL;
 
-      -- Text, when they opted in and still may get one.
-      CONTINUE WHEN r.sms_phone IS NULL OR r.sms_opted_out_at IS NOT NULL;
-      IF EXISTS (SELECT 1 FROM public.exos_sms_stops st
-                  WHERE st.org_id = ev.org_id AND st.phone = r.sms_phone AND st.stopped_at >= r.sms_consented_at)
-         OR EXISTS (SELECT 1 FROM public.exos_sms_subscribers sb
-                     WHERE sb.org_id = ev.org_id AND sb.phone = r.sms_phone AND sb.opted_out_at >= r.sms_consented_at) THEN
-        v_status := 'stopped';
-      ELSIF v_prov IS NULL THEN
-        v_status := 'no_provider';
-      ELSIF (SELECT count(*) FROM public.exos_sms_outbox o
-              WHERE o.org_id = ev.org_id AND o.phone = r.sms_phone
-                AND o.status IN ('queued', 'sending', 'sent', 'dry_run')
-                AND o.created_at > now() - interval '30 days') >= 8 THEN
-        v_status := 'capped';
-      ELSE
-        IF v_camp IS NULL THEN
-          SELECT c.id INTO v_camp FROM public.exos_sms_campaigns c
-           WHERE c.org_id = ev.org_id AND c.event_id = ev.id AND c.audience = 'drop_list'
-           ORDER BY c.created_at LIMIT 1;
-          IF v_camp IS NULL THEN
-            INSERT INTO public.exos_sms_campaigns (org_id, event_id, audience, body, provider, send_after, status)
-            VALUES (ev.org_id, ev.id, 'drop_list', left(v_body, 480), v_prov, v_send, 'queued')
-            RETURNING id INTO v_camp;
-          END IF;
-        END IF;
-        IF (SELECT c.status FROM public.exos_sms_campaigns c WHERE c.id = v_camp) = 'cancelled' THEN
-          v_status := 'cancelled';
+      -- During the presale only members confirmed before it opened (the code
+      -- works for them only); the rest wait for the public on-sale.
+      FOR r IN
+        WITH c AS (
+          SELECT s.id FROM public.exos_drop_signups s
+           WHERE s.event_id = ev.id AND s.confirmed_at IS NOT NULL AND s.left_at IS NULL AND s.blasted_at IS NULL
+             AND (NOT v_presale OR s.confirmed_at <= v_opens)
+           ORDER BY s.confirmed_at, s.id
+           LIMIT v_left
+           FOR UPDATE SKIP LOCKED)
+        UPDATE public.exos_drop_signups s SET blasted_at = now(), blast_kind = v_kind
+          FROM c WHERE s.id = c.id AND s.blasted_at IS NULL
+        RETURNING s.*
+      LOOP
+        v_left := v_left - 1;
+        -- Email: an account that opted out of follow-up mail since gets none.
+        IF r.user_id IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_mail_prefs mp
+                                              WHERE mp.user_id = r.user_id AND mp.marketing_opt_out) THEN
+          UPDATE public.exos_drop_signups SET blast_skip = 'opted_out' WHERE id = r.id;
         ELSE
-          INSERT INTO public.exos_sms_outbox (campaign_id, org_id, phone, body, send_after)
-          VALUES (v_camp, ev.org_id, r.sms_phone, left(v_body, 480), v_send)
-          ON CONFLICT (campaign_id, phone) DO NOTHING;
-          GET DIAGNOSTICS v_n = ROW_COUNT;
-          IF v_n = 0 THEN
-            v_status := 'duplicate';                 -- this number already has the text
+          v_leave := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
+          v_mail := public.exos_mail_enqueue('drop-on-sale', r.email,
+            jsonb_build_object('org', jsonb_build_object('id', ev.org_id, 'name', ev.org_name),
+                               'event', jsonb_build_object('id', ev.id, 'name', ev.name, 'starts_at', ev.starts_at,
+                                                           'timezone', ev.timezone, 'venue_name', ev.venue_name,
+                                                           'venue_location', ev.venue_location),
+                               'kind', v_kind, 'code', v_code, 'on_sale_at', v_at, 'leave_token', v_leave),
+            'drop-on-sale:' || r.id::text, r.user_id, false, NULL);
+          IF v_mail IS NOT NULL THEN
+            UPDATE public.exos_mail SET list_unsubscribe = '{{app_url}}/drop/leave?t=' || v_leave WHERE id = v_mail;
+            v_mails := v_mails + 1;
+          END IF;
+          UPDATE public.exos_drop_signups
+             SET blast_mail_id = v_mail, blast_skip = CASE WHEN v_mail IS NULL THEN 'no_address' END,
+                 blast_leave_hash = CASE WHEN v_mail IS NOT NULL THEN public._exos_drop_hash(v_leave) END
+           WHERE id = r.id;
+        END IF;
+
+        -- Text, when they proved the number and still may get one.
+        CONTINUE WHEN r.sms_phone IS NULL OR r.sms_opted_out_at IS NOT NULL;
+        IF public._exos_drop_phone_stopped(ev.org_id, r.sms_phone) THEN
+          v_status := 'stopped';                    -- any STOP on record, until START
+        ELSIF v_prov IS NULL THEN
+          v_status := 'no_provider';
+        ELSIF (SELECT count(*) FROM public.exos_sms_outbox o
+                WHERE o.org_id = ev.org_id AND o.phone = r.sms_phone
+                  AND o.status IN ('queued', 'sending', 'sent', 'dry_run')
+                  AND o.created_at > now() - interval '30 days') >= 8 THEN
+          v_status := 'capped';
+        ELSE
+          IF v_camp IS NULL THEN
+            SELECT c.id INTO v_camp FROM public.exos_sms_campaigns c
+             WHERE c.org_id = ev.org_id AND c.event_id = ev.id AND c.audience = 'drop_list'
+             ORDER BY c.created_at LIMIT 1;
+            IF v_camp IS NULL THEN
+              INSERT INTO public.exos_sms_campaigns (org_id, event_id, audience, body, provider, send_after, status)
+              VALUES (ev.org_id, ev.id, 'drop_list', left(v_body, 480), v_prov, v_send, 'queued')
+              RETURNING id INTO v_camp;
+            END IF;
+          END IF;
+          IF (SELECT c.status FROM public.exos_sms_campaigns c WHERE c.id = v_camp) = 'cancelled' THEN
+            v_status := 'cancelled';
           ELSE
-            v_status := 'queued';
-            v_texts := v_texts + 1;
-            UPDATE public.exos_sms_campaigns
-               SET status = 'queued', queued_count = queued_count + 1
-             WHERE id = v_camp AND status <> 'cancelled';
+            INSERT INTO public.exos_sms_outbox (campaign_id, org_id, phone, body, send_after)
+            VALUES (v_camp, ev.org_id, r.sms_phone, left(v_body, 480), v_send)
+            ON CONFLICT (campaign_id, phone) DO NOTHING;
+            GET DIAGNOSTICS v_n = ROW_COUNT;
+            IF v_n = 0 THEN
+              v_status := 'duplicate';                 -- this number already has the text
+            ELSE
+              v_status := 'queued';
+              v_texts := v_texts + 1;
+              UPDATE public.exos_sms_campaigns
+                 SET status = 'queued', queued_count = queued_count + 1
+               WHERE id = v_camp AND status <> 'cancelled';
+            END IF;
           END IF;
         END IF;
-      END IF;
-      UPDATE public.exos_drop_signups SET sms_status = v_status WHERE id = r.id;
-    END LOOP;
+        UPDATE public.exos_drop_signups SET sms_status = v_status WHERE id = r.id;
+      END LOOP;
+    EXCEPTION WHEN others THEN
+      v_left := s_left; v_mails := s_mails; v_texts := s_texts; v_errors := v_errors + 1;
+      RAISE WARNING 'exos_drop_list_blast: event %: % (%)', ev.id, SQLERRM, SQLSTATE;
+    END;
   END LOOP;
-  RETURN jsonb_build_object('mails', v_mails, 'texts', v_texts);
+  RETURN jsonb_build_object('mails', v_mails, 'texts', v_texts)
+         || CASE WHEN v_errors > 0 THEN jsonb_build_object('failed_events', v_errors) ELSE '{}'::jsonb END;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_drop_list_blast(int) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_drop_list_blast(int) TO service_role;
@@ -966,6 +1258,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE v_c int; v_s int; v_e int;
 BEGIN
+  DELETE FROM public.exos_drop_sms_codes WHERE created_at < now() - interval '2 days';
   DELETE FROM public.exos_drop_confirms WHERE created_at < now() - interval '8 days';
   GET DIAGNOSTICS v_c = ROW_COUNT;
   DELETE FROM public.exos_drop_signups WHERE confirmed_at IS NULL AND created_at < now() - interval '30 days';
@@ -1007,15 +1300,19 @@ BEGIN
                  (SELECT string_agg(quote_literal(x), ',' ORDER BY x) FROM unnest(v_vals) x));
 END $$;
 
+-- Add 'drop_list' to whatever the audience check allows now (read live).
 DO $$
-DECLARE v_def text;
+DECLARE v_def text; v_vals text[];
 BEGIN
   SELECT pg_get_constraintdef(c.oid) INTO v_def FROM pg_constraint c
    WHERE c.conrelid = 'public.exos_sms_campaigns'::regclass AND c.conname = 'exos_sms_campaigns_audience_check';
-  IF strpos(coalesce(v_def, ''), 'drop_list') > 0 THEN RETURN; END IF;
-  ALTER TABLE public.exos_sms_campaigns DROP CONSTRAINT IF EXISTS exos_sms_campaigns_audience_check;
-  ALTER TABLE public.exos_sms_campaigns ADD CONSTRAINT exos_sms_campaigns_audience_check
-    CHECK (audience IN ('org', 'event_buyers', 'staff_report', 'drop_list'));
+  IF v_def IS NULL THEN RETURN; END IF;
+  SELECT array_agg(m[1]) INTO v_vals FROM regexp_matches(v_def, '''([^'']+)''', 'g') AS m;
+  IF 'drop_list' = ANY (coalesce(v_vals, '{}'::text[])) THEN RETURN; END IF;
+  SELECT array_agg(DISTINCT x ORDER BY x) INTO v_vals FROM unnest(coalesce(v_vals, '{}'::text[]) || 'drop_list'::text) x;
+  ALTER TABLE public.exos_sms_campaigns DROP CONSTRAINT exos_sms_campaigns_audience_check;
+  EXECUTE format('ALTER TABLE public.exos_sms_campaigns ADD CONSTRAINT exos_sms_campaigns_audience_check CHECK (audience = ANY (ARRAY[%s]))',
+                 (SELECT string_agg(quote_literal(x), ',' ORDER BY x) FROM unnest(v_vals) x));
 END $$;
 
 -- ---------------------------------------------------------------------------

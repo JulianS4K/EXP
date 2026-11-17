@@ -2138,6 +2138,22 @@ await run('edit event: Show on Discord and Post to Discord (dry run)', async (pa
     assert(st.code?.p_browser_token === st.signup.p_browser_token, 'the code goes with the same browser token');
   }, { mock: dropMock(st) });
 }
+{
+  const st = {};
+  await run('drop list: signed in, the text waits for the texted code', async (page) => {
+    await page.goto(BASE + '/event/' + EV);
+    const box = page.locator('[data-drop-list]');
+    await box.getByLabel(/Also text me/).click();
+    await box.getByLabel('Mobile number').fill('212 555 0101');
+    await box.getByRole('button', { name: /Notify me/ }).click();
+    await box.getByText('We texted a code to …0101').waitFor({ timeout: 8000 });
+    assert(st.join?.p_sms === true && st.join.p_phone === '212 555 0101', 'join sent the number');
+    assert(await box.getByText(/and text …0101/).count() === 0, 'no text promised before the code');
+    await box.getByLabel('Code from the text').fill('654321');
+    await box.getByRole('button', { name: 'Turn on the text' }).click();
+    await box.getByText(/and text …0101/).waitFor({ timeout: 8000 });
+  }, { signedIn: true, mock: dropMock(st) });
+}
 await run('drop list: on sale, no "Notify me" (the buy button as before)', async (page, log) => {
   await page.goto(BASE + '/event/' + EV);
   await expectText(page, 'Four rooms of house till late.');

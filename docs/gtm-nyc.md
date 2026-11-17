@@ -96,7 +96,7 @@ What follows for us:
 | Door app dies in the basement | Offline roster that syncs when back online |
 | Sold out, then no-shows | Waitlist auto-offers that hold the seat, plus face-value transfers |
 | Promoter team payouts on spreadsheets | Promoter tracking links and attribution (Phase 1) |
-| Slow payouts | Stripe Connect Express, paid straight to the organizer's account |
+| Slow payouts | Stripe Connect (Standard accounts by default), paid straight to the organizer's account |
 
 **Commercial offer** (as built: `supabase/functions/_shared/platformFee.ts`, `docs/organizer-guide.md`):
 

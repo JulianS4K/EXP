@@ -6,7 +6,7 @@ browsers; the server copy isn't. Both carry the same dedupe id, so a platform th
 counts the order once.
 
 Status (2026-09-30): built, **not live**. Migrations `20260930100000_exos_marketing_conversions.sql`
-and `20260930102000_exos_oauth_google.sql` are not applied; `exos-conversions-drain` and
+and `20260930102000_exos_oauth_google.sql` are applied (prod history, checked 2026-11-17); `exos-conversions-drain` and
 `exos-oauth-google` are not deployed (the drain isn't scheduled); the drain is dry-run until
 `EXOS_CONVERSIONS_LIVE=true`.
 

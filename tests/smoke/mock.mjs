@@ -313,6 +313,9 @@ export const dropMock = (st = {}) => ({
     exos_drop_status: () => ({ ...DROP_STATUS, ...(st.joined ? { joined: true, sms: false } : {}) }),
     exos_drop_signup: (b) => { st.signup = b; return { ok: true, status: 'check_email' }; },
     exos_drop_confirm_code: (b) => { st.code = b; return { ok: b.p_code === '123456' }; },
+    // Texts wait for the code texted to the number (nothing consented yet).
+    exos_drop_join: (b) => { st.join = b; return { ...DROP_STATUS, joined: true, sms: false, sms_pending: !!b.p_sms, pending_hint: b.p_sms ? '…0101' : null }; },
+    exos_drop_verify_sms: (b) => ({ ...DROP_STATUS, joined: true, verified: b.p_code === '654321', sms: b.p_code === '654321', phone_hint: '…0101' }),
     exos_drop_confirm: (b) => (/^[0-9a-f]{64}$/.test(b.p_token) ? { ok: true, event_id: EV, event_name: 'Fall Party', org_name: 'Brooklyn Nights' } : { ok: false }),
     exos_drop_leave: (b) => (/^[0-9a-f]{64}$/.test(b.p_token) ? { ok: true, event_name: 'Fall Party' } : { ok: false }),
     exos_drop_list_summary: () => DROP_SUMMARY,

@@ -469,7 +469,11 @@ await check('event page: drop list (signed in, texts)', async (page, run) => {
   const box = page.locator('[data-drop-list]');
   await box.getByLabel(/Also text me/).click();
   await box.getByLabel('Mobile number').waitFor({ timeout: 8000 });
-  await run();
+  await run('form');
+  await box.getByLabel('Mobile number').fill('212 555 0101');
+  await box.getByRole('button', { name: /Notify me/ }).click();
+  await box.getByLabel('Code from the text').waitFor({ timeout: 8000 });
+  await run('text code');
 }, { signedIn: true, include: '[data-drop-list]', mock: dropMock({}) });
 await check('drop list confirm link', async (page, run) => {
   await page.goto(BASE + '/drop/confirm?t=' + 'c'.repeat(64));

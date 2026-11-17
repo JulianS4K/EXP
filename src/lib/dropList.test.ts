@@ -68,6 +68,8 @@ describe('drop list helpers', () => {
       email_consent_text: 'Email me once', sms_consent_text: 'Text me once. Reply STOP' });
     expect(s).toMatchObject({ open: true, listPresale: true, joined: true, sms: true, phoneHint: '…0101', emailConsentText: 'Email me once' });
     expect(parseStatus(null)).toMatchObject({ open: false, joined: false, onSaleAt: null, smsConsentText: null });
+    expect(parseStatus({ open: true, joined: true, sms: false, sms_pending: true, pending_hint: '…0177' }))
+      .toMatchObject({ sms: false, smsPending: true, pendingHint: '…0177' });
     const m = parseSummary({ open: true, signups: 12, confirmed: 9, pending: 3, sms: 4, left: 1, notified: 0, texts_queued: 0,
       sources: [{ label: 'promoter:dj_k', promoter: 'dj_k', signups: 5, confirmed: 4 }, { label: 'instagram', utm_source: 'instagram', utm_medium: 'story', signups: 4, confirmed: 3 }],
       presale: { status: 'set', minutes: 60, tier_id: 't1', tier_name: 'List presale', code: 'LISTABC', opens_at: '2026-11-18T14:00:00Z' },

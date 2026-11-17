@@ -92,6 +92,12 @@ export interface DropStatus {
   joined: boolean;
   sms: boolean;
   phoneHint: string | null;
+  /** A number waiting for the code texted to it (nothing consented yet). */
+  smsPending: boolean;
+  pendingHint: string | null;
+  /** After a join with a number: the code was texted, or a limit held it back
+   *  (the same answer whichever limit). */
+  smsCode: 'sent' | 'try_again' | null;
   /** The exact words the signup stores (from SQL), while open. */
   emailConsentText: string | null;
   smsConsentText: string | null;
@@ -105,6 +111,9 @@ export function parseStatus(d: any): DropStatus {
     joined: d?.joined === true,
     sms: d?.sms === true,
     phoneHint: typeof d?.phone_hint === 'string' ? d.phone_hint : null,
+    smsPending: d?.sms_pending === true,
+    pendingHint: typeof d?.pending_hint === 'string' ? d.pending_hint : null,
+    smsCode: d?.sms_code === 'sent' || d?.sms_code === 'try_again' ? d.sms_code : null,
     emailConsentText: typeof d?.email_consent_text === 'string' ? d.email_consent_text : null,
     smsConsentText: typeof d?.sms_consent_text === 'string' ? d.sms_consent_text : null,
   };
@@ -179,12 +188,21 @@ export async function getDropStatus(eventId: string): Promise<DropStatus> {
   return parseStatus(data);
 }
 
-/** Guest signup: the answer is always "check your email". */
-export async function dropSignup(eventId: string, email: string, source: Record<string, string> | null): Promise<void> {
-  const { error } = await supabase.rpc('exos_drop_signup', {
+/** Guest signup: "check your email" for any address, or "try again" when
+ *  the event's own signup limit is full (it says nothing about an address). */
+export async function dropSignup(eventId: string, email: string, source: Record<string, string> | null): Promise<'check_email' | 'try_again'> {
+  const { data, error } = await supabase.rpc('exos_drop_signup', {
     p_event_id: eventId, p_email: email.trim(), p_browser_token: browserToken(eventId), p_source: source,
   });
   if (error) throw msg(error);
+  return data?.status === 'try_again' ? 'try_again' : 'check_email';
+}
+
+/** The code texted to the number given at join; texts are on only after it. */
+export async function dropVerifySms(eventId: string, code: string): Promise<{ verified: boolean; status: DropStatus }> {
+  const { data, error } = await supabase.rpc('exos_drop_verify_sms', { p_event_id: eventId, p_code: code });
+  if (error) throw msg(error);
+  return { verified: data?.verified === true, status: parseStatus(data) };
 }
 
 export async function dropConfirmCode(eventId: string, code: string): Promise<boolean> {
