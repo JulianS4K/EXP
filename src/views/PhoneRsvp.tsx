@@ -100,7 +100,7 @@ export default function PhoneRsvp() {
     if (!/^[0-9]{6}$/.test(code.trim())) { setError('Enter the 6-digit code.'); return; }
     setBusy(true);
     try {
-      const v = await rsvpVerify(rsvpId, code.trim());
+      const v = await rsvpVerify(rsvpId, code.trim(), eventId);
       if (!v.ok) {
         if (v.error === 'sold_out') setStep('full');
         if (v.error === 'locked' || v.error === 'expired') setStep('form');

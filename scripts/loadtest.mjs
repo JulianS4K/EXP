@@ -10,7 +10,8 @@
 // server's suggested, jittered pace (--poll-scale multiplies it; 1 is real
 // time) until admitted, then runs exos-checkout's SQL before Stripe: the queue
 // check, the tier read, the last-call read, the purchase limit, the current
-// price, the guest hold (with the queue token header) and the fee terms.
+// price, the turn's attach (one open checkout), the guest hold (with the
+// queue token header) and the fee terms.
 // Payment is stubbed: nothing calls Stripe, and the holds simply expire.
 //
 // Targets: the local scratch Postgres built by tests/exos/run_p0.sh (the
@@ -181,6 +182,8 @@ async function vu(i, deadline, stepTag) {
     await request('checkout_sql', 'service_role', hdr, 'SELECT * FROM public.exos_public_event_sale($1)', [EV]);
     await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_assert_purchase_limit_email($1, $2, 2)', [EV, email]);
     await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_tier_current_price($1)', [TIER]);
+    await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_wroom_attach($1, $2, $3, NULL, $4, $5) AS ok',
+      [EV, TIER, tok, email, randomUUID()]);
     await request('hold', 'service_role', svc, 'SELECT public.exos_create_guest_hold($1, $2, 2, $3, $4, NULL) AS h',
       [EV, TIER, email, randomUUID().replace(/-/g, '')]);
     await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_event_fee_terms($1, $2, 2)', [EV, TIER]);

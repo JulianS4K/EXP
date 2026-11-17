@@ -23,6 +23,12 @@ function fmt(d: Date | null, tz?: string | null): string {
   }
 }
 
+/** A Date as a datetime-local value in the browser's zone. */
+function localInput(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 const PHASE: Record<RoomSummary['phase'], string> = {
   off: 'Off', before: 'Armed: opens before the on-sale', lobby: 'Open: people are gathering', live: 'Live: letting people in',
 };
@@ -33,11 +39,12 @@ export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey =
   const { toast } = useToast();
   const [s, setS] = useState<RoomSummary | null>(null);
   const [turnstile, setTurnstile] = useState(false);
+  const [pin, setPin] = useState('');
   const [form, setForm] = useState<Record<Exclude<keyof RoomSettingsInput, 'turnstile'>, string>>({
     windowMinutes: '15', admitPerMinute: '200', admissionMinutes: '10', idleCloseMinutes: '10', maxEntries: '',
   });
   const [busy, setBusy] = useState(false);
-  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId(), cap: useId(), ts: useId(), tsHelp: useId() };
+  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId(), cap: useId(), ts: useId(), tsHelp: useId(), pin: useId(), pinHelp: useId() };
 
   const load = useCallback(() => {
     if (!canView) return;
@@ -58,7 +65,8 @@ export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey =
       maxEntries: s.maxEntries == null ? '' : String(s.maxEntries),
     });
     setTurnstile(s.turnstile);
-  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes, s?.maxEntries, s?.turnstile]); // eslint-disable-line react-hooks/exhaustive-deps
+    setPin(s.opensAtPin ? localInput(s.opensAtPin) : '');
+  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes, s?.maxEntries, s?.turnstile, s?.opensAtPin?.getTime()]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!canView || !s) return null;
 
   const input: RoomSettingsInput = {
@@ -67,6 +75,7 @@ export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey =
     maxEntries: form.maxEntries.trim() === '' ? 0 : Number(form.maxEntries),
     // Without the platform's keys it can only be turned off, never on.
     turnstile: siteKey ? turnstile : (s.turnstile ? false : undefined),
+    opensAt: pin ? new Date(pin) : (s.opensAtPin ? null : undefined),
   };
   const err = settingsProblem(input);
   const on = s.enabled && !s.closedAt;
@@ -128,6 +137,16 @@ export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey =
         {field('admissionMinutes', ids.adm, 'Time to check out (min)', 2, 60)}
         {field('idleCloseMinutes', ids.idle, 'Close when idle for (min)', 1, 240)}
         {field('maxEntries', ids.cap, 'Most people in line', 100, 1000000, s.cap ? `Automatic (${s.cap.toLocaleString()})` : 'Automatic')}
+      </div>
+      <div className="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+        <div>
+          <label htmlFor={ids.pin} className={LBL}>On-sale time (optional)</label>
+          <input id={ids.pin} type="datetime-local" value={pin} disabled={!s.canManage} aria-describedby={ids.pinHelp}
+            onChange={(e) => setPin(e.target.value)} className={FLD} />
+        </div>
+        <p id={ids.pinHelp} className="text-[11px] text-slate-600">
+          Blank: when your ticket types' sales start. Set it if an early type (already on sale or sold out) shouldn't count.
+        </p>
       </div>
       <div className="mb-3">
         <label htmlFor={ids.ts} className="flex items-center gap-2 text-xs text-slate-800">

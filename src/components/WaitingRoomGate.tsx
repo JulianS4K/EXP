@@ -14,6 +14,7 @@ import {
   rejoinRoom, type RoomStatus,
 } from '../lib/waitingRoom';
 import TurnstileWidget from './TurnstileWidget';
+import { useAuth } from '../context/AuthContext';
 
 function timeIn(d: Date, tz?: string | null): string {
   try {
@@ -23,9 +24,11 @@ function timeIn(d: Date, tz?: string | null): string {
   }
 }
 
-export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge }: {
+export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge, onSignIn }: {
   status: RoomStatus; timezone?: string | null; onRejoin: () => void; busy?: boolean;
   siteKey?: string; onChallenge?: (token: string) => void;
+  /** Signed out: offered when the guest line is full (every account gets a place). */
+  onSignIn?: () => void;
 }) {
   const v = queueView(status, (d) => timeIn(d, timezone));
   const mode = challengeMode(status, siteKey);
@@ -51,6 +54,12 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = T
       {mode === 'unavailable' && (
         <p className="type text-[12px] text-white/75">This waiting room can't take new places right now. Try again later.</p>
       )}
+      {status.state === 'full' && onSignIn && (
+        <button type="button" onClick={onSignIn}
+          className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide">
+          Sign in to get a place
+        </button>
+      )}
       {v.rejoin && (
         <button type="button" onClick={onRejoin} disabled={busy}
           className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide disabled:opacity-50">
@@ -68,6 +77,8 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = T
 export default function WaitingRoomGate({ eventId, timezone, children, siteKey = TURNSTILE_SITE_KEY }: {
   eventId: string; timezone?: string | null; children: ReactNode; siteKey?: string;
 }) {
+  const { user, openAuthModal } = useAuth();
+  const uid = user?.uid ?? null;
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,7 +107,8 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
       if (!prev) { setStatus({ state: 'off' }); return; }
       schedule({ ...prev, pollAfterMs: 15000 }, (j) => void run(j));
     }
-  }, [eventId, schedule]);
+    // A sign-in changes who asks: the account's own place (uid in the deps).
+  }, [eventId, schedule, uid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     alive.current = true;
@@ -144,7 +156,7 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
   // Until the first answer, show the buy box (most events have no room).
   if (status && blocksBuying(status)) {
     return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy}
-      siteKey={siteKey} onChallenge={(t) => void challenge(t)} />;
+      siteKey={siteKey} onChallenge={(t) => void challenge(t)} onSignIn={uid ? undefined : openAuthModal} />;
   }
   return (
     <>

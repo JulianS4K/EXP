@@ -1,18 +1,23 @@
-// exos-wroom-join (mig 20261118120000): a new place in a waiting room whose
-// organizer turned Cloudflare Turnstile on. The browser's anon join answers
-// { state: 'challenge' } there and mints nothing; this checks the Turnstile
-// token with Cloudflare's siteverify (one verification POST, no upstream
-// write) and then calls exos_wroom_join_verified with the service role,
-// passing the platform's client-address headers so the SQL network limits
-// read the same trusted address as for a browser call.
+// exos-wroom-join (mig 20261118120000): a new anonymous place in a waiting
+// room whose organizer turned Cloudflare Turnstile on. The browser's anon join
+// answers { state: 'challenge' } there and mints nothing; this checks the
+// Turnstile token with Cloudflare's siteverify (one verification POST, no
+// upstream write) and then calls exos_wroom_join_verified (service role).
 //
-// Order: method, body size, ids, the per-network rate limit (before the
-// external call), the secret, the token, siteverify, then SQL.
-// Pure enough to test: every outside call comes in through deps.
+// The client address is never read here: the platform headers
+// (cf-connecting-ip, x-forwarded-for) go to SQL, which applies
+// _exos_request_ip()'s trusted-source rule (request_ip_source: Cloudflare's
+// header, else the last X-Forwarded-For hop; never x-real-ip or a
+// client-written first hop), buckets IPv6 by /64 for the 30-a-minute limit,
+// and answers 'no_ip' without one (503 here: never a place in 'unknown').
+//
+// Order: method, body, ids, the secret, the address + rate limit (SQL, before
+// the external call), the token, siteverify (success, action 'wroom', the
+// app's hostname), then the join. Every outside call comes in through deps.
 
 import { readCapped } from "./api/body.ts";
 import { captchaPassed, captchaVerifyRequest } from "./signup.ts";
-import { clientIp, hashIp } from "./guest.ts";
+import { parseRedirectOrigins } from "./redirects.ts";
 
 export const WROOM_JOIN_MAX_BODY = 4 * 1024;
 export const WROOM_TURNSTILE_ACTION = "wroom";
@@ -31,6 +36,31 @@ export interface WroomJoinDeps {
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   /** service-role RPC */
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
+  log?: (msg: string) => void;
+}
+
+/** The app's hostnames, from EXOS_APP_BASE_URL, EXOS_APP_URL and EXOS_REDIRECT_ORIGINS. */
+export function allowedHosts(env: (name: string) => string | undefined): string[] {
+  const out = new Set<string>();
+  for (const raw of [env("EXOS_APP_BASE_URL"), env("EXOS_APP_URL"), ...parseRedirectOrigins(env("EXOS_REDIRECT_ORIGINS"))]) {
+    if (!raw) continue;
+    try { out.add(new URL(raw.trim()).hostname.toLowerCase()); } catch { /* not a URL */ }
+  }
+  return [...out];
+}
+
+let warnedNoHosts = false;
+
+/** Does siteverify's answer pass for this room: success, our action, our host? */
+export function verifyAnswer(answer: unknown, hosts: string[], log: (m: string) => void = console.warn): boolean {
+  if (!captchaPassed(answer)) return false;
+  const a = answer as { action?: unknown; hostname?: unknown };
+  if (a.action !== WROOM_TURNSTILE_ACTION) return false;
+  if (hosts.length === 0) {
+    if (!warnedNoHosts) { warnedNoHosts = true; log("exos-wroom-join: no app hostnames configured; Turnstile hostname not checked"); }
+    return true;
+  }
+  return typeof a.hostname === "string" && hosts.includes(a.hostname.toLowerCase());
 }
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
@@ -56,19 +86,23 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   const token = typeof b.token === "string" && TOKEN_RE.test(b.token) ? b.token : null;
   const challenge = typeof b.turnstile_token === "string" ? b.turnstile_token.trim() : "";
 
-  const ip = clientIp((h) => req.headers.get(h));
-  const salt = deps.env("EXOS_GUEST_IP_SALT") ?? deps.env("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  const ipHash = await hashIp(ip, salt);
-  // Before the external call: 30 verifications a minute per network.
-  const rl = await deps.rpc("exos_rate_hit", { p_bucket: `wroom-tv:${ipHash?.slice(0, 32) ?? "unknown"}`, p_limit: 30 });
-  if (rl.error) return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
-  if (rl.data === false) return json({ state: "busy", retry_after_ms: 10000 }, 429, { "retry-after": "10" });
-
   const secret = (deps.env("TURNSTILE_SECRET_KEY") ?? "").trim();
   if (!secret) return json({ error: "the waiting room's check isn't set up", reason: "challenge_unavailable" }, 503);
+
+  // The platform's address headers only; SQL resolves and rate-limits.
+  const headers = {
+    "cf-connecting-ip": req.headers.get("cf-connecting-ip"),
+    "x-forwarded-for": req.headers.get("x-forwarded-for"),
+  };
+  const g = await deps.rpc("exos_wroom_verify_gate", { p_headers: headers });
+  if (g.error) return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
+  const gate = (g.data ?? {}) as { ok?: boolean; reason?: string; ip?: string };
+  if (gate.reason === "busy") return json({ state: "busy", retry_after_ms: 10000 }, 429, { "retry-after": "10" });
+  if (!gate.ok || typeof gate.ip !== "string") return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
+
   if (!challenge || challenge.length > 2048) return json({ error: "complete the check first", reason: "challenge_required" }, 400);
 
-  const r = captchaVerifyRequest({ provider: "turnstile", secret }, challenge, ip);
+  const r = captchaVerifyRequest({ provider: "turnstile", secret }, challenge, gate.ip);
   let answer: unknown;
   try {
     const res = await deps.fetch(r.url, {
@@ -79,18 +113,11 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   } catch {
     return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
   }
-  const action = (answer as { action?: unknown } | null)?.action;
-  if (!captchaPassed(answer) || (action !== undefined && action !== WROOM_TURNSTILE_ACTION)) {
+  if (!verifyAnswer(answer, allowedHosts(deps.env), deps.log)) {
     return json({ error: "the check didn't pass, try again", reason: "challenge_failed" }, 403);
   }
 
-  const { data, error } = await deps.rpc("exos_wroom_join_verified", {
-    p_event_id: eventId, p_token: token,
-    p_headers: {
-      "cf-connecting-ip": req.headers.get("cf-connecting-ip"),
-      "x-forwarded-for": req.headers.get("x-forwarded-for"),
-    },
-  });
+  const { data, error } = await deps.rpc("exos_wroom_join_verified", { p_event_id: eventId, p_token: token, p_headers: headers });
   if (error) return json({ error: "could not join the line, try again" }, 503);
   return json(data ?? { state: "off" });
 }

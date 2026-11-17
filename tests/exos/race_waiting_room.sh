@@ -15,11 +15,11 @@
 #          refused (XWR01); an admission is marked used only when its hold
 #          committed
 #   race 4 one admitted token, 10 different buyers at once (each keeps its
-#          transaction open): exactly one hold; the others refused (XWR02 while
-#          the first is open, XWR01 once the turn is bound); the turn bound to
-#          that one buyer
-#   race 5 the same buyer twice at once on one token: one hold, the other
-#          XWR02 (one checkout per turn at a time)
+#          transaction open): exactly one hold; the others refused (XWR01: the
+#          turn is bound to that one buyer under the entry's row lock)
+#   race 5 10 checkouts of one buyer on one turn at once (exos_wroom_attach,
+#          each keeping its transaction open): exactly one attached, 9 XWR02
+#          (one open checkout, so one Stripe session, per turn)
 #   race 6 40 newcomers join at once (40 networks) while the room recounts:
 #          40 places, and the next recount's live count equals an exact count
 #          of the live line (waiting and seen in 3 minutes, or admitted and
@@ -67,7 +67,7 @@ $P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash
          SELECT '$O','$EV',(SELECT run_id FROM exos_wroom_settings WHERE event_id='$EV'),
                 public._exos_wroom_hash('$EV', v.t), md5(v.t) || md5(v.t), md5(v.t) || md5(v.t), now() - interval '3 minutes', public._exos_wroom_rand()
            FROM (VALUES ${VALUES%,}) v(t);
-       UPDATE exos_wroom_settings SET on_sale_at = now() - interval '1 minute', drawn_at = now() - interval '1 minute'
+       UPDATE exos_wroom_settings SET on_sale_at = now() - interval '1 minute', first_admit_at = now() - interval '1 minute'
         WHERE event_id='$EV';" >/dev/null
 fail=0
 admitted() { $P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND state='admitted'"; }
@@ -77,8 +77,9 @@ due_round() {  # the next round is due, with 30 s of credit at 120 a minute = 60
 }
 POLL="SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.51.100.7\"}',true);
       SET LOCAL ROLE anon;"
-pollers() {  # $1 = label: 20 pollers at once, each holding its transaction open
-  for i in $(seq 1 20); do
+pollers() {  # $1 = label, $2 = first token: 20 pollers at once, each holding its transaction open
+  # (other people each round: a poll within 5 s of one's own last poll gets the cached view)
+  for i in $(seq "$2" $(($2 + 19))); do
     $P -c "BEGIN; $POLL SELECT public.exos_wroom_status('$EV', '$(tok $i)')->>'state'; SELECT pg_sleep(0.5); COMMIT;" \
       > "$OUT/$1.$i" 2>&1 &
   done
@@ -87,7 +88,7 @@ pollers() {  # $1 = label: 20 pollers at once, each holding its transaction open
 
 # race 1 ---------------------------------------------------------------------
 due_round
-pollers r1
+pollers r1 1
 n1=$(admitted)
 front=$($P -c "SELECT count(*) FROM (SELECT state FROM exos_wroom_entries WHERE event_id='$EV' ORDER BY order_key, id LIMIT 60) x
                WHERE state = 'admitted'")
@@ -102,7 +103,7 @@ fi
 ids=$($P -c "SELECT string_agg(quote_literal(id::text), ',') FROM exos_wroom_entries WHERE event_id='$EV' AND state='admitted'")
 first=$($P -c "SELECT string_agg(id::text || admitted_at::text, ',' ORDER BY id) FROM exos_wroom_entries WHERE id::text IN ($ids)")
 due_round
-pollers r2
+pollers r2 101
 n2=$(admitted)
 again=$($P -c "SELECT string_agg(id::text || admitted_at::text, ',' ORDER BY id) FROM exos_wroom_entries
                WHERE id::text IN ($ids) AND state = 'admitted'")
@@ -160,21 +161,26 @@ wait4=$(cat "$OUT"/r4.* | grep -c 'wait for your turn' || true)
 held4=$($P -c "SELECT count(*) FROM exos_cart_holds WHERE event_id='$EV' AND status='active'")
 bound=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE token_hash=public._exos_wroom_hash('$EV','$(tok 270)') AND redeemer_hash IS NOT NULL")
 if [[ "$ok4" == 1 && $((busy4 + wait4)) == 9 && "$held4" == 1 && "$bound" == 1 ]]; then
-  echo "OK   race 4 one token, 10 buyers at once: 1 hold, 9 refused ($busy4 busy, $wait4 not theirs), bound to one buyer"
+  echo "OK   race 4 one token, 10 buyers at once: 1 hold, 9 refused (not theirs), bound to one buyer"
 else
   echo "FAIL race 4: ok $ok4, busy $busy4, wait $wait4, active holds $held4, bound $bound"; cat "$OUT"/r4.* | grep -v '^t$' | sort | uniq -c | head -5; fail=1
 fi
 
 # race 5 ---------------------------------------------------------------------
-hold 45 271 0.5 > "$OUT/r5.a" &
-hold 45 271 0.5 > "$OUT/r5.b" &
+$P -c "UPDATE exos_wroom_entries SET checkout_ref = NULL, checkout_at = NULL, session_id = NULL
+        WHERE event_id='$EV' AND token_hash = public._exos_wroom_hash('$EV','$(tok 271)')" >/dev/null
+for n in $(seq 1 10); do
+  $P -c "BEGIN; SET LOCAL ROLE service_role;
+         SELECT public.exos_wroom_attach('$EV','$T','$(tok 271)',NULL,'race5@x.com',gen_random_uuid());
+         SELECT count(*) FROM pg_sleep(0.5); COMMIT;" > "$OUT/r5.$n" 2>&1 || true &
+done
 wait
 ok5=$(cat "$OUT"/r5.* | grep -c '^t$' || true)
 busy5=$(cat "$OUT"/r5.* | grep -c 'already checking out' || true)
-if [[ "$ok5" == 1 && "$busy5" == 1 ]]; then
-  echo "OK   race 5 the same buyer twice at once on one turn: one hold, the other refused (XWR02)"
+if [[ "$ok5" == 1 && "$busy5" == 9 ]]; then
+  echo "OK   race 5 10 checkouts on one turn at once: one attached, 9 refused (XWR02): one open checkout per turn"
 else
-  echo "FAIL race 5: ok $ok5, busy $busy5"; cat "$OUT"/r5.*; fail=1
+  echo "FAIL race 5: attached $ok5, busy $busy5"; cat "$OUT"/r5.* | sort | uniq -c | head -5; fail=1
 fi
 
 # race 6 ---------------------------------------------------------------------

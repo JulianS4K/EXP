@@ -4,6 +4,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 
 const h = vi.hoisted(() => ({ join: vi.fn(), poll: vi.fn(), rejoin: vi.fn(), challenge: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
+const auth = vi.hoisted(() => ({ user: null as { uid: string } | null, openAuthModal: vi.fn() }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../lib/waitingRoom', async (orig) => ({
   ...(await orig<typeof import('../lib/waitingRoom')>()),
   joinRoom: h.join, pollRoom: h.poll, rejoinRoom: h.rejoin, joinWithChallenge: h.challenge,
@@ -106,5 +108,19 @@ describe('WaitingRoomGate', () => {
     await screen.findByRole('heading', { name: 'One quick check' });
     await waitFor(() => expect(document.querySelector('script[src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"]')).toBeTruthy());
     expect(screen.queryByRole('button', { name: 'Buy tickets' })).toBeNull();
+  });
+
+  it('a full guest line offers sign-in (every account gets a place); signed in, no such button', async () => {
+    h.join.mockResolvedValue(parseStatus({ state: 'full', reason: 'room' }));
+    render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign in to get a place' }));
+    expect(auth.openAuthModal).toHaveBeenCalled();
+    cleanup();
+    auth.user = { uid: 'u1' };
+    h.join.mockResolvedValue(parseStatus({ state: 'waiting', position: 20001, ahead: 10000, position_capped: true, kind: 'account' }));
+    render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
+    expect(await screen.findByRole('heading', { name: "You're number 10,000+ in line" })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign in to get a place' })).toBeNull();
+    auth.user = null;
   });
 });

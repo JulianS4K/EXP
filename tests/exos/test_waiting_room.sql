@@ -3,32 +3,33 @@
 -- rolled back. now() is fixed inside the transaction, so time moves by
 -- back-dating rows (arrived_at, advanced_at, admit_clock, admit_expires_at).
 --   WR0 shape: RLS on, no client grants; definer + search_path; anon may call
---       exactly join / status; summary / configure signed in; require service
---       only; the gate is the first statement of the three hold / claim bodies
---   WR1 roles: configure owner / manager (+ an event.waiting_room audit row
---       with the before / after numbers); finance, content, scanner, an
---       outsider and the other org's owner 42501; summary owner / manager /
---       finance, never a token; bad numbers 22023
---   WR2 off by default: no room, no token, holds as before; "before" the
---       window: no token, the opening time
---   WR3 lobby + fair draw: early arrivals get no position before the on-sale;
---       holds refused (XWR01); at the on-sale every early arrival gets a
---       distinct random place (not arrival order), late arrivals after all of
---       them in arrival order; one token per browser
---   WR4 batches: the first round lets in six seconds' worth, the front of the
---       line; a round at most every 5 s; credit capped at one minute; a tab
---       not seen for 3 minutes is skipped but keeps its place; positions
---       count only the people ahead
---   WR5 gate: an admitted token of THIS event passes (create_hold, guest
---       hold, free claim, exos_wroom_require) and is marked used; no token, a
---       waiting token, a malformed one and another event's admitted token are
---       XWR01; the drop list presale type bypasses
---   WR6 expiry: after N minutes the admission is gone (status, gate, counts)
---   WR7 rate limit: 60 new tokens a minute per network, then "busy" with
---       nothing stored; a known token still polls
---   WR8 closing: idle (nobody waiting for X minutes) and by the organizer;
---       then no token is needed; on again = a new run, old tokens dead
---   WR9 no PII: no email / user / IP columns; nothing about other people
+--       exactly join / status; summary / configure signed in; require /
+--       attach / verify gate service only; the gate is the first statement
+--       of the five hold / claim bodies; no stale configure overloads
+--   WR1 roles: configure owner / manager (+ an audit row); finance reads;
+--       content, scanner, an outsider, the other org's owner 42501; 22023
+--   WR2 off by default; "before" the window: no token, the opening time
+--   WR3 lobby: a random place fixed at mint (none shown), holds refused; at
+--       the on-sale 200 distinct random places, late arrivals at the back in
+--       order; one token per browser
+--   WR4 batches (first round, 5 s rounds, a minute's credit, positions); idle
+--       3 minutes skipped, back within 30 keeps its place; idle 30 released
+--       for good (poll, join, recount batch)
+--   WR5 gate: admitted token passes; require check-only (x6); the first hold
+--       binds the buyer, a claim spends the turn (XWR03); none / waiting /
+--       malformed / other event XWR01; presale type in its window; one cart;
+--       the event taken from the type
+--   WR6 expiry; WR7 mint limits, strict network shares, the live-line cap,
+--       Turnstile (anon refused, verified join scales under a ceiling)
+--   WR8 idle / organizer close; re-enable keeps admitted turns
+--   WR9 no PII
+--   WR10 accounts (x1): one place per account outside the cap and shares,
+--       resumed anywhere, usable only by that account
+--   WR11 on-sale (x5): sold-out / ended early types ignored, the pin, no idle
+--       close before a wait, drafts off
+--   WR12 one turn, one order: attach / release / bind, sessions spend or free
+--   WR13 polls: 10,000+ positions, the 5 s cached view
+--   WR14 phone RSVP verify and the referral reward gated
 -- Users: o owner A, m manager A, f finance A, c content A, s scanner A,
 --        b owner B, f1 / f2 fans, x outsider.
 -- ============================================================================
@@ -128,14 +129,21 @@ BEGIN
      AND NOT has_function_privilege('authenticated', 'public.exos_wroom_require(uuid,uuid,text,uuid,text)', 'EXECUTE'), 'WR0 require: service only';
   FOREACH f IN ARRAY ARRAY['public.exos_create_hold(uuid,uuid,integer,integer,text)',
                            'public.exos_create_guest_hold(uuid,uuid,integer,text,text,text)',
-                           'public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)'] LOOP
+                           'public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)',
+                           'public.exos_phone_rsvp_verify(uuid,text,text)',
+                           'public.exos_redeem_referral_reward(uuid,uuid)'] LOOP
     v_def := pg_get_functiondef(f::regprocedure);
-    ASSERT position(E'\nBEGIN\n  PERFORM public._exos_wroom_gate(p_event_id, p_tier_id, ' in v_def) > 0
-       AND position('/* exos: waiting room gate */' in v_def) < position('RAISE EXCEPTION' in v_def)
+    ASSERT position(E'\nBEGIN\n  PERFORM public._exos_wroom_gate' in v_def) = position(E'\nBEGIN\n' in v_def)
        AND (length(v_def) - length(replace(v_def, '/* exos: waiting room gate */', ''))) = length('/* exos: waiting room gate */'),
       'WR0 gate first, once: ' || f;
   END LOOP;
-  RAISE NOTICE 'OK  WR0 RLS + no client grants, search_path, anon / signed-in / service surfaces, the gate first in 3 bodies';
+  ASSERT has_function_privilege('service_role', 'public.exos_wroom_attach(uuid,uuid,text,uuid,text,uuid)', 'EXECUTE')
+     AND NOT has_function_privilege('authenticated', 'public.exos_wroom_attach(uuid,uuid,text,uuid,text,uuid)', 'EXECUTE')
+     AND NOT has_function_privilege('anon', 'public.exos_wroom_verify_gate(jsonb)', 'EXECUTE'), 'WR0 attach / verify gate: service only';
+  ASSERT to_regprocedure('public.exos_wroom_configure(uuid,boolean,integer,integer,integer,integer,integer)') IS NULL
+     AND to_regprocedure('public.exos_wroom_configure(uuid,boolean,integer,integer,integer,integer,integer,boolean)') IS NULL,
+    'WR0 no stale configure overloads';
+  RAISE NOTICE 'OK  WR0 RLS + no client grants, search_path, anon / signed-in / service surfaces, the gate first in 5 bodies, no stale overloads';
 END $$;
 
 -- WR1 -----------------------------------------------------------------------
@@ -213,20 +221,19 @@ BEGIN
   ASSERT j->>'state' = 'lobby' AND j->>'token' = (SELECT token FROM wr_tok WHERE n = 7), 'WR3 same token back';
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1')) = 200, 'WR3 200 entries';
-  ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE order_key IS NOT NULL AND event_id = pg_temp.u('e1')) = 0,
-    'WR3 no place before the on-sale';
+  -- Each place got its random key at mint (no draw later); none is shown before the on-sale.
+  ASSERT (SELECT bool_and(order_key >= 0 AND order_key < 1) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1')),
+    'WR3 random keys at mint';
   -- Holds in the lobby: refused (nobody is admitted yet), even with a token.
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '198.51.100.9', (SELECT token FROM wr_tok WHERE n = 1));
   v_err := pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1')));
   ASSERT v_err LIKE 'XWR01%', 'WR3 lobby hold refused: ' || v_err;
 
-  -- The on-sale: it opened a second ago; everyone above arrived a minute before.
+  -- The on-sale: it opened a second ago.
   PERFORM pg_temp.as_('postgres');
   UPDATE public.exos_ticket_tiers SET sales_start = now() - interval '1 second' WHERE id IN (pg_temp.u('c1'), pg_temp.u('c3'));
   UPDATE public.exos_drop_settings SET public_on_sale_at = now() - interval '1 second' WHERE event_id = pg_temp.u('e1');
-  UPDATE public.exos_wroom_entries SET arrived_at = now() - interval '1 minute', last_seen_at = now() - interval '1 minute'
-   WHERE event_id = pg_temp.u('e1');
-  -- No credit in the first round (so the draw is all this checks).
+  -- No credit in the first round (places only).
   UPDATE public.exos_wroom_settings SET admit_clock = now() WHERE event_id = pg_temp.u('e1');
   PERFORM pg_temp.as_('anon', NULL, '203.0.113.1');
   j := public.exos_wroom_status(pg_temp.u('e1'), (SELECT token FROM wr_tok WHERE n = 1));
@@ -250,16 +257,13 @@ BEGIN
     j := public.exos_wroom_join(pg_temp.u('e1'));
     ASSERT j->>'state' = 'waiting' AND (j->>'position')::int = 200 + (i - 200), 'WR3 late at the back: ' || j::text;
     INSERT INTO wr_tok VALUES (i, pg_temp.u('e1'), j->>'token', false);
-    PERFORM pg_temp.as_('postgres');
-    -- (they all arrived at the transaction's now(): spread them out, in order)
-    UPDATE public.exos_wroom_entries SET arrived_at = arrived_at + make_interval(secs => i - 200),
-                                         order_key = order_key - 1000 + (i - 200)
-     WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e1'), j->>'token');
   END LOOP;
-  ASSERT (SELECT min(order_key) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND arrived_at >= now())
-       > (SELECT max(order_key) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND arrived_at < now()),
-    'WR3 every late arrival behind every early one';
-  RAISE NOTICE 'OK  WR3 lobby (no place, holds refused), fair draw at the on-sale (200 distinct random places, corr %, top-half %), late arrivals at the back in order, one token per browser',
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT array_agg(e.order_key > 1 ORDER BY t.n) = array_fill(true, ARRAY[5])
+                 AND array_agg(e.order_key ORDER BY t.n) = array_agg(e.order_key ORDER BY e.order_key)
+            FROM wr_tok t JOIN public.exos_wroom_entries e ON e.token_hash = public._exos_wroom_hash(t.event_id, t.token)
+           WHERE t.n > 200), 'WR3 every late arrival behind every early one, in arrival order';
+  RAISE NOTICE 'OK  WR3 lobby (random place at mint, none shown, holds refused), the on-sale (200 distinct random places, corr %, top-half %), late arrivals at the back in order, one token per browser',
     round(v_corr::numeric, 3), v_top;
 END $$;
 
@@ -302,7 +306,7 @@ BEGIN
   j := public.exos_wroom_status(pg_temp.u('e1'), v_tok);
   ASSERT j->>'state' = 'waiting' AND (j->>'position')::int = v_pos AND (j->>'ahead')::int = v_pos - 1
      AND (j->>'eta_minutes')::int = ceil(v_pos / 60.0) AND (j->>'admit_per_minute')::int = 60, 'WR4 position: ' || j::text;
-  -- A tab not seen for 3 minutes is skipped (keeps its place); back, it goes next.
+  -- A tab not seen for 3 minutes is skipped; back within 30 minutes (room left), it keeps its place.
   PERFORM pg_temp.as_('postgres');
   UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
    WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key, id LIMIT 1)
@@ -311,28 +315,42 @@ BEGIN
   PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
   ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'waiting'
      AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 97, 'WR4 stale skipped';
-  -- Abandoned for good: neither a poll nor a join with the same token revives it.
   SELECT t.token INTO v_tok FROM wr_tok t
    WHERE public._exos_wroom_hash(t.event_id, t.token) = (SELECT token_hash FROM public.exos_wroom_entries WHERE id = v_stale);
   PERFORM pg_temp.as_('anon');
   j := public.exos_wroom_status(pg_temp.u('e1'), v_tok);
-  ASSERT j->>'state' = 'expired' AND j->>'reason' = 'idle' AND NOT j ? 'token', 'WR4 idle poll: ' || j::text;
+  ASSERT j->>'state' = 'waiting' AND (j->>'position')::int = 1, 'WR4 revived at the front: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  PERFORM pg_temp.tick(pg_temp.u('e1'), 1);
+  PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
+  ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'admitted', 'WR4 back, it goes next';
+  -- Idle 30 minutes: released for good; neither a poll nor a join with the token revives it.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '31 minutes'
+   WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key, id LIMIT 1)
+  RETURNING id INTO v_stale;
+  ASSERT public._exos_wroom_view(pg_temp.u('e1'), v_stale) @> '{"state": "expired", "reason": "idle"}'::jsonb, 'WR4 idle on read';
+  SELECT t.token INTO v_tok FROM wr_tok t
+   WHERE public._exos_wroom_hash(t.event_id, t.token) = (SELECT token_hash FROM public.exos_wroom_entries WHERE id = v_stale);
+  PERFORM pg_temp.as_('anon');
+  j := public.exos_wroom_status(pg_temp.u('e1'), v_tok);
+  ASSERT j->>'state' = 'expired' AND j->>'reason' = 'idle' AND NOT j ? 'token', 'WR4 30-minute idle poll: ' || j::text;
   j := public.exos_wroom_join(pg_temp.u('e1'), v_tok);
   ASSERT j->>'state' = 'expired' AND j->>'reason' = 'idle' AND NOT j ? 'token', 'WR4 idle join with the token: ' || j::text;
   PERFORM pg_temp.as_('postgres');
-  ASSERT (SELECT state = 'abandoned' AND last_seen_at = now() - interval '4 minutes' FROM public.exos_wroom_entries WHERE id = v_stale),
+  ASSERT (SELECT state = 'abandoned' AND last_seen_at = now() - interval '31 minutes' FROM public.exos_wroom_entries WHERE id = v_stale),
     'WR4 marked abandoned, not revived';
   PERFORM pg_temp.tick(pg_temp.u('e1'), 1);
   PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
   ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'abandoned'
-     AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 98, 'WR4 never admitted';
-  -- The same rule on read before any mark: a 3-minute-idle waiting place answers expired / idle.
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '3 minutes'
+     AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 99, 'WR4 never admitted';
+  -- The recount marks 30-minute-idle places in batches too.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '40 minutes'
    WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key DESC, id LIMIT 1)
   RETURNING id INTO v_stale;
-  ASSERT public._exos_wroom_view(pg_temp.u('e1'), v_stale) @> '{"state": "expired", "reason": "idle"}'::jsonb, 'WR4 idle on read';
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE id = v_stale;
-  RAISE NOTICE 'OK  WR4 batches: first round 6 (the front), one round per 5 s, +30 for 30 s, capped at a minute, positions; a tab idle 3 minutes is skipped and abandoned for good (poll and join answer expired / idle)';
+  UPDATE public.exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id = pg_temp.u('e1');
+  PERFORM public._exos_wroom_recount(pg_temp.u('e1'));
+  ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'abandoned', 'WR4 recount abandons';
+  RAISE NOTICE 'OK  WR4 batches: first round 6 (the front), one round per 5 s, +30 for 30 s, capped at a minute, positions; idle 3 minutes skipped, back within 30 keeps its place; idle 30 released for good (poll, join, recount)';
 END $$;
 
 -- WR5 -----------------------------------------------------------------------
@@ -357,21 +375,37 @@ BEGIN
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '198.51.100.1', 'nope');
   ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1'))) LIKE 'XWR01%', 'WR5 malformed';
   ASSERT pg_temp.st(format('SELECT public.exos_claim_free_tickets(%L, %L, 1)', pg_temp.u('e1'), pg_temp.u('c3'))) LIKE 'XWR01%', 'WR5 free claim';
-  -- Admitted: the hold goes through and the admission is marked used.
+  -- Admitted: the hold goes through and binds the turn to b1.
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '198.51.100.1', v_adm);
   h := public.exos_create_hold(pg_temp.u('e1'), pg_temp.u('c1'), 2, 600, NULL);
   ASSERT h IS NOT NULL, 'WR5 admitted hold';
+  -- b1's turn refuses b2's account.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '198.51.100.1', v_adm);
+  ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1'))) LIKE 'XWR01%',
+    'WR5 another account on a bound turn';
+  ASSERT pg_temp.st(format('SELECT public.exos_claim_free_tickets(%L, %L, 1)', pg_temp.u('e1'), pg_temp.u('c3'))) LIKE 'XWR01%',
+    'WR5 another account, free claim';
+  -- A completed claim spends the turn: nothing more on it (XWR03).
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '198.51.100.1', v_adm);
   v_ids := public.exos_claim_free_tickets(pg_temp.u('e1'), pg_temp.u('c3'), 1);
   ASSERT cardinality(v_ids) = 1, 'WR5 admitted free claim';
+  ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1'))) LIKE 'XWR03%',
+    'WR5 a spent turn: XWR03';
+  PERFORM pg_temp.as_('anon');
+  ASSERT public.exos_wroom_status(pg_temp.u('e1'), v_adm) @> '{"state": "expired", "reason": "used"}'::jsonb, 'WR5 spent: status says used';
   -- The guest hold (service role) and exos-checkout's first check.
   PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', NULL);
   ASSERT pg_temp.st(format('SELECT public.exos_create_guest_hold(%L, %L, 1, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'),
                            'guest@x.com', md5('g1'))) LIKE 'XWR01%', 'WR5 guest hold without a token';
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, NULL, %L)', pg_temp.u('e1'), pg_temp.u('c1'), v_wait, 'guest@x.com')) LIKE 'XWR01%', 'WR5 require waiting';
+  -- exos_wroom_require is check-only: a typo'd email first (then a refusal
+  -- elsewhere in checkout) binds nothing; the right email still can go on (x6).
+  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), v_adm2, NULL, 'guest@x.con'), 'WR5 require (typo)';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT redeemer_hash IS NULL AND used_at IS NULL FROM public.exos_wroom_entries
+           WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e1'), v_adm2)), 'WR5 require wrote nothing';
+  PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', NULL);
   ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), v_adm2, NULL, 'Guest@x.com '), 'WR5 require admitted';
-  -- The turn is now the guest's: another buyer (an account, another email) is refused.
-  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'), v_adm2,
-                           pg_temp.u('b2'))) LIKE 'XWR01%', 'WR5 a bound turn refuses another account';
   PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', v_adm2);
   ASSERT public.exos_create_guest_hold(pg_temp.u('e1'), pg_temp.u('c1'), 1, 'guest@x.com', md5('g1'), NULL) IS NOT NULL, 'WR5 guest hold admitted';
   ASSERT pg_temp.st(format('SELECT public.exos_create_guest_hold(%L, %L, 1, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'),
@@ -381,12 +415,12 @@ BEGIN
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_cart_holds WHERE event_id = pg_temp.u('e1') AND buyer_email = 'guest@x.com' AND status = 'active') = 1,
     'WR5 one live cart per turn';
-  -- b1's turn (v_adm, bound by the hold above) refuses b2's account.
-  PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '198.51.100.1', v_adm);
-  ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1'))) LIKE 'XWR01%',
-    'WR5 another account on a bound turn';
-  ASSERT pg_temp.st(format('SELECT public.exos_claim_free_tickets(%L, %L, 1)', pg_temp.u('e1'), pg_temp.u('c3'))) LIKE 'XWR01%',
-    'WR5 another account, free claim';
+  -- Now bound to the guest (the hold): another account or email is refused.
+  PERFORM pg_temp.as_('service_role');
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'), v_adm2,
+                           pg_temp.u('b2'))) LIKE 'XWR01%', 'WR5 a bound turn refuses another account';
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, NULL, %L)', pg_temp.u('e1'), pg_temp.u('c1'), v_adm2,
+                           'guest@x.con')) LIKE 'XWR01%', 'WR5 ... and the typo now';
   -- A roomless event named with this room's ticket type: the type's event is checked.
   PERFORM pg_temp.as_('service_role');
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, NULL, %L, NULL)', pg_temp.u('e3'), pg_temp.u('c1'), pg_temp.u('b2')))
@@ -421,9 +455,9 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE used_at IS NOT NULL AND event_id = pg_temp.u('e1')) = 2, 'WR5 two used';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   j := public.exos_wroom_summary(pg_temp.u('e1'));
-  ASSERT (j->'counts'->>'checked_out')::int = 2 AND (j->'counts'->>'admitted')::int = 96 AND (j->'counts'->>'waiting')::int = 106
+  ASSERT (j->'counts'->>'checked_out')::int = 2 AND (j->'counts'->>'admitted')::int = 97 AND (j->'counts'->>'waiting')::int = 104
      AND (j->'counts'->>'total')::int = 205 AND j->>'phase' = 'live', 'WR5 counts: ' || j::text;
-  RAISE NOTICE 'OK  WR5 gate: admitted token passes (hold, free claim, guest hold, require) and is marked used; none / waiting / malformed / other event XWR01; presale type bypasses in its window only; a turn is bound to its first buyer (account or guest email), one live cart; the event is taken from the type';
+  RAISE NOTICE 'OK  WR5 gate: admitted token passes (hold, free claim, guest hold, require); require is check-only (x6); the first hold binds the turn to its buyer, a claim spends it (XWR03 after); none / waiting / malformed / other event XWR01; presale type bypasses in its window only; one live cart; the event is taken from the type';
 END $$;
 
 -- WR6 -----------------------------------------------------------------------
@@ -447,7 +481,7 @@ BEGIN
     'WR6 swept to expired';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a3'));
   j := public.exos_wroom_summary(pg_temp.u('e1'));
-  ASSERT (j->'counts'->>'expired')::int = 2 AND (j->'counts'->>'admitted')::int = 95, 'WR6 counts (1 lapsed + 1 abandoned): ' || j::text;
+  ASSERT (j->'counts'->>'expired')::int = 3 AND (j->'counts'->>'admitted')::int = 96, 'WR6 counts (1 lapsed + 2 abandoned): ' || j::text;
   RAISE NOTICE 'OK  WR6 admission expires after N minutes: status, gate and counts';
 END $$;
 
@@ -573,7 +607,7 @@ BEGIN
   ASSERT public.exos_wroom_join(pg_temp.u('e2')) = '{"state": "challenge"}'::jsonb, 'WR7 anon join refused while Turnstile is on';
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_join_verified(%L, NULL, %L)', pg_temp.u('e2'), '{}')) LIKE '42501%',
     'WR7 the verified join is service role only';
-  -- ... the verified join (exos-wroom-join, service role) scales the shares: 1,000 from one /48 at 50,000.
+  -- ... the verified join (exos-wroom-join, service role) scales the shares under a ceiling: 200 per /48 at 50,000.
   PERFORM pg_temp.as_('service_role', NULL, '10.9.9.9');
   j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "2001:dba:5:2::1"}');
   ASSERT j->>'state' = 'waiting' AND j->>'token' ~ '^[0-9a-f]{64}$', 'WR7 more than 20 from one /48 behind Turnstile: ' || j::text;
@@ -588,11 +622,11 @@ BEGIN
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s48b-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':2001:dba:5::/48', 'UTF8')), 'hex'),
          encode(sha256(convert_to('wr7-s32b-' || g, 'UTF8')), 'hex'), extract(epoch FROM now())
-    FROM public.exos_wroom_settings s, generate_series(1, 974) g WHERE s.event_id = pg_temp.u('e2');
+    FROM public.exos_wroom_settings s, generate_series(1, 174) g WHERE s.event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('service_role');
   j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "2001:dba:5:3::1"}');
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled /48 share holds at 1,000: ' || j::text;
-  -- IPv4 behind Turnstile: 5,000 live places at 50,000 (its 200 earlier went idle).
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled /48 share holds at its ceiling, 200: ' || j::text;
+  -- IPv4 behind Turnstile: least(5,000, 1,000) = 1,000 live places at 50,000.
   j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.3"}');
   ASSERT j->>'state' = 'waiting', 'WR7 more than 200 from one IPv4 address behind Turnstile: ' || j::text;
   PERFORM pg_temp.as_('postgres');
@@ -600,14 +634,14 @@ BEGIN
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s4-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'), extract(epoch FROM now())
-    FROM public.exos_wroom_settings s, generate_series(1, 4999) g WHERE s.event_id = pg_temp.u('e2');
+    FROM public.exos_wroom_settings s, generate_series(1, 999) g WHERE s.event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('service_role');
   j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.3"}');
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled IPv4 share holds at 5,000: ' || j::text;
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled IPv4 share holds at its ceiling, 1,000: ' || j::text;
   -- The verified join reads the address the edge function passed, not its own request's.
   ASSERT public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.8"}')->>'state' = 'waiting',
     'WR7 the passed address decides';
-  -- Network shares count the live line: those 5,000 going idle free the address.
+  -- Network shares count the live line: those 1,000 going idle free the address.
   PERFORM pg_temp.as_('postgres');
   UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
    WHERE event_id = pg_temp.u('e2') AND net_hash = encode(sha256(convert_to(
@@ -621,12 +655,12 @@ BEGIN
   j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 0);
   ASSERT j->>'max_entries' IS NULL AND (j->>'cap')::int = 1000, 'WR7 automatic cap (5 x 100, at least 1,000): ' || j::text;
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_configure(%L, true, NULL, NULL, NULL, NULL, 50)', pg_temp.u('e2'))) LIKE '22023%', 'WR7 cap bounds';
-  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); live places per network fixed without a CAPTCHA (20 per /48, 200 per IPv4, 100 per /32, even at 50,000) and scaled behind Turnstile (1,000 per /48, 5,000 per IPv4 at 50,000), the anon join refused (challenge) while Turnstile is on, the verified join service-only and reading the passed address; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
+  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); live places per network fixed without a CAPTCHA (20 per /48, 200 per IPv4, 100 per /32, even at 50,000) and scaled behind Turnstile under a ceiling (200 per /48, 1,000 per IPv4 at 50,000), the anon join refused (challenge) while Turnstile is on, the verified join service-only and reading the passed address; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
 END $$;
 
 -- WR8 -----------------------------------------------------------------------
 DO $$
-DECLARE j jsonb; v_tok text; v_old text; h uuid;
+DECLARE j jsonb; v_tok text; v_old text; v_kept text; v_carry int; h uuid;
 BEGIN
   PERFORM pg_temp.as_('postgres');
   -- Idle: e2's line emptied (everyone admitted) 11 minutes ago.
@@ -650,16 +684,24 @@ BEGIN
   ASSERT public.exos_wroom_join(pg_temp.u('e1')) = '{"state": "off"}'::jsonb, 'WR8 off: no token';
   PERFORM pg_temp.as_('service_role');
   ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), NULL, NULL, 'a@x.com'), 'WR8 off: require passes';
-  -- On again: a new run; the old tokens are dead, the line starts empty.
-  SELECT token INTO v_old FROM wr_tok WHERE n = 1;
+  -- On again: a new run; admitted, unexpired turns carry over, the rest of the line is gone.
+  PERFORM pg_temp.as_('postgres');
+  SELECT t.token INTO v_old FROM wr_tok t JOIN public.exos_wroom_entries e ON e.token_hash = public._exos_wroom_hash(t.event_id, t.token)
+   WHERE e.state = 'waiting' LIMIT 1;
+  SELECT t.token INTO v_kept FROM wr_tok t JOIN public.exos_wroom_entries e ON e.token_hash = public._exos_wroom_hash(t.event_id, t.token)
+   WHERE e.state = 'admitted' AND e.admit_expires_at > now() AND e.used_at IS NULL LIMIT 1;
+  SELECT count(*) INTO v_carry FROM public.exos_wroom_entries
+   WHERE event_id = pg_temp.u('e1') AND state = 'admitted' AND admit_expires_at > now();
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   j := public.exos_wroom_configure(pg_temp.u('e1'), true, 0, 120, 5, 10);
-  ASSERT j->>'phase' = 'live' AND (j->'counts'->>'total')::int = 0 AND j->>'closed_at' IS NULL, 'WR8 new run: ' || j::text;
+  ASSERT j->>'phase' = 'live' AND (j->'counts'->>'total')::int = v_carry AND v_carry > 0 AND j->>'closed_at' IS NULL,
+    'WR8 new run keeps ' || v_carry || ' admitted: ' || j::text;
   PERFORM pg_temp.as_('anon');
-  ASSERT public.exos_wroom_status(pg_temp.u('e1'), v_old)->>'state' = 'unknown', 'WR8 old token unknown';
+  ASSERT public.exos_wroom_status(pg_temp.u('e1'), v_old)->>'state' = 'unknown', 'WR8 old waiting token unknown';
+  ASSERT public.exos_wroom_status(pg_temp.u('e1'), v_kept)->>'state' = 'admitted', 'WR8 an admitted turn survives the re-enable';
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_org_audit WHERE action = 'event.waiting_room' AND event_id = pg_temp.u('e1')) = 3, 'WR8 3 audit rows';
-  RAISE NOTICE 'OK  WR8 closes when idle and when turned off (no token needed then); on again = a new run, old tokens dead';
+  RAISE NOTICE 'OK  WR8 closes when idle and when turned off (no token needed then); on again = a new run, admitted turns kept, the rest gone';
 END $$;
 
 -- WR9 -----------------------------------------------------------------------
@@ -672,6 +714,246 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE action = 'event.waiting_room' AND changes::text ~ '[0-9a-f]{64}'),
     'WR9 no token in the audit';
   RAISE NOTICE 'OK  WR9 no PII in the queue (token hash, times, state); no token in the audit';
+END $$;
+
+-- WR10 ----------------------------------------------------------------------
+-- Accounts (x1): five IPv4 addresses fill a 1,000-place guest line; a
+-- signed-in buyer still gets a place, outside the cap; a second browser of
+-- the account resumes it; only that account can use it.
+DO $$
+DECLARE j jsonb; i int; v_tok text; v_id uuid; h uuid;
+BEGIN
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, timezone, total_tickets, created_by, link_out)
+  VALUES (pg_temp.u('e4'), pg_temp.u('1'), 'D71 Accounts', 'd71-accounts', 'published', now() + interval '30 days',
+          'America/New_York', 500, pg_temp.u('a1'), false);
+  INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sales_start, visibility)
+  VALUES (pg_temp.u('c41'), pg_temp.u('e4'), 'GA', 20, 100, NULL, 'public');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e4'), true, 0, 60, 10, 10);
+  ASSERT (j->>'cap')::int = 1000, 'WR10 cap 1,000: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e4'), s.run_id, encode(sha256(convert_to('wr10-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':100.65.0.' || (g % 5), 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':100.65.0.' || (g % 5), 'UTF8')), 'hex'), 1 + g
+    FROM public.exos_wroom_settings s, generate_series(1, 1000) g WHERE s.event_id = pg_temp.u('e4');
+  PERFORM pg_temp.as_('anon', NULL, '100.66.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'room', 'WR10 guests full: ' || j::text;
+  -- An unconfirmed account counts as a guest.
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO auth.users (id, email, email_confirmed_at) VALUES (pg_temp.u('b9'), 'd71-unconfirmed@x.com', NULL);
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b9'), '100.66.0.2');
+  ASSERT public.exos_wroom_join(pg_temp.u('e4'))->>'state' = 'full', 'WR10 unconfirmed: guest rules';
+  -- b1 signs in: a place anyway, at the back, outside the cap and the network shares.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '100.65.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'waiting' AND j->>'kind' = 'account' AND j->>'token' ~ '^[0-9a-f]{64}$'
+     AND (j->>'position')::int = 1001, 'WR10 an account always gets a place: ' || j::text;
+  v_tok := j->>'token';
+  -- A second browser (no token) resumes the same place; status works without the token.
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'waiting' AND NOT j ? 'token' AND (j->>'position')::int = 1001, 'WR10 resumed: ' || j::text;
+  ASSERT public.exos_wroom_status(pg_temp.u('e4'), NULL)->>'kind' = 'account', 'WR10 status by account';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e4') AND kind = 'account') = 1, 'WR10 one per account';
+  -- Admitted: only that account can use it, with or without the token.
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes'
+   WHERE event_id = pg_temp.u('e4') AND kind = 'account'
+  RETURNING id INTO v_id;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '198.51.100.1', v_tok);
+  ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e4'), pg_temp.u('c41'))) LIKE 'XWR01%',
+    'WR10 another account with the token';
+  PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', v_tok);
+  ASSERT pg_temp.st(format('SELECT public.exos_create_guest_hold(%L, %L, 1, %L, %L, NULL)', pg_temp.u('e4'), pg_temp.u('c41'),
+                           'thief@x.com', md5('t1'))) LIKE 'XWR01%', 'WR10 a guest with the token';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'));
+  h := public.exos_create_hold(pg_temp.u('e4'), pg_temp.u('c41'), 1, 600, NULL);
+  ASSERT h IS NOT NULL, 'WR10 the account, no token needed';
+  -- A guest's browser place becomes the account's when they sign in with it.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  PERFORM public.exos_wroom_configure(pg_temp.u('e4'), true, NULL, NULL, NULL, NULL, 1500);
+  PERFORM pg_temp.as_('anon', NULL, '100.66.0.9');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'waiting' AND j->>'kind' = 'anon', 'WR10 a guest place: ' || j::text;
+  v_tok := j->>'token';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '100.66.0.9');
+  j := public.exos_wroom_join(pg_temp.u('e4'), v_tok);
+  ASSERT j->>'kind' = 'account' AND j->>'token' = v_tok, 'WR10 the guest place is the account''s now: ' || j::text;
+  RAISE NOTICE 'OK  WR10 accounts (x1): guests full, a confirmed account still gets one place outside the cap and shares, resumed by a second browser, usable only by that account (token or not); a guest place carries over on sign-in';
+END $$;
+
+-- WR11 ----------------------------------------------------------------------
+-- The on-sale moment (x5): an early, sold-out or ended public type doesn't
+-- switch the room live before the real drop; the organizer's pin wins; a
+-- room never closes before anyone waited.
+DO $$
+DECLARE j jsonb;
+BEGIN
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, timezone, total_tickets, created_by, link_out)
+  VALUES (pg_temp.u('e5'), pg_temp.u('1'), 'D71 Early Bird', 'd71-early', 'published', now() + interval '30 days',
+          'America/New_York', 500, pg_temp.u('a1'), false),
+         (pg_temp.u('e6'), pg_temp.u('1'), 'D71 Draft', 'd71-draft-room', 'draft', now() + interval '30 days',
+          'America/New_York', 500, pg_temp.u('a1'), false);
+  INSERT INTO public.exos_ticket_tiers (id, event_id, name, price, capacity, sold, sales_start, sales_end, visibility) VALUES
+    (pg_temp.u('c51'), pg_temp.u('e5'), 'Early bird (sold out)', 10, 50, 50, NULL, NULL, 'public'),
+    (pg_temp.u('c52'), pg_temp.u('e5'), 'Teaser (ended)', 10, 50, 0, NULL, now() - interval '1 day', 'public'),
+    (pg_temp.u('c53'), pg_temp.u('e5'), 'GA', 20, 400, 0, now() + interval '2 hours', NULL, 'public'),
+    (pg_temp.u('c61'), pg_temp.u('e6'), 'GA', 20, 400, 0, NULL, NULL, 'public');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e5'), true, 15, 60, 10, 1);
+  ASSERT j->>'phase' = 'before' AND (j->>'on_sale_at')::timestamptz = now() + interval '2 hours',
+    'WR11 the drop, not the early types: ' || j::text;
+  PERFORM pg_temp.as_('anon', NULL, '100.67.0.1');
+  ASSERT public.exos_wroom_join(pg_temp.u('e5'))->>'state' = 'before', 'WR11 the first visitor sees "before"';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT closed_at IS NULL FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e5')), 'WR11 not closed';
+  -- The pin wins (e.g. an early type still on sale but the drop is at 18:00).
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e5'), true, NULL, NULL, NULL, NULL, NULL, NULL, now() + interval '5 minutes');
+  ASSERT j->>'phase' = 'lobby' AND (j->>'on_sale_at')::timestamptz = now() + interval '5 minutes'
+     AND (j->>'opens_at_pin')::timestamptz = now() + interval '5 minutes', 'WR11 pinned: ' || j::text;
+  -- Live with nobody ever waiting: it stays open (idle close needs a wait or an admission first).
+  j := public.exos_wroom_configure(pg_temp.u('e5'), true, NULL, NULL, NULL, NULL, NULL, NULL, now() - interval '2 hours');
+  ASSERT j->>'phase' = 'live', 'WR11 live: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_settings SET advanced_at = now() - interval '1 hour' WHERE event_id = pg_temp.u('e5');
+  PERFORM pg_temp.as_('anon', NULL, '100.67.0.2');
+  j := public.exos_wroom_join(pg_temp.u('e5'));
+  ASSERT j->>'state' = 'waiting', 'WR11 the first visitor gets a place, the room stays: ' || j::text;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e5'), true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, true);
+  ASSERT j->>'opens_at_pin' IS NULL, 'WR11 pin cleared';
+  -- An unpublished event: no room, whatever the setting.
+  PERFORM public.exos_wroom_configure(pg_temp.u('e6'), true, 0, 60, 10, 10);
+  PERFORM pg_temp.as_('anon', NULL, '100.67.0.3');
+  ASSERT public.exos_wroom_join(pg_temp.u('e6')) = '{"state": "off"}'::jsonb
+     AND public.exos_wroom_status(pg_temp.u('e6'), repeat('a', 64)) = '{"state": "off"}'::jsonb, 'WR11 draft: off';
+  RAISE NOTICE 'OK  WR11 on-sale (x5): sold-out / ended early types ignored, the pin wins and clears, never idle-closed before a wait, drafts off';
+END $$;
+
+-- WR12 ----------------------------------------------------------------------
+-- One turn, one order (should-fix 6): one open checkout per turn (attach),
+-- a failed one released, a bound session spent at fulfilment (XWR03 after);
+-- a failed / expired session frees the turn; an account's used place goes to
+-- the back on its next join.
+DO $$
+DECLARE j jsonb; v_tok text; a1 uuid := gen_random_uuid(); a2 uuid := gen_random_uuid(); v_id uuid;
+BEGIN
+  PERFORM pg_temp.as_('anon', NULL, '100.68.0.1');
+  v_tok := public.exos_wroom_join(pg_temp.u('e4'))->>'token';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes'
+   WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok) RETURNING id INTO v_id;
+  PERFORM pg_temp.as_('service_role');
+  ASSERT public.exos_wroom_attach(pg_temp.u('e4'), pg_temp.u('c41'), v_tok, NULL, 'buyer@x.com', a1), 'WR12 attach';
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_attach(%L, %L, %L, NULL, %L, %L)', pg_temp.u('e4'), pg_temp.u('c41'), v_tok,
+                           'buyer@x.com', a2)) LIKE 'XWR02%', 'WR12 a second checkout on the turn: XWR02';
+  PERFORM public.exos_wroom_release(pg_temp.u('e4'), a1);
+  ASSERT public.exos_wroom_attach(pg_temp.u('e4'), pg_temp.u('c41'), v_tok, NULL, 'buyer@x.com', a2), 'WR12 released: another try';
+  ASSERT public.exos_wroom_bind(pg_temp.u('e4'), a2, 'cs_wr12_a', NULL, 'buyer@x.com'), 'WR12 bound';
+  -- A bound session holds the turn (35 min) even after a release call.
+  PERFORM public.exos_wroom_release(pg_temp.u('e4'), a2);
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_attach(%L, %L, %L, NULL, %L, %L)', pg_temp.u('e4'), pg_temp.u('c41'), v_tok,
+                           'buyer@x.com', gen_random_uuid())) LIKE 'XWR02%', 'WR12 bound session holds the turn';
+  -- The session expires (Stripe): the turn is free again. (Only this
+  -- migration's trigger runs here; the other session triggers have their own suites.)
+  PERFORM pg_temp.as_('postgres');
+  ALTER TABLE public.exos_checkout_sessions DISABLE TRIGGER USER;
+  ALTER TABLE public.exos_checkout_sessions ENABLE TRIGGER exos_checkout_sessions_wroom;
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_email, guest)
+  VALUES ('cs_wr12_a', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'pending', 'buyer@x.com', true);
+  UPDATE public.exos_checkout_sessions SET status = 'expired' WHERE session_id = 'cs_wr12_a';
+  ASSERT (SELECT checkout_ref IS NULL AND session_id IS NULL AND state = 'admitted' FROM public.exos_wroom_entries WHERE id = v_id),
+    'WR12 expired session frees the turn';
+  PERFORM pg_temp.as_('service_role');
+  ASSERT public.exos_wroom_attach(pg_temp.u('e4'), pg_temp.u('c41'), v_tok, NULL, 'buyer@x.com', a1), 'WR12 attach again';
+  ASSERT public.exos_wroom_bind(pg_temp.u('e4'), a1, 'cs_wr12_b', NULL, 'buyer@x.com'), 'WR12 bound again';
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_email, guest)
+  VALUES ('cs_wr12_b', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'fulfilled', 'buyer@x.com', true);
+  ASSERT (SELECT state = 'spent' AND spent_at IS NOT NULL FROM public.exos_wroom_entries WHERE id = v_id), 'WR12 fulfilled: spent';
+  ALTER TABLE public.exos_checkout_sessions ENABLE TRIGGER USER;
+  PERFORM pg_temp.as_('service_role');
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, NULL, %L)', pg_temp.u('e4'), pg_temp.u('c41'), v_tok,
+                           'buyer@x.com')) LIKE 'XWR03%', 'WR12 used: XWR03';
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_attach(%L, %L, %L, NULL, %L, %L)', pg_temp.u('e4'), pg_temp.u('c41'), v_tok,
+                           'buyer@x.com', gen_random_uuid())) LIKE 'XWR03%', 'WR12 used: attach XWR03';
+  -- The attach refuses another buyer on a bound turn too.
+  PERFORM pg_temp.as_('anon', NULL, '100.68.0.2');
+  v_tok := public.exos_wroom_join(pg_temp.u('e4'))->>'token';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes',
+         redeemer_hash = public._exos_wroom_buyer_hash(pg_temp.u('e4'), 'email:first@x.com')
+   WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok);
+  PERFORM pg_temp.as_('service_role');
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_attach(%L, %L, %L, NULL, %L, %L)', pg_temp.u('e4'), pg_temp.u('c41'), v_tok,
+                           'second@x.com', gen_random_uuid())) LIKE 'XWR01%', 'WR12 another buyer can''t attach';
+  -- An account's used place: its next join is a new place at the back.
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET state = 'spent', spent_at = now()
+   WHERE event_id = pg_temp.u('e4') AND kind = 'account' AND redeemer_hash = public._exos_wroom_buyer_hash(pg_temp.u('e4'), 'uid:' || pg_temp.u('b1'));
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '100.65.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'waiting' AND j->>'token' ~ '^[0-9a-f]{64}$' AND j->>'kind' = 'account', 'WR12 account rejoins at the back: ' || j::text;
+  RAISE NOTICE 'OK  WR12 one turn, one order: one open checkout (XWR02), release, bind, expired session frees it, fulfilment spends it (XWR03), another buyer refused, an account re-places';
+END $$;
+
+-- WR13 ----------------------------------------------------------------------
+-- Polls (should-fix 4): positions count at most 10,000 ahead ("10,000+"); a
+-- poll within 5 s of the last write gets the cached view with no write.
+DO $$
+DECLARE j jsonb; j2 jsonb; v_tok text; v_seen timestamptz;
+BEGIN
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e4'), s.run_id, encode(sha256(convert_to('wr13-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to('wr13n-' || g, 'UTF8')), 'hex'), encode(sha256(convert_to('wr13m-' || g, 'UTF8')), 'hex'), 0.5
+    FROM public.exos_wroom_settings s, generate_series(1, 10050) g WHERE s.event_id = pg_temp.u('e4');
+  UPDATE public.exos_wroom_settings SET max_entries = 1000000, advanced_at = now() WHERE event_id = pg_temp.u('e4');
+  PERFORM pg_temp.as_('anon', NULL, '100.69.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  v_tok := j->>'token';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '30 seconds', view_at = NULL
+   WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok);
+  PERFORM pg_temp.as_('anon', NULL, '100.69.0.1');
+  j := public.exos_wroom_status(pg_temp.u('e4'), v_tok);
+  ASSERT (j->>'position_capped')::boolean AND (j->>'position')::int = 10001, 'WR13 10,000+: ' || (j - 'token')::text;
+  PERFORM pg_temp.as_('postgres');
+  SELECT last_seen_at INTO v_seen FROM public.exos_wroom_entries WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok);
+  ASSERT v_seen = now(), 'WR13 the first poll wrote last_seen';
+  UPDATE public.exos_wroom_entries SET view_cache = view_cache || '{"cached": true}' WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok);
+  PERFORM pg_temp.as_('anon', NULL, '100.69.0.1');
+  j2 := public.exos_wroom_status(pg_temp.u('e4'), v_tok);
+  ASSERT j2->>'cached' = 'true', 'WR13 a poll within 5 s: the cached view';
+  RAISE NOTICE 'OK  WR13 positions capped at 10,000+ (LIMIT 10001); a poll within 5 s gets the cached view (no write)';
+END $$;
+
+-- WR14 ----------------------------------------------------------------------
+-- The two other inventory paths (should-fix 7): phone RSVP verify and the
+-- referral reward refuse without a turn; both carry the gate first.
+DO $$
+DECLARE v_rsvp uuid := gen_random_uuid(); v_err text; v_v uuid := gen_random_uuid(); v_rw uuid := gen_random_uuid();
+BEGIN
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_phone_rsvps (id, org_id, event_id, tier_id, guest_name, phone, channel, code_hash, code_expires_at)
+  VALUES (v_rsvp, pg_temp.u('1'), pg_temp.u('e4'), pg_temp.u('c41'), 'Guest', '+15555550123', 'sms', repeat('a', 64), now() + interval '10 minutes');
+  PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', NULL);
+  v_err := pg_temp.st(format('SELECT public.exos_phone_rsvp_verify(%L, %L, %L)', v_rsvp, '123456', 'https://x.test'));
+  ASSERT v_err LIKE 'XWR01%', 'WR14 phone RSVP without a turn: ' || v_err;
+  PERFORM pg_temp.as_('postgres');
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO public.exos_vouchers (id, event_id, code, price_override) VALUES (v_v, pg_temp.u('e4'), 'WR14REWARD', 0);
+  INSERT INTO public.exos_referral_rewards (id, referral_code, user_id, event_id, milestone, threshold, reward_event_id, voucher_id)
+  VALUES (v_rw, 'wr14code', pg_temp.u('b2'), pg_temp.u('e4'), 1, 1, pg_temp.u('e4'), v_v);
+  SET LOCAL session_replication_role = origin;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b4'));
+  v_err := pg_temp.st(format('SELECT public.exos_redeem_referral_reward(%L, %L)', v_rw, pg_temp.u('c41')));
+  ASSERT v_err LIKE 'XWR01%', 'WR14 referral reward without a turn: ' || v_err;
+  RAISE NOTICE 'OK  WR14 phone RSVP verify and the referral reward are gated first (XWR01 without a turn)';
 END $$;
 
 ROLLBACK;

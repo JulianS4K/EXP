@@ -259,44 +259,47 @@ tiers and discount codes, into a series of dates.
 For a drop that sells out in minutes (an Instagram on-sale, a fair grandstand), turn on the waiting
 room: buyers queue fairly and Exos lets them in at a steady pace, so checkout never sees a stampede.
 It is **off** for every event until you turn it on (Overview → **Waiting room**; owner or manager;
-finance can see the counts).
+finance can see the counts). Only published events have one.
 
 - **Settings:** when it opens before the on-sale (default 15 minutes), how many people it lets in per
-  minute (default 200), how long each person has to check out once let in (default 10 minutes), and
-  how long it stays open once nobody is waiting (default 10 minutes). The on-sale time is your public
-  ticket types' sales start (Edit event → Tickets); turned on mid-sale, it starts at once.
-- **Fair start:** everyone who arrives in the window before the on-sale gets a **random** place in line
-  at the on-sale, so refreshing or arriving at 9:59:59 doesn't beat arriving at 9:50. People who arrive
-  after the on-sale join at the back, in order.
+  minute (default 200), how long each person has to check out once let in (default 10 minutes), how
+  long it stays open once nobody is waiting (default 10 minutes), and the most guests in line.
+- **The on-sale time** is the earliest sales start of your public ticket types that still have
+  tickets and haven't ended (a sold-out early bird doesn't count). Pin your own **On-sale time**
+  when that isn't the drop, e.g. an early type is still on sale. Turned on mid-sale, it starts at once.
+- **Fair start:** everyone who arrives in the window before the on-sale gets a **random** place in line,
+  so refreshing or arriving at 9:59:59 doesn't beat arriving at 9:50. People who arrive after the
+  on-sale join at the back, in order.
+- **Signed-in buyers always get a place:** one per account, which they can pick up on any device. Guests
+  (not signed in) get a place too, up to "Most people in line" (blank = 5 times the public capacity,
+  at least 1,000) and a share per network so one network can't fill the line; past that the page
+  says "The waiting room is full" and offers **Sign in to get a place**.
 - **For buyers:** the event page shows their place and an estimated wait instead of the buy button,
-  and updates on its own (no need to sign in or refresh; one place per browser, more tabs don't help).
-  When it's their turn the buy box comes back with the time they have. A turn that lapses, or a
-  place whose page was closed or asleep for 3 minutes, is gone for good: the buyer can join again,
-  at the back. `/event/<id>/queue` is the same line on a lighter page you can link to.
-- **Only admitted buyers can check out.** While the room is open, checkout, seat holds and free
-  claims for the event refuse anyone without a current turn; the check runs in the database before
-  anything else. A turn belongs to the first buyer who uses it (their account, or the email a guest
-  pays with): passing the link to a friend doesn't let a second person in, and one turn holds one
-  cart at a time.
-- **How big the line can get:** at most "Most people in line" (blank = automatic: 5 times the
-  public capacity, at least 1,000) people *in line now*: anyone who closed the page for 3 minutes, or
-  whose turn lapsed or was used, no longer counts. Beyond that, and beyond a per-network share that
-  stops one network filling the line, newcomers see "The waiting room is full" and the page tries
-  again each minute.
-- **Human check (Cloudflare Turnstile), optional:** turn it on for a big public drop. New arrivals
+  and updates on its own (no need to refresh; one place per browser or account, more tabs don't
+  help). When it's their turn the buy box comes back with the time they have.
+- **One turn, one order.** A turn belongs to the first buyer who uses it and buys one order; to buy
+  again they join again, at the back. Passing the page to a friend doesn't let a second person in.
+- **Stepping away:** a page that's closed or asleep for 3 minutes is skipped (others go ahead) and may
+  come back within 30 minutes: always for a signed-in buyer, for a guest while the line has room.
+  After 30 minutes, or a lapsed turn, the place is gone and they can join again at the back.
+  `/event/<id>/queue` is the same line on a lighter page you can link to.
+- **Only admitted buyers can check out.** While the room is open, checkout, seat holds, free claims,
+  phone RSVPs and referral reward tickets for the event refuse anyone without a current turn; the
+  check runs in the database before anything else.
+- **Human check (Cloudflare Turnstile), optional:** turn it on for a big public drop. New guests
   tick a quick check before they get a place, which stops bots filling the line and lets more people
-  in from one network (mobile carriers put many phones behind shared addresses; without the check,
-  one network gets at most 200 places, and 20 or 100 on IPv6). Greyed out until the platform's
-  Turnstile keys are set up.
+  in from one network (mobile carriers put many phones behind shared addresses). Greyed out until the
+  platform's Turnstile keys are set up.
 - **Who skips the line:** your drop list's presale ticket type (confirmed list members, with their
   code, until the public on-sale), and sales that never go through the public checkout: partner API
   reservations, the box office, the door and comps.
 - **Counts** (refreshed every 10 seconds while open): waiting, admitted (not checked out yet), checked
-  out, and expired turns, plus the wait at the back of the line. They are counts only: the queue
-  stores no names, emails or IP addresses.
-- **Closing:** it closes itself once nobody has been waiting for the time you set, or when you turn it
-  off; then everyone buys as usual. Turning it on again starts a new line.
-- Every change to the switch or its numbers is in the org activity log (`event.waiting_room`).
+  out, and expired turns, plus the wait at the back of the line. Counts only: the queue stores no
+  names, emails or IP addresses.
+- **Closing:** it closes itself once nobody has been waiting for the time you set (never before
+  anyone has waited), or when you turn it off; then everyone buys as usual. Turning it on again starts
+  a new line; people already let in keep their turn.
+- Every change to the switch or its settings is in the org activity log (`event.waiting_room`).
 - How it holds up under load, and how to re-run the test: [`docs/load-test.md`](load-test.md).
 
 ### Group buys: friends pay for their own seats

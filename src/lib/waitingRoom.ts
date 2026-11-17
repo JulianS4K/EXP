@@ -24,7 +24,11 @@ export interface RoomStatus {
   retryAfterMs?: number;
   /** 'full': the room ('room') or this network's share of it ('network');
    *  'expired': away 3+ minutes ('idle') or the turn lapsed unused ('lapsed'). */
-  reason?: 'room' | 'network' | 'idle' | 'lapsed';
+  reason?: 'room' | 'network' | 'idle' | 'lapsed' | 'used';
+  /** More than 10,000 people ahead (the server stops counting there). */
+  positionCapped?: boolean;
+  /** 'account': the signed-in buyer's own place (any browser resumes it). */
+  kind?: 'anon' | 'account';
 }
 
 const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full', 'challenge'];
@@ -57,7 +61,9 @@ export function parseStatus(raw: unknown): RoomStatus {
     admitPerMinute: num(r.admit_per_minute),
     pollAfterMs: num(r.poll_after_ms),
     retryAfterMs: num(r.retry_after_ms),
-    reason: ['room', 'network', 'idle', 'lapsed'].includes(r.reason as string) ? (r.reason as RoomStatus['reason']) : undefined,
+    reason: ['room', 'network', 'idle', 'lapsed', 'used'].includes(r.reason as string) ? (r.reason as RoomStatus['reason']) : undefined,
+    positionCapped: r.position_capped === true,
+    kind: r.kind === 'account' || r.kind === 'anon' ? r.kind : undefined,
   };
 }
 
@@ -154,7 +160,8 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
       };
     case 'waiting':
       return {
-        heading: s.position != null ? `You're number ${s.position.toLocaleString()} in line` : "You're in line",
+        heading: s.positionCapped ? "You're number 10,000+ in line"
+          : s.position != null ? `You're number ${s.position.toLocaleString()} in line` : "You're in line",
         detail: `Estimated wait: ${waitWords(s.etaMinutes) || 'a few minutes'}. Keep this page open; it updates on its own.`,
         rejoin: false,
       };
@@ -165,10 +172,17 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
         rejoin: false,
       };
     case 'expired':
+      if (s.reason === 'used') {
+        return {
+          heading: 'You used your turn',
+          detail: 'Your order went through. To buy more, join the line again, at the back.',
+          rejoin: true,
+        };
+      }
       return s.reason === 'idle'
         ? {
           heading: 'Your place was released',
-          detail: 'This page was closed or asleep for a few minutes, so your place went to the people still waiting. You can join the line again, at the back.',
+          detail: 'This page was closed or asleep for a while and the line has filled up since, so your place went to the people still waiting. You can join the line again, at the back.',
           rejoin: true,
         }
         : {
@@ -185,9 +199,10 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
     case 'full':
       return {
         heading: 'The waiting room is full',
-        detail: s.reason === 'network'
-          ? 'Too many people on your network have joined this line. This page tries again every minute.'
-          : 'The line is as long as the organizer allows. This page tries again every minute.',
+        detail: (s.reason === 'network'
+          ? 'Too many people on your network have joined this line.'
+          : 'The line is as long as the organizer allows for guests.')
+          + ' Sign in to get a place (every account gets one), or wait here: this page tries again every minute.',
         rejoin: false,
       };
     case 'unknown':
@@ -276,13 +291,15 @@ export interface RoomSummary {
   maxEntries: number | null;
   /** Cloudflare Turnstile in front of new places. */
   turnstile: boolean;
+  /** The organizer's on-sale pin, or null (from the ticket types). */
+  opensAtPin: Date | null;
   /** The cap in force. */
   cap: number | null;
   onSaleAt: Date | null;
   opensAt: Date | null;
   closedAt: Date | null;
   closedReason: 'idle' | 'organizer' | null;
-  counts: { waiting: number; admitted: number; checkedOut: number; expired: number; total: number };
+  counts: { waiting: number; admitted: number; checkedOut: number; expired: number; accounts: number; total: number };
   waitMinutes: number;
   canManage: boolean;
 }
@@ -300,6 +317,7 @@ export function parseSummary(raw: unknown): RoomSummary {
     idleCloseMinutes: num(r.idle_close_minutes) ?? 10,
     maxEntries: num(r.max_entries) ?? null,
     turnstile: r.turnstile === true,
+    opensAtPin: date(r.opens_at_pin),
     cap: num(r.cap) ?? null,
     onSaleAt: date(r.on_sale_at),
     opensAt: date(r.opens_at),
@@ -307,7 +325,7 @@ export function parseSummary(raw: unknown): RoomSummary {
     closedReason: r.closed_reason === 'idle' || r.closed_reason === 'organizer' ? r.closed_reason : null,
     counts: {
       waiting: num(c.waiting) ?? 0, admitted: num(c.admitted) ?? 0, checkedOut: num(c.checked_out) ?? 0,
-      expired: num(c.expired) ?? 0, total: num(c.total) ?? 0,
+      expired: num(c.expired) ?? 0, accounts: num(c.accounts) ?? 0, total: num(c.total) ?? 0,
     },
     waitMinutes: num(r.wait_minutes) ?? 0,
     canManage: r.can_manage === true,
@@ -323,6 +341,8 @@ export interface RoomSettingsInput {
   maxEntries?: number;
   /** Turnstile on / off (undefined keeps it). */
   turnstile?: boolean;
+  /** On-sale pin: a date sets it, null clears it, undefined keeps it. */
+  opensAt?: Date | null;
 }
 
 /** The same bounds exos_wroom_configure checks; null when fine. */
@@ -347,6 +367,7 @@ export async function configureRoom(eventId: string, enabled: boolean, s: RoomSe
     p_event_id: eventId, p_enabled: enabled, p_window_minutes: s.windowMinutes, p_admit_per_minute: s.admitPerMinute,
     p_admission_minutes: s.admissionMinutes, p_idle_close_minutes: s.idleCloseMinutes, p_max_entries: s.maxEntries ?? 0,
     ...(s.turnstile === undefined ? {} : { p_turnstile: s.turnstile }),
+    ...(s.opensAt === undefined ? {} : s.opensAt === null ? { p_clear_opens_at: true } : { p_opens_at: s.opensAt.toISOString() }),
   });
   if (error) throw new Error(error.message.replace(/^exos_wroom_configure: /, ''));
   return parseSummary(data);

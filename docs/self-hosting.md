@@ -152,6 +152,17 @@ IPv6 callers are limited per /64. Requests with no usable IP share one
 `unknown` bucket with the same caps, so a misconfigured proxy shows up as
 legitimate requests being limited together, never as no limit.
 
+The waiting room's Turnstile check (`exos-wroom-join`) uses the same rule: the
+edge function passes on the `cf-connecting-ip` and `X-Forwarded-For` it
+received and the database resolves them, never `x-real-ip`. Without a usable
+address it answers 503 instead of a place in the `unknown` bucket. So:
+
+- a self-host **without** Cloudflare in front must set `request_ip_source` to
+  `xff_last` and run behind a proxy that appends the client to
+  `X-Forwarded-For`;
+- hosted Supabase must stay on `cloudflare`: calls to edge functions there
+  carry Cloudflare's header and no `X-Forwarded-For` hop of the client's.
+
 ## Upstream rules (kept in code, not configuration)
 
 Ticketing platforms and marketplaces are **read**. pretix, hi.events, Luma and the marketplaces are only read;

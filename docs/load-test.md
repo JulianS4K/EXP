@@ -19,16 +19,17 @@ Each **virtual user (VU)** is one buyer's browser, run as async code in one Node
    front; the lobby wakes up spread over 15 s after the on-sale), with ±25 % jitter, in real time;
 5. once admitted, runs **exos-checkout's SQL before Stripe**, one request each, as the service role:
    `exos_wroom_require`, the tier read, `exos_public_event_sale`, `exos_assert_purchase_limit_email`,
-   `exos_tier_current_price`, `exos_create_guest_hold` (2 tickets, the queue token in `x-exos-queue`)
-   and `exos_event_fee_terms`. **Payment is stubbed**: nothing calls Stripe; the holds just expire.
+   `exos_tier_current_price`, `exos_wroom_attach` (the turn's one open checkout),
+   `exos_create_guest_hold` (2 tickets, the queue token in `x-exos-queue`) and `exos_event_fee_terms`. **Payment is stubbed**: nothing calls Stripe; the holds just expire.
 
 Every request is one transaction on a shared pool of 40 connections with the role, JWT claims and
 headers set as GUCs, which is what PostgREST does. Latency is measured from asking for a connection to
 the commit, so it includes waiting for the pool, as a buyer behind PostgREST would. A step lasts at most
 120 s; VUs still in line at the end are counted as `in_line`, not as errors.
 
-Rows: `event_read` (each of the two page reads), `token_mint`, `poll`, `checkout_sql` (the six non-hold
-checkout calls), `hold` (the guest hold alone) and `checkout_pre_stripe` (all seven, end to end).
+Rows: `event_read` (each of the two page reads), `token_mint`, `poll`, `checkout_sql` (the seven non-hold
+checkout calls), `hold` (the guest hold alone) and `checkout_pre_stripe` (all eight, end to end). The
+3,000-a-minute section below was measured on an earlier version (six non-hold calls).
 
 ## The machine
 
@@ -45,55 +46,39 @@ checkout calls), `hold` (the guest hold alone) and `checkout_pre_stripe` (all se
 
 ### The room paced at 1,200 a minute (20 checkouts a second)
 
-`npm run loadtest -- --steps 100,1000,5000,10000 --rate 1200 --max-step 120`, on the final code (one buyer per
-turn, the per-network and room caps), plus a second 10,000 run:
+`npm run loadtest -- --steps 1000,5000,10000 --rate 1200 --max-step 120`, on the final code (random places at mint,
+one place per account, live-line caps, one checkout per turn with the attach step, bounded rounds):
 
 | VUs | Op | Requests | p50 ms | p95 ms | p99 ms | Errors |
 |---|---|---|---|---|---|---|
-| 100 | event_read | 200 | 3.1 | 5.7 | 8.6 | 0 % |
-| 100 | token_mint | 100 | 2.8 | 6.3 | 8.5 | 0 % |
-| 100 | poll | 106 | 1.7 | 4.2 | 6.3 | 0 % |
-| 100 | hold | 100 | 5.5 | 7.6 | 9.6 | 0 % |
-| 100 | checkout_pre_stripe | 100 | 14.0 | 19.6 | 25.1 | 0 % |
-| 1,000 | event_read | 2,000 | 2.7 | 4.7 | 6.3 | 0 % |
-| 1,000 | token_mint | 1,000 | 2.4 | 4.5 | 8.4 | 0 % |
-| 1,000 | poll | 4,168 | 1.3 | 2.6 | 5.3 | 0 % |
-| 1,000 | hold | 1,000 | 10.0 | 19.9 | 28.7 | 0 % |
-| 1,000 | checkout_pre_stripe | 1,000 | 17.3 | 29.0 | 36.4 | 0 % |
-| 5,000 | event_read | 10,000 | 2.9 | 13.2 | 31.2 | 0 % |
-| 5,000 | token_mint | 5,000 | 3.5 | 21.1 | 44.8 | 0 % |
-| 5,000 | poll | 45,004 | 2.3 | 8.1 | 12.8 | 0 % |
-| 5,000 | hold | 2,325 | 21.2 | 58.4 | 86.5 | 0 % |
-| 5,000 | checkout_pre_stripe | 2,325 | 33.2 | 74.5 | 105.2 | 0 % |
-| 10,000 | event_read | 20,000 | 73.6 | 2,400 | 2,718 | 0 % |
-| 10,000 | token_mint | 10,000 | 97.6 | 2,820 | 2,891 | 0 % |
-| 10,000 | poll | 72,106 | 3.9 | 2,245 | 2,741 | 0 % |
-| 10,000 | hold | 2,323 | 29.2 | 958.6 | 1,725 | 0 % |
-| 10,000 | checkout_pre_stripe | 2,323 | 43.5 | 9,361 | 13,466 | 0 % |
-| 10,000 (run 2) | event_read | 20,000 | 182.9 | 1,473 | 1,534 | 0 % |
-| 10,000 (run 2) | token_mint | 10,000 | 199.1 | 1,529 | 1,598 | 0 % |
-| 10,000 (run 2) | poll | 73,475 | 4.1 | 700.3 | 1,485 | 0 % |
-| 10,000 (run 2) | hold | 2,325 | 27.2 | 549.1 | 1,464 | 0 % |
-| 10,000 (run 2) | checkout_pre_stripe | 2,325 | 44.0 | 4,670 | 7,776 | 0 % |
+| 1,000 | event_read | 2,000 | 2.6 | 4.6 | 7.2 | 0 % |
+| 1,000 | token_mint | 1,000 | 2.9 | 4.5 | 9.5 | 0 % |
+| 1,000 | poll | 4,176 | 1.7 | 3.1 | 4.4 | 0 % |
+| 1,000 | hold | 1,000 | 9.5 | 17.5 | 24.3 | 0 % |
+| 1,000 | checkout_pre_stripe | 1,000 | 17.3 | 27.0 | 34.5 | 0 % |
+| 5,000 | event_read | 10,000 | 2.5 | 5.8 | 10.3 | 0 % |
+| 5,000 | token_mint | 5,000 | 3.0 | 8.5 | 17.0 | 0 % |
+| 5,000 | poll | 45,032 | 2.3 | 4.8 | 7.3 | 0 % |
+| 5,000 | hold | 2,324 | 14.3 | 38.5 | 66.2 | 0 % |
+| 5,000 | checkout_pre_stripe | 2,324 | 23.0 | 48.8 | 76.1 | 0 % |
+| 10,000 | event_read | 20,000 | 36.4 | 1,288 | 1,577 | 0 % |
+| 10,000 | token_mint | 10,000 | 57.1 | 1,734 | 1,809 | 0 % |
+| 10,000 | poll | 72,898 | 4.4 | 823.9 | 1,696 | 0 % |
+| 10,000 | hold | 2,328 | 22.4 | 797.8 | 1,298 | 0 % |
+| 10,000 | checkout_pre_stripe | 2,328 | 37.1 | 6,653 | 9,161 | 0 % |
 
-Every VU got a token and a place; no request failed. At 5,000 and 10,000 VUs the room let in 20 a
-second as set (about 2,325 holds in the step) and the rest were still in line, with a correct place,
-when the step ended.
+Every VU got a place; no request failed. At 5,000 and 10,000 VUs the room let in 20 a second as set
+(about 2,325 holds in the step) and the rest were still in line, with a correct place, when the step
+ended.
 
-**Headline.** 5,000 buyers arriving in 20 seconds: event page p95 13 ms, queue join p95 21 ms, queue
-poll p95 8 ms, hold p95 58 ms, checkout SQL before Stripe p95 75 ms, 0 errors. 10,000 buyers in 20
-seconds: 0 errors, poll p50 4 ms and hold p50 29 ms, but p95 of 1.5-2.8 s on the page read, the join
-and the poll across two runs. That is the arrival burst (500 new buyers a second, each a page read, a
-join and a poll) saturating this 4-vCPU box, which also runs the 10,000 VUs: every request waits for
-one of the 40 connections. An earlier 10,000 run, before the one-buyer-per-turn and cap checks,
-measured p95 288 ms (page), 303 ms (join), 82 ms (poll), 167 ms (hold) and 0.8 s (checkout SQL); the
-gap between runs on this shared sandbox is as large as the gap between versions, so treat the 10,000
-p95s as "about 0.3 to 3 s at the arrival peak on 4 vCPUs", to be measured on the real instance.
-
-**Re-run after the live-line cap, scaled network shares and terminal idle places** (counter shards, a
-recount every 5 s, a live count per network on each join), 5,000 VUs, same command: event page p95 11.7 ms,
-join p95 18.6 ms, poll p95 5.1 ms, hold p95 51.1 ms, checkout SQL before Stripe p95 61.9 ms, 0 errors: no
-regression.
+**Headline.** 5,000 buyers arriving in 20 seconds: event page p95 5.8 ms, queue join p95 8.5 ms, queue
+poll p95 4.8 ms, hold p95 38.5 ms, checkout SQL before Stripe p95 48.8 ms, 0 errors. 10,000 buyers in
+20 seconds: 0 errors, poll p50 4.4 ms and hold p50 22 ms, but p95 of 0.8-1.7 s on the page read, the
+join and the poll. That is the arrival burst (500 new buyers a second, each a page read, a join and a
+poll) saturating this 4-vCPU box, which also runs the 10,000 VUs: every request waits for one of the
+40 connections. Earlier runs of the same step on earlier versions of the room measured 0.3 to 2.8 s at
+p95 here; the spread between runs on this shared sandbox is as large as between versions, so treat the
+10,000 p95s as "under 3 s at the arrival peak on 4 vCPUs", to be measured on the real instance.
 
 ### The room set faster than checkout can go (3,000 a minute)
 
@@ -114,6 +99,32 @@ Nothing failed, but admitting 50 a second is more than one event's hold path doe
 (about 30 a second, see below): admitted buyers pile up behind the hold, take the pool's connections,
 and every other request waits for one. **The admit rate is the knob**: set it below what checkout can
 take and everything else stays fast.
+
+## Scale check: the line at 200,000 and 1,000,000 places
+
+`bash tests/exos/scale_waiting_room.sh <db> 200000` (and `1000000`) seeds one room with N places (half
+random lobby keys, a tenth idle for 40 minutes, a twentieth with lapsed turns) and times each call the
+way PostgREST runs it (role, headers, `statement_timeout` 3 s for anon, 8 s for authenticated), with a
+due admission round where noted. Same machine; first call of each kind on a fresh connection (cold plan
+cache), so prod's warm pool is faster.
+
+| Call | 200,000 | 1,000,000 |
+|---|---|---|
+| join: a new place, with an admission round of 2,000 due | 365 ms | 679 ms |
+| join: a new place, no round due | 137 ms | 363 ms |
+| status: the back of the line (counts to 10,001, shows "10,000+") | 246 ms | 265 ms |
+| status: the front | 7 ms | 8 ms |
+| status: again within 5 s (the cached view, no write) | 5 ms | 5 ms |
+| status: an idle place coming back (network shares + cap re-checked) | 149 ms | 327 ms |
+| recount: abandon a batch of 500 + count the live line (inside anon calls) | 128 ms | 326 ms |
+| admission round alone: 2,000 (inside anon calls) | 275 ms | 254 ms |
+| checkout check (`exos_wroom_require`, service role) | 6 ms | 6 ms |
+| organizer summary (authenticated) | 114 ms | 420 ms |
+
+Nothing is O(line) per request any more: there is no draw (a place's key is fixed at mint), a round
+admits at most 2,000, abandonment and expiry go in batches of 500, positions stop counting at 10,001,
+and the cap reads a 5-second recount plus 16 counter rows. The earlier draft's one-statement draw took
+2.9 s at 50,000 waiting and 12.7 s at 200,000 (the Applier's measurement), past the 3 s limit.
 
 ## What the run found
 

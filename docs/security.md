@@ -85,7 +85,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_drop_signup` (mig 20261118100000) | OK (anon + authenticated; rate limited) | A guest's "Notify me". Always `{ ok, status: 'check_email' }` for a well-formed request to an open list: new, pending, already listed or held by a per-address limit (no enumeration). 10 a minute per network (`_exos_request_ip_bucket`) and 5 per address (lower case, `+tag` folded), before any write; 120 a minute per event answers `{ ok: false, status: 'try_again' }` (per event, nothing about an address); 3 confirm mails a day per address and event, 10 across lists; none when already listed. Stores the address, the consent words and the sanitized first-touch promoter / UTM tags; no IP. The browser token (64 hex) is stored hashed |
 | `exos_drop_confirm`, `exos_drop_leave` (mig 20261118100000) | OK (anon + authenticated; 64-hex token) | The confirm link (two UUIDv4s, only its SHA-256 stored, 7 days) and the leave token (one per mail, only its SHA-256 stored). A link made before the person left, or spent by the leave, answers `{ ok: false }`. Answer ok and the event (and org) name only. The pages take a click, so a mail scanner changes nothing |
 | `exos_drop_confirm_code` (mig 20261118100000) | OK (anon + authenticated; 256-bit browser token) | The 6-digit code from the confirm mail, only with the hashed browser token of the signup that asked for it (the guest-proof pattern, mig 20261105100000): 5 wrong tries spend the code, 20 tries a minute per network, 24 hours. Answers `{ ok }` only, the same false for a wrong code, a spent one or no signup |
-| `exos_wroom_join`, `exos_wroom_status` (mig 20261118120000) | OK (anon + authenticated; rate limited) | The on-sale waiting room, no login. Join mints a queue token only while an event's room is open (32 bytes from `gen_random_bytes`, 64 hex; only SHA-256(event id:token) is stored, so a token for one event matches nothing in another). Before any write: 60 new tokens a minute per network (`_exos_request_ip_bucket()`: an IPv4 address or an IPv6 /64) and 120 per IPv6 /48 (over either `{ state: 'busy' }`, nothing stored); live places per network, fixed by default (20 per IPv6 /48, 200 per IPv4 address, 100 per IPv6 /32) and scaled with the room's cap only behind the room's Cloudflare Turnstile (greatest(20, cap / 50), greatest(200, cap / 10), greatest(100, cap / 4): a 50,000 room allows 1,000 / 5,000 / 12,500, so carriers' shared addresses get in while each place costs a solved check), and the room's cap (the organizer's number, else 5 x the public capacity, at least 1,000) counted on the LIVE line only (waiting and seen in the last 3 minutes, or admitted and neither expired nor used; recounted at most every 5 s, plus the mints since, soft at the edge), so abandoned, expired and used places free up; over those `{ state: 'full' }` and the page retries each minute. With the room's Turnstile on, `exos_wroom_join` mints nothing (`{ state: 'challenge' }`) and new places come only through `exos-wroom-join` (siteverify, then the service-role `exos_wroom_join_verified`); a browser presenting its own token gets its place back instead of a new one. Status answers only the caller's own state and place (position, people ahead, estimated minutes, admission end) by that token; an unknown or malformed token answers `unknown`, no room answers `off`. Both run the admission round on read (at most every 5 s per event, try-lock). Never another buyer's place, a count of the line, org data or a token back from status. In the H3 allowlist |
+| `exos_wroom_join`, `exos_wroom_status` (mig 20261118120000) | OK (anon + authenticated; rate limited) | The on-sale waiting room, no login needed. A signed-in buyer with a confirmed email gets one place per account per run (SHA-256 of event + account; resumed from any browser; outside the cap, the network shares and Turnstile). An anonymous place: a token of 32 bytes from `gen_random_bytes` (only SHA-256(event:token) stored), minted only while the room is open, after Turnstile when the room has it on (else `challenge`), 60 a minute per IPv4 / IPv6 /64 and 120 per /48 (`busy`, nothing stored), then the live network shares and the anonymous cap (`full`, with a sign-in offer). Status answers only the caller's own state and place (positions capped at "10,000+"); an unknown token answers `unknown`, no room or an unpublished event `off`. Both run the admission round on read (bounded: at most 2,000 a round, every 5 s, try-lock). Never another buyer's place, a count of the line, org data, or a token back from status. In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -981,47 +981,61 @@ to review:
 
 ### Waiting room (mig 20261118120000)
 
-- **Tables.** `exos_wroom_settings` (one row per event), `exos_wroom_entries` (one per queue token: the token's
-  hash, arrival, place, state, admission times, first use, SHA-256 of event + the redeeming buyer, SHA-256 of run +
-  the minting network): RLS on, no client grants (RPCs only), `org_id` on every row. No email, user id, phone or IP
-  in clear.
-- **The gate.** `exos_create_hold`, `exos_create_guest_hold` and `exos_claim_free_tickets` call
-  `_exos_wroom_gate(p_event_id, p_tier_id, <buyer>)` as their first statement (marker `/* exos: waiting room gate */`):
-  with an open room (enabled, in its window, not closed), only an admitted, unexpired token of that event's current
-  run in the request's `x-exos-queue` header passes (XWR01 otherwise); no room is one indexed read. The event is also
-  taken from the ticket type, so naming a roomless event with another event's type doesn't skip it. `exos-checkout`
-  refuses non-canonical event / type ids (400) and calls `exos_wroom_require` (service role) with the event and type
-  as the database resolved them, before any hold, write or Stripe call, which also covers bypass-voucher checkouts
-  that skip the hold. The drop list presale type passes in its early window only (members with their code, until the
-  public on-sale it was set against); partner reservations, POS, door, kiosk and comps never call these functions.
-- **One buyer per turn.** The first checkout, hold or free claim binds the admission to its buyer (the account id,
-  else the guest email, hashed with the event); anyone else presenting the token gets XWR01. A transaction-scoped
-  advisory lock on the turn refuses a second checkout on it while one runs (XWR02), and the hold functions keep one
-  live cart per buyer and event, so a turn never holds two carts (`race_waiting_room.sh` races 4-5). A retry by the
-  same buyer after a failed or abandoned checkout replaces the earlier cart instead of waiting 30 minutes for it.
-- **Stuffing.** Without a CAPTCHA the per-network shares of the live line are fixed (20 per IPv6 /48, 200 per IPv4
-  address, 100 per IPv6 /32): scaling them would make filling a room cheaper (about 50 /48s across 4 /32s). Places
-  stop counting 3 minutes after their last poll and a freed place is final: a waiting place idle for 3 minutes is
-  `abandoned` (marked by the recount, treated so on read under the entry's row lock), an admission that lapsed unused
-  is `expired`; neither counts, takes a turn or comes back. Its token answers `{ state: 'expired', reason: 'idle' }`
-  and the page offers a new join at the back, through every cap (`race_waiting_room.sh` race 7). The page polls at
-  least every ~40 s and on returning to the tab; browsers throttle background tabs to about once a minute. A phone that
-  suspends the page for 3+ minutes loses its place.
-- **Turnstile** (per room, off by default; owner / manager, audited). Needs the platform's `TURNSTILE_SECRET_KEY` and
-  `VITE_TURNSTILE_SITE_KEY` (`docs/self-hosting.md`); without them the toggle is greyed out. On: the anon join can't
-  mint (`challenge`); `exos-wroom-join` rate-limits per network (30 checks a minute, before the external call),
-  verifies the token with Cloudflare's siteverify (one POST to `challenges.cloudflare.com`, a verification, no
-  ticketing write; the widget's action must be `wroom`), then calls `exos_wroom_join_verified` (service role) with the
-  platform's `cf-connecting-ip` / `x-forwarded-for`, which the SQL reads through the same `_exos_request_ip()` rule as
-  a browser call (`request_ip_source`). Only then do the per-network shares scale with the cap. Places already held
-  keep polling and re-joining without a new check. Turnstile's script loads on the event and queue pages only, never
-  on the embed's card page (`docs/pci.md`).
+- **Tables.** `exos_wroom_settings` (one row per event), `exos_wroom_entries` (one per place: hashes of the token,
+  the account, the redeeming buyer and the minting network; times; a state), `exos_wroom_counts` (cap counter
+  shards): RLS on, no client grants (RPCs only), `org_id` on every row. No email, user id, phone or IP in clear.
+- **The gate.** `exos_create_hold`, `exos_create_guest_hold`, `exos_claim_free_tickets`, `exos_phone_rsvp_verify`
+  and `exos_redeem_referral_reward` call the gate as their first statement (marker `/* exos: waiting room gate */`,
+  anchored on the body's top-level `BEGIN`): with an open room (enabled, in its window, not closed, the event
+  published) only an admitted, unexpired, unspent turn of that event's current run passes: the request's
+  `x-exos-queue` token, or the signed-in account's own place (XWR01 otherwise; XWR03 once used). The event is also
+  taken from the ticket type. The drop list presale type passes in its early window only (members with their code,
+  until the public on-sale it was set against). Partner reservations, POS, door, kiosk and comps never call these
+  functions.
+- **exos-checkout.** Refuses non-canonical ids (400); `exos_wroom_require` (service role, **check-only**: nothing is
+  bound, so a refusal later in checkout, e.g. a typo'd guest email, leaves the turn as it was) once the event and
+  type are resolved; then, after its own checks and before any hold or Stripe call, `exos_wroom_attach`: the attempt
+  is attached to the turn under the entry's row lock, one open checkout per turn (a parallel one is XWR02; this also
+  covers bypass-voucher checkouts that skip the hold). A failed attempt is released (`exos_wroom_release`); the
+  session id is bound before the session row is written (`exos_wroom_bind`). Only `PGRST202` (function not there
+  yet) passes through.
+- **One turn, one order.** The first hold binds the turn to its buyer (account id, else the guest email, hashed with
+  the event); a claim spends it at once; a fulfilled order spends it (`exos_checkout_sessions_wroom` trigger), a
+  failed or expired session frees it. Spent: XWR03 and "join again". An account's spent / lapsed place goes to the
+  back on its next join.
+- **Stuffing.** Anonymous places only: per-network shares of the live line, fixed without a CAPTCHA (20 per IPv6 /48,
+  200 per IPv4 address, 100 per IPv6 /32), and the anonymous cap (5 x the public capacity, at least 1,000, or the
+  organizer's number). Behind the room's Turnstile the shares scale with the cap under a hard ceiling:
+  least(greatest(20, cap / 50), 200), least(greatest(200, cap / 10), 1,000), least(greatest(100, cap / 4), 2,000), so a
+  solver farm's cost grows with the room and stays bounded. Full is never a lockout for a real buyer: every
+  confirmed account gets a place. Signup's own CAPTCHA and email confirmation (operator settings below) are what
+  bound account creation; this repo can't see prod's auth settings (left to the operator to confirm).
+- **Idle places.** Not polled for 3 minutes: skipped by admission and not counted. Back within 30 minutes: an
+  account's place always, an anonymous one only if its network shares and the cap still have room (re-checked under
+  the entry's row lock and the network locks), else it is released for good. Idle 30 minutes: `abandoned` (marked in
+  batches of 500 by the recount, and so on read). A released place never comes back: its token answers
+  `{ state: 'expired', reason: 'idle' }` and the page offers a new join at the back, through every cap
+  (`race_waiting_room.sh` race 7). The page polls at least every ~40 s and on returning to the tab.
+- **Turnstile** (per room, off by default; owner / manager, audited; needs `TURNSTILE_SECRET_KEY` and
+  `VITE_TURNSTILE_SITE_KEY`, otherwise the toggle is greyed out). On: the anon join can't mint (`challenge`);
+  `exos-wroom-join` sends the platform's `cf-connecting-ip` / `x-forwarded-for` to `exos_wroom_verify_gate`, which
+  resolves the address with `_exos_request_ip()`'s rule (no address: 503, never a place in `unknown`) and allows 30
+  checks a minute per IPv4 / IPv6 /64, all before the external call; then siteverify (one POST to
+  `challenges.cloudflare.com`, a verification, no ticketing write) must pass with action `wroom` and a hostname from
+  `EXOS_APP_BASE_URL` / `EXOS_APP_URL` / `EXOS_REDIRECT_ORIGINS` (none configured: accepted, logged once); then
+  `exos_wroom_join_verified` (service role). Its script loads on the event and queue pages only, never on the
+  embed's card page (`docs/pci.md`).
 - **Organizers.** `exos_wroom_summary`: owner / manager / finance (or admin); counts only, never a token; another
   org's event and an unknown id are the same 42501. `exos_wroom_configure`: owner / manager (or admin), bounds checked,
-  audited `event.waiting_room` with the before / after numbers. Content and scanner roles get nothing.
-- **Fairness.** The draw at the on-sale gives early arrivals a place from `gen_random_bytes` under the room's lock; a
-  token's place is never shown before it. Admission rounds run under a try-lock and re-read the room after taking it,
-  so parallel polls admit one round's worth (`tests/exos/race_waiting_room.sh`).
+  audited `event.waiting_room` with the before / after values. Re-enabling keeps admitted, unexpired turns.
+- **Bounded work** (prod: anon statement_timeout 3 s, authenticated 8 s). No draw (a place's key is fixed at mint),
+  admission at most 2,000 a round, abandonment and expiry in batches of 500, positions counted to 10,001 at most, a
+  poll within 5 s of the last write answered from the cached view, `last_seen_at` written at most every 20 s.
+  Measured at 200,000 and 1,000,000 places: `docs/load-test.md` "Scale check".
+- **Notes.** Personal bypass codes (`exos_vouchers.bypass_capacity`) and group-pay seats still need an admission;
+  the lobby (before the on-sale) refuses hidden presale types other than the drop list's; requests without a trusted
+  IP share one `unknown` network bucket (with Turnstile on they get 503 instead); rate windows are clock minutes
+  (`exos_rate_hit`), so a burst across a minute boundary can get up to twice the per-minute number.
 
 ### Search path
 
