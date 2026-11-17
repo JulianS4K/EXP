@@ -65,6 +65,7 @@
 --              exos_drop_list_export, exos_drop_list_set_presale (owner /
 --              manager; audited); exos_drop_list_blast, exos_drop_list_sweep
 --              (service role); helpers _exos_drop_*
+--           C: TRIGGER exos_orgs_country_audit (org.country audit rows)
 --           W: FUNCTION exos_check_voucher (marker /* exos: drop list code */),
 --              exos_sms_claim (marker /* exos: drop list stop */)
 --           W: CONSTRAINT exos_mail_template_check (+ drop-confirm,
@@ -209,6 +210,7 @@ CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_user_idx ON public.exos_drop_sms_
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_phone_idx ON public.exos_drop_sms_codes (phone, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_org_idx ON public.exos_drop_sms_codes (org_id, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_signup_idx ON public.exos_drop_sms_codes (signup_id);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_at_idx ON public.exos_drop_sms_codes (created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_new_idx ON public.exos_drop_sms_codes (created_at) WHERE newcomer;
 
 -- Countries an org may text verification codes to beyond its own (owner
@@ -460,6 +462,25 @@ AS $$
   END
 $$;
 REVOKE ALL ON FUNCTION public._exos_drop_phone_country_ok(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- exos_orgs.country decides which numbers an org may text codes to, and an
+-- owner can change it directly: every change is an org.country audit row.
+CREATE OR REPLACE FUNCTION public._exos_tg_org_country_audit()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  /* exos: audit org.country */
+  PERFORM public._exos_audit(NEW.id, 'org.country', 'org', NEW.id::text, NULL,
+    jsonb_build_object('country', jsonb_build_array(OLD.country, NEW.country)));
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_org_country_audit() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_orgs_country_audit ON public.exos_orgs;
+CREATE TRIGGER exos_orgs_country_audit AFTER UPDATE OF country ON public.exos_orgs
+  FOR EACH ROW WHEN (OLD.country IS DISTINCT FROM NEW.country)
+  EXECUTE FUNCTION public._exos_tg_org_country_audit();
 
 -- Owner only (or admin): the extra countries the org's drop list may text
 -- codes to. Every code must be one Exos texts (_exos_drop_calling_code).
@@ -789,13 +810,15 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- the outbox under per-account, per-org and per-number locks, over actual
 -- sends logged in exos_drop_sms_codes: 5 a day per account, 5 a day per
 -- number (all accounts and orgs), 300 a day per org of which accounts new to
--- the org (no verified number or paid order with it) share 100, and 2,000
--- newcomer sends a day platform-wide (exos_platform_settings
--- drop_sms_codes_daily_cap). The platform cap counts and blocks newcomers
--- only: an org's established accounts (a proved number or paid order with
--- it) are never stopped by other orgs, and with 100 newcomers per org at
--- most, filling it takes 20 orgs' worth of new accounts. The trade-off: on
--- such a day new accounts everywhere wait. 3 per
+-- the org share 100. Established = a proved number with the org, or a paid
+-- order with it at least 7 days old (amount > 0, fulfilled or partly
+-- refunded; $0 claims and fully refunded orders don't count). Platform-wide, two caps
+-- (exos_platform_settings): drop_sms_codes_daily_cap, 5,000 sends a day in
+-- all, which stops everyone (a hard spend ceiling that trades availability
+-- on a day it fills: no org can pump past it, however many orgs and
+-- established accounts it fakes), and drop_sms_codes_daily_newcomer_cap,
+-- 2,000 a day, which stops only newcomers so they can't use up the total
+-- (an org's newcomers take at most 100 of it). 3 per
 -- number per 10
 -- minutes (shared with the order proofs), 60 s apart and 5 in all per
 -- signup, at most 2 different numbers per signup (the second replaces the
@@ -873,17 +896,23 @@ BEGIN
 
   -- A new number, or the same one after leaving (its consent ended): a code.
   IF v_phone IS NOT NULL AND (v_phone IS DISTINCT FROM s.sms_phone OR s.sms_opted_out_at IS NOT NULL) THEN
-    -- Locks in one order (account, org, number), then every cap, then send.
+    -- Locks in one order (account, org, number, platform), then every cap, then send.
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-acct:' || v_uid::text, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-org:' || e.org_id::text, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-proof-phone:' || v_phone, 0));
+    -- Last, the platform lock: the platform-wide caps count every org's sends.
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-all', 0));
     SELECT * INTO s FROM public.exos_drop_signups WHERE id = s.id;
-    -- New to the org: no verified number and no paid order with it before.
+    -- New to the org: no proved number and no paid order (amount > 0, not
+    -- fully refunded) with it before.
     v_new := NOT EXISTS (SELECT 1 FROM public.exos_drop_signups x
                           WHERE x.org_id = e.org_id AND x.user_id = v_uid AND x.sms_consented_at IS NOT NULL)
+         -- A paid order at least 7 days old: money actually taken and not all
+         -- refunded ($0 claims, comps and fully refunded orders don't count).
          AND NOT EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
                           WHERE cs.org_id = e.org_id AND cs.buyer_uid = v_uid
-                            AND cs.status IN ('fulfilled', 'partially_refunded', 'refunded'));
+                            AND cs.status IN ('fulfilled', 'partially_refunded') AND cs.amount_cents > 0
+                            AND coalesce(cs.fulfilled_at, cs.created_at) < now() - interval '7 days');
     IF (s.sms_code_at IS NOT NULL AND s.sms_code_at >= now() - interval '60 seconds')
        OR s.sms_code_sends >= 5
        OR (NOT EXISTS (SELECT 1 FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id AND l.phone = v_phone)
@@ -898,12 +927,17 @@ BEGIN
             WHERE l.org_id = e.org_id AND l.created_at > now() - interval '1 day') >= 300
        OR (v_new AND (SELECT count(*) FROM public.exos_drop_sms_codes l
                        WHERE l.org_id = e.org_id AND l.newcomer AND l.created_at > now() - interval '1 day') >= 100)
-       -- Platform-wide, newcomers only: exos_platform_settings drop_sms_codes_daily_cap
-       -- (2,000 by default). Established accounts never hit it, so orgs filling it
-       -- can't stop anyone's regulars; each org's newcomers take at most 100 of it.
+       -- Platform-wide. The total (drop_sms_codes_daily_cap, 5,000 by default)
+       -- counts every send and stops everyone: a hard spend ceiling, at the cost
+       -- of availability on a day it fills. The newcomer sub-cap
+       -- (drop_sms_codes_daily_newcomer_cap, 2,000) stops only accounts new to
+       -- the org, so newcomers can't use up the total on their own.
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l WHERE l.created_at > now() - interval '1 day')
+          >= coalesce((SELECT (ps.value #>> '{}')::int FROM public.exos_platform_settings ps
+                        WHERE ps.key = 'drop_sms_codes_daily_cap' AND jsonb_typeof(ps.value) = 'number'), 5000)
        OR (v_new AND (SELECT count(*) FROM public.exos_drop_sms_codes l WHERE l.newcomer AND l.created_at > now() - interval '1 day')
           >= coalesce((SELECT (ps.value #>> '{}')::int FROM public.exos_platform_settings ps
-                        WHERE ps.key = 'drop_sms_codes_daily_cap' AND jsonb_typeof(ps.value) = 'number'), 2000))
+                        WHERE ps.key = 'drop_sms_codes_daily_newcomer_cap' AND jsonb_typeof(ps.value) = 'number'), 2000))
        OR (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
             WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') >= 3 THEN
       RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'try_again');
