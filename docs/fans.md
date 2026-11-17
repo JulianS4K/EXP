@@ -86,10 +86,15 @@ by hand). For an announced event that isn't on sale yet: the moment promoters se
   checkbox and consent words. The number counts only once it is proved: a one-time 6-digit code is texted to it
   (`exos_rsvp_sms_outbox`, the order-proof SMS path; a dry run until `EXOS_SMS_LIVE=on`) and typed back
   (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes (against SMS pumping, logged in
-  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org, 3 per
+  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org (of
+  which accounts new to the org, with no proved number or paid order there, share 100), 2,000 a day platform-wide
+  (`exos_platform_settings` `drop_sms_codes_daily_cap`), 3 per
   number per 10 minutes, 60 s apart, at most 2 numbers per signup, and none to a number with 10 wrong codes typed in a
-  day; over any of them the page says try later (the same answer whichever). A number that replied STOP gets no
-  text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
+  day; over any of them the page says try later (the same answer whichever). Numbers: no extensions or dial
+  strings, a real NANP number for +1, and only the org's own country (`exos_orgs.country`; +1 for US / CA) unless its
+  owner allows more with `exos_drop_set_sms_countries` (an audited allowlist, RPC only for now); any other number
+  gets "texts aren't available for this number" before anything is logged or sent. A number that replied STOP gets
+  no text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
   exemption for user-requested one-time codes, as for the order-proof codes). Leaving and re-joining with the same
   number sends a new code. Everyone else: an email
   (`exos_drop_signup`), then the mail's **Confirm** link (`/drop/confirm?t=`, a page that takes a click) or its
