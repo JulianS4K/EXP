@@ -119,6 +119,8 @@ for m in \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
+         20261021174000_exos_dead_crons_off \
+         20261021174500_exos_all_crons_off \
          20261027080000_exos_public_tier_available_grant \
          20261027090000_exos_api_scopes \
          20261027100000_exos_fee_rules \
@@ -337,6 +339,8 @@ for m in \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
+         20261021174000_exos_dead_crons_off \
+         20261021174500_exos_all_crons_off \
          20261027080000_exos_public_tier_available_grant \
          20261027090000_exos_api_scopes \
          20261027100000_exos_fee_rules \
