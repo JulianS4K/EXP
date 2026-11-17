@@ -117,9 +117,9 @@ BEGIN
                      AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0), 'A0 marker ' || m;
   END LOOP;
   ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
-            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 61, 'A0 61 patched functions';  -- +1 exos_wroom_configure (20261118120000), +2 exos_drop_list_export / _set_presale (20261118100000), +1 exos_set_social_features_enabled (20261117190000), +3 exos_discord_set_reminder / _delete_mark / _test_begin (20261114100000), +8 exos_discord_* (20261113194000), +1 exos_fair_setup (20261113192000), +1 exos_org_followers_export (20261111110000), +1 exos_set_group_pay_enabled (20261111120000), +1 exos_stripe_org_payouts_record (20261111130000), +2 reservation answers replace / add-on wallet reissue (20261111140000), +4 exos_pos_kiosk_configure / _enter / _end / _exos_pos_kiosk_exit (20261113191000)
+            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 63, 'A0 63 patched functions';  -- +1 exos_wroom_configure (20261118120000), +4 exos_drop_list_export / _set_presale / exos_drop_set_sms_countries / _exos_tg_org_country_audit (20261118100000), +1 exos_set_social_features_enabled (20261117190000), +3 exos_discord_set_reminder / _delete_mark / _test_begin (20261114100000), +8 exos_discord_* (20261113194000), +1 exos_fair_setup (20261113192000), +1 exos_org_followers_export (20261111110000), +1 exos_set_group_pay_enabled (20261111120000), +1 exos_stripe_org_payouts_record (20261111130000), +2 reservation answers replace / add-on wallet reissue (20261111140000), +4 exos_pos_kiosk_configure / _enter / _end / _exos_pos_kiosk_exit (20261113191000)
   ASSERT (SELECT count(DISTINCT tgrelid) FROM pg_trigger WHERE tgname IN ('exos_audit_ins_del', 'exos_audit_upd')) = 10, 'A0 ten tables';
-  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 61 patched functions, 10 audited tables';
+  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 63 patched functions, 10 audited tables';
 END $$;
 
 -- A1 -------------------------------------------------------------------------

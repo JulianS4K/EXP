@@ -19,6 +19,8 @@
 #   race 5 ten parallel "text me" joins by one account, each on its own event
 #          with its own number: at most 5 codes are logged and texted (the
 #          per-account daily cap holds under concurrency)
+#   race 6 ten parallel code requests by ten accounts in ten orgs against a
+#          platform-wide cap K = 3: exactly 3 are logged and texted
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -159,5 +161,41 @@ if [[ "$r" == "5 5" ]]; then
   echo "OK   race 5 ten parallel code requests by one account: 5 logged, 5 texted"
 else
   echo "FAIL race 5: logged / texted = $r"; fail=1
+fi
+# race 6: the platform-wide cap under concurrency (10 orgs, 10 accounts, cap = now + 3).
+cleanup6() {
+  $P -c "DELETE FROM exos_platform_settings WHERE key = 'drop_sms_codes_daily_cap';
+         DELETE FROM exos_rsvp_sms_outbox WHERE phone LIKE '+121255591%';
+         DELETE FROM exos_drop_signups WHERE org_id::text LIKE 'd7a00000-0000-0000-0000-0000000006%';
+         DELETE FROM exos_ticket_tiers WHERE event_id::text LIKE 'd7a00000-0000-0000-0000-0000000007%';
+         DELETE FROM exos_events WHERE org_id::text LIKE 'd7a00000-0000-0000-0000-0000000006%';
+         DELETE FROM exos_orgs WHERE id::text LIKE 'd7a00000-0000-0000-0000-0000000006%';
+         DELETE FROM auth.users WHERE id::text LIKE 'd7a00000-0000-0000-0000-0000000008%';" >/dev/null
+}
+cleanup6
+$P -c "INSERT INTO auth.users(id,email,email_confirmed_at)
+       SELECT ('d7a00000-0000-0000-0000-0000000008' || lpad(g::text, 2, '0'))::uuid, 'cap' || g || '@race-drop.test', now() FROM generate_series(1, 10) g;
+       INSERT INTO exos_orgs(id,name,slug,owner_uid)
+       SELECT ('d7a00000-0000-0000-0000-0000000006' || lpad(g::text, 2, '0'))::uuid, 'Race Cap ' || g, 'race-cap-' || g, '$A' FROM generate_series(1, 10) g;
+       INSERT INTO exos_events(id,org_id,name,slug,status,starts_at,timezone,total_tickets,created_by)
+       SELECT ('d7a00000-0000-0000-0000-0000000007' || lpad(g::text, 2, '0'))::uuid, ('d7a00000-0000-0000-0000-0000000006' || lpad(g::text, 2, '0'))::uuid,
+              'Race Cap ' || g, 'race-cap-ev-' || g, 'published', now() + interval '30 days', 'America/New_York', 100, '$A' FROM generate_series(1, 10) g;
+       INSERT INTO exos_ticket_tiers(event_id,name,price,capacity,sales_start)
+       SELECT ('d7a00000-0000-0000-0000-0000000007' || lpad(g::text, 2, '0'))::uuid, 'GA', 20, 100, now() + interval '2 days' FROM generate_series(1, 10) g;
+       INSERT INTO exos_platform_settings(key,value)
+       SELECT 'drop_sms_codes_daily_cap', to_jsonb((SELECT count(*) FROM exos_drop_sms_codes WHERE created_at > now() - interval '1 day') + 3)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;" >/dev/null
+for g in 01 02 03 04 05 06 07 08 09 10; do
+  $P -c "SELECT set_config('app.uid','d7a00000-0000-0000-0000-0000000008$g',false);
+         SELECT public.exos_drop_join('d7a00000-0000-0000-0000-0000000007$g', true, '+121255591$g');" >/dev/null 2>&1 &
+done
+wait
+r=$($P -c "SELECT (SELECT count(*) FROM exos_drop_sms_codes WHERE org_id::text LIKE 'd7a00000-0000-0000-0000-0000000006%') || ' ' ||
+                  (SELECT count(*) FROM exos_rsvp_sms_outbox WHERE phone LIKE '+121255591%')")
+cleanup6
+if [[ "$r" == "3 3" ]]; then
+  echo "OK   race 6 ten parallel code requests across ten orgs, platform cap K=3: exactly 3 logged, 3 texted"
+else
+  echo "FAIL race 6: logged / texted = $r"; fail=1
 fi
 exit $fail

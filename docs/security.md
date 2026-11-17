@@ -944,7 +944,14 @@ to review:
   (`exos_rsvp_sms_outbox`). Against SMS pumping, checked before the outbox under per-account, per-org and per-number
   locks over the sends logged in `exos_drop_sms_codes`: 5 a day per account, 5 a day per number (all accounts and
   orgs), 300 a day per org, 3 per number per 10 minutes, 60 s apart, 2 numbers per signup, none after 10 wrong codes
-  for the number in a day (across signups); one `try_again` answer
+  for the number in a day (across signups), 100 of the org's 300 for accounts new to it (established: a proved
+  number or a paid order, amount > 0, not fully refunded, at least 7 days old), 5,000 sends a day platform-wide for
+  everyone (a hard spend ceiling that trades availability) and 2,000 of them for newcomers, both counted under one
+  platform advisory lock (race 6); every change of `exos_orgs.country` is an `org.country` audit row (trigger
+  `exos_orgs_country_audit`); numbers only in the org's country (+1 for US / CA / US
+  territories; other NANP countries by area code, `_exos_drop_nanp_iso`; 900 never) or an owner's audited allowlist
+  (`exos_drop_set_sms_countries`, owner / admin, `drop_list.sms_countries_set`), no extensions, NANP for +1, refused
+  before any log or send; one `try_again` answer
   whichever cap (`race_drop_list.sh` race 5). None to a stopped number, same answer as sent. and `exos_drop_verify_sms` (the caller's own signup, 10 minutes, 5 tries, 10 a
   minute) stores the number and the consent words. `exos_drop_leave_mine`: the caller's own rows.
 - **Organizers.** `exos_drop_list_summary`: owner / manager / finance of the event's org (or admin), counts and

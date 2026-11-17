@@ -86,10 +86,21 @@ by hand). For an announced event that isn't on sale yet: the moment promoters se
   checkbox and consent words. The number counts only once it is proved: a one-time 6-digit code is texted to it
   (`exos_rsvp_sms_outbox`, the order-proof SMS path; a dry run until `EXOS_SMS_LIVE=on`) and typed back
   (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes (against SMS pumping, logged in
-  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org, 3 per
+  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org (of
+  which accounts new to the org share 100; established means a proved number or a paid order there, amount above $0,
+  not fully refunded and at least 7 days old), and two platform-wide caps in `exos_platform_settings`: `drop_sms_codes_daily_cap`, 5,000
+  sends a day in all, stops everyone (a hard spend ceiling, traded against availability on a day it fills; both caps
+  are counted under one platform lock, so parallel requests can't overshoot them), and
+  `drop_sms_codes_daily_newcomer_cap`, 2,000 a day, stops only newcomers so they can't use up the total. 3 per
   number per 10 minutes, 60 s apart, at most 2 numbers per signup, and none to a number with 10 wrong codes typed in a
-  day; over any of them the page says try later (the same answer whichever). A number that replied STOP gets no
-  text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
+  day; over any of them the page says try later (the same answer whichever). Numbers: no extensions or dial
+  strings, a real NANP number for +1, and only the org's own country (`exos_orgs.country`; +1 for US / CA and the US
+  territories, while the other NANP countries such as Jamaica 876 / 658 or the Dominican Republic 809 / 829 / 849
+  are placed by area code as their own countries, and 900 is never texted) unless its
+  owner allows more with `exos_drop_set_sms_countries` (an audited allowlist, RPC only for now; a change of
+  `exos_orgs.country` itself is an `org.country` audit row); any other number
+  gets "texts aren't available for this number" before anything is logged or sent. A number that replied STOP gets
+  no text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
   exemption for user-requested one-time codes, as for the order-proof codes). Leaving and re-joining with the same
   number sends a new code. Everyone else: an email
   (`exos_drop_signup`), then the mail's **Confirm** link (`/drop/confirm?t=`, a page that takes a click) or its
