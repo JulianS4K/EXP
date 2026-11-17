@@ -1,6 +1,6 @@
 // The finish token of the OAuth sign-ins (mig 20261029140000), shared by
 // exos-oauth-google (Connect Google Ads), exos-eventbrite-oauth (Connect
-// Eventbrite) and exos-discord (Add Exos bot, mig 20261113130000). No imports, so Deno and EXP's vitest both load it
+// Eventbrite) and exos-discord (Add Exos bot, mig 20261113194000). No imports, so Deno and EXP's vitest both load it
 // (src/lib/oauthReturn.test.ts).
 //
 // Why: the user who starts a sign-in knows the raw state. Without a second

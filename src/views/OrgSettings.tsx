@@ -652,7 +652,7 @@ export default function OrgSettings() {
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
 
-            {/* Discord: announcements + scheduled events in the org's own server (mig 20261113130000). Owner / manager; hidden until switched on. */}
+            {/* Discord: announcements + scheduled events in the org's own server (mig 20261113194000). Owner / manager; hidden until switched on. */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <DiscordPanel orgId={org.id} />}
 
             {/* Fee rules every event inherits: passed on (inside the all-in price) or absorbed (mig 20261027100000). */}

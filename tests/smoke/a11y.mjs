@@ -315,7 +315,7 @@ await check('door scanner (/checkin)', async (page, run) => {
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
-// claude/exos-attendance-report (mig 20261113120000): the attendance report
+// claude/exos-attendance-report (mig 20261113193000): the attendance report
 // panel on the event report (postal table, the comparison picker, the pace
 // chart and its checkpoints), blocking. Only the panel: the rest of the event
 // report isn't in this gate yet.
@@ -367,7 +367,7 @@ await check('event editor: fair / multi-day setup', async (page, run) => {
   exos_event_quotas: () => [],
 } }) });
 
-// Kiosk mode (mig 20261113100000): the self-serve screen, blocking. Big touch
+// Kiosk mode (mig 20261113191000): the self-serve screen, blocking. Big touch
 // targets and visible focus are its own rules (src/views/Kiosk.tsx); axe
 // checks names, contrast, labels and the PIN dialog.
 await check('kiosk screen', async (page, run) => {
@@ -399,7 +399,7 @@ await check('kiosk screen', async (page, run) => {
   await run('staff PIN');
 }, { mock: { fns: { 'exos-pos': kioskPos({}) } } });
 
-// claude/exos-discord (mig 20261113130000): Org settings → Discord, empty,
+// claude/exos-discord (mig 20261113194000): Org settings → Discord, empty,
 // with a bad URL, and connected (blocking; the panel only).
 const DISCORD_ST = { can_manage: true, is_owner: false, webhook: { set: false }, guild: { linked: false }, writes_enabled: false, shown_events: 0 };
 const discordFns = { 'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: false } }) };

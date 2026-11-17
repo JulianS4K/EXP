@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 20261113120000 — Exos: attendance report (postal rollup, daily
+-- Migration 20261113193000 — Exos: attendance report (postal rollup, daily
 --   pacing against a prior event, XLSX export kinds). Wave 13.
 -- ============================================================================
 -- Branch: claude/exos-attendance-report

@@ -234,7 +234,7 @@ export async function handle(route, log, over = {}) {
   return json({ message: 'unmocked' }, 404);
 }
 
-// --- claude/exos-kiosk: kiosk mode (mig 20261113100000) ----------------------
+// --- claude/exos-kiosk: kiosk mode (mig 20261113191000) ----------------------
 // A kiosk screen: signed out, only the kiosk credential in localStorage, and
 // exos-pos's kiosk_* actions mocked. kioskPos(state) answers them; state
 // { polls, cardOn, questions } drives the card poll and the variants.

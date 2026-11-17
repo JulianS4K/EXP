@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 20261113100000 — Exos: kiosk mode (self-serve card sales)
+-- Migration 20261113191000 — Exos: kiosk mode (self-serve card sales)
 -- Branch:   claude/exos-kiosk
 -- Touches:  C: TABLE exos_pos_kiosks (the kiosk flag on a POS device: one
 --              event, the card reader, a printer, the admin PIN's bcrypt hash),
@@ -209,7 +209,7 @@ SELECT pg_temp.exos_patch_n('public._exos_pos_walkup_complete(uuid,uuid,text,uui
   $n$  IF o.status <> 'open' THEN
     RAISE EXCEPTION 'this sale was %', o.status USING ERRCODE = '55000';
   END IF;
-  /* exos: pos kiosk card only */ -- mig 20261113100000: a kiosk sale is paid by card, nothing else.
+  /* exos: pos kiosk card only */ -- mig 20261113191000: a kiosk sale is paid by card, nothing else.
   IF o.channel = 'kiosk' AND lower(coalesce(p_payment, '')) <> 'card' THEN
     RAISE EXCEPTION 'a kiosk takes cards only' USING ERRCODE = '0A000', HINT = 'kiosk-card-only';
   END IF;$n$, 1);
@@ -228,7 +228,7 @@ SELECT pg_temp.exos_patch_n('public.exos_pos_settlement_summary(uuid)',
 SELECT pg_temp.exos_patch_n('public._exos_pos_card_begin(uuid,uuid,text,uuid,boolean)',
   '/* exos: pos kiosk card limit */',
   $o$  IF NOT public.exos_rate_hit('pos:card:' || p_actor::text, 20) THEN$o$,
-  $n$  /* exos: pos kiosk card limit */ -- mig 20261113100000: a kiosk's charges count on its own
+  $n$  /* exos: pos kiosk card limit */ -- mig 20261113191000: a kiosk's charges count on its own
   -- session (set by _exos_pos_kiosk_charge only), not on the member who started it.
   IF NOT public.exos_rate_hit('pos:card:' || coalesce('kiosk:' || nullif(current_setting('exos.pos_kiosk_session', true), ''),
                                                       p_actor::text), 20) THEN$n$, 1);

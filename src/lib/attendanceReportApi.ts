@@ -1,4 +1,4 @@
-// Read for the attendance report panel (mig 20261113120000). The RPC checks
+// Read for the attendance report panel (mig 20261113193000). The RPC checks
 // the caller is the org's owner, manager or finance (or a platform admin)
 // and allows 20 reads a minute per user.
 

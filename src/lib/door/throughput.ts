@@ -1,5 +1,5 @@
 // Per-gate throughput on the door report (exos_door_throughput, mig
-// 20261113110000): scans per bucket (15 minutes by default) per gate and
+// 20261113192000): scans per bucket (15 minutes by default) per gate and
 // list, gate totals, the current in-park count where direction is tracked
 // (re-entry lists), and refusals by reason. Pure parsing and shaping; the
 // panel is components/DoorThroughputPanel.tsx.

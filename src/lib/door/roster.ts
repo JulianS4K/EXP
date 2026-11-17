@@ -404,7 +404,7 @@ export interface DoorEvent {
    *  so the picker works offline. [] = none (the implicit everyone-once
    *  list); null = the database doesn't have lists yet (old RPCs only). */
   checkinLists?: DoorCheckinList[] | null;
-  /** Fair days (mig 20261113110000): ticket type id → max_entry_days, for the
+  /** Fair days (mig 20261113192000): ticket type id → max_entry_days, for the
    *  door's offline day limit. Absent / {} = no limits. */
   dayLimits?: Record<string, number>;
 }

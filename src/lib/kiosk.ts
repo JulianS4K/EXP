@@ -1,4 +1,4 @@
-// Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"): the pure side of
+// Kiosk mode (mig 20261113191000, docs/pos.md "Kiosk mode"): the pure side of
 // the self-serve screen. A kiosk sells one event's public ticket types by card
 // on its own reader; this file is its state machine, its reset rules and the
 // one thing it keeps in the browser (the kiosk credential).

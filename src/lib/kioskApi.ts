@@ -1,4 +1,4 @@
-// Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"): the calls.
+// Kiosk mode (mig 20261113191000, docs/pos.md "Kiosk mode"): the calls.
 //
 // Setup (a signed-in owner / manager, RLS + the SQL role checks): the kiosk
 // devices and their kiosk flag, starting kiosk mode on this screen (which

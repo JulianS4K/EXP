@@ -1,5 +1,5 @@
 -- ============================================================================
--- Discord promotion (mig 20261113130000). Self-contained (d15… ids), rolled
+-- Discord promotion (mig 20261113194000). Self-contained (d15… ids), rolled
 -- back.
 --   DC0 shape: RLS on, no client grants on the three tables; definer +
 --       search_path; organizer RPCs signed-in only, the edge function's

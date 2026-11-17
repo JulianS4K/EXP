@@ -1,0 +1,33 @@
+-- 20261021174500_exos_all_crons_off — RECORD ONLY. This file runs nothing.
+--
+-- Applied directly to prod on 2026-10-21 (prod version 20261021173918,
+-- name "20261021174500_exos_all_crons_off"); no file for it existed in any
+-- repo. Recorded here 2026-11-17 (EXP is the home of every Exos migration).
+--
+-- What it did on prod: step 2 of the 2026-10-21 pause; deactivated the
+-- remaining Exos cron jobs (operator: "Yes — pause all 14 too"). They were
+-- turned back on later; as of 2026-11-17 prod has 14 active Exos jobs.
+-- Re-running it would switch every Exos job off, so the SQL is kept as a
+-- comment, not as code.
+--
+-- Original SQL, verbatim from supabase_migrations.schema_migrations:
+--   DO $$
+--   DECLARE
+--     v_names text[] := ARRAY[
+--       'exos-mail-drain-2min', 'exos-wallet-push-5min',
+--       'exos_expire_holds', 'exos_send_event_reminders', 'exos_send_checkout_reminders',
+--       'exos_send_mail_followups', 'exos-reconcile-checkouts-15min', 'exos-webhook-drain-3min',
+--       'exos-geocode-refresh-daily', 'exos-payouts-daily', 'exos-eventbrite-sync-2min',
+--       'exos-channel-split-hourly', 'exos-s4k-feed-1min', 'exos-integrations-sync-2min',
+--       'exos-sms-drain-1min', 'exos-channel-sync-2min'
+--     ];
+--     r record;
+--     n int := 0;
+--   BEGIN
+--     FOR r IN SELECT jobid FROM cron.job WHERE jobname = ANY (v_names) AND active LOOP
+--       PERFORM cron.alter_job(r.jobid, active := false);
+--       n := n + 1;
+--     END LOOP;
+--     RAISE NOTICE '20261021174000: % Exos cron jobs deactivated', n;
+--   END $$;
+SELECT 1;

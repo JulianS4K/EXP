@@ -208,6 +208,8 @@ for m in \
   20261019100000_exos_door_day_keys \
   20261019110000_exos_online_event_followups \
   20261019120000_exos_door_roster_wallet_delta \
+  20261021174000_exos_dead_crons_off \
+  20261021174500_exos_all_crons_off \
   20261027080000_exos_public_tier_available_grant \
   20261027090000_exos_api_scopes \
   20261027100000_exos_fee_rules \
@@ -282,10 +284,10 @@ for m in \
   20261111130000_exos_journal_payouts_tax \
   20261111140000_exos_api_leftovers \
   20261112100000_exos_follower_fixes \
-  20261113100000_exos_kiosk \
-  20261113110000_exos_fair_day \
-  20261113120000_exos_attendance_report \
-  20261113130000_exos_discord \
+  20261113191000_exos_kiosk \
+  20261113192000_exos_fair_day \
+  20261113193000_exos_attendance_report \
+  20261113194000_exos_discord \
   20261114100000_exos_leftovers_15 \
   20261117190000_exos_social_off \
   20261118100000_exos_drop_list; do
@@ -456,6 +458,8 @@ for m in \
          20261019100000_exos_door_day_keys \
          20261019110000_exos_online_event_followups \
          20261019120000_exos_door_roster_wallet_delta \
+         20261021174000_exos_dead_crons_off \
+         20261021174500_exos_all_crons_off \
          20261027080000_exos_public_tier_available_grant \
          20261027090000_exos_api_scopes \
          20261027100000_exos_fee_rules \
@@ -530,10 +534,10 @@ for m in \
          20261111130000_exos_journal_payouts_tax \
          20261111140000_exos_api_leftovers \
          20261112100000_exos_follower_fixes \
-         20261113100000_exos_kiosk \
-         20261113110000_exos_fair_day \
-         20261113120000_exos_attendance_report \
-         20261113130000_exos_discord \
+         20261113191000_exos_kiosk \
+         20261113192000_exos_fair_day \
+         20261113193000_exos_attendance_report \
+         20261113194000_exos_discord \
          20261114100000_exos_leftovers_15 \
          20261117190000_exos_social_off \
          20261118100000_exos_drop_list; do
@@ -672,15 +676,15 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_leftovers
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_neighborhoods.sql"
 # claude/exos-follower-fixes (mig 20261112100000): a publish with 5,000 followers under statement_timeout 2s (notices only, one INSERT; the digest job mails, oldest first), the same for exos_announce_to_followers, the follow throttle (30 a minute, 300 a day), no address in the follower list, exos_audit_export 200 a day per org, unconfirmed addresses skipped (race: race_follower_mail.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_follower_fixes.sql"
-# claude/exos-fair-day (mig 20261113110000): fair days: a day list admits once per day (several gates share the day), a multi-day pass on each of its days, the any-day pass on one day only (max_entry_days), re-entry presets, the lot list scans only parking / camping codes, offline replay and by name follow, the roster carries day lists, the fair setup preset (owner / manager only, one transaction, once), the per-gate throughput view (buckets, in-park now, refusals; cross-org refused) (race: race_fair_day.sh, by hand)
+# claude/exos-fair-day (mig 20261113192000): fair days: a day list admits once per day (several gates share the day), a multi-day pass on each of its days, the any-day pass on one day only (max_entry_days), re-entry presets, the lot list scans only parking / camping codes, offline replay and by name follow, the roster carries day lists, the fair setup preset (owner / manager only, one transaction, once), the per-gate throughput view (buckets, in-park now, refusals; cross-org refused) (race: race_fair_day.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_fair_day.sql"
 # claude/exos-api-leftovers (mig 20261111140000): reservation updates replace checkout answers while open (partners' required ones required, audit, cross-partner / org), partner order reads carry answers (hidden left out), add-on wallet reissue (holder only, door refuses old codes, 5 a day, RLS) (race: race_api_leftovers.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_api_leftovers.sql"
-# claude/exos-attendance-report (mig 20261113120000): the attendance report: postal rollup (areas under 5 buyers folded into "Other", never named; live tickets; $0 orders by ticket_ids), daily pacing in the event's zone ($0 tickets apart from gross) aligned with a prior event by days before, roles (owner / manager / finance; API key creator, token user), cross-org, rate limits, XLSX export kinds in exos_audit_export
+# claude/exos-attendance-report (mig 20261113193000): the attendance report: postal rollup (areas under 5 buyers folded into "Other", never named; live tickets; $0 orders by ticket_ids), daily pacing in the event's zone ($0 tickets apart from gross) aligned with a prior event by days before, roles (owner / manager / finance; API key creator, token user), cross-org, rate limits, XLSX export kinds in exos_audit_export
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_attendance_report.sql"
-# claude/exos-kiosk (mig 20261113100000): kiosk mode: the kiosk flag + admin PIN (bcrypt, rate-limited exit, lockout), the kiosk credential (sha-256 only), event lock, card only (no cash / comp / door sale on a kiosk device), required questions never skipped, journal + settlement, audit rows, cross-org (race: race_pos_kiosk.sh, by hand)
+# claude/exos-kiosk (mig 20261113191000): kiosk mode: the kiosk flag + admin PIN (bcrypt, rate-limited exit, lockout), the kiosk credential (sha-256 only), event lock, card only (no cash / comp / door sale on a kiosk device), required questions never skipped, journal + settlement, audit rows, cross-org (race: race_pos_kiosk.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk.sql"
-# claude/exos-discord (mig 20261113130000): Discord promotion: the channel webhook URL check (discord.com / discordapp.com webhook paths only, never echoed), Vault-only token, roles (owner / manager; writes switch owner only), cross-org refusal, one post per event per kind (dry runs and errors re-queue, sent never), rate limits, lease-checked marks, the bot install state ('discord' provider, finish token), one server per org, Show on Discord re-sync, audit rows
+# claude/exos-discord (mig 20261113194000): Discord promotion: the channel webhook URL check (discord.com / discordapp.com webhook paths only, never echoed), Vault-only token, roles (owner / manager; writes switch owner only), cross-org refusal, one post per event per kind (dry runs and errors re-queue, sent never), rate limits, lease-checked marks, the bot install state ('discord' provider, finish token), one server per org, Show on Discord re-sync, audit rows
 # claude/exos-wave15-leftovers (mig 20261114100000): DC12-DC15 (the automatic reminder: roles, window, once per event, the button's limits; deleting an event deletes its Discord event: recorded before the delete, lease, backoff, gates, disconnect skips, a raced create; Send a test: roles, 3 an hour, audit) and K18 in test_pos_kiosk.sql (kiosk prints per kiosk session)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discord.sql"
 # claude/exos-focus-core (mig 20261117190000): social / friends features paused by the operator 2026-11-17: off by default (platform setting social_features_enabled), the admin-only audited setter, new starts refuse with XSOFF (a split or a friend added to one, a new matched type, a group chat, a join, a member added, a texts opt-in) before any write, the relay stops (queued relay / confirmation texts skipped, inbound answered "paused" once a day, STOP still works), and what exists keeps working (the split's paid tick sends the ticket and its claim link claims, an existing matched type edits and shows, a member re-joins and posts); the suites above turn it on for themselves
