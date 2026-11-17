@@ -1,5 +1,5 @@
 -- ============================================================================
--- Attendance report (mig 20261113120000). Self-contained (a7e… ids), rolled
+-- Attendance report (mig 20261113193000). Self-contained (a7e… ids), rolled
 -- back.
 --   AR0 shape: definer + search_path; the dashboard read is signed-in only,
 --       the core / API / helpers service-role only; nothing for anon

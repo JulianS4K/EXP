@@ -314,7 +314,7 @@ await check('door scanner (/checkin)', async (page, run) => {
   exos_server_time: () => new Date().toISOString(),
 } }) });
 
-// claude/exos-attendance-report (mig 20261113120000): the attendance report
+// claude/exos-attendance-report (mig 20261113193000): the attendance report
 // panel on the event report (postal table, the comparison picker, the pace
 // chart and its checkpoints), blocking. Only the panel: the rest of the event
 // report isn't in this gate yet.
@@ -366,7 +366,7 @@ await check('event editor: fair / multi-day setup', async (page, run) => {
   exos_event_quotas: () => [],
 } }) });
 
-// Kiosk mode (mig 20261113100000): the self-serve screen, blocking. Big touch
+// Kiosk mode (mig 20261113191000): the self-serve screen, blocking. Big touch
 // targets and visible focus are its own rules (src/views/Kiosk.tsx); axe
 // checks names, contrast, labels and the PIN dialog.
 await check('kiosk screen', async (page, run) => {

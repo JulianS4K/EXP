@@ -1,5 +1,5 @@
 // Per-gate throughput on the door report (exos_door_throughput, mig
-// 20261113110000): entries per 15 minutes (or 5 / 30 / 60) per gate and
+// 20261113192000): entries per 15 minutes (or 5 / 30 / 60) per gate and
 // list, the lot's add-on codes in their own column, gate totals (devices,
 // the busiest stretch), how many are in the park now where gates scan people
 // out (re-entry lists), and refusals by reason. Today in the event's time

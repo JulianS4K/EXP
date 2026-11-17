@@ -192,7 +192,7 @@ const REFUSAL_TEXT: Record<string, string> = {
   // Add-on entry codes (mig 20261107110000).
   'tickets-only-list': "This is an add-on's own entry code (a VIP lounge, a merch pickup). It scans at that add-on's check-in list, not here. Switch the list if this device covers it.",
   'addon-only-list': "This list scans add-on entry codes only (a VIP lounge, a merch pickup). Send the ticket holder to the main door.",
-  // Fair days (mig 20261113110000).
+  // Fair days (mig 20261113192000).
   'day-limit': 'This pass has used all its days (an any-day pass gets one day). It was already used on another day of the fair.',
   'wrong-day': "This check-in list is for another day of the fair. Switch to today's list.",
 };

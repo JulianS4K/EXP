@@ -388,7 +388,7 @@ export default function OrganizerEventReport() {
           <DoorSummaryPanel eventId={eventId!} eventTitle={event.title} />
         </div>
 
-        {/* Per-gate throughput (mig 20261113110000): entries per 15 minutes per
+        {/* Per-gate throughput (mig 20261113192000): entries per 15 minutes per
             gate and list, in the park now, refusals by reason. */}
         <div className="mb-8">
           <DoorThroughputPanel eventId={eventId!} timezone={event.timezone} />
@@ -416,7 +416,7 @@ export default function OrganizerEventReport() {
         <QuestionAnswersPanel eventId={eventId!} eventTitle={event.title} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Attendance: by postal code (under 5 buyers grouped) and sales pace
-            against an earlier event, with an XLSX (mig 20261113120000). */}
+            against an earlier event, with an XLSX (mig 20261113193000). */}
         <AttendanceReportPanel eventId={eventId!} orgId={event.orgId} eventTitle={event.title}
           canView={canSeeMoney(activeRole, isAdmin)} />
 

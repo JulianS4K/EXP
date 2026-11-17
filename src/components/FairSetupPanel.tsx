@@ -1,4 +1,4 @@
-// "Fair / multi-day setup" in the event editor (mig 20261113110000). A preset
+// "Fair / multi-day setup" in the event editor (mig 20261113192000). A preset
 // generator: a few answers (the days and their gate hours, prices, re-entry,
 // parking and camping) become ordinary ticket types, check-in lists and
 // add-ons in one transaction (exos_fair_setup), which the organizer edits

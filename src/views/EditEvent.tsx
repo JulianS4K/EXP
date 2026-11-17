@@ -1311,7 +1311,7 @@ export default function EditEvent() {
 
            {/* Check-in lists / gates and optional re-entry (mig 20260929140000);
                hidden until the database has them. Saves on its own buttons. */}
-           {/* Fair / multi-day setup (mig 20261113110000): a preset generator that
+           {/* Fair / multi-day setup (mig 20261113192000): a preset generator that
                writes ordinary ticket types, check-in lists and add-ons. */}
            {eventId && (
              <FairSetupPanel

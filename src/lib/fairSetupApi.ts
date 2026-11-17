@@ -1,4 +1,4 @@
-// The editor's fair setup (mig 20261113110000): one call, one transaction.
+// The editor's fair setup (mig 20261113192000): one call, one transaction.
 // exos_fair_setup checks the caller is an owner / manager of the event's org.
 
 import { supabase } from './supabase';
