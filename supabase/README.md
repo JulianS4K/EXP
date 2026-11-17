@@ -60,6 +60,19 @@ project** and still needs explicit operator permission.
    at run time. `20261105100000` did that to `exos_claim_transfer` and broke
    every claim until `20261108130000`. Pick an alias the target doesn't
    declare.
+5. **Exos calls no Terminal-2 function** (operator 2026-11-17: Terminal-2 is
+   reference only). A cron calls an edge function through
+   `public.exos_cron_invoke_edge_fn(url, body)` and gates with
+   `public.exos_cron_should_fire(jobname)` (an overlap lock; put any "is there
+   work?" check in the job's own command). Never Terminal-2's
+   `_cron_invoke_edge_fn` / `cron_should_fire`: `20261118110000` copied the
+   first and re-pointed every Exos function and cron off both, and
+   `scripts/check-migrations.sh` refuses a later migration that calls either.
+   Before that date, Exos used no other Terminal-2 function: no trigger,
+   policy, view or default on an `exos_*` object, and no edge function or SPA
+   call, reached one (checked on prod 2026-11-17). This rule is about
+   functions; Terminal-2 tables that early Exos migrations name
+   (`bridge_event_xref`, `aq_event_map`) are outside it.
 
 ## The SQL harness (`tests/exos/run_p0.sh`)
 

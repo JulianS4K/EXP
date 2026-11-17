@@ -38,5 +38,20 @@ for f in "$ROOT"/supabase/migrations/*exos*.sql; do
     missing=1
   fi
 done
+# Exos owns its cron helpers (mig 20261118110000; operator 2026-11-17:
+# Terminal-2 is reference only). A later migration calls exos_cron_should_fire
+# and exos_cron_invoke_edge_fn, never Terminal-2's cron_should_fire or
+# _cron_invoke_edge_fn (comment lines don't count).
+OWN_SINCE=20261118110000
+for f in "$ROOT"/supabase/migrations/*exos*.sql; do
+  name=$(basename "$f" .sql)
+  ts=${name%%_*}
+  [[ "$ts" =~ ^[0-9]{14}$ ]] || continue
+  [ "$ts" -gt "$OWN_SINCE" ] || continue
+  if grep -vE '^\s*--' "$f" | grep -qE '(^|[^a-z0-9_])(cron_should_fire|_cron_invoke_edge_fn)\s*\('; then
+    echo "::error::$name calls Terminal-2's cron_should_fire / _cron_invoke_edge_fn: use exos_cron_should_fire / exos_cron_invoke_edge_fn (mig $OWN_SINCE)" >&2
+    missing=1
+  fi
+done
 if [ "$missing" -ne 0 ]; then exit 1; fi
 echo "check-migrations: every *exos* migration is applied by run_p0.sh, and each since $SINCE replayed"

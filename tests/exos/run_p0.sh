@@ -290,7 +290,8 @@ for m in \
   20261113194000_exos_discord \
   20261114100000_exos_leftovers_15 \
   20261117190000_exos_social_off \
-  20261118100000_exos_drop_list; do
+  20261118100000_exos_drop_list \
+  20261118110000_exos_own_cron_helpers; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -540,7 +541,8 @@ for m in \
          20261113194000_exos_discord \
          20261114100000_exos_leftovers_15 \
          20261117190000_exos_social_off \
-         20261118100000_exos_drop_list; do
+         20261118100000_exos_drop_list \
+         20261118110000_exos_own_cron_helpers; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -691,5 +693,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discord.s
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_social_off.sql"
 # claude/exos-drop-list (mig 20261118100000): the drop list ("Notify me"): open only before the public on-sale, guest double opt-in (link, or the 6-digit code from the signing-up browser, 5 tries) with a constant answer, signed-in one click + texts (consent words, STOP), dedupe, rate limits (network, address), roles (summary owner / manager / finance, export owner / manager + export.run), cross-org, the list-only presale code (exos_check_voucher marker; hold path), the blast (once per member, presale then on-sale, opted out / left / pending skipped, texts in quiet hours, monthly cap, no provider), leave, sweep (race: race_drop_list.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_drop_list.sql"
+# claude/exos-own-cron-helpers (mig 20261118110000): Exos owns its cron helpers (operator 2026-11-17: Terminal-2 is reference only): exos_cron_invoke_edge_fn (prod's _cron_invoke_edge_fn body) and exos_cron_should_fire (the overlap lock), both definer + pinned + no client EXECUTE; no exos function calls Terminal-2's cron_should_fire / _cron_invoke_edge_fn any more; the re-pointed cron entry functions run
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_own_cron_helpers.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"
