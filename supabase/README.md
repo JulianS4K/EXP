@@ -74,6 +74,16 @@ Of prod's 221 Exos and Stripe rows:
 | 2026-10-21 cron pause, step 1 | 1 | `20261021174000_exos_dead_crons_off.sql`, moved from Terminal-2 |
 | 2026-10-21 cron pause, step 2 | 1 | `20261021174500_exos_all_crons_off.sql`, previously in no repo |
 
+Three files here have **no** prod history row under any name or version, yet their
+effects are on prod (checked 2026-11-17): they were applied outside the migration
+tool. Treat them as applied; `rollout-prod.sh` never re-runs them.
+
+| File here | Evidence on prod |
+|---|---|
+| `20260702121000_exos_transfer_secret_leak_fix.sql` | `exos_claim_transfer` is in its later hardened form; anon can't execute it |
+| `20260702144637_exos_reconcile_checkouts_cron.sql` | cron `exos-reconcile-checkouts-15min` exists and is active |
+| `20260911130000_exos_event_analytics.sql` | `exos_event_analytics` exists |
+
 The two cron-pause files are **record only**: they keep the original SQL as a
 comment and run `SELECT 1`, because re-running them would switch Exos jobs off
 (the jobs were turned back on after the pause).
