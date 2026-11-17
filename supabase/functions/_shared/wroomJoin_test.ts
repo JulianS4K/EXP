@@ -6,7 +6,7 @@ import { allowedHosts, handleWroomJoin, verifyAnswer, type WroomJoinDeps } from 
 const EV = "11111111-1111-4111-8111-111111111111";
 const ENV: Record<string, string> = { TURNSTILE_SECRET_KEY: "sk", EXOS_APP_BASE_URL: "https://tickets.example.com/bridge" };
 
-function deps(opts: { env?: Record<string, string>; verify?: unknown; gate?: unknown } = {}) {
+function deps(opts: { env?: Record<string, string>; verify?: unknown; gate?: unknown; domains?: string[] | Error } = {}) {
   const calls: { fetch: string[]; rpc: { fn: string; args: Record<string, unknown> }[]; logs: string[] } = { fetch: [], rpc: [], logs: [] };
   const env = opts.env ?? ENV;
   const d: WroomJoinDeps = {
@@ -22,6 +22,10 @@ function deps(opts: { env?: Record<string, string>; verify?: unknown; gate?: unk
       return Promise.resolve({ data: { state: "waiting", token: "a".repeat(64), position: 7 }, error: null });
     },
     log: (m) => calls.logs.push(m),
+    orgDomains: (ev) => {
+      calls.rpc.push({ fn: "orgDomains", args: { ev } });
+      return opts.domains instanceof Error ? Promise.reject(opts.domains) : Promise.resolve(opts.domains ?? []);
+    },
   };
   return { d, calls };
 }
@@ -75,15 +79,46 @@ Deno.test("siteverify: failure, a missing or other action, another hostname neve
   }
 });
 
-Deno.test("hostnames come from the app URLs and redirect origins; none configured: accepted, logged once", () => {
+Deno.test("hostnames come from the app URLs and redirect origins; none configured: refused, logged once", () => {
   assertEquals(allowedHosts((n) => ({ EXOS_APP_BASE_URL: "https://a.example.com/bridge", EXOS_APP_URL: "https://b.example.com",
     EXOS_REDIRECT_ORIGINS: "https://c.example.com, https://a.example.com" } as Record<string, string>)[n]).sort(),
     ["a.example.com", "b.example.com", "c.example.com"]);
   const logs: string[] = [];
-  assertEquals(verifyAnswer({ success: true, action: "wroom", hostname: "x.example" }, [], (m) => logs.push(m)), true);
-  assertEquals(verifyAnswer({ success: true, action: "wroom", hostname: "y.example" }, [], (m) => logs.push(m)), true);
+  assertEquals(verifyAnswer({ success: true, action: "wroom", hostname: "x.example" }, [], (m) => logs.push(m)), false);
+  assertEquals(verifyAnswer({ success: true, action: "wroom", hostname: "y.example" }, [], (m) => logs.push(m)), false);
   assertEquals(logs.length, 1);
   assertEquals(verifyAnswer({ success: true, action: "wroom" }, ["a.example.com"]), false);
+});
+
+Deno.test("an org's verified custom domain passes the hostname check; another org's or a bad row doesn't", async () => {
+  {
+    const { d, calls } = deps({ verify: { success: true, action: "wroom", hostname: "Tickets.Venue.example" },
+      domains: ["tickets.venue.example"] });
+    const res = await handleWroomJoin(post({ event_id: EV, turnstile_token: "tok" }), d);
+    assertEquals(res.status, 200);
+    assertEquals(calls.rpc.find((c) => c.fn === "orgDomains")?.args, { ev: EV });
+    assertEquals(calls.rpc.some((c) => c.fn === "exos_wroom_join_verified"), true);
+  }
+  for (const domains of [["other.example"], ["bad host!"], new Error("db down")]) {
+    const { d, calls } = deps({ verify: { success: true, action: "wroom", hostname: "tickets.venue.example" }, domains });
+    const res = await handleWroomJoin(post({ event_id: EV, turnstile_token: "tok" }), d);
+    assertEquals(res.status, 403, String(domains));
+    assertEquals(calls.rpc.some((c) => c.fn === "exos_wroom_join_verified"), false);
+  }
+  {
+    // No app URL configured, but the org's domain is: that host passes.
+    const { d } = deps({ env: { TURNSTILE_SECRET_KEY: "sk" }, verify: { success: true, action: "wroom", hostname: "t.v.example" },
+      domains: ["t.v.example"] });
+    assertEquals((await handleWroomJoin(post({ event_id: EV, turnstile_token: "tok" }), d)).status, 200);
+  }
+  {
+    // Nothing configured at all: fail closed (403).
+    const { d, calls } = deps({ env: { TURNSTILE_SECRET_KEY: "sk" } });
+    const res = await handleWroomJoin(post({ event_id: EV, turnstile_token: "tok" }), d);
+    assertEquals(res.status, 403);
+    assertEquals((await res.json()).reason, "challenge_failed");
+    assertEquals(calls.rpc.some((c) => c.fn === "exos_wroom_join_verified"), false);
+  }
 });
 
 Deno.test("a missing token: 400, no siteverify, no join; no secret: 503 first; bad ids: 400", async () => {

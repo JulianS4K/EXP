@@ -96,6 +96,12 @@ describe('queue state', () => {
     for (const st of ['waiting', 'lobby'] as const) expect(nextPollMs(parseStatus({ state: st, poll_after_ms: 30000 }), () => 1)).toBeLessThanOrEqual(37500);
     expect(queueView(parseStatus({ state: 'full', reason: 'room' }), fmt).heading).toBe('The waiting room is full');
     expect(queueView(parseStatus({ state: 'full', reason: 'network' }), fmt).detail).toContain('your network');
+    // Signed in already (too new an account for a seat): no sign-in offer, just the retry.
+    const signedIn = queueView(parseStatus({ state: 'full', reason: 'room', signed_in: true }), fmt);
+    expect(signedIn.heading).toBe('The line is full right now');
+    expect(signedIn.detail).toContain("We'll keep trying");
+    expect(signedIn.detail).not.toMatch(/sign in/i);
+    expect(queueView(parseStatus({ state: 'full', reason: 'room' }), fmt).detail).toMatch(/Sign in to get a place/);
     expect(nextPollMs(parseStatus({ state: 'full', poll_after_ms: 60000 }), () => 0.5)).toBe(60000);
     expect(waitWords(90)).toBe('about 1.5 hours');
     expect(waitWords(12)).toBe('about 12 minutes');
@@ -137,5 +143,8 @@ describe('organizer settings', () => {
     expect(settingsProblem({ ...ok, maxEntries: 50 })).toMatch(/Most people in line/);
     expect(parseSummary({ max_entries: 5000, cap: 5000 })).toMatchObject({ maxEntries: 5000, cap: 5000 });
     expect(parseSummary({ cap: 1000 }).maxEntries).toBeNull();
+    expect(parseSummary({ warnings: [{ code: 'live_now', message: 'Pin the on-sale time.' }, { code: 1 }, 'x'] }).warnings)
+      .toEqual([{ code: 'live_now', message: 'Pin the on-sale time.' }]);
+    expect(parseSummary({}).warnings).toEqual([]);
   });
 });

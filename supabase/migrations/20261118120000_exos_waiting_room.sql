@@ -25,11 +25,12 @@
 --     everyone early gets a random place, revealed only at the on-sale), and
 --     1 + the clock after it (arrival order, behind every early one). No draw,
 --     nothing O(line) in any request.
---   * Signed-in buyers (confirmed email) get ONE place per account per run,
---     always: outside the room's cap, the network shares and Turnstile, keyed
---     on SHA-256(event:account), so a second browser resumes it; it can only
---     be used by that account. Signup's own protections bound account
---     creation (docs/security.md "Operator settings").
+--   * One place per account per run, keyed on SHA-256(event:account), so a
+--     second browser resumes it and only that account can use it. An
+--     account with a confirmed email that is 7+ days old or has paid for an
+--     order (any org) gets a seat: always, outside the cap, the network shares
+--     and Turnstile. Any other signed-in account queues under the guest rules
+--     below (its place still keyed on the account; it counts as a guest).
 --   * Anonymous places sit under per-network shares and the room's cap (5 x
 --     the public capacity, at least 1,000, or the organizer's number), both on
 --     the LIVE line. Full: "full", and the page offers "Sign in to get a
@@ -50,7 +51,12 @@
 --   * One turn, one order: the first hold / claim binds the turn to its buyer;
 --     a completed order (fulfilment) or claim spends it (XWR03 after). Paths
 --     that skip the hold attach their checkout to the turn under the entry's
---     row lock before Stripe: one open checkout per turn (XWR02).
+--     row lock before Stripe: one open checkout per turn (XWR02). The same
+--     buyer starting again takes over: exos-checkout expires the earlier
+--     Stripe session (unless it is complete or paying) and attaches anew.
+--     A failed or expired session frees the turn; its session id stays mapped
+--     (exos_wroom_sessions), so if it is fulfilled after all the turn is spent.
+--     A phone RSVP spends the turn only when the code is right (confirmed).
 --   * The gate: while the room is open, exos_create_hold,
 --     exos_create_guest_hold, exos_claim_free_tickets, exos_phone_rsvp_verify
 --     and exos_redeem_referral_reward refuse (XWR01) unless the request carries
@@ -75,8 +81,8 @@
 --     a state. A caller only ever sees its own place.
 --   * No cron: everything runs on read, each statement bounded.
 --
--- Touches:  C: TABLE exos_wroom_settings, exos_wroom_entries, exos_wroom_counts
---              (RLS on, no client grants: RPCs only)
+-- Touches:  C: TABLE exos_wroom_settings, exos_wroom_entries, exos_wroom_counts,
+--              exos_wroom_sessions (RLS on, no client grants: RPCs only)
 --           C: FUNCTION exos_wroom_join, exos_wroom_status (anon +
 --              authenticated; H3 allowlist), exos_wroom_summary (owner /
 --              manager / finance), exos_wroom_configure (owner / manager;
@@ -86,14 +92,20 @@
 --              _exos_wroom_*
 --           C: TRIGGER exos_checkout_sessions_wroom (spends the turn of a
 --              fulfilled order, frees it on a failed / expired one)
+--           C: TRIGGER exos_phone_rsvps_wroom (spends the turn of a phone
+--              RSVP confirmed in the same call)
 --           W: FUNCTION exos_create_hold, exos_create_guest_hold,
 --              exos_claim_free_tickets, exos_phone_rsvp_verify,
 --              exos_redeem_referral_reward (marker /* exos: waiting room gate */,
 --              one PERFORM as the first statement of the body)
 -- Re-run safe. D4 authors; applying to prod is operator-gated.
+-- Lock order: holds and the RSVP gate lock the place, then the inventory;
+--   fulfilment (inventory first) takes the place with SKIP LOCKED and the gate
+--   also reads a paid session directly (_exos_wroom_paid), so the two never
+--   deadlock and a turn whose order was paid reads as used either way.
 -- ROLLBACK (manual): re-create the five patched functions without the gate
 --   line (or leave it: with no settings row the gate returns at once), drop
---   the trigger, the functions above and the three tables.
+--   the two triggers, the functions above and the four tables.
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -168,6 +180,9 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   used_at           timestamptz,
   redeemer_hash     text CHECK (redeemer_hash IS NULL OR redeemer_hash ~ '^[0-9a-f]{64}$'),
   spent_at          timestamptz,
+  -- The free claim's order reference that spent the turn (a retry with the
+  -- same reference is the same claim, not a second order).
+  spent_ref         text,
   -- The open checkout attached to the turn (exos_wroom_attach / _bind).
   checkout_ref      uuid,
   checkout_at       timestamptz,
@@ -182,7 +197,9 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   view_cache        jsonb,
   view_at           timestamptz,
   CONSTRAINT exos_wroom_entries_admit_chk CHECK ((state IN ('waiting', 'abandoned')) = (admitted_at IS NULL)),
-  CONSTRAINT exos_wroom_entries_kind_chk CHECK ((kind = 'account') = (account_hash IS NOT NULL))
+  -- An account seat always has its account; a guest place may have one (a
+  -- signed-in buyer who isn't eligible for a seat keeps one place per run).
+  CONSTRAINT exos_wroom_entries_kind_chk CHECK (kind = 'anon' OR account_hash IS NOT NULL)
 );
 -- The line, front first (admission, positions).
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_line_idx
@@ -202,6 +219,22 @@ CREATE INDEX IF NOT EXISTS exos_wroom_entries_net32_idx ON public.exos_wroom_ent
 ALTER TABLE public.exos_wroom_entries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_wroom_entries FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_wroom_entries TO service_role;
+
+-- Every checkout session ever bound to a place (a place may try several):
+-- a fulfilled one spends its place, however late it arrives.
+CREATE TABLE IF NOT EXISTS public.exos_wroom_sessions (
+  session_id  text PRIMARY KEY CHECK (length(session_id) BETWEEN 1 AND 255),
+  entry_id    uuid NOT NULL REFERENCES public.exos_wroom_entries (id) ON DELETE CASCADE,
+  org_id      uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  event_id    uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_wroom_sessions_entry_idx ON public.exos_wroom_sessions (entry_id);
+CREATE INDEX IF NOT EXISTS exos_wroom_sessions_org_idx ON public.exos_wroom_sessions (org_id);
+CREATE INDEX IF NOT EXISTS exos_wroom_sessions_event_idx ON public.exos_wroom_sessions (event_id);
+ALTER TABLE public.exos_wroom_sessions ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_wroom_sessions FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_wroom_sessions TO service_role;
 
 -- Anonymous places handed out since the last recount, per counter round, in
 -- 16 shards (a mint adds 1 to a random shard): the cap reads the live count of
@@ -230,6 +263,10 @@ DROP FUNCTION IF EXISTS public._exos_wroom_gate(uuid, uuid, text);
 DROP FUNCTION IF EXISTS public._exos_wroom_gate_token(uuid, uuid, text);
 DROP FUNCTION IF EXISTS public._exos_wroom_gate_token(uuid, uuid, text, text);
 DROP FUNCTION IF EXISTS public.exos_wroom_require(uuid, uuid, text);
+DROP FUNCTION IF EXISTS public._exos_wroom_gate(uuid, uuid, text, text);
+DROP FUNCTION IF EXISTS public._exos_wroom_gate_token(uuid, uuid, text, text, text);
+-- attach changed its return type (boolean -> jsonb); re-created below.
+DROP FUNCTION IF EXISTS public.exos_wroom_attach(uuid, uuid, text, uuid, text, uuid);
 
 CREATE OR REPLACE FUNCTION public._exos_wroom_hash(p_event_id uuid, p_token text)
 RETURNS text
@@ -661,16 +698,49 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_view(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
--- The caller's account key for a run, or NULL (signed in with a confirmed email).
+-- The signed-in caller's account key for the event, or NULL (signed out).
+-- Any signed-in caller keeps one place per run under it.
 CREATE OR REPLACE FUNCTION public._exos_wroom_account(p_event_id uuid)
 RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT encode(sha256(convert_to(p_event_id::text || ':uid:' || u.id::text, 'UTF8')), 'hex')
-    FROM auth.users u WHERE u.id = auth.uid() AND u.email_confirmed_at IS NOT NULL
+    FROM auth.users u WHERE u.id = auth.uid()
 $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_account(uuid) FROM PUBLIC, anon, authenticated;
+
+-- Does the signed-in caller get an always-a-place account seat? Only a
+-- confirmed email AND either an account at least 7 days old or a fulfilled
+-- paid order (any org). It doesn't rely on the project's auth settings
+-- (email confirmation, signup CAPTCHA): new accounts queue as guests.
+CREATE OR REPLACE FUNCTION public._exos_wroom_seat_eligible()
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce((
+    SELECT u.email_confirmed_at IS NOT NULL
+       AND (u.created_at <= now() - interval '7 days'
+            OR EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
+                        WHERE cs.buyer_uid = u.id AND cs.amount_cents > 0
+                          AND cs.status IN ('fulfilled', 'partially_refunded')))
+      FROM auth.users u WHERE u.id = auth.uid()), false)
+$$;
+REVOKE ALL ON FUNCTION public._exos_wroom_seat_eligible() FROM PUBLIC, anon, authenticated;
+
+-- Was one of this place's checkout sessions fulfilled? (the turn is spent,
+-- even if the fulfilment's trigger couldn't take the row's lock)
+CREATE OR REPLACE FUNCTION public._exos_wroom_paid(p_entry_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.exos_wroom_sessions ws
+                   JOIN public.exos_checkout_sessions cs ON cs.session_id = ws.session_id
+                  WHERE ws.entry_id = p_entry_id AND cs.status IN ('fulfilled', 'partially_refunded', 'refunded'))
+$$;
+REVOKE ALL ON FUNCTION public._exos_wroom_paid(uuid) FROM PUBLIC, anon, authenticated;
 
 -- The buyer key a turn binds to.
 CREATE OR REPLACE FUNCTION public._exos_wroom_buyer_hash(p_event_id uuid, p_buyer text)
@@ -682,8 +752,9 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_buyer_hash(uuid, text) FROM PUBLIC, anon, authenticated;
 
--- The turn a request may use: its token's place, else (for 'uid:<id>') the
--- account's place. NULL without one.
+-- The turn a request may use. One per account: for 'uid:<id>' the account's
+-- own place comes first (a token of another place doesn't stand in for it);
+-- else the token's place. NULL without one.
 CREATE OR REPLACE FUNCTION public._exos_wroom_find(p_event_id uuid, p_run uuid, p_token text, p_buyer text)
 RETURNS uuid
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -691,23 +762,25 @@ SET search_path = public, pg_temp
 AS $$
   SELECT coalesce(
     (SELECT e.id FROM public.exos_wroom_entries e
-      WHERE coalesce(p_token, '') ~ '^[0-9a-f]{64}$' AND e.token_hash = public._exos_wroom_hash(p_event_id, p_token)
-        AND e.event_id = p_event_id AND e.run_id = p_run),
-    (SELECT e.id FROM public.exos_wroom_entries e
       WHERE p_buyer LIKE 'uid:%' AND e.event_id = p_event_id AND e.run_id = p_run
-        AND e.account_hash = encode(sha256(convert_to(p_event_id::text || ':' || lower(p_buyer), 'UTF8')), 'hex')))
+        AND e.account_hash = encode(sha256(convert_to(p_event_id::text || ':' || lower(p_buyer), 'UTF8')), 'hex')),
+    (SELECT e.id FROM public.exos_wroom_entries e
+      WHERE coalesce(p_token, '') ~ '^[0-9a-f]{64}$' AND e.token_hash = public._exos_wroom_hash(p_event_id, p_token)
+        AND e.event_id = p_event_id AND e.run_id = p_run))
 $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_find(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
 
 -- The gate. p_mode: 'check' (no writes: exos_wroom_require), 'hold' (binds
 -- the turn to its buyer), 'claim' (binds and spends it: the claim completes
--- in this transaction). Returns when there is no open room, for the drop
--- list presale type in its early window, or for an admitted, unexpired,
--- unspent turn of this event's current run that is unused or this buyer's.
--- Raises XWR01 (wait your turn) or XWR03 (turn used). The event is also taken
--- from the ticket type.
+-- in this transaction; p_ref is its order reference, so a retry of the same
+-- claim passes). Returns when there is no open room, for the drop list
+-- presale type in its early window, or for an admitted, unexpired, unspent
+-- turn of this event's current run that is unused or this buyer's. A signed-in
+-- buyer uses the account's place; binding an unbound guest place to an account
+-- keys it on the account (one place per account per run). Raises XWR01 (wait
+-- your turn) or XWR03 (turn used). The event is also taken from the type.
 CREATE OR REPLACE FUNCTION public._exos_wroom_gate_token(p_event_id uuid, p_tier_id uuid, p_token text, p_buyer text,
-  p_mode text DEFAULT 'hold')
+  p_mode text DEFAULT 'hold', p_ref text DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -719,10 +792,11 @@ DECLARE
   v_tev   uuid;
   v_id    uuid;
   v_r     text;
+  v_acct  text;
 BEGIN
   SELECT t.event_id INTO v_tev FROM public.exos_ticket_tiers t WHERE t.id = p_tier_id;
   IF v_tev IS NOT NULL AND v_tev IS DISTINCT FROM p_event_id THEN
-    PERFORM public._exos_wroom_gate_token(v_tev, p_tier_id, p_token, p_buyer, p_mode);
+    PERFORM public._exos_wroom_gate_token(v_tev, p_tier_id, p_token, p_buyer, p_mode, p_ref);
   END IF;
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   IF NOT FOUND OR NOT s.enabled OR s.closed_at IS NOT NULL THEN RETURN; END IF;
@@ -751,7 +825,11 @@ BEGIN
   ELSE
     SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id FOR UPDATE;
   END IF;
-  IF e.state = 'spent' THEN
+  IF e.state = 'spent' AND p_mode = 'claim' AND p_ref IS NOT NULL AND e.spent_ref = p_ref
+     AND e.redeemer_hash = v_r THEN
+    RETURN;  -- the same claim again (its own idempotency answers with the same tickets)
+  END IF;
+  IF e.state = 'spent' OR public._exos_wroom_paid(e.id) THEN
     RAISE EXCEPTION 'exos waiting room: this turn was used; join the line again to buy more' USING ERRCODE = 'XWR03';
   END IF;
   IF e.state <> 'admitted' OR e.admit_expires_at <= now()
@@ -759,18 +837,33 @@ BEGIN
     RAISE EXCEPTION 'exos waiting room: wait for your turn in the queue' USING ERRCODE = 'XWR01';
   END IF;
   IF p_mode = 'check' THEN RETURN; END IF;
-  UPDATE public.exos_wroom_entries x
-     SET used_at = coalesce(x.used_at, now()), redeemer_hash = coalesce(x.redeemer_hash, v_r), last_seen_at = now(),
-         state = CASE WHEN p_mode = 'claim' THEN 'spent' ELSE x.state END,
-         spent_at = CASE WHEN p_mode = 'claim' THEN now() ELSE x.spent_at END,
-         view_at = NULL
-   WHERE x.id = e.id;
+  IF p_mode = 'lock' THEN
+    -- Checked and row-locked, nothing written: the caller spends it (or not).
+    PERFORM set_config('exos.wroom_locked', e.id::text, true);
+    RETURN;
+  END IF;
+  v_acct := CASE WHEN p_buyer LIKE 'uid:%' AND e.account_hash IS NULL
+                 THEN encode(sha256(convert_to(p_event_id::text || ':' || lower(p_buyer), 'UTF8')), 'hex') END;
+  BEGIN
+    UPDATE public.exos_wroom_entries x
+       SET used_at = coalesce(x.used_at, now()), redeemer_hash = coalesce(x.redeemer_hash, v_r), last_seen_at = now(),
+           account_hash = coalesce(x.account_hash, v_acct),
+           state = CASE WHEN p_mode = 'claim' THEN 'spent' ELSE x.state END,
+           spent_at = CASE WHEN p_mode = 'claim' THEN now() ELSE x.spent_at END,
+           spent_ref = CASE WHEN p_mode = 'claim' THEN p_ref ELSE x.spent_ref END,
+           view_at = NULL
+     WHERE x.id = e.id;
+  EXCEPTION WHEN unique_violation THEN
+    -- The account got a place of its own meanwhile: one place per account.
+    RAISE EXCEPTION 'exos waiting room: wait for your turn in the queue' USING ERRCODE = 'XWR01';
+  END;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_wroom_gate_token(uuid, uuid, text, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_wroom_gate_token(uuid, uuid, text, text, text, text) FROM PUBLIC, anon, authenticated;
 
 -- The same, with the token from the request's x-exos-queue header (what the
 -- patched hold / claim functions call first, with their buyer).
-CREATE OR REPLACE FUNCTION public._exos_wroom_gate(p_event_id uuid, p_tier_id uuid, p_buyer text, p_mode text DEFAULT 'hold')
+CREATE OR REPLACE FUNCTION public._exos_wroom_gate(p_event_id uuid, p_tier_id uuid, p_buyer text, p_mode text DEFAULT 'hold',
+  p_ref text DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -782,11 +875,15 @@ BEGIN
                     OR s.event_id = (SELECT t.event_id FROM public.exos_ticket_tiers t WHERE t.id = p_tier_id))) THEN
     RETURN;
   END IF;
-  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, public._exos_wroom_header_token(), p_buyer, p_mode);
+  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, public._exos_wroom_header_token(), p_buyer, p_mode, p_ref);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text, text, text) FROM PUBLIC, anon, authenticated;
 
--- The phone RSVP's gate: its event, type and phone from the RSVP row.
+-- The phone RSVP's gate: its event, type and phone from the RSVP row. It
+-- checks the turn and locks its row (in the same order as a hold: the place,
+-- then the inventory) but writes nothing; only the RSVP turning 'confirmed'
+-- in this same call spends it (the trigger below), so a wrong, expired or
+-- locked code costs nothing. An RSVP already confirmed answers as before.
 CREATE OR REPLACE FUNCTION public._exos_wroom_gate_rsvp(p_rsvp_id uuid)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -794,11 +891,38 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE r record;
 BEGIN
-  SELECT x.event_id, x.tier_id, x.phone INTO r FROM public.exos_phone_rsvps x WHERE x.id = p_rsvp_id;
-  IF r.event_id IS NULL THEN RETURN; END IF;
-  PERFORM public._exos_wroom_gate(r.event_id, r.tier_id, 'phone:' || coalesce(r.phone, ''), 'claim');
+  PERFORM set_config('exos.wroom_rsvp', '', true);
+  SELECT x.event_id, x.tier_id, x.phone, x.status INTO r FROM public.exos_phone_rsvps x WHERE x.id = p_rsvp_id;
+  IF r.event_id IS NULL OR r.status IN ('confirmed', 'duplicate') THEN RETURN; END IF;
+  PERFORM set_config('exos.wroom_locked', '', true);
+  PERFORM public._exos_wroom_gate(r.event_id, r.tier_id, 'phone:' || coalesce(r.phone, ''), 'lock');
+  IF coalesce(current_setting('exos.wroom_locked', true), '') <> '' THEN
+    PERFORM set_config('exos.wroom_rsvp', p_rsvp_id::text || ':' || current_setting('exos.wroom_locked', true), true);
+  END IF;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_gate_rsvp(uuid) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public._exos_tg_wroom_rsvp()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v text := coalesce(current_setting('exos.wroom_rsvp', true), '');
+BEGIN
+  IF split_part(v, ':', 1) <> NEW.id::text THEN RETURN NULL; END IF;
+  UPDATE public.exos_wroom_entries e
+     SET state = 'spent', spent_at = now(), spent_ref = 'rsvp:' || NEW.id::text, used_at = coalesce(e.used_at, now()),
+         redeemer_hash = coalesce(e.redeemer_hash, public._exos_wroom_buyer_hash(NEW.event_id, 'phone:' || coalesce(NEW.phone, ''))),
+         last_seen_at = now(), view_at = NULL
+   WHERE e.id = split_part(v, ':', 2)::uuid AND e.state = 'admitted';
+  PERFORM set_config('exos.wroom_rsvp', '', true);
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_wroom_rsvp() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_phone_rsvps_wroom ON public.exos_phone_rsvps;
+CREATE TRIGGER exos_phone_rsvps_wroom AFTER UPDATE OF status ON public.exos_phone_rsvps
+  FOR EACH ROW WHEN (NEW.status = 'confirmed' AND OLD.status IS DISTINCT FROM 'confirmed')
+  EXECUTE FUNCTION public._exos_tg_wroom_rsvp();
 
 -- The referral reward's gate: the reward voucher's event, the chosen type.
 CREATE OR REPLACE FUNCTION public._exos_wroom_gate_reward(p_reward_id uuid, p_tier_id uuid)
@@ -829,6 +953,43 @@ REVOKE ALL ON FUNCTION public._exos_wroom_gate_reward(uuid, uuid) FROM PUBLIC, a
 --      IPv4 / IPv6 /64 and 120 per /48 ('busy'), the network shares and the
 --      cap on the live line ('full', the page offers sign-in).
 -- No room: { state: 'off' } (buy as usual).
+-- An existing place, from a join or a poll: the cached view within 5 s of
+-- the last write (no write at all), else at most 30 a minute per place
+-- ('busy' over that), then the touch (idle rules), the round, the view; the
+-- view is cached alongside the last_seen write (at most every 20 s).
+CREATE OR REPLACE FUNCTION public._exos_wroom_resume(p_event_id uuid, p_entry_id uuid, p_token text)
+RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  e  public.exos_wroom_entries%ROWTYPE;
+  s  public.exos_wroom_settings%ROWTYPE;
+  v  jsonb;
+  v_tok jsonb := CASE WHEN p_token IS NOT NULL THEN jsonb_build_object('token', p_token) ELSE '{}'::jsonb END;
+BEGIN
+  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = p_entry_id;
+  IF e.view_at > now() - interval '5 seconds' AND e.view_cache IS NOT NULL THEN
+    RETURN e.view_cache || CASE WHEN e.view_cache ->> 'state' IN ('waiting', 'lobby', 'admitted') THEN v_tok ELSE '{}'::jsonb END;
+  END IF;
+  IF NOT public.exos_rate_hit('wroom-place:' || p_entry_id::text, 30) THEN
+    RETURN coalesce(e.view_cache, jsonb_build_object('state', 'busy', 'retry_after_ms', 2000));
+  END IF;
+  PERFORM public._exos_wroom_advance(p_event_id);
+  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
+  IF s.closed_at IS NOT NULL THEN
+    RETURN jsonb_build_object('state', 'off');
+  END IF;
+  IF public._exos_wroom_touch(p_entry_id, 20) = 'idle' THEN
+    RETURN jsonb_build_object('state', 'expired', 'reason', 'idle');
+  END IF;
+  v := public._exos_wroom_view(p_event_id, p_entry_id);
+  UPDATE public.exos_wroom_entries SET view_cache = v, view_at = now()
+   WHERE id = p_entry_id AND last_seen_at > now() - interval '1 second';
+  RETURN v || CASE WHEN v ->> 'state' IN ('waiting', 'lobby', 'admitted') THEN v_tok ELSE '{}'::jsonb END;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_resume(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public._exos_wroom_join_core(p_event_id uuid, p_token text, p_verified boolean)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -841,6 +1002,8 @@ DECLARE
   v_id    uuid;
   v_token text;
   v_acct  text := public._exos_wroom_account(p_event_id);
+  v_seat  boolean := false;
+  v_buyer text;
   v_key   double precision;
   v_narrow text;
   v_wide  text;
@@ -856,49 +1019,64 @@ BEGIN
     RETURN public._exos_wroom_view(p_event_id, NULL);
   END IF;
   v_key := CASE WHEN ph.phase = 'lobby' THEN public._exos_wroom_rand() ELSE 1 + extract(epoch FROM clock_timestamp()) END;
+  IF v_acct IS NOT NULL THEN
+    v_seat := public._exos_wroom_seat_eligible();
+    v_buyer := public._exos_wroom_buyer_hash(p_event_id, 'uid:' || auth.uid()::text);
+  END IF;
 
-  -- 1. The account's place.
+  -- 1. The account's place (seat or guest place): resumed, or a dead one re-placed at the back.
   IF v_acct IS NOT NULL THEN
     SELECT * INTO e FROM public.exos_wroom_entries x
-     WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.account_hash = v_acct FOR UPDATE;
+     WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.account_hash = v_acct;
     IF FOUND THEN
-      IF e.state IN ('spent', 'expired', 'abandoned')
+      IF e.state IN ('spent', 'expired', 'abandoned') OR public._exos_wroom_paid(e.id)
          OR (e.state = 'admitted' AND e.admit_expires_at <= now())
          OR (e.state = 'waiting' AND e.last_seen_at <= now() - interval '30 minutes') THEN
-        -- A new place for the account, at the back (random in the lobby).
-        v_token := encode(extensions.gen_random_bytes(32), 'hex');
-        UPDATE public.exos_wroom_entries
-           SET token_hash = public._exos_wroom_hash(p_event_id, v_token), order_key = v_key, state = 'waiting',
-               arrived_at = now(), admitted_at = NULL, admit_expires_at = NULL, used_at = NULL, spent_at = NULL,
-               checkout_ref = NULL, checkout_at = NULL, session_id = NULL, last_seen_at = now(), view_at = NULL
-         WHERE id = e.id;
-        PERFORM public._exos_wroom_advance(p_event_id);
-        RETURN public._exos_wroom_view(p_event_id, e.id, v_token);
+        IF NOT v_seat THEN
+          -- A guest place again: the same rules as a new one (below), on this row.
+          v_id := e.id;
+        ELSE
+          v_token := encode(extensions.gen_random_bytes(32), 'hex');
+          UPDATE public.exos_wroom_entries
+             SET token_hash = public._exos_wroom_hash(p_event_id, v_token), order_key = v_key, state = 'waiting', kind = 'account',
+                 arrived_at = now(), admitted_at = NULL, admit_expires_at = NULL, used_at = NULL, spent_at = NULL, spent_ref = NULL,
+                 checkout_ref = NULL, checkout_at = NULL, session_id = NULL, last_seen_at = now(), view_at = NULL,
+                 redeemer_hash = v_buyer
+           WHERE id = e.id;
+          PERFORM public._exos_wroom_advance(p_event_id);
+          RETURN public._exos_wroom_view(p_event_id, e.id, v_token);
+        END IF;
+      ELSE
+        IF v_seat AND e.kind = 'anon' THEN
+          UPDATE public.exos_wroom_entries SET kind = 'account' WHERE id = e.id;  -- eligible now: a seat
+        END IF;
+        RETURN public._exos_wroom_resume(p_event_id, e.id, NULL) || jsonb_build_object('signed_in', true);
       END IF;
-      PERFORM public._exos_wroom_touch(e.id, 20);  -- an account place always comes back
-      PERFORM public._exos_wroom_advance(p_event_id);
-      RETURN public._exos_wroom_view(p_event_id, e.id);
     END IF;
   END IF;
 
-  -- 2. The browser's own token.
-  IF coalesce(p_token, '') ~ '^[0-9a-f]{64}$' THEN
+  -- 2. The browser's own token (not when the account already has a place: one per account).
+  IF v_id IS NULL AND coalesce(p_token, '') ~ '^[0-9a-f]{64}$' THEN
     SELECT x.id INTO v_id FROM public.exos_wroom_entries x
      WHERE x.token_hash = public._exos_wroom_hash(p_event_id, p_token)
        AND x.event_id = p_event_id AND x.run_id = s.run_id;
     IF v_id IS NOT NULL THEN
-      IF public._exos_wroom_touch(v_id, 20) = 'idle' THEN
-        RETURN jsonb_build_object('state', 'expired', 'reason', 'idle', 'phase', ph.phase);
-      END IF;
       IF v_acct IS NOT NULL THEN
-        -- Signed in on a browser that already queued: the place becomes the account's.
-        UPDATE public.exos_wroom_entries SET kind = 'account', account_hash = v_acct,
-               redeemer_hash = coalesce(redeemer_hash, public._exos_wroom_buyer_hash(p_event_id, 'uid:' || auth.uid()::text))
-         WHERE id = v_id AND kind = 'anon'
-           AND (redeemer_hash IS NULL OR redeemer_hash = public._exos_wroom_buyer_hash(p_event_id, 'uid:' || auth.uid()::text));
+        -- Signed in on a browser that already queued: the place becomes the account's
+        -- (a seat when eligible). A parallel join may have given the account a place
+        -- first: then that one is the account's (one per account).
+        BEGIN
+          UPDATE public.exos_wroom_entries
+             SET account_hash = v_acct, kind = CASE WHEN v_seat THEN 'account' ELSE kind END,
+                 redeemer_hash = coalesce(redeemer_hash, v_buyer)
+           WHERE id = v_id AND account_hash IS NULL AND (redeemer_hash IS NULL OR redeemer_hash = v_buyer);
+        EXCEPTION WHEN unique_violation THEN
+          SELECT x.id INTO v_id FROM public.exos_wroom_entries x
+           WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.account_hash = v_acct;
+          RETURN public._exos_wroom_resume(p_event_id, v_id, NULL) || jsonb_build_object('signed_in', true);
+        END;
       END IF;
-      PERFORM public._exos_wroom_advance(p_event_id);
-      RETURN public._exos_wroom_view(p_event_id, v_id, p_token);
+      RETURN public._exos_wroom_resume(p_event_id, v_id, p_token);
     END IF;
   END IF;
 
@@ -908,27 +1086,27 @@ BEGIN
   v_net := encode(sha256(convert_to(s.run_id::text || ':' || v_wide, 'UTF8')), 'hex');
   v_net32 := encode(sha256(convert_to(s.run_id::text || ':' || v_n32, 'UTF8')), 'hex');
 
-  -- 3a. A new account place: always.
-  IF v_acct IS NOT NULL THEN
+  -- 3a. A new account seat (eligible accounts): always.
+  IF v_seat THEN
     INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, kind, account_hash, redeemer_hash,
                                            net_hash, net32_hash, net_v6, order_key)
     VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), 'account', v_acct,
-            public._exos_wroom_buyer_hash(p_event_id, 'uid:' || auth.uid()::text), v_net, v_net32,
-            position(':' in v_wide) > 0, v_key)
+            v_buyer, v_net, v_net32, position(':' in v_wide) > 0, v_key)
     ON CONFLICT DO NOTHING
     RETURNING id INTO v_id;
     IF v_id IS NULL THEN  -- a parallel join of the same account won
       SELECT x.id INTO v_id FROM public.exos_wroom_entries x
        WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.account_hash = v_acct;
-      RETURN public._exos_wroom_view(p_event_id, v_id);
+      RETURN public._exos_wroom_resume(p_event_id, v_id, NULL) || jsonb_build_object('signed_in', true);
     END IF;
     PERFORM public._exos_wroom_advance(p_event_id);
     RETURN public._exos_wroom_view(p_event_id, v_id, v_token);
   END IF;
 
-  -- 3b. A new anonymous place.
+  -- 3b. A guest place (signed out, or a signed-in account that isn't eligible
+  -- for a seat: keyed on the account, under the guest rules).
   IF s.turnstile AND NOT coalesce(p_verified, false) THEN
-    RETURN jsonb_build_object('state', 'challenge');
+    RETURN jsonb_build_object('state', 'challenge', 'signed_in', v_acct IS NOT NULL);
   END IF;
   v_narrow := public._exos_request_ip_bucket();
   IF NOT public.exos_rate_hit('wroom-ip:' || md5(v_narrow), 60)
@@ -946,15 +1124,32 @@ BEGIN
            public._exos_wroom_share(CASE WHEN position(':' in v_wide) > 0 THEN '48' ELSE 'v4' END, v_cap, v_sc))
      OR (position(':' in v_n32) > 0
          AND NOT public._exos_wroom_net_room(p_event_id, s.run_id, 'net32', v_net32, public._exos_wroom_share('32', v_cap, v_sc))) THEN
-    RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
+    RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000, 'signed_in', v_acct IS NOT NULL);
   END IF;
   IF NOT public._exos_wroom_cap_room(p_event_id) THEN
-    RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000);
+    RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000, 'signed_in', v_acct IS NOT NULL);
   END IF;
-  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, net_v6, order_key)
-  VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), v_net, v_net32,
-          position(':' in v_wide) > 0, v_key)
-  RETURNING id INTO v_id;
+  IF v_id IS NOT NULL THEN
+    -- The account's dead guest place, re-placed at the back.
+    UPDATE public.exos_wroom_entries
+       SET token_hash = public._exos_wroom_hash(p_event_id, v_token), order_key = v_key, state = 'waiting', kind = 'anon',
+           arrived_at = now(), admitted_at = NULL, admit_expires_at = NULL, used_at = NULL, spent_at = NULL, spent_ref = NULL,
+           checkout_ref = NULL, checkout_at = NULL, session_id = NULL, last_seen_at = now(), view_at = NULL,
+           net_hash = v_net, net32_hash = v_net32, net_v6 = position(':' in v_wide) > 0, redeemer_hash = v_buyer
+     WHERE id = v_id;
+  ELSE
+    INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, account_hash, redeemer_hash,
+                                           net_hash, net32_hash, net_v6, order_key)
+    VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), v_acct, v_buyer,
+            v_net, v_net32, position(':' in v_wide) > 0, v_key)
+    ON CONFLICT DO NOTHING
+    RETURNING id INTO v_id;
+    IF v_id IS NULL THEN  -- a parallel join of the same account won
+      SELECT x.id INTO v_id FROM public.exos_wroom_entries x
+       WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.account_hash = v_acct;
+      RETURN public._exos_wroom_resume(p_event_id, v_id, NULL) || jsonb_build_object('signed_in', true);
+    END IF;
+  END IF;
   PERFORM public._exos_wroom_count_one(p_event_id);
   RETURN public._exos_wroom_view(p_event_id, v_id, v_token);
 END $$;
@@ -1023,9 +1218,9 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_join_verified(uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_join_verified(uuid, text, jsonb) TO service_role;
 
--- Poll: the caller's own state and place (the token's, else the signed-in
--- account's). A poll within 5 s of the last write gets the cached view back
--- with no write; last_seen_at is written at most every 20 s.
+-- Poll: the caller's own state and place (the signed-in account's, else the
+-- token's), by the same rules as a join that finds a place
+-- (_exos_wroom_resume: 5 s cache, 30 a minute per place).
 CREATE OR REPLACE FUNCTION public.exos_wroom_status(p_event_id uuid, p_token text)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -1034,9 +1229,7 @@ AS $$
 DECLARE
   s    public.exos_wroom_settings%ROWTYPE;
   ph   record;
-  e    public.exos_wroom_entries%ROWTYPE;
   v_id uuid;
-  v    jsonb;
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
@@ -1048,23 +1241,7 @@ BEGIN
   IF v_id IS NULL THEN
     RETURN jsonb_build_object('state', 'unknown', 'phase', ph.phase);
   END IF;
-  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id;
-  IF e.view_at > now() - interval '5 seconds' AND e.view_cache IS NOT NULL THEN
-    RETURN e.view_cache;
-  END IF;
-  PERFORM public._exos_wroom_advance(p_event_id);
-  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
-  IF s.closed_at IS NOT NULL THEN
-    RETURN jsonb_build_object('state', 'off');
-  END IF;
-  IF public._exos_wroom_touch(v_id, 20) = 'idle' THEN
-    RETURN jsonb_build_object('state', 'expired', 'reason', 'idle', 'phase', ph.phase);
-  END IF;
-  v := public._exos_wroom_view(p_event_id, v_id);
-  -- Cache it only alongside a last_seen write (at most every 20 s).
-  UPDATE public.exos_wroom_entries SET view_cache = v, view_at = now()
-   WHERE id = v_id AND last_seen_at > now() - interval '1 second';
-  RETURN v;
+  RETURN public._exos_wroom_resume(p_event_id, v_id, NULL);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_status(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_status(uuid, text) TO anon, authenticated, service_role;
@@ -1088,13 +1265,19 @@ GRANT EXECUTE ON FUNCTION public.exos_wroom_require(uuid, uuid, text, uuid, text
 
 -- exos-checkout, after its checks and before any hold or Stripe call: attach
 -- this checkout attempt to the turn under the entry's row lock. One open
--- checkout per turn: another attempt is XWR02 while one is attached (until it
--- fails and is released, its order is fulfilled, or 35 minutes pass; an
--- attempt that never got a session is dead after 2 minutes). Returns false
--- when no turn is needed (no room, the presale type).
+-- checkout per turn. Answers:
+--   { attached: true }            attached (or no turn needed: false);
+--   { takeover: '<cs_ id>' }      the same buyer's earlier Stripe session is
+--                                  still attached: exos-checkout expires it at
+--                                  Stripe (our own account), marks its row
+--                                  expired (the trigger frees the turn) and
+--                                  attaches again; a session already complete
+--                                  or paying stays (XWR02);
+-- XWR02 another attempt in flight (2 minutes without a session), or another
+-- buyer's / a non-Stripe open session (35 minutes); XWR03 used.
 CREATE OR REPLACE FUNCTION public.exos_wroom_attach(p_event_id uuid, p_tier_id uuid, p_token text,
   p_buyer_uid uuid, p_email text, p_attempt uuid)
-RETURNS boolean
+RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
@@ -1109,65 +1292,86 @@ DECLARE
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = v_ev;
   ph := public._exos_wroom_phase(s);
-  IF ph.phase IN ('off', 'before') THEN RETURN false; END IF;
+  IF ph.phase IN ('off', 'before') THEN RETURN jsonb_build_object('attached', false); END IF;
   IF EXISTS (SELECT 1 FROM public.exos_drop_settings ds
               WHERE ds.event_id = v_ev AND ds.presale_tier_id = p_tier_id AND now() < ds.public_on_sale_at) THEN
-    RETURN false;
+    RETURN jsonb_build_object('attached', false);
   END IF;
   -- The same checks as the gate, then the lock.
   PERFORM public._exos_wroom_gate_token(v_ev, p_tier_id, p_token, v_buyer, 'check');
   v_id := public._exos_wroom_find(v_ev, s.run_id, p_token, v_buyer);
   SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id FOR UPDATE;
-  IF e.checkout_ref IS NOT NULL AND e.checkout_ref <> p_attempt
-     AND e.checkout_at > now() - (CASE WHEN e.session_id IS NULL THEN interval '2 minutes' ELSE interval '35 minutes' END) THEN
-    RAISE EXCEPTION 'exos waiting room: your turn is already checking out in another window' USING ERRCODE = 'XWR02';
-  END IF;
-  IF e.state = 'spent' THEN
+  IF e.state = 'spent' OR public._exos_wroom_paid(e.id) THEN
     RAISE EXCEPTION 'exos waiting room: this turn was used; join the line again to buy more' USING ERRCODE = 'XWR03';
+  END IF;
+  IF e.checkout_ref IS NOT NULL AND e.checkout_ref <> p_attempt THEN
+    IF e.session_id IS NULL AND e.checkout_at > now() - interval '2 minutes' THEN
+      RAISE EXCEPTION 'exos waiting room: your turn is already checking out in another window' USING ERRCODE = 'XWR02';
+    END IF;
+    IF e.session_id IS NOT NULL AND e.checkout_at > now() - interval '35 minutes'
+       AND NOT EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
+                        WHERE cs.session_id = e.session_id AND cs.status IN ('failed', 'expired')) THEN
+      IF e.redeemer_hash = public._exos_wroom_buyer_hash(v_ev, v_buyer) AND e.session_id LIKE 'cs\_%' THEN
+        RETURN jsonb_build_object('takeover', e.session_id);
+      END IF;
+      RAISE EXCEPTION 'exos waiting room: your turn is already checking out in another window' USING ERRCODE = 'XWR02';
+    END IF;
   END IF;
   UPDATE public.exos_wroom_entries
      SET checkout_ref = p_attempt, checkout_at = now(), session_id = NULL, view_at = NULL
    WHERE id = e.id;
-  RETURN true;
+  RETURN jsonb_build_object('attached', true);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_attach(uuid, uuid, text, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_attach(uuid, uuid, text, uuid, text, uuid) TO service_role;
 
--- The attempt's order: its session id, before the session row is written (the
--- fulfilment trigger below spends the turn), and the buyer the turn binds to.
+-- The attempt's order: its session id, before the session row is written
+-- (kept in exos_wroom_sessions too: a fulfilled session spends the turn,
+-- however late), and the buyer the turn binds to. False when the attempt
+-- isn't attached any more (exos-checkout then stops before taking money).
 CREATE OR REPLACE FUNCTION public.exos_wroom_bind(p_event_id uuid, p_attempt uuid, p_session_id text,
   p_buyer_uid uuid, p_email text)
 RETURNS boolean
-LANGUAGE sql VOLATILE SECURITY DEFINER
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-  WITH u AS (
-    UPDATE public.exos_wroom_entries e
-       SET session_id = left(p_session_id, 255), used_at = coalesce(e.used_at, now()),
-           redeemer_hash = coalesce(e.redeemer_hash, public._exos_wroom_buyer_hash(e.event_id,
-             CASE WHEN p_buyer_uid IS NOT NULL THEN 'uid:' || p_buyer_uid::text
-                  ELSE 'email:' || lower(btrim(coalesce(p_email, ''))) END))
-     WHERE e.checkout_ref = p_attempt AND e.event_id = p_event_id
-    RETURNING 1)
-  SELECT EXISTS (SELECT 1 FROM u)
-$$;
+DECLARE e public.exos_wroom_entries%ROWTYPE;
+BEGIN
+  UPDATE public.exos_wroom_entries x
+     SET session_id = left(p_session_id, 255), used_at = coalesce(x.used_at, now()),
+         redeemer_hash = coalesce(x.redeemer_hash, public._exos_wroom_buyer_hash(x.event_id,
+           CASE WHEN p_buyer_uid IS NOT NULL THEN 'uid:' || p_buyer_uid::text
+                ELSE 'email:' || lower(btrim(coalesce(p_email, ''))) END))
+   WHERE x.checkout_ref = p_attempt AND x.event_id = p_event_id
+  RETURNING * INTO e;
+  IF NOT FOUND THEN RETURN false; END IF;
+  INSERT INTO public.exos_wroom_sessions (session_id, entry_id, org_id, event_id)
+  VALUES (left(p_session_id, 255), e.id, e.org_id, e.event_id)
+  ON CONFLICT (session_id) DO NOTHING;
+  RETURN true;
+END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_bind(uuid, uuid, text, uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_bind(uuid, uuid, text, uuid, text) TO service_role;
 
--- A failed attempt lets the turn try again (only one without a session).
+-- A failed checkout (whatever the step, a bound session too) lets the turn
+-- try again.
 CREATE OR REPLACE FUNCTION public.exos_wroom_release(p_event_id uuid, p_attempt uuid)
 RETURNS void
 LANGUAGE sql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   UPDATE public.exos_wroom_entries
-     SET checkout_ref = NULL, checkout_at = NULL
-   WHERE checkout_ref = p_attempt AND event_id = p_event_id AND session_id IS NULL
+     SET checkout_ref = NULL, checkout_at = NULL, session_id = NULL
+   WHERE checkout_ref = p_attempt AND event_id = p_event_id AND state <> 'spent'
 $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_release(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_release(uuid, uuid) TO service_role;
 
--- A fulfilled order spends its turn; a failed or expired one frees it.
+-- A fulfilled order spends its turn; a failed or expired one frees it (the
+-- attachment only: its session stays mapped, so a later fulfilment still
+-- spends). SKIP LOCKED: a fulfilment never waits on (or deadlocks with) a
+-- hold holding the place's row; the gate then sees the paid session itself
+-- (_exos_wroom_paid) and the turn reads as used anyway.
 CREATE OR REPLACE FUNCTION public._exos_tg_wroom_session()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER
@@ -1175,13 +1379,18 @@ SET search_path = public, pg_temp
 AS $$
 BEGIN
   IF NEW.status = 'fulfilled' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'fulfilled') THEN
-    UPDATE public.exos_wroom_entries
+    UPDATE public.exos_wroom_entries e
        SET state = 'spent', spent_at = now(), view_at = NULL
-     WHERE session_id = NEW.session_id AND state <> 'spent';
+     WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
+                      JOIN public.exos_wroom_sessions ws ON ws.entry_id = x.id
+                     WHERE ws.session_id = NEW.session_id AND x.state <> 'spent'
+                     FOR UPDATE OF x SKIP LOCKED);
   ELSIF NEW.status IN ('failed', 'expired') AND TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
-    UPDATE public.exos_wroom_entries
-       SET checkout_ref = NULL, checkout_at = NULL, session_id = NULL
-     WHERE session_id = NEW.session_id AND state <> 'spent';
+    UPDATE public.exos_wroom_entries e
+       SET checkout_ref = NULL, checkout_at = NULL
+     WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
+                     WHERE x.session_id = NEW.session_id AND x.state <> 'spent'
+                     FOR UPDATE SKIP LOCKED);
   END IF;
   RETURN NULL;
 END $$;
@@ -1255,7 +1464,15 @@ BEGIN
                                  'accounts', coalesce(c.accounts, 0), 'total', coalesce(c.total, 0)),
     'wait_minutes', CASE WHEN coalesce(c.waiting, 0) > 0
                          THEN ceil(c.waiting::numeric / s.admit_per_minute)::int ELSE 0 END,
-    'can_manage', public._exos_wroom_staff(p_event_id, ARRAY['owner', 'manager']) IS NOT NULL);
+    'can_manage', public._exos_wroom_staff(p_event_id, ARRAY['owner', 'manager']) IS NOT NULL,
+    -- A public type on sale already (no sales start, or one passed) with no
+    -- pin makes the line live at once: no lobby, first come first served.
+    'warnings', CASE WHEN coalesce(s.enabled, false) AND s.closed_at IS NULL AND s.opens_at IS NULL
+                          AND public._exos_wroom_open_at(p_event_id) <= now()
+                     THEN jsonb_build_array(jsonb_build_object('code', 'live_now',
+                            'message', 'A public ticket type is on sale now, so the line is live at once with no lobby. '
+                                       || 'Pin the on-sale time (or give the types a sales start) for a fair start.'))
+                     ELSE '[]'::jsonb END);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_summary(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_summary(uuid) TO authenticated, service_role;
@@ -1388,7 +1605,7 @@ BEGIN
       ('public.exos_create_guest_hold(uuid,uuid,integer,text,text,text)',
        $q$public._exos_wroom_gate(p_event_id, p_tier_id, 'email:' || lower(btrim(coalesce(p_email, ''))), 'hold')$q$),
       ('public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)',
-       $q$public._exos_wroom_gate(p_event_id, p_tier_id, 'uid:' || coalesce(auth.uid()::text, ''), 'claim')$q$),
+       $q$public._exos_wroom_gate(p_event_id, p_tier_id, 'uid:' || coalesce(auth.uid()::text, ''), 'claim', p_order_ref)$q$),
       ('public.exos_phone_rsvp_verify(uuid,text,text)',
        $q$public._exos_wroom_gate_rsvp(p_rsvp_id)$q$),
       ('public.exos_redeem_referral_reward(uuid,uuid)',

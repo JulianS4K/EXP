@@ -174,6 +174,7 @@ import {
 } from "../_shared/payouts/commissionMethods.ts";
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
+import { type StripeEnd, wroomAttach, wroomBindSession } from "../_shared/wroomCheckout.ts";
 
 // exos: waiting room — ids are checked before they reach the queue check.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -978,17 +979,27 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   // below, with or without a hold, is covered; wroomRun releases it if this
   // checkout then fails, and the session row binds it (wroomBind).
   {
-    const { data: att, error: attErr } = await sb.rpc("exos_wroom_attach", {
+    // The same buyer starting again (a reload, a second tab) takes over: their
+    // earlier Stripe session is expired on our own platform account first.
+    const att = await wroomAttach({
+      rpc: async (fn, args) => await sb.rpc(fn, args),
+      expireStripe: (id) => expireOwnStripeSession(stripeKey, id),
+      markExpired: async (id) => {
+        const { error } = await sb.from("exos_checkout_sessions").update({ status: "expired" })
+          .eq("session_id", id).eq("status", "pending");
+        if (error) console.error("exos-checkout: waiting room take-over: session not marked", error.message);
+      },
+      log: (m) => console.error(m),
+    }, {
       p_event_id: wr.eventId ?? event_id, p_tier_id: wr.tierId ?? tier_id, p_token: queueToken || null,
       p_buyer_uid: buyerUid, p_email: buyerUid ? null : buyerEmail, p_attempt: wr.attempt,
     });
-    const refused = wroomRefusal(attErr?.code);
-    if (refused) return json(refused, 409);
-    if (attErr && attErr.code !== "PGRST202") {
-      console.error("exos-checkout: waiting room attach failed", attErr.message);
+    if (att.kind === "refused") return json(wroomRefusal(att.code), 409);
+    if (att.kind === "error") {
+      console.error("exos-checkout: waiting room attach failed", att.message);
       return json({ error: "could not check the queue, try again" }, 503);
     }
-    wr.attached = att === true;
+    wr.attached = att.attached;
     wr.buyerUid = buyerUid;
     wr.email = buyerUid ? null : buyerEmail;
   }
@@ -1101,7 +1112,10 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   // guest one keyed claim link per ticket, as for a paid guest order.
   if (freeGuest) {
     const sessionId = `free_${crypto.randomUUID()}`;
-    await wroomBind(sb, wr, sessionId);
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const fInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       // Reserved seating / timed entry: a signed-in buyer lands here only for
@@ -1150,7 +1164,10 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   // gives it back through the session's status trigger).
   if (giftFull) {
     const sessionId = `gc_${crypto.randomUUID().replaceAll("-", "")}`;
-    await wroomBind(sb, wr, sessionId);
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const gInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       buyer_uid: buyerUid, buyer_email: buyerEmail, ...(buyerUid ? {} : { guest: true }),
@@ -1220,7 +1237,11 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
       return json({ error: "could not start PayPal checkout" }, 502);
     }
     const orderId = typeof order.id === "string" ? order.id : "";
-    await wroomBind(sb, wr, sessionId);
+    // Not bound: the PayPal order is never recorded, so it can't be captured.
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const ppRow: Record<string, unknown> = {
       session_id: sessionId,
       event_id, tier_id, org_id: ev.org_id,
@@ -1357,7 +1378,12 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
     return json({ error: "could not create checkout session" }, 502);
   }
 
-  await wroomBind(sb, wr, session.id);
+  if (!(await wroomBind(sb, wr, session.id))) {
+    // Not bound to the turn: nobody pays on this session.
+    try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+    await releaseHold(sb, holdId);
+    return json(WROOM_BIND_FAILED, 503);
+  }
   const ledgerRow: Record<string, unknown> = {
     session_id: session.id,
     provider_expires_at: new Date((session.expires_at || stripeExpiresAt) * 1000).toISOString(),
@@ -1661,7 +1687,6 @@ interface WroomAttempt {
   /** This checkout's attempt id (attached to the turn by exos_wroom_attach). */
   attempt: string;
   attached: boolean;
-  bound: boolean;
   eventId: string | null;
   tierId: string | null;
   buyerUid: string | null;
@@ -1676,13 +1701,14 @@ function wroomRefusal(code: string | undefined): Record<string, string> | null {
   return null;
 }
 
-/** Run the handler; a checkout that fails after attaching releases the turn. */
+/** Run the handler; a checkout that fails after attaching releases the turn
+ *  (its bound session too, so the turn can try again). */
 async function wroomRun(req: Request, handler: (req: Request, wr: WroomAttempt) => Promise<Response>): Promise<Response> {
   const wr: WroomAttempt = {
-    attempt: crypto.randomUUID(), attached: false, bound: false, eventId: null, tierId: null, buyerUid: null, email: null,
+    attempt: crypto.randomUUID(), attached: false, eventId: null, tierId: null, buyerUid: null, email: null,
   };
   const release = async () => {
-    if (!wr.attached || wr.bound || !wr.eventId) return;
+    if (!wr.attached || !wr.eventId) return;
     const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { error } = await sb.rpc("exos_wroom_release", { p_event_id: wr.eventId, p_attempt: wr.attempt });
     if (error) console.error("exos-checkout: waiting room release failed", error.message);
@@ -1697,14 +1723,34 @@ async function wroomRun(req: Request, handler: (req: Request, wr: WroomAttempt) 
   }
 }
 
+const WROOM_BIND_FAILED = { error: "could not check the queue, try again", reason: "waiting_room_retry" };
+
 /** The order's session id on the attached turn, before its row is written
- *  (fulfilment spends the turn; a failed / expired session frees it). */
+ *  (fulfilment spends the turn; a failed / expired session frees it). False:
+ *  not bound (the caller stops before any money moves). */
 // deno-lint-ignore no-explicit-any
-async function wroomBind(sb: SupabaseClient<any, any, any>, wr: WroomAttempt, sessionId: string): Promise<void> {
-  if (!wr.attached || !wr.eventId) return;
-  const { error } = await sb.rpc("exos_wroom_bind", {
+async function wroomBind(sb: SupabaseClient<any, any, any>, wr: WroomAttempt, sessionId: string): Promise<boolean> {
+  if (!wr.attached || !wr.eventId) return true;
+  return await wroomBindSession(async (fn, args) => await sb.rpc(fn, args), {
     p_event_id: wr.eventId, p_attempt: wr.attempt, p_session_id: sessionId, p_buyer_uid: wr.buyerUid, p_email: wr.email,
-  });
-  if (error) console.error("exos-checkout: waiting room bind failed", error.message);
-  else wr.bound = true;
+  }, (m) => console.error(m));
+}
+
+/** Expire one of our own Checkout sessions (the waiting room take-over).
+ *  Expire fails on a session that isn't open: then read where it stands. */
+async function expireOwnStripeSession(stripeKey: string | undefined, id: string): Promise<StripeEnd> {
+  if (!stripeKey) return "unknown";
+  const st = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
+  try {
+    const s = await st.checkout.sessions.expire(id);
+    return s.status === "expired" ? "expired" : "unknown";
+  } catch (e) {
+    try {
+      const s = await st.checkout.sessions.retrieve(id);
+      return s.status === "expired" || s.status === "complete" || s.status === "open" ? s.status : "unknown";
+    } catch {
+      console.error("exos-checkout: take-over expire failed", e);
+      return "unknown";
+    }
+  }
 }

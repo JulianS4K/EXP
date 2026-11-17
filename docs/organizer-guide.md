@@ -267,18 +267,27 @@ finance can see the counts). Only published events have one.
 - **The on-sale time** is the earliest sales start of your public ticket types that still have
   tickets and haven't ended (a sold-out early bird doesn't count). Pin your own **On-sale time**
   when that isn't the drop, e.g. an early type is still on sale. Turned on mid-sale, it starts at once.
+  If a public type is on sale already (no sales start), the panel warns that the line goes live at once
+  with no lobby: pin the on-sale time (or give the types a sales start) for a fair start.
 - **Fair start:** everyone who arrives in the window before the on-sale gets a **random** place in line,
   so refreshing or arriving at 9:59:59 doesn't beat arriving at 9:50. People who arrive after the
   on-sale join at the back, in order.
-- **Signed-in buyers always get a place:** one per account, which they can pick up on any device. Guests
-  (not signed in) get a place too, up to "Most people in line" (blank = 5 times the public capacity,
-  at least 1,000) and a share per network so one network can't fill the line; past that the page
-  says "The waiting room is full" and offers **Sign in to get a place**.
+- **Established accounts always get a place:** a signed-in buyer whose email is confirmed and whose
+  account is at least 7 days old, or who has paid for an order before (any organizer), gets one place
+  per account, which they can pick up on any device. Everyone else (guests, and accounts made this
+  week) gets a place too, up to "Most people in line" (blank = 5 times the public capacity, at least
+  1,000) and a share per network so one network can't fill the line; past that the page says "The
+  waiting room is full" and offers **Sign in to get a place** to signed-out buyers (a signed-in one
+  sees "The line is full right now, we'll keep trying"). So nobody can jump a full line with freshly
+  made accounts. (Platform operator: turn on **Confirm email** and the **sign-up CAPTCHA** in Supabase
+  Auth; see `docs/security.md` "Operator settings".)
 - **For buyers:** the event page shows their place and an estimated wait instead of the buy button,
   and updates on its own (no need to refresh; one place per browser or account, more tabs don't
   help). When it's their turn the buy box comes back with the time they have.
 - **One turn, one order.** A turn belongs to the first buyer who uses it and buys one order; to buy
   again they join again, at the back. Passing the page to a friend doesn't let a second person in.
+  A buyer who reloads or starts checkout again on their turn gets a fresh payment page (the old one
+  is cancelled), unless they were already paying on it.
 - **Stepping away:** a page that's closed or asleep for 3 minutes is skipped (others go ahead) and may
   come back within 30 minutes: always for a signed-in buyer, for a guest while the line has room.
   After 30 minutes, or a lapsed turn, the place is gone and they can join again at the back.

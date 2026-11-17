@@ -13,7 +13,8 @@
 //
 // Order: method, body, ids, the secret, the address + rate limit (SQL, before
 // the external call), the token, siteverify (success, action 'wroom', the
-// app's hostname), then the join. Every outside call comes in through deps.
+// app's hostname or one of the org's verified custom domains; none
+// configured: refused), then the join. Every outside call comes in through deps.
 
 import { readCapped } from "./api/body.ts";
 import { captchaPassed, captchaVerifyRequest } from "./signup.ts";
@@ -37,6 +38,8 @@ export interface WroomJoinDeps {
   /** service-role RPC */
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { code?: string; message?: string } | null }>;
   log?: (msg: string) => void;
+  /** The verified custom domains (exos_public_org_domains) of the event's org. */
+  orgDomains?: (eventId: string) => Promise<string[]>;
 }
 
 /** The app's hostnames, from EXOS_APP_BASE_URL, EXOS_APP_URL and EXOS_REDIRECT_ORIGINS. */
@@ -51,16 +54,33 @@ export function allowedHosts(env: (name: string) => string | undefined): string[
 
 let warnedNoHosts = false;
 
-/** Does siteverify's answer pass for this room: success, our action, our host? */
+/** Does siteverify's answer pass for this room: success, our action, one of
+ *  our hosts (the app's, or the org's verified custom domains)? No host
+ *  configured at all: refused (fail closed), logged once. */
 export function verifyAnswer(answer: unknown, hosts: string[], log: (m: string) => void = console.warn): boolean {
   if (!captchaPassed(answer)) return false;
   const a = answer as { action?: unknown; hostname?: unknown };
   if (a.action !== WROOM_TURNSTILE_ACTION) return false;
   if (hosts.length === 0) {
-    if (!warnedNoHosts) { warnedNoHosts = true; log("exos-wroom-join: no app hostnames configured; Turnstile hostname not checked"); }
-    return true;
+    if (!warnedNoHosts) {
+      warnedNoHosts = true;
+      log("exos-wroom-join: no app hostnames configured (EXOS_APP_BASE_URL / EXOS_APP_URL / EXOS_REDIRECT_ORIGINS); refusing every check");
+    }
+    return false;
   }
   return typeof a.hostname === "string" && hosts.includes(a.hostname.toLowerCase());
+}
+
+/** The org's verified domains, as hostnames (bad rows and errors: none). */
+async function orgHosts(deps: WroomJoinDeps, eventId: string): Promise<string[]> {
+  if (!deps.orgDomains) return [];
+  try {
+    return (await deps.orgDomains(eventId))
+      .map((d) => (typeof d === "string" ? d.trim().toLowerCase() : ""))
+      .filter((d) => /^[a-z0-9.-]{3,253}$/.test(d));
+  } catch {
+    return [];
+  }
 }
 
 function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
@@ -113,7 +133,9 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   } catch {
     return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
   }
-  if (!verifyAnswer(answer, allowedHosts(deps.env), deps.log)) {
+  const passed = captchaPassed(answer);
+  const hosts = passed ? [...allowedHosts(deps.env), ...(await orgHosts(deps, eventId))] : [];
+  if (!passed || !verifyAnswer(answer, hosts, deps.log)) {
     return json({ error: "the check didn't pass, try again", reason: "challenge_failed" }, 403);
   }
 

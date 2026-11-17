@@ -110,7 +110,7 @@ describe('WaitingRoomGate', () => {
     expect(screen.queryByRole('button', { name: 'Buy tickets' })).toBeNull();
   });
 
-  it('a full guest line offers sign-in (every account gets a place); signed in, no such button', async () => {
+  it('a full guest line offers sign-in when signed out; signed in, no such button (a seat, or "we\'ll keep trying")', async () => {
     h.join.mockResolvedValue(parseStatus({ state: 'full', reason: 'room' }));
     render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
     fireEvent.click(await screen.findByRole('button', { name: 'Sign in to get a place' }));
@@ -120,6 +120,12 @@ describe('WaitingRoomGate', () => {
     h.join.mockResolvedValue(parseStatus({ state: 'waiting', position: 20001, ahead: 10000, position_capped: true, kind: 'account' }));
     render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
     expect(await screen.findByRole('heading', { name: "You're number 10,000+ in line" })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign in to get a place' })).toBeNull();
+    // Signed in, the guest line full (a new account): "we'll keep trying", no sign-in button.
+    cleanup();
+    h.join.mockResolvedValue(parseStatus({ state: 'full', reason: 'room', signed_in: true }));
+    render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
+    expect(await screen.findByRole('heading', { name: 'The line is full right now' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in to get a place' })).toBeNull();
     auth.user = null;
   });

@@ -94,7 +94,7 @@ npm ci --include=dev && npm run build && npm start
 | `TRUST_PROXY_HOPS` | number of proxies in front (Render: 1) |
 | `EXOS_AI_DISCOVERY` | leave off until you want crawler / AI pages |
 | `VITE_EXOS_LUMA` | `on` shows Luma in the app (Integrations, ticketing choices); set with `EXOS_LUMA_ENABLED` |
-| `VITE_TURNSTILE_SITE_KEY` | build time; the waiting room's human check. Create a Turnstile widget in Cloudflare (Turnstile → Add widget; mode Managed; hostnames: your app host), put its site key here and its secret key in the edge secret `TURNSTILE_SECRET_KEY`, deploy `exos-wroom-join` (`--no-verify-jwt`), rebuild the app. Both unset: the check stays off |
+| `VITE_TURNSTILE_SITE_KEY` | build time; the waiting room's human check. Create a Turnstile widget in Cloudflare (Turnstile → Add widget; mode Managed; hostnames: your app host, or turn on "any hostname" if organizers use custom domains: `exos-wroom-join` checks the answer's hostname itself against `EXOS_APP_BASE_URL` / `EXOS_APP_URL` / `EXOS_REDIRECT_ORIGINS` and each org's verified custom domains, and refuses every check when none is set), put its site key here and its secret key in the edge secret `TURNSTILE_SECRET_KEY`, deploy `exos-wroom-join` (`--no-verify-jwt`), rebuild the app. Both unset: the check stays off |
 
 The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bridge/` or change `base` and
 `EXOS_APP_URL` together.

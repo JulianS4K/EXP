@@ -82,6 +82,7 @@ reset_round
 run "status: the back of the line (10,000+ count)" anon 3s "public.exos_wroom_status('$EV', '$BACK')"
 run "status: the front" anon 3s "public.exos_wroom_status('$EV', '$FRONT')"
 run "status: within 5 s (cached)" anon 3s "public.exos_wroom_status('$EV', '$BACK')"
+run "join: an existing place (its token; cached like a poll)" anon 3s "public.exos_wroom_join('$EV', '$BACK')"
 run "status: an idle place coming back (shares + cap)" anon 3s "public.exos_wroom_status('$EV', '$IDLE')"
 reset_round
 run "recount: abandon batch (500) + live count (runs inside anon calls)" postgres 3s "public._exos_wroom_recount('$EV')"

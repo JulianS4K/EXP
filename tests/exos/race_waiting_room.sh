@@ -28,6 +28,14 @@
 #          fill it again with newcomers, then revive all 100 old tokens at once
 #          (status and join): every old token answers expired / idle, and the
 #          live line stays at the cap
+#   race 8 take-over (B): one buyer's bound Stripe session, then 5 quick
+#          retries by the same buyer at once, each doing what exos-checkout
+#          does (attach -> takeover -> mark the old session expired -> attach
+#          again -> bind): exactly one retry ends bound, the rest XWR02; the
+#          old session is expired and still mapped to the turn
+#   race 9 one account, two browsers' guest places, two joins at once (each
+#          keeping its transaction open): no error, exactly one place keyed on
+#          the account, the other token left a guest place (23505 handled)
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -36,7 +44,8 @@ O=e7e00000-0000-0000-0000-000000000001; A=e7e00000-0000-0000-0000-0000000000a1
 EV=e7e00000-0000-0000-0000-0000000000e1; T=e7e00000-0000-0000-0000-0000000000c1
 OUT=$(mktemp -d)
 cleanup() {
-  $P -c "DELETE FROM exos_cart_holds WHERE event_id='$EV'; DELETE FROM exos_wroom_entries WHERE event_id='$EV';
+  $P -c "DELETE FROM exos_cart_holds WHERE event_id='$EV'; DELETE FROM exos_checkout_sessions WHERE event_id='$EV';
+         DELETE FROM exos_wroom_entries WHERE event_id='$EV';
          DELETE FROM exos_wroom_settings WHERE event_id='$EV'; DELETE FROM exos_ticket_tiers WHERE event_id='$EV';
          DELETE FROM exos_events WHERE id='$EV'; DELETE FROM exos_org_memberships WHERE org_id='$O';
          DELETE FROM exos_orgs WHERE id='$O';
@@ -148,12 +157,15 @@ else
 fi
 
 # race 4 ---------------------------------------------------------------------
-# Token 270: admitted, unused. Buyers 41..50 had holds released for room.
+# Token 270: admitted, unused. All holds released for room. Buyers 51..60
+# (race 3's waiting ones) have no place of their own: buyers 1..50 do now
+# (their race 3 turn, keyed on the account), and an account's own place is
+# its turn.
 $P -c "UPDATE exos_cart_holds SET status='released', released_at=now() WHERE event_id='$EV';
        UPDATE exos_wroom_entries SET state='admitted', admitted_at=now(), admit_expires_at=now() + interval '10 minutes',
               used_at=NULL, redeemer_hash=NULL
         WHERE event_id='$EV' AND token_hash IN (public._exos_wroom_hash('$EV','$(tok 270)'), public._exos_wroom_hash('$EV','$(tok 271)'));" >/dev/null
-for n in $(seq 41 50); do hold "$n" 270 0.5 > "$OUT/r4.$n" & done
+for n in $(seq 51 60); do hold "$n" 270 0.5 > "$OUT/r4.$n" & done
 wait
 ok4=$(cat "$OUT"/r4.* | grep -c '^t$' || true)
 busy4=$(cat "$OUT"/r4.* | grep -c 'already checking out' || true)
@@ -175,7 +187,7 @@ for n in $(seq 1 10); do
          SELECT count(*) FROM pg_sleep(0.5); COMMIT;" > "$OUT/r5.$n" 2>&1 || true &
 done
 wait
-ok5=$(cat "$OUT"/r5.* | grep -c '^t$' || true)
+ok5=$(cat "$OUT"/r5.* | grep -c '"attached": true' || true)
 busy5=$(cat "$OUT"/r5.* | grep -c 'already checking out' || true)
 if [[ "$ok5" == 1 && "$busy5" == 9 ]]; then
   echo "OK   race 5 10 checkouts on one turn at once: one attached, 9 refused (XWR02): one open checkout per turn"
@@ -245,5 +257,77 @@ if [[ "$oldok" == 100 && "$newok" == 100 && "$idle" == 200 && "$live" == 100 && 
   echo "OK   race 7 park and revive: 100 places, idle, 100 newcomers, 100 old tokens revived at once all answer expired / idle; live line 100 = the cap"
 else
   echo "FAIL race 7: first fill $oldok (101st refused?), second fill $newok, idle answers $idle / 200, live $live, abandoned $abandoned"; fail=1
+fi
+# race 8 ---------------------------------------------------------------------
+# (Race 7 emptied the line: these places are inserted here.)
+newplace() {  # $1 = token n
+  $P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash,net32_hash,order_key)
+           SELECT '$O','$EV',run_id,public._exos_wroom_hash('$EV','$(tok $1)'),md5('n$1') || md5('n$1'),md5('m$1') || md5('m$1'),0.5
+             FROM exos_wroom_settings WHERE event_id='$EV'" >/dev/null
+}
+newplace 272; newplace 280; newplace 281
+$P -c "UPDATE exos_wroom_entries SET state='admitted', admitted_at=now(), admit_expires_at=now() + interval '10 minutes',
+              used_at=now(), checkout_ref=gen_random_uuid(), checkout_at=now(), session_id='cs_race8_old',
+              redeemer_hash=public._exos_wroom_buyer_hash('$EV','email:race8@x.com')
+        WHERE event_id='$EV' AND token_hash = public._exos_wroom_hash('$EV','$(tok 272)');
+       INSERT INTO exos_wroom_sessions(session_id, entry_id, org_id, event_id)
+         SELECT 'cs_race8_old', id, org_id, event_id FROM exos_wroom_entries
+          WHERE event_id='$EV' AND token_hash = public._exos_wroom_hash('$EV','$(tok 272)');
+       INSERT INTO exos_checkout_sessions(session_id,event_id,tier_id,org_id,quantity,amount_cents,status,buyer_email,guest)
+         VALUES ('cs_race8_old','$EV','$T','$O',1,2000,'pending','race8@x.com',true);" >/dev/null
+retry8() {  # $1 = worker: the edge's attach / take-over / bind, statement by statement
+  local att a2 sv="BEGIN; SET LOCAL ROLE service_role;" args="'$EV','$T','$(tok 272)',NULL,'race8@x.com','e7e00000-0000-0000-0000-00000000080$1'"
+  att=$($P -c "$sv SELECT public.exos_wroom_attach($args); COMMIT;" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' || true)
+  if [[ "$att" == *takeover* ]]; then
+    local old; old=$(echo "$att" | sed -E 's/.*"takeover": "([^"]+)".*/\1/')
+    # (Stripe expire: mocked as succeeded.)
+    $P -c "UPDATE exos_checkout_sessions SET status='expired' WHERE session_id='$old' AND status='pending'" >/dev/null 2>&1
+    a2=$($P -c "$sv SELECT public.exos_wroom_attach($args); COMMIT;" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' || true)
+    if [[ "$a2" == *'"attached": true'* ]]; then
+      $P -c "$sv SELECT public.exos_wroom_bind('$EV','e7e00000-0000-0000-0000-00000000080$1','cs_race8_$1',NULL,'race8@x.com'); COMMIT;" \
+        2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' | sed 's/^t$/BOUND/'
+    elif [[ "$a2" == *takeover* ]]; then echo "XWR02 (second take-over)"
+    else echo "$a2"; fi
+  else echo "$att"; fi
+}
+for n in 1 2 3 4 5; do retry8 "$n" > "$OUT/r8.$n" & done
+wait
+bound8=$(cat "$OUT"/r8.* | grep -c '^BOUND$' || true)
+busy8=$(cat "$OUT"/r8.* | grep -c 'already checking out\|XWR02' || true)
+st8=$($P -c "SELECT status FROM exos_checkout_sessions WHERE session_id='cs_race8_old'")
+map8=$($P -c "SELECT count(*) FROM exos_wroom_sessions WHERE session_id LIKE 'cs_race8_%'")
+cur8=$($P -c "SELECT session_id FROM exos_wroom_entries WHERE event_id='$EV' AND token_hash = public._exos_wroom_hash('$EV','$(tok 272)')")
+if [[ "$bound8" == 1 && "$busy8" == 4 && "$st8" == expired && "$map8" == 2 && "$cur8" == cs_race8_* ]]; then
+  echo "OK   race 8 take-over: 5 quick retries by the same buyer, one bound ($cur8), 4 XWR02; the old session expired and still mapped"
+else
+  echo "FAIL race 8: bound $bound8, busy $busy8, old $st8, mapped $map8, current $cur8"; cat "$OUT"/r8.* | sort | uniq -c | head -8; fail=1
+fi
+$P -c "DELETE FROM exos_checkout_sessions WHERE session_id LIKE 'cs_race8_%'; DELETE FROM exos_wroom_sessions WHERE session_id LIKE 'cs_race8_%'" >/dev/null
+
+# race 9 ---------------------------------------------------------------------
+U9="e7e00000-0000-0000-0000-$(printf '%012x' 1055)"
+$P -c "UPDATE auth.users SET created_at = now() - interval '30 days' WHERE id='$U9';
+       UPDATE exos_wroom_entries SET state='waiting', last_seen_at=now(), account_hash=NULL, redeemer_hash=NULL, view_at=NULL
+        WHERE event_id='$EV' AND token_hash IN (public._exos_wroom_hash('$EV','$(tok 280)'), public._exos_wroom_hash('$EV','$(tok 281)'));" >/dev/null
+for n in 280 281; do
+  $P -c "BEGIN;
+         SELECT set_config('app.uid','$U9',true);
+         SELECT set_config('app.jwt','{\"email\":\"fan55@race-wr.test\"}',true);
+         SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.51.100.9\"}',true);
+         SET LOCAL ROLE authenticated;
+         SELECT public.exos_wroom_join('$EV','$(tok $n)')->>'state';
+         SELECT count(*) FROM pg_sleep(0.5);
+         COMMIT;" > "$OUT/r9.$n" 2>&1 &
+done
+wait
+err9=$(cat "$OUT"/r9.* | grep -c ERROR || true)
+acct9=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV'
+                  AND account_hash = encode(sha256(convert_to('$EV' || ':uid:$U9', 'UTF8')), 'hex')")
+guest9=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND account_hash IS NULL
+                  AND token_hash IN (public._exos_wroom_hash('$EV','$(tok 280)'), public._exos_wroom_hash('$EV','$(tok 281)'))")
+if [[ "$err9" == 0 && "$acct9" == 1 && "$guest9" == 1 ]]; then
+  echo "OK   race 9 one account, two guest places joined at once: no error, one place keyed on the account, the other left a guest place"
+else
+  echo "FAIL race 9: errors $err9, account places $acct9, guest left $guest9"; cat "$OUT"/r9.* | grep -v '^1$' | head -6; fail=1
 fi
 exit $fail

@@ -27,7 +27,7 @@ function timeIn(d: Date, tz?: string | null): string {
 export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge, onSignIn }: {
   status: RoomStatus; timezone?: string | null; onRejoin: () => void; busy?: boolean;
   siteKey?: string; onChallenge?: (token: string) => void;
-  /** Signed out: offered when the guest line is full (every account gets a place). */
+  /** Signed out: offered when the guest line is full (an established account gets a place). */
   onSignIn?: () => void;
 }) {
   const v = queueView(status, (d) => timeIn(d, timezone));
@@ -156,7 +156,8 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
   // Until the first answer, show the buy box (most events have no room).
   if (status && blocksBuying(status)) {
     return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy}
-      siteKey={siteKey} onChallenge={(t) => void challenge(t)} onSignIn={uid ? undefined : openAuthModal} />;
+      siteKey={siteKey} onChallenge={(t) => void challenge(t)}
+      onSignIn={uid || status.signedIn ? undefined : openAuthModal} />;
   }
   return (
     <>

@@ -71,6 +71,10 @@ Every VU got a place; no request failed. At 5,000 and 10,000 VUs the room let in
 (about 2,325 holds in the step) and the rest were still in line, with a correct place, when the step
 ended.
 
+Re-run at 1,000 and 5,000 VUs after the account-seat, take-over and one-turn-per-account changes:
+5,000 VUs p95 event page 7.8 ms, join 14.6, poll 6.0, hold 43.2, checkout SQL before Stripe 58.4, no
+errors (1,000 VUs: 4.1 / 4.1 / 3.3 / 17.9 / 28.5): within this sandbox's run-to-run spread.
+
 **Headline.** 5,000 buyers arriving in 20 seconds: event page p95 5.8 ms, queue join p95 8.5 ms, queue
 poll p95 4.8 ms, hold p95 38.5 ms, checkout SQL before Stripe p95 48.8 ms, 0 errors. 10,000 buyers in
 20 seconds: 0 errors, poll p50 4.4 ms and hold p50 22 ms, but p95 of 0.8-1.7 s on the page read, the
@@ -106,20 +110,22 @@ take and everything else stays fast.
 random lobby keys, a tenth idle for 40 minutes, a twentieth with lapsed turns) and times each call the
 way PostgREST runs it (role, headers, `statement_timeout` 3 s for anon, 8 s for authenticated), with a
 due admission round where noted. Same machine; first call of each kind on a fresh connection (cold plan
-cache), so prod's warm pool is faster.
+cache), so prod's warm pool is faster. The 1,000,000 column is the latest run (account seats, take-over,
+one turn per account).
 
 | Call | 200,000 | 1,000,000 |
 |---|---|---|
-| join: a new place, with an admission round of 2,000 due | 365 ms | 679 ms |
-| join: a new place, no round due | 137 ms | 363 ms |
-| status: the back of the line (counts to 10,001, shows "10,000+") | 246 ms | 265 ms |
-| status: the front | 7 ms | 8 ms |
-| status: again within 5 s (the cached view, no write) | 5 ms | 5 ms |
-| status: an idle place coming back (network shares + cap re-checked) | 149 ms | 327 ms |
-| recount: abandon a batch of 500 + count the live line (inside anon calls) | 128 ms | 326 ms |
-| admission round alone: 2,000 (inside anon calls) | 275 ms | 254 ms |
-| checkout check (`exos_wroom_require`, service role) | 6 ms | 6 ms |
-| organizer summary (authenticated) | 114 ms | 420 ms |
+| join: a new place, with an admission round of 2,000 due | 365 ms | 639 ms |
+| join: a new place, no round due | 137 ms | 342 ms |
+| join: an existing place (its token; answered like a poll, 5 s cache) | | 5 ms |
+| status: the back of the line (counts to 10,001, shows "10,000+") | 246 ms | 270 ms |
+| status: the front | 7 ms | 9 ms |
+| status: again within 5 s (the cached view, no write) | 5 ms | 7 ms |
+| status: an idle place coming back (network shares + cap re-checked) | 149 ms | 360 ms |
+| recount: abandon a batch of 500 + count the live line (inside anon calls) | 128 ms | 299 ms |
+| admission round alone: 2,000 (inside anon calls) | 275 ms | 249 ms |
+| checkout check (`exos_wroom_require`, service role) | 6 ms | 10 ms |
+| organizer summary (authenticated) | 114 ms | 461 ms |
 
 Nothing is O(line) per request any more: there is no draw (a place's key is fixed at mint), a round
 admits at most 2,000, abandonment and expiry go in batches of 500, positions stop counting at 10,001,

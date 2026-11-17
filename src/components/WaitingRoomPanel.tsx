@@ -121,6 +121,13 @@ export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey =
         {s.phase === 'off' && s.closedReason === 'idle' && s.closedAt ? ` · closed itself ${fmt(s.closedAt, timezone)} (nobody waiting)` : ''}
         {s.phase === 'live' && s.counts.waiting > 0 ? ` · the back of the line waits about ${s.waitMinutes} min` : ''}
       </p>
+      {s.warnings.length > 0 && (
+        <ul data-wroom-warnings className="mb-4 space-y-1 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          {s.warnings.map((w) => (
+            <li key={w.code} className="text-xs text-amber-900">{w.message}</li>
+          ))}
+        </ul>
+      )}
       {s.counts.total > 0 && (
         <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
           {tiles.map(([k, v]) => (

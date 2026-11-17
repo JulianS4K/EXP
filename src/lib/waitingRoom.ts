@@ -29,6 +29,8 @@ export interface RoomStatus {
   positionCapped?: boolean;
   /** 'account': the signed-in buyer's own place (any browser resumes it). */
   kind?: 'anon' | 'account';
+  /** The server saw a signed-in account ('full': signing in again won't help). */
+  signedIn?: boolean;
 }
 
 const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full', 'challenge'];
@@ -64,6 +66,7 @@ export function parseStatus(raw: unknown): RoomStatus {
     reason: ['room', 'network', 'idle', 'lapsed', 'used'].includes(r.reason as string) ? (r.reason as RoomStatus['reason']) : undefined,
     positionCapped: r.position_capped === true,
     kind: r.kind === 'account' || r.kind === 'anon' ? r.kind : undefined,
+    signedIn: r.signed_in === true,
   };
 }
 
@@ -197,12 +200,21 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
         rejoin: false,
       };
     case 'full':
+      // Signed in already (an account too new for a seat): nothing to offer
+      // but the retry.
+      if (s.signedIn) {
+        return {
+          heading: 'The line is full right now',
+          detail: "We'll keep trying: this page asks again every minute. Keep it open.",
+          rejoin: false,
+        };
+      }
       return {
         heading: 'The waiting room is full',
         detail: (s.reason === 'network'
           ? 'Too many people on your network have joined this line.'
           : 'The line is as long as the organizer allows for guests.')
-          + ' Sign in to get a place (every account gets one), or wait here: this page tries again every minute.',
+          + ' Sign in to get a place, or wait here: this page tries again every minute.',
         rejoin: false,
       };
     case 'unknown':
@@ -302,6 +314,8 @@ export interface RoomSummary {
   counts: { waiting: number; admitted: number; checkedOut: number; expired: number; accounts: number; total: number };
   waitMinutes: number;
   canManage: boolean;
+  /** Things the organizer should know (e.g. 'live_now': the line goes live at once). */
+  warnings: { code: string; message: string }[];
 }
 
 export function parseSummary(raw: unknown): RoomSummary {
@@ -329,6 +343,11 @@ export function parseSummary(raw: unknown): RoomSummary {
     },
     waitMinutes: num(r.wait_minutes) ?? 0,
     canManage: r.can_manage === true,
+    warnings: (Array.isArray(r.warnings) ? r.warnings : [])
+      .filter((w): w is { code: string; message: string } =>
+        !!w && typeof w === 'object' && typeof (w as Record<string, unknown>).code === 'string'
+        && typeof (w as Record<string, unknown>).message === 'string')
+      .map((w) => ({ code: w.code, message: w.message.slice(0, 300) })),
   };
 }
 
