@@ -1,7 +1,8 @@
 // "Notify me when tickets go on sale" (drop list, mig 20261118100000) on the
 // event page while every public ticket type opens later. Signed in with a
 // confirmed email: one click, plus an optional text with its own checkbox and
-// consent words. Everyone else: an email, then the confirm link or the
+// consent words; the number counts only after the code texted to it is typed
+// back (nobody can sign up someone else's phone). Everyone else: an email, then the confirm link or the
 // 6-digit code from the mail, typed here (only this browser's code works).
 // The guest answer is always "check your email", whether or not the address
 // is already on the list. Sold out stays the existing waitlist.
@@ -11,7 +12,7 @@ import { Bell, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { Attribution } from '../lib/attribution';
 import {
-  cleanCode, dropConfirmCode, dropJoin, dropLeaveMine, dropSignup, dropSource, getDropStatus, type DropStatus,
+  cleanCode, dropConfirmCode, dropJoin, dropLeaveMine, dropSignup, dropSource, dropVerifySms, getDropStatus, type DropStatus,
 } from '../lib/dropList';
 
 interface Props {
@@ -39,10 +40,11 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
   const [wantsSms, setWantsSms] = useState(false);
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
+  const [smsCode, setSmsCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const ids = { email: useId(), phone: useId(), sms: useId(), code: useId(), consent: useId(), smsConsent: useId() };
+  const ids = { email: useId(), phone: useId(), sms: useId(), code: useId(), smsCode: useId(), consent: useId(), smsConsent: useId() };
   const confirmed = !!user?.emailVerified;
 
   useEffect(() => {
@@ -78,8 +80,11 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)) { setError('Enter a valid email address.'); return; }
     setBusy(true); setError(null);
     try {
-      await dropSignup(eventId, trimmed, dropSource(attribution));
-      setStep('check_email');
+      if (await dropSignup(eventId, trimmed, dropSource(attribution)) === 'try_again') {
+        setError('Lots of people are signing up right now. Try again in a minute.');
+      } else {
+        setStep('check_email');
+      }
     } catch (e) {
       setError((e as Error).message || 'That didn\'t work. Try again.');
     } finally {
@@ -105,11 +110,26 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
     }
   };
 
+  const verifySms = async () => {
+    const c = cleanCode(smsCode);
+    if (!c) { setError('Enter the 6 digits from the text.'); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await dropVerifySms(eventId, c);
+      setStatus(r.status);
+      if (!r.verified) setError('That code didn\'t work. Check the newest text, or ask for texts again.');
+    } catch (e) {
+      setError((e as Error).message || 'That didn\'t work. Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const leave = async () => {
     setBusy(true); setError(null);
     try {
       await dropLeaveMine(eventId);
-      setStatus({ ...status, joined: false, sms: false, phoneHint: null });
+      setStatus({ ...status, joined: false, sms: false, phoneHint: null, smsPending: false, pendingHint: null });
       setStep('form');
       setNote('You left the list.');
     } catch (e) {
@@ -138,6 +158,15 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
             <Check className="h-4 w-4" aria-hidden="true" /> You're on the list. We'll email you once when tickets go on sale
             {status.sms && status.phoneHint ? ` and text ${status.phoneHint}` : ''}.
           </p>
+          {status.smsPending && !status.sms && (
+            <div className="space-y-2">
+              <p className="text-sm text-white">We texted a code to {status.pendingHint}. Type it here to turn on the text.</p>
+              <label htmlFor={ids.smsCode} className="type block text-[11px] uppercase tracking-widest text-white/80">Code from the text</label>
+              <input id={ids.smsCode} inputMode="numeric" autoComplete="one-time-code" maxLength={7} value={smsCode}
+                onChange={(e) => setSmsCode(e.target.value)} className={input} />
+              <button type="button" onClick={() => void verifySms()} disabled={busy} className={btn}>Turn on the text</button>
+            </div>
+          )}
           {user && (
             <button type="button" onClick={() => void leave()} disabled={busy}
               className="type text-[11px] uppercase tracking-widest text-white/80 underline hover:text-white disabled:opacity-60">

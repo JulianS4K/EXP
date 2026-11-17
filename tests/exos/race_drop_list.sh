@@ -12,6 +12,10 @@
 #          waits on the event, then finds nothing left (0 mails)
 #   race 3 the organizer sets a presale while a blast is in flight: it waits,
 #          then is refused (the list has already been notified)
+#   race 4 leave vs confirm, both orders: a leave in flight when the confirm
+#          link is clicked (the confirm waits, then answers false), and a
+#          confirm in flight when the leave comes (the leave waits, then
+#          wins); either way the person ends off the list
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -27,7 +31,7 @@ cleanup() {
          DELETE FROM exos_org_integrations WHERE org_id='$O';
          DELETE FROM exos_drop_signups WHERE org_id='$O'; DELETE FROM exos_drop_settings WHERE org_id='$O';
          DELETE FROM exos_vouchers WHERE event_id IN ('$E1','$E2');
-         DELETE FROM exos_ticket_tiers WHERE event_id IN ('$E1','$E2'); DELETE FROM exos_events WHERE org_id='$O';
+         DELETE FROM exos_ticket_tiers WHERE event_id IN (SELECT id FROM exos_events WHERE org_id='$O'); DELETE FROM exos_events WHERE org_id='$O';
          DELETE FROM exos_org_memberships WHERE org_id='$O'; DELETE FROM exos_orgs WHERE id='$O';
          DELETE FROM auth.users WHERE id='$A';" >/dev/null
 }
@@ -94,5 +98,40 @@ if [[ "$presale" == *"already been notified"* && "$($P -c "SELECT count(*) FROM 
   echo "OK   race 3 a presale set during an uncommitted blast: waits, then refused; no code minted"
 else
   echo "FAIL race 3: $presale"; fail=1
+fi
+# race 4: leave vs confirm on one pending signup, both orders.
+TOK=$(printf 'a%.0s' $(seq 64)); LV=$(printf 'b%.0s' $(seq 64))
+E3=d7a00000-0000-0000-0000-0000000000e3; T4=d7a00000-0000-0000-0000-0000000000c4
+SID=d7a00000-0000-0000-0000-00000000d001; CID=d7a00000-0000-0000-0000-00000000d002
+$P -c "INSERT INTO exos_events(id,org_id,name,slug,status,starts_at,timezone,total_tickets,created_by) VALUES
+         ('$E3','$O','Race Drop Three','race-drop-three','published',now() + interval '30 days','America/New_York',500,'$A');
+       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sales_start) VALUES ('$T4','$E3','GA',20,500,now() + interval '2 days');" >/dev/null
+fresh_pending() {
+  $P -c "DELETE FROM exos_drop_signups WHERE id='$SID';
+         INSERT INTO exos_drop_signups(id,org_id,event_id,email,email_consent_text)
+           VALUES ('$SID','$O','$E3','race4@race-drop.test', exos_drop_email_consent_text('Race Drop','Race Drop Three'));
+         INSERT INTO exos_drop_confirms(id,signup_id,org_id,token_hash,code_hash,browser_token_hash,leave_hash)
+           VALUES ('$CID','$SID','$O',_exos_drop_hash('$TOK'),repeat('0',64),repeat('0',64),_exos_drop_hash('$LV'));" >/dev/null
+}
+state() { $P -c "SELECT (left_at IS NOT NULL)::text || ' ' || (confirmed_at IS NOT NULL AND left_at IS NULL)::text FROM exos_drop_signups WHERE id='$SID'"; }
+fresh_pending
+$P -c "BEGIN; SELECT exos_drop_leave('$LV'); SELECT pg_sleep(2); COMMIT;" >/dev/null &
+sleep 0.5
+out=$($P -c "SELECT exos_drop_confirm('$TOK')" 2>&1 || true)
+wait
+if [[ "$out" == '{"ok": false}' && "$(state)" == "true false" ]]; then
+  echo "OK   race 4a a confirm during an uncommitted leave: waits, answers false, stays off"
+else
+  echo "FAIL race 4a: confirm $out / left, on = $(state)"; fail=1
+fi
+fresh_pending
+$P -c "BEGIN; SELECT exos_drop_confirm('$TOK'); SELECT pg_sleep(2); COMMIT;" >/dev/null &
+sleep 0.5
+$P -c "SELECT exos_drop_leave('$LV')" >/dev/null
+wait
+if [[ "$(state)" == "true false" && "$($P -c "SELECT count(*) FROM exos_drop_confirms WHERE signup_id='$SID' AND used_at IS NULL")" == 0 ]]; then
+  echo "OK   race 4b a leave during an uncommitted confirm: waits, then wins; nothing left open"
+else
+  echo "FAIL race 4b: left, on = $(state)"; fail=1
 fi
 exit $fail
