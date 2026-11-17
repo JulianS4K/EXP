@@ -81,6 +81,10 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). NULL for every token while group pay is off (mig 20261111120000, the default). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the event and ticket type ids (also published only, since mig 20261109110000), and the group's time slot and locked step price (published only, mig 20261110110000). Never the host's seat labels, another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
 | `exos_neighborhoods_list`, `exos_neighborhood_page` (mig 20261111110000) | OK (anon + authenticated; rate limited) | Neighborhood pages (`/nyc`, `/nyc/<slug>`): published events that aren't `noindex`, haven't ended and start in the next 1-14 days, placed by their public pin (`exos_public_event_geo`: fresh, never a secret / TBA location), each as the public card `_exos_public_event_json` plus the org's public name and slug; per neighborhood only a count. The count of listed events with no pin is added only for platform admins (`exos_is_admin()`). 120 calls a minute per network between the two (`_exos_request_ip_bucket()`, the platform-set IP), checked first. In the H3 allowlist |
 | `exos_unfollow_by_token` (mig 20261111110000) | OK (anon + authenticated; 64-hex token) | The unfollow link in `follower-new-event` mail: a 64-hex token per (org, follower) (two UUIDv4s), format-checked; it removes only that follow (and its waiting notices), keeping `followers_count` right. Answers `{ ok, org_name }`; a malformed or unknown token answers `{ ok: false }` and nothing else. In the H3 allowlist |
+| `exos_drop_status` (mig 20261118100000) | OK (anon + authenticated) | A published event's drop list: open or not, the public on-sale time, whether the list gets a presale, and the consent words. Signed in: the caller's own signup only (joined, texts, a masked number). Nothing about anyone else; a draft answers `{ open: false }` |
+| `exos_drop_signup` (mig 20261118100000) | OK (anon + authenticated; rate limited) | A guest's "Notify me". Always `{ ok, status: 'check_email' }` for a well-formed request to an open list: new, pending, already listed or throttled (no enumeration). 10 a minute per network (`_exos_request_ip_bucket`), 120 per event, 5 per address, before any write; 3 confirm mails a day per address and event; none when already listed. Stores the address, the consent words and the sanitized first-touch promoter / UTM tags; no IP. The browser token (64 hex) is stored hashed |
+| `exos_drop_confirm`, `exos_drop_leave` (mig 20261118100000) | OK (anon + authenticated; 64-hex token) | The confirm link (two UUIDv4s, only its SHA-256 stored, 7 days) and the per-signup leave token. Answer ok and the event (and org) name only. The pages take a click, so a mail scanner changes nothing |
+| `exos_drop_confirm_code` (mig 20261118100000) | OK (anon + authenticated; 256-bit browser token) | The 6-digit code from the confirm mail, only with the hashed browser token of the signup that asked for it (the guest-proof pattern, mig 20261105100000): 5 wrong tries spend the code, 20 tries a minute per network, 24 hours. Answers `{ ok }` only, the same false for a wrong code, a spent one or no signup |
 
 ### Callable by authenticated
 
@@ -929,6 +933,30 @@ to review:
   accepts those four kinds and counts them toward its 200-a-day cap (markers
   `exos: attendance export kinds`, `exos: attendance export cap`). Text cells
   are inline strings, which a spreadsheet never evaluates as formulas.
+
+### Drop list (mig 20261118100000)
+
+- **Tables.** `exos_drop_signups`, `exos_drop_confirms`, `exos_drop_settings`: RLS on, no client grants (RPCs only),
+  `org_id` on every row. No anon or fan read of the list.
+- **Signed in.** `exos_drop_join` (one click; needs a confirmed account email, which is the proof; texts only here, the
+  `exos_sms_opt_in` rule: a stranger can't sign someone else's number up; 10 numbers a day per account; 10 joins a
+  minute) and `exos_drop_leave_mine` (the caller's own rows).
+- **Organizers.** `exos_drop_list_summary`: owner / manager / finance of the event's org (or admin), counts and
+  sources only, never an address; the same 42501 for another org's event or an unknown id. `exos_drop_list_export`:
+  owner / manager only (the fans export pattern), 3 a minute and 20 a day per org, an `export.run` row (entity
+  `drop_list`); email, dates, texts yes / no, source; no phone, no tokens. `exos_drop_list_set_presale`: owner /
+  manager, a hidden ticket type of the same event, audited `drop_list.presale_set`; frozen once the list was notified.
+  Content and scanner roles get nothing.
+- **The list-only code.** `exos_check_voucher` (marker `/* exos: drop list code */`) answers "invalid code" for a
+  drop-list presale code unless the buyer is a confirmed member: signed in, the account or its confirmed email; the
+  service role (`exos-checkout`, which passes the verified account email), that email; an anon or authenticated JWT
+  without a uid, never. So the hold path (`exos_create_hold`'s hidden-type gate) and checkout honour it for members
+  only. The code expires at the public on-sale.
+- **The blast.** `exos_drop_list_blast` / `exos_drop_list_sweep`: service role only (cron `exos-drop-list-blast-5min`,
+  created inactive). Each signup is claimed once under a per-event advisory lock and `FOR UPDATE SKIP LOCKED`, and
+  its mail keyed `drop-on-sale:<id>` (`tests/exos/race_drop_list.sh`). Texts re-check consent at queue time (left,
+  opted out, a STOP after the consent in `exos_sms_stops`, 8 a month, the org's provider) and go through the
+  existing outbox and `exos-sms-drain`, 9:00-20:00 in the event's zone, with "Reply STOP to opt out.".
 
 ### Search path
 

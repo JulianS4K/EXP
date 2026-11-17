@@ -186,7 +186,11 @@ BEGIN
        -- claude/exos-neighborhoods (mig 20261111110000): neighborhood pages:
        -- published, listed (not noindex) upcoming events with a public pin;
        -- the unfollow link's 64-hex token (answers ok + org name only)
-       'exos_neighborhoods_list', 'exos_neighborhood_page', 'exos_unfollow_by_token');
+       'exos_neighborhoods_list', 'exos_neighborhood_page', 'exos_unfollow_by_token',
+       -- claude/exos-drop-list (mig 20261118100000): an event's list state (open, on-sale
+       -- time; the caller's own row only when signed in), the rate-limited signup with a
+       -- constant answer, the 64-hex confirm / leave tokens and the browser-bound code
+       'exos_drop_status', 'exos_drop_signup', 'exos_drop_confirm', 'exos_drop_confirm_code', 'exos_drop_leave');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

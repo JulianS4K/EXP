@@ -44,6 +44,8 @@ import { useShareTags } from '../hooks/useShareTags';
 import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
+import DropListCTA from '../components/DropListCTA';
+import { saleState } from '../lib/dropList';
 import PhoneRsvpLink from '../components/PhoneRsvpLink';
 import GroupPayStart from '../components/GroupPayStart';
 import SaveEventButton from '../components/SaveEventButton';
@@ -1638,6 +1640,12 @@ export default function EventDetails() {
                 {/* Phone-number RSVP, when the organizer turned it on (mig 20261102150000). */}
                 {!elsewhere && (
                   <PhoneRsvpLink eventId={event.id} hasFreeTier={(event.ticketTiers ?? []).some((t) => Number(t.price) === 0)} />
+                )}
+
+                {/* Drop list (mig 20261118100000): announced, not on sale yet -> "Notify me".
+                    The server decides (exos_drop_status); sold out keeps the waitlist below. */}
+                {!elsewhere && !externalShop && saleState(event.ticketTiers) === 'not_yet' && (
+                  <DropListCTA eventId={event.id} timezone={event.timezone} attribution={attribution} />
                 )}
 
                 {soldOut && !canBypass && !elsewhere && (

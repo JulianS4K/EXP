@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
 import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 import { TIER } from './mock.mjs'; // claude/exos-focus-core
+import { dropMock, HIDDEN } from './mock.mjs'; // claude/exos-drop-list
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 // Group pay v2 is paused (mig 20261111120000): its steps run against a build
 // with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
@@ -2112,6 +2113,69 @@ await run('edit event: Show on Discord and Post to Discord (dry run)', async (pa
   await expectText(page, 'Dry run: recorded, not sent');
   assert(log.some((l) => l.startsWith('fn exos-discord/post') && l.includes('"kind":"publish"')), 'post call');
 }, { signedIn: true, mock: discordMock({}) });
+
+// ── claude/exos-drop-list (mig 20261118100000): "Notify me", the mail links, the organizer tile ──
+{
+  const st = {};
+  await run('drop list: a guest asks to be notified, then types the code', async (page, log) => {
+    await page.goto(BASE + '/event/' + EV + '?promoter=dj-kay&utm_source=instagram&fbclid=zz');
+    const box = page.locator('[data-drop-list]');
+    await box.getByRole('heading', { name: 'Notify me when tickets go on sale' }).waitFor({ timeout: 8000 });
+    await box.getByText('The list gets early access').waitFor({ timeout: 8000 });
+    await box.getByText('Email me once when tickets for Fall Party').waitFor({ timeout: 8000 });
+    await box.getByLabel('Email').fill('fan@x.com');
+    await box.getByRole('button', { name: /Notify me/ }).click();
+    await box.getByText('Check your email').waitFor({ timeout: 8000 });
+    assert(st.signup?.p_email === 'fan@x.com' && /^[0-9a-f]{64}$/.test(st.signup.p_browser_token), 'signup sent with a browser token');
+    assert(JSON.stringify(st.signup.p_source) === JSON.stringify({ promoter: 'dj-kay', utm_source: 'instagram' }), 'source: ' + JSON.stringify(st.signup.p_source));
+    await box.getByLabel('Code from the email').fill('000000');
+    await box.getByRole('button', { name: 'Confirm' }).click();
+    await box.getByText("That code didn't work").waitFor({ timeout: 8000 });
+    await box.getByLabel('Code from the email').fill('123 456');
+    await box.getByRole('button', { name: 'Confirm' }).click();
+    await box.getByText("You're on the list").waitFor({ timeout: 8000 });
+    assert(st.code?.p_browser_token === st.signup.p_browser_token, 'the code goes with the same browser token');
+  }, { mock: dropMock(st) });
+}
+await run('drop list: on sale, no "Notify me" (the buy button as before)', async (page, log) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Four rooms of house till late.');
+  await page.waitForLoadState('networkidle');
+  assert(await page.locator('[data-drop-list]').count() === 0, 'no drop list on an on-sale event');
+  assert(!log.some((l) => l.startsWith('rpc exos_drop_status')), 'not even asked');
+});
+await run('drop list: the confirm and leave links take a click', async (page, log) => {
+  await page.goto(BASE + '/drop/confirm?t=' + 'c'.repeat(64));
+  await page.getByRole('heading', { name: 'Tell you when tickets go on sale?' }).waitFor({ timeout: 8000 });
+  assert(!log.some((l) => l.includes('exos_drop_confirm')), 'nothing on page load (mail scanners)');
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await page.getByRole('heading', { name: "You're on the list." }).waitFor({ timeout: 8000 });
+  await page.goto(BASE + '/drop/leave?t=' + 'c'.repeat(64));
+  await page.getByRole('button', { name: 'Leave the list' }).click();
+  await page.getByRole('heading', { name: 'You left the list.' }).waitFor({ timeout: 8000 });
+  await page.goto(BASE + '/drop/leave?t=nope');
+  await page.getByRole('heading', { name: "This link isn't valid." }).waitFor({ timeout: 8000 });
+}, { mock: dropMock({}) });
+{
+  const st = {};
+  const dm = dropMock(st);
+  await run('event report: drop list tile (counts, sources, presale, CSV)', async (page, log) => {
+    await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+    const panel = page.locator('[data-drop-panel]');
+    await panel.getByRole('heading', { name: 'Drop list' }).waitFor({ timeout: 8000 });
+    const text = (await panel.innerText()).replace(/\s+/g, ' ');
+    for (const want of ['42', '31', 'Texts opted in', 'Promoter dj-kay', 'instagram / story / drop', 'Direct (no tag)', 'LISTA1B2C3D4E5', '60 minutes early']) {
+      assert(text.toLowerCase().includes(want.toLowerCase()), `tile shows "${want}": ` + text);
+    }
+    assert(!text.includes('@'), 'no address on the tile');
+    const { name, text: csv } = await download(page, () => panel.getByRole('button', { name: /Export CSV/ }).click());
+    assert(/^drop-list-fall-party-\d{4}-\d{2}-\d{2}\.csv$/.test(name), 'file ' + name);
+    assert(firstLines(csv)[0] === 'email,joined_at,confirmed_at,texts,promoter,utm_source,utm_medium,utm_campaign', 'header ' + firstLines(csv)[0]);
+    assert(st.exported, 'export RPC (audited in SQL)');
+  }, { signedIn: true, mock: ownerMock({ tables: { ...reportMock.tables, exos_ticket_tiers: [{ id: HIDDEN, event_id: EV, name: 'Presale',
+    price: 15, capacity: 20, sold: 0, visibility: 'hidden', ticket_type: 'paid', sales_start: null, sales_end: null, sort_order: 2 }] },
+    rpcs: dm.rpcs }) });
+}
 
 await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));

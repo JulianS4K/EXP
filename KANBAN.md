@@ -314,6 +314,7 @@ pass revenue reconciles to Stripe.
 6. Not mirrored yet: cover images (both need an upload to their CDN), Eventbrite online events, ticket sales
    windows. Not run against a live Eventbrite / Luma account from the build sandbox.
 7. Discord promotion (branch `claude/exos-discord`, mig 20261113130000; operator ask 2026-11-11): channel-webhook announcements (once per event per kind, no mentions) + EXTERNAL Discord scheduled events kept in step by the platform's bot (CREATE_EVENTS only); dark until `EXOS_DISCORD_ENABLED=on`, dry run until the org switch and `EXOS_DISCORD_WRITES=on`; needs the Discord application (`docs/discord.md`). Not applied. Follow-ups (branch `claude/exos-wave15-leftovers`, mig 20261114100000): automatic reminder 24 / 48 hours before (off by default, from the existing cron), deleting an Exos event deletes its Discord event, Send a test for the webhook (3 an hour). Not applied.
+8. Drop list / "Notify me" + on-sale blast (branch `claude/exos-drop-list`, mig 20261118100000; Growth R&D pass 4 #1): pre-on-sale signups (guest double opt-in, signed-in one click + text), organizer tile with sources + CSV, a list-only presale on a hidden type, one email / text per member at the on-sale; cron created inactive. Left: apply, turn on the cron with the mail drain.
 
 ## Open-source build 2026-10-16 (operator ask: BYO credentials, backends, promo links, SMS, white-label)
 

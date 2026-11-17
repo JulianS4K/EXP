@@ -28,6 +28,7 @@ import PhoneRsvpPanel from '../components/PhoneRsvpPanel';
 import DoorImport from '../components/DoorImport';
 import EventbriteSync from '../components/EventbriteSync';
 import WaitlistPanel from '../components/WaitlistPanel';
+import DropListPanel from '../components/DropListPanel'; // claude/exos-drop-list
 import AnnouncementsPanel from '../components/AnnouncementsPanel';
 import RemindersPanel from '../components/RemindersPanel';
 import EventAnalyticsPanel from '../components/EventAnalyticsPanel';
@@ -597,6 +598,11 @@ export default function OrganizerEventReport() {
 
         {/* Fan referral rewards: rule (owner/manager) + top referrers. */}
         <ReferralRewardsPanel event={event} canManage={canAct} />
+
+        {/* Drop list (mig 20261118100000): pre-on-sale signups, sources, the list
+            presale and its CSV (owner / manager / finance read; checked in SQL). */}
+        <DropListPanel eventId={event.id} eventTitle={event.title} timezone={event.timezone}
+          tiers={event.ticketTiers} canView={canSeeMoney(activeRole, isAdmin)} />
 
         {/* Waitlist — demand captured after sell-out; release spots to notify. */}
         <WaitlistPanel eventId={eventId!} />

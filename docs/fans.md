@@ -71,6 +71,45 @@ follow is refused with 54000 and nothing changes).
   address. Addresses come only from **Export CSV** (`exos_org_followers_export`): the same rows with the email,
   3 a minute and 20 a day per org, each one an `export.run` row (entity `followers`) in the org audit log.
 
+## Drop list ("Notify me")
+
+Mig `20261118100000_exos_drop_list.sql`, harness `tests/exos/test_drop_list.sql` (race: `tests/exos/race_drop_list.sh`,
+by hand). For an announced event that isn't on sale yet: the moment promoters sell out on an Instagram drop.
+
+- **When it shows.** A published, upcoming event sold on Exos whose public ticket types (capacity above 0) all open
+  later (`sales_start` in the future). The event page shows **Notify me when tickets go on sale**
+  (`src/components/DropListCTA.tsx`); once one public type is on sale it goes away, and a sold-out event keeps the
+  waitlist. Why not the waitlist, followers or signup forms: the waitlist is for a sold-out event (queue positions,
+  offers, holds); a follow is org-wide; a signup form joins the org's newsletter list. This is narrower consent, one
+  event and one message, so it has its own table and joins neither the org's list nor the fan profiles.
+- **Signing up.** Signed in with a confirmed email: one click (`exos_drop_join`), with an optional text behind its own
+  checkbox and consent words (stored with the time; signed in only, the SMS feature's rule). Everyone else: an email
+  (`exos_drop_signup`), then the mail's **Confirm** link (`/drop/confirm?t=`, a page that takes a click) or its
+  6-digit code typed on the event page, which only works from the browser that signed up (the guest-proof pattern).
+  The answer is always "check your email": it never says whether an address is already on the list. Limits: 10 a
+  minute per network, 120 per event, 5 per address; 3 confirm mails a day per address and event.
+- **What is kept.** The address, the consent words and times, the number and its words when texts were asked for,
+  and the first-touch promoter code and UTM tags. No IP, no name. Unconfirmed signups go after 30 days, a list 30
+  days after its event (`exos_drop_list_sweep`).
+- **The organizer's tile.** Event report → Marketing → **Drop list** (`src/components/DropListPanel.tsx`): signed up,
+  confirmed, texts opted in, waiting to confirm, and the sources (promoter / UTM), so the room can be sized before the
+  on-sale. Owner / manager / finance; never an address. **Export CSV** (owner / manager): email, dates, texts yes /
+  no, source; no phone; 3 a minute and 20 a day per org, an `export.run` row each.
+- **List presale.** Owner / manager pick one of the event's **hidden** ticket types and N minutes (5 to 1440). Exos
+  makes the existing presale shape: one code for that type, valid until the public on-sale, and the type opens N
+  minutes early. The code works only for confirmed list members (`exos_check_voucher`, signed in), so a forwarded
+  code does nothing; the type's own price applies. If the public on-sale moves later, the presale shows as stale
+  and the list hears at the on-sale instead; set it again. Turning it off deletes an unused code.
+- **The blast.** At the public on-sale (or when the list presale opens), each confirmed member gets one
+  `drop-on-sale` mail (with the code while the presale runs) and, if they opted in, one text from the org's own
+  Twilio / Telnyx (a `drop_list` campaign in the SMS tab) at 9:00-20:00 in the event's zone; a presale text that
+  quiet hours push past the on-sale says "on sale" instead. Once per member, even across parallel runs.
+  `exos_drop_list_blast` runs from the cron `exos-drop-list-blast-5min`, **created inactive**: nothing goes out until
+  it and `exos-mail-drain` are on (and `exos-sms-drain` with `EXOS_SMS_LIVE=on` for texts).
+- **Leaving.** Every mail has a leave link (`/drop/leave?t=`, also its List-Unsubscribe); texts end "Reply STOP to
+  opt out." and a STOP after the consent is honoured; signed-in fans can leave from the event page. An account opted
+  out of follow-up mail gets no on-sale email.
+
 ## Signup forms
 
 An org builds a form (title, intro, button, whether to ask for a name, whether to offer texts, tags to put on

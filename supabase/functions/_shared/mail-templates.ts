@@ -873,6 +873,58 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
     };
   },
 
+  // Drop list (mig 20261118100000, docs/fans.md "Drop list"). A guest proves
+  // the address with the link or the 6-digit code; both mails carry the
+  // leave link (the drain also sends it as List-Unsubscribe on the blast).
+  "drop-confirm": (ctx) => {
+    const o = org(ctx.p);
+    const ev = event(ctx.p);
+    const t = token(ctx.p, "token");
+    const leave = token(ctx.p, "leave_token");
+    const code = str(ctx.p, "code");
+    if (!/^[0-9]{6}$/.test(code)) throw new PayloadError("code missing");
+    return {
+      audience: "buyer",
+      orgName: o.name,
+      subject: `Confirm: tell me when ${ev.name} goes on sale`,
+      body:
+        `<p>Someone, hopefully you, asked to hear from <strong>${esc(o.name)}</strong> when tickets go on sale for:</p>` +
+        eventBlock(ev) +
+        button(ctx, `/drop/confirm?t=${t}`, "Confirm") +
+        `<p>Or type this code on the event page: <strong style="font-size:18px;letter-spacing:2px">${code}</strong></p>` +
+        `<p style="color:#555">If it wasn't you, ignore this mail: nothing is sent without the click or the code.</p>` +
+        `<p style="color:#888;font-size:12px"><a href="${href(ctx, `/drop/leave?t=${leave}`)}">Leave this list</a>.</p>`,
+    };
+  },
+
+  "drop-on-sale": (ctx) => {
+    const o = org(ctx.p);
+    const ev = event(ctx.p);
+    const leave = token(ctx.p, "leave_token");
+    const presale = ctx.p.kind === "presale";
+    const code = presale ? str(ctx.p, "code") : null;
+    if (code !== null && !/^[A-Z0-9_-]{3,32}$/.test(code)) throw new PayloadError("code missing");
+    const onSale = opt(ctx.p, "on_sale_at");
+    const publicAt = onSale ? formatWhen(onSale, opt(obj(ctx.p, "event"), "timezone")) : "";
+    const link = `/event/${ev.id}${code ? `?code=${code}` : ""}`;
+    return {
+      audience: "buyer",
+      orgName: o.name,
+      subject: presale ? `Your presale is open: ${ev.name}` : `Tickets are on sale: ${ev.name}`,
+      body:
+        (presale
+          ? `<p>The list presale from <strong>${esc(o.name)}</strong> is open now, before the public on-sale` +
+            `${publicAt ? ` (${esc(publicAt)})` : ""}:</p>`
+          : `<p>Tickets are on sale now from <strong>${esc(o.name)}</strong>:</p>`) +
+        eventBlock(ev) +
+        (code ? `<p>Your code: <strong style="font-size:18px;letter-spacing:1px">${esc(code)}</strong> ` +
+          `(it works for the account or email on this list).</p>` : "") +
+        button(ctx, link, presale ? "Get presale tickets" : "Get tickets") +
+        `<p style="color:#888;font-size:12px">You asked to be told once when tickets went on sale; this is that email. ` +
+        `<a href="${href(ctx, `/drop/leave?t=${leave}`)}">Leave this list</a>.</p>`,
+    };
+  },
+
   "ticket-counts": (ctx) => {
     const o = org(ctx.p);
     const c = obj(ctx.p, "counts");

@@ -109,6 +109,7 @@ const OrgGiving = lazy(() => import('./views/OrgGiving'));
 const OrgOrders = lazy(() => import('./views/OrgOrders'));
 const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
+const DropLink = lazy(() => import('./views/DropLink')); // claude/exos-drop-list
 const OrgTemplates = lazy(() => import('./views/OrgTemplates'));
 const OrgInbound = lazy(() => import('./views/OrgInbound'));
 const OrgVenueRequests = lazy(() => import('./views/OrgVenueRequests'));
@@ -230,6 +231,8 @@ export default function App() {
                     <Route path="/signup/confirm" element={<SignupConfirm mode="confirm" />} />
                     <Route path="/book/:orgSlug" element={<BookingRequest />} />
                     <Route path="/signup/unsubscribe" element={<SignupConfirm mode="unsubscribe" />} />
+                    <Route path="/drop/confirm" element={<DropLink mode="confirm" />} />
+                    <Route path="/drop/leave" element={<DropLink mode="leave" />} />
                     <Route path="/refund" element={<RescheduleRefund />} />
                     <Route path="/map" element={<EventsMap />} />
                     <Route path="/p/:token" element={<PromoterPortal />} />
