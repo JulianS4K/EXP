@@ -319,7 +319,9 @@ Operator setup (all operator-gated): apply `20261104190000`; redeploy `exos-chec
 
 Exos checkouts are destination charges, so a chargeback is opened against the **Exos platform's** Stripe account:
 Stripe takes the amount plus its dispute fee from the platform balance, not from the organizer. Migration
-`20261001101000_exos_disputes_reconciliation.sql` (**not applied**) records and announces them. Tests:
+`20261001101000_exos_disputes_reconciliation.sql` (**applied**: on `main` since 2026-09-30, and `KANBAN.md` "Prod
+state" records every migration on `main` through `20261019120000` in prod's `schema_migrations`, checked
+2026-11-04) records and announces them. Tests:
 `tests/exos/test_disputes_reconciliation.sql` (D1–D4), `src/lib/disputes.test.ts`, the dispute cases in
 `src/lib/mailTemplates.test.ts`, and the smoke test for the Disputes block.
 
@@ -331,8 +333,8 @@ Stripe takes the amount plus its dispute fee from the platform balance, not from
   reason, status, evidence deadline (`evidence_details.due_by`), evidence submitted, opened / closed times, and
   `raw`, an allowlisted copy of the Stripe object without the `evidence` block (buyer name, email, IP, addresses,
   files) or metadata (`_shared/disputes.ts`, repeated in SQL by `_exos_dispute_raw`). A closed status (won / lost /
-  warning_closed) is final: a replayed earlier event doesn't reopen it. Until the migration is applied the webhook
-  falls back to `exos_record_dispute` alone.
+  warning_closed) is final: a replayed earlier event doesn't reopen it. On a database without the migration the
+  webhook falls back to `exos_record_dispute` alone.
 - **Tell the organizer.** Mail to the org owner and active finance members, once per dispute and person:
   `dispute-opened` (amount, reason, evidence deadline, the event's Money section, the dispute in the Stripe
   dashboard), `dispute-won`, `dispute-lost` (`docs/email.md`). A mail problem is logged and never fails the webhook.

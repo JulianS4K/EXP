@@ -42,8 +42,9 @@ sold; block and unblock single seats instead.
    only when no block fits).
 2. **Checkout.** `exos-checkout` takes `seat_ids` for a seated tier (quantity
    = seat count, one tier per order, up to 10). It creates the usual cart
-   hold (`exos_create_hold` / `exos_create_guest_hold`, 30 minutes, matching
-   the Stripe session), then `exos_hold_seats` claims the seats for that
+   hold (`exos_create_hold` / `exos_create_guest_hold`, 30 minutes; once linked
+   to the Stripe session it lasts until the session's expiry + 10 minutes,
+   mig `20261105100000`), then `exos_hold_seats` claims the seats for that
    hold. A seat someone else holds, bought or blocked answers 409 with its
    name ("Sorry, Orchestra · Row A · Seat 2 was just taken by someone
    else"), and the hold is released. Two buyers racing for one seat: the
