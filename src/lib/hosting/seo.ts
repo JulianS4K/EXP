@@ -17,6 +17,7 @@ import {
 import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
 import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
 import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
+import { assistantFacts } from './productFacts';
 
 export const SSR_META_START = '<!-- SSR_META_START -->';
 export const SSR_META_END = '<!-- SSR_META_END -->';
@@ -592,6 +593,13 @@ export async function buildLlmsTxt(
   ];
   if (opts.mcpUrl) {
     lines.push(`- MCP server (search events, prices, checkout links; read-only, no key needed): ${opts.mcpUrl}`);
+  }
+  // What Exos does, from the facts registry: only what works today or at
+  // launch (productFacts.ts; docs/ai-facts.md maps each line to its code).
+  const facts = assistantFacts();
+  for (const [audience, heading] of [['fan', 'For ticket buyers'], ['organizer', 'For organizers']] as const) {
+    const own = facts.filter((f) => f.audience === audience);
+    if (own.length) lines.push('', `## ${heading}`, '', ...own.map((f) => `- ${f.claim}`));
   }
   // Upcoming only, soonest first, filtered and sorted by the database: the
   // view also holds every past event, and an unordered capped read could drop

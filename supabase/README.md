@@ -97,6 +97,57 @@ says, which is what text patches match.
 When the DB split happens (plan step 4 below), the remaining step is data:
 a new project, a data copy, and repointing the functions and the SPA.
 
+## Prod history vs these files (checked 2026-11-17)
+
+EXP is the home of every Exos migration; Terminal-2 is reference only. Prod's
+`supabase_migrations.schema_migrations` records the **time of applying** as
+`version` and the file name as `name`, so match prod rows to files here by
+**name**, never by version alone (a version-only diff reports about 200
+"missing" migrations that are all here).
+
+Of prod's 221 Exos and Stripe rows:
+
+| Prod rows | Count | Here |
+|---|---|---|
+| Same file name (or same version) | 193 | `supabase/migrations/` |
+| Same migration, prod name without its timestamp or with another one | 22 | mapped below |
+| Wave 7 (`20261108100000`–`130000`) | 4 | applied ahead of `main` by plan; files arrive with PR #110 |
+| 2026-10-21 cron pause, step 1 | 1 | `20261021174000_exos_dead_crons_off.sql`, moved from Terminal-2 |
+| 2026-10-21 cron pause, step 2 | 1 | `20261021174500_exos_all_crons_off.sql`, previously in no repo |
+
+The two cron-pause files are **record only**: they keep the original SQL as a
+comment and run `SELECT 1`, because re-running them would switch Exos jobs off
+(the jobs were turned back on after the pause).
+
+<details><summary>The 22 renamed rows</summary>
+
+| Prod version | Prod name | File here |
+|---|---|---|
+| `20260522162344` | `exos_phase1_schema` | `20260520120000_exos_phase1_schema.sql` |
+| `20260522165908` | `exos_phase2_tickets` | `20260520130000_exos_phase2_tickets.sql` |
+| `20260601183748` | `sec_p3_document_exos_public_views_accepted` | `20260601120500_sec_p3_document_exos_public_views_accepted.sql` |
+| `20260702052004` | `exos_barcode_secret_least_privilege` | `20260702123000_exos_barcode_secret_least_privilege.sql` |
+| `20260702234014` | `exos_event_checkin_roster_rpc` | `20260702240000_exos_event_checkin_roster_rpc.sql` |
+| `20260924213042` | `exos_p0_voucher_per_ticket` | `20260924205508_exos_p0_voucher_per_ticket.sql` |
+| `20260924213102` | `exos_p0_hold_caps` | `20260924205916_exos_p0_hold_caps.sql` |
+| `20260924213107` | `exos_p0_quota_aware_mints` | `20260924210103_exos_p0_quota_aware_mints.sql` |
+| `20260924213336` | `exos_all_in_price_tax` | `20260924211840_exos_all_in_price_tax.sql` |
+| `20260925163438` | `exos_scanner_no_buyer_email` | `20260925013000_exos_scanner_no_buyer_email.sql` |
+| `20260925170722` | `exos_webhook_claim` | `20260925020000_exos_webhook_claim.sql` |
+| `20260925170829` | `exos_p1_db_hardening` | `20260925021000_exos_p1_db_hardening.sql` |
+| `20260926055156` | `exos_advisor_cleanup` | `20260926000000_exos_advisor_cleanup.sql` |
+| `20260926055423` | `exos_waitlist_signin_account_deletion` | `20260926010000_exos_waitlist_signin_account_deletion.sql` |
+| `20260926061803` | `exos_promoter_commissions` | `20260926020000_exos_promoter_commissions.sql` |
+| `20260926062105` | `exos_referral_rewards` | `20260926030000_exos_referral_rewards.sql` |
+| `20260926062357` | `exos_organizer_refunds` | `20260926040000_exos_organizer_refunds.sql` |
+| `20260926062958` | `exos_tables_guest_lists` | `20260926050000_exos_tables_guest_lists.sql` |
+| `20260926063252` | `exos_abandoned_checkout` | `20260926060000_exos_abandoned_checkout.sql` |
+| `20260926063522` | `exos_price_disclosure` | `20260926070000_exos_price_disclosure.sql` |
+| `20260926063534` | `exos_refund_tables_fix` | `20260926080000_exos_refund_tables_fix.sql` |
+| `20260926193630` | `exos_accessible_tickets` | `20260926090000_exos_accessible_tickets.sql` |
+
+</details>
+
 ## Caveats
 
 - These are only the migrations with `exos` in the filename. Some Terminal-2

@@ -80,7 +80,9 @@ With it on:
   running JavaScript. Hidden (`noindex`) events never get it.
 - **FAQPage JSON-LD** from the organizer's FAQ (not on hidden events or promoter pages).
 - **`/llms.txt`**: what Exos is, that prices are all-in and purchases happen on the event page, the sitemap, the
-  MCP endpoint (from `VITE_SUPABASE_URL`), and up to 200 upcoming public events. Cached 10 minutes.
+  MCP endpoint (from `VITE_SUPABASE_URL`), what Exos does for ticket buyers and organizers (the `Live` and
+  `At launch` facts from `src/lib/hosting/productFacts.ts`; the map to the code is `docs/ai-facts.md`), and up to 200
+  upcoming public events. Cached 10 minutes.
 
 Through the Render link this needs `EXOS_ORIGIN` set (Terminal-2's own `static/bridge/` fallback has none of it).
 Check after turning it on:
