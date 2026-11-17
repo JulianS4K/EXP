@@ -1,6 +1,6 @@
 // The confirm screen after an OAuth sign-in (Connect Google Ads, Connect
 // Eventbrite; mig 20261029140000; Add Exos bot to Discord, mig
-// 20261113130000). The org settings page shows it instead of the settings
+// 20261113194000). The org settings page shows it instead of the settings
 // while a return is in hand (lib/oauthReturn.ts has the flow).
 //
 // - The state and finish token were read from the URL by the page and are

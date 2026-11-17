@@ -1,5 +1,5 @@
 // Channels: promote an Exos event on the organizer's own Discord server (mig
-// 20261113130000; docs/discord.md). Two levels:
+// 20261113194000; docs/discord.md). Two levels:
 //
 //   1. Announcement: one embed through the org's channel webhook
 //      (POST /webhooks/{id}/{token}).

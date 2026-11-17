@@ -1,5 +1,5 @@
 // The attendance report, on the event report's Attendees tab (mig
-// 20261113120000; docs/fans.md "Attendance report"). Read-only, owner /
+// 20261113193000; docs/fans.md "Attendance report"). Read-only, owner /
 // manager / finance. Two parts:
 //   * where attendees are by billing postal code (aggregate only: an area
 //     with fewer than 5 buyers is folded into "Other (fewer than 5)" in SQL,

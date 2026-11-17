@@ -635,7 +635,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
   }
   // claude/exos-money-journal (mig 20261108100000): the journal, read-only.
   if (JOURNAL_ROUTES.has(route.id)) return await handleJournal(route, { sb, orgId, q: c.q, page });
-  // claude/exos-attendance-report (mig 20261113120000): the attendance report, aggregate only.
+  // claude/exos-attendance-report (mig 20261113193000): the attendance report, aggregate only.
   if (ATTENDANCE_ROUTES.has(route.id)) {
     return await handleAttendance(route, {
       sb, orgId, cred: { kind: c.cred.kind, id: c.cred.id, userId: c.cred.userId }, params: c.params, q: c.q,

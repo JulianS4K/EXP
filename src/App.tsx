@@ -76,7 +76,7 @@ const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
-// Kiosk mode (mig 20261113100000): the self-serve screen, bare and locked.
+// Kiosk mode (mig 20261113191000): the self-serve screen, bare and locked.
 const Kiosk = lazy(() => import('./views/Kiosk'));
 // The apps suite's public landing pages (docs/strategy.md "Apps"; claude/exos-apps-pages).
 const AppLanding = lazy(() => import('./views/AppLanding'));

@@ -26,7 +26,7 @@ interface Form {
   admits: ListAdmits;
   allAddons: boolean;
   addonIds: string[];
-  /** YYYY-MM-DD fair day ('' = an ordinary list), mig 20261113110000. */
+  /** YYYY-MM-DD fair day ('' = an ordinary list), mig 20261113192000. */
   entryDay: string;
   /** The list had a fair day when it was opened (so clearing it is sent). */
   hadDay: boolean;

@@ -14,7 +14,7 @@ what keeps us eligible for SAQ A as the product grows.
 | Event page → **Cash App Pay** (on Stripe Checkout, mig 20261031220000) | Stripe-hosted page, next to cards | SAQ A, same as cards |
 | Event page → **Pay with Venmo / PayPal** → `/bridge/pay/paypal` | PayPal's JS SDK buttons (PayPal / Venmo log-ins in PayPal's windows; card funding switched off) on a page of its own | No card data on our page. See "PayPal / Venmo" below |
 | Box office (`exos-pos`) | Cash and comp; a card only on a Stripe Terminal reader when `EXOS_POS_CARD=on` (`docs/pos.md` "Card at the door"). The reader reads the card; Exos sends and keeps the PaymentIntent id only | Card-present: the card is read and encrypted inside Stripe's PCI PTS readers; see "Box office cards" |
-| Self-serve kiosk (`/kiosk`, mig 20261113100000) | A card on the kiosk's own Stripe Terminal reader only; the page has no card field and no payment script | The web page: SAQ A. The reader: as the box office |
+| Self-serve kiosk (`/kiosk`, mig 20261113191000) | A card on the kiosk's own Stripe Terminal reader only; the page has no card field and no payment script | The web page: SAQ A. The reader: as the box office |
 
 - No Exos code, table, log or email holds a card number, CVC or expiry. Exos keeps Stripe ids
   (`cs_…`, `pi_…`, `ch_…`) and amounts only (`grep -rn "last4\|card_number\|cvc" src supabase` finds nothing).
@@ -63,7 +63,7 @@ stays in the reader: no Exos page, request, table or log sees it (`exos-pos` ref
 Sell tab has no card field and loads no script). Before the first live card, re-check the SAQ type with Stripe
 (card-present usually adds SAQ B-IP or a P2PE assessment to SAQ A).
 
-**Kiosk mode** (mig 20261113100000, `docs/pos.md` "Kiosk mode") doesn't change this: the self-serve screen
+**Kiosk mode** (mig 20261113191000, `docs/pos.md` "Kiosk mode") doesn't change this: the self-serve screen
 (`/kiosk`) is the same SPA with **no card field and no payment script**; the buyer pays on the kiosk's Stripe
 Terminal reader, and the page sends only ids (`exos-pos` refuses any card-looking field, the smoke test checks every
 kiosk call). The web side stays **SAQ A**; the reader's card-present scope is the box-office question above.

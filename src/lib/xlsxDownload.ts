@@ -1,7 +1,7 @@
 // The XLSX buttons' one entry point (claude/exos-attendance-report). The
 // writer (./xlsx.ts) is loaded with a dynamic import on the first click, so
 // it stays out of every page's first load; then the download is logged as
-// export.run (exos_audit_export, mig 20261113120000), best effort like the
+// export.run (exos_audit_export, mig 20261113193000), best effort like the
 // CSV exports: a failed log never holds the file back.
 
 import type { XlsxSheet } from './xlsx';

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fair-day races (mig 20261113110000), in real parallel sessions. Timing-based,
+# Fair-day races (mig 20261113192000), in real parallel sessions. Timing-based,
 # so run by hand against a DB built by run_p0.sh:
 #   bash tests/exos/race_fair_day.sh exos_p0_test
 # Expect:

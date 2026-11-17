@@ -1,4 +1,4 @@
-// "Fair / multi-day setup" in the event editor (mig 20261113110000): a preset
+// "Fair / multi-day setup" in the event editor (mig 20261113192000): a preset
 // generator for county fairs, rodeos and state fairs. From a few answers (the
 // days and their hours, prices, re-entry, parking and camping) it builds one
 // plan that exos_fair_setup writes in a single transaction as ordinary rows

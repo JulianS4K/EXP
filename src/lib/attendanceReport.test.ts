@@ -9,7 +9,7 @@ const day = (d: string, before: number, paid: number, gross: number, free: numbe
   free_tickets: free, cum_paid_tickets: cum[0], cum_gross_cents: cum[1], cum_free_tickets: cum[2],
 });
 
-// As exos_event_attendance answers (mig 20261113120000; the SQL test's e2 / e0).
+// As exos_event_attendance answers (mig 20261113193000; the SQL test's e2 / e0).
 const RAW = {
   org_id: 'o1', event_id: 'e2', generated_at: '2026-12-12T10:00:00Z', min_buyers: 5,
   attendance: {

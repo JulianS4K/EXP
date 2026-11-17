@@ -136,7 +136,7 @@ export function auditArgs(orgId: string, f: AuditFilters, before: number | null,
 }
 
 export type ExportKind = 'audit' | 'donations' | 'price_disclosure' | 'attendees'
-  // claude/exos-attendance-report (mig 20261113120000): the XLSX workbooks.
+  // claude/exos-attendance-report (mig 20261113193000): the XLSX workbooks.
   | 'attendance' | 'settlement' | 'sales_tax' | 'journal';
 
 // ── The event report's footer (claude/exos-leftovers-9, mig 20261110120000) ──

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Org settings → Discord (mig 20261113130000): hidden until the operator turns
+// Org settings → Discord (mig 20261113194000): hidden until the operator turns
 // Discord on; the webhook URL is checked before saving and never shown back;
 // only an owner can turn sending on.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

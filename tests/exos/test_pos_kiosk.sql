@@ -1,5 +1,5 @@
 -- ============================================================================
--- Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"):
+-- Kiosk mode (mig 20261113191000, docs/pos.md "Kiosk mode"):
 --   K1  RLS on the two tables, no client writes, no hash readable; the kiosk
 --       cores service role only; setup RPCs for signed-in members only
 --   K2  the kiosk flag: owner / manager only, an admin PIN (required, not weak,

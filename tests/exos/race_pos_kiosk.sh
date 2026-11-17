@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Kiosk mode races (mig 20261113100000): real parallel sessions.
+# Kiosk mode races (mig 20261113191000): real parallel sessions.
 # Timing-based, so run by hand against a DB built by run_p0.sh:
 #   bash tests/exos/race_pos_kiosk.sh exos_p0_test
 # Expect:

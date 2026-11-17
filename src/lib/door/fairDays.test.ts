@@ -1,4 +1,4 @@
-// Fair days at the door (mig 20261113110000): the device's offline rules,
+// Fair days at the door (mig 20261113192000): the device's offline rules,
 // which mirror SQL _exos_checkin_day_refusal (tests/exos/test_fair_day.sql).
 import { describe, expect, it } from 'vitest';
 import { decideScan, parseDoorCode, type DoorCachedTicket, type ScanDecisionInput } from './decide';

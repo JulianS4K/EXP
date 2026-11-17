@@ -1312,7 +1312,7 @@ export default function EditEvent() {
 
            {/* Check-in lists / gates and optional re-entry (mig 20260929140000);
                hidden until the database has them. Saves on its own buttons. */}
-           {/* Fair / multi-day setup (mig 20261113110000): a preset generator that
+           {/* Fair / multi-day setup (mig 20261113192000): a preset generator that
                writes ordinary ticket types, check-in lists and add-ons. */}
            {eventId && (
              <FairSetupPanel
@@ -1902,7 +1902,7 @@ export default function EditEvent() {
         {eventId && <LinkOutStatusPanel eventId={eventId} />}
         {/* Where tickets are sold: Exos or the organizer's own shop (mig 20261016100000). */}
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
-        {/* Discord: a scheduled event on the org's server + the announcement (mig 20261113130000). */}
+        {/* Discord: a scheduled event on the org's server + the announcement (mig 20261113194000). */}
         {eventId && <DiscordEventPanel eventId={eventId} />}
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
         {eventId && <LastCallPanel eventId={eventId} />}

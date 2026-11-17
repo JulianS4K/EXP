@@ -1,4 +1,4 @@
-// Edit event → Promote on Discord (mig 20261113130000; docs/discord.md): show
+// Edit event → Promote on Discord (mig 20261113194000; docs/discord.md): show
 // the event on the org's Discord server (a Discord scheduled event Exos keeps
 // in step), and post its announcement or a reminder through the org's
 // channel webhook, once each. Hidden unless the operator turned Discord on
