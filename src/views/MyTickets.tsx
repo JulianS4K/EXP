@@ -15,6 +15,8 @@ import { formatInTz } from '../lib/datetime';
 import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
 import { listSavedEvents } from '../lib/saves';
+import { listMySplitOrders } from '../lib/split';
+import { socialEnabled } from '../lib/socialFlag';
 import SaveEventButton from '../components/SaveEventButton';
 import { useT } from '../context/LanguageContext';
 import Dialog from '../components/Dialog';
@@ -53,6 +55,9 @@ export default function MyTickets() {
   const { toast } = useToast();
   const t = useT();
   const [tickets, setTickets] = useState<(Ticket & { event?: Event })[]>([]);
+  // Split with friends is paused (mig 20261117100000): only orders that already
+  // have a split keep their link (to the pay-back checklist).
+  const [splitOrders, setSplitOrders] = useState<Set<string>>(new Set());
   const [groupedTickets, setGroupedTickets] = useState<{ [eventId: string]: (Ticket & { event?: Event })[] }>({});
   const [showReceipts, setShowReceipts] = useState<string | null>(null); // eventId
   const [pendingTransfers, setPendingTransfers] = useState<Transfer[]>([]);
@@ -157,6 +162,13 @@ export default function MyTickets() {
     }
     navigate('/my-tickets', { replace: true });
   }, [location.search, navigate, toast]);
+
+  useEffect(() => {
+    if (!user || socialEnabled()) return undefined;
+    let alive = true;
+    void listMySplitOrders(user.uid).then((ids) => { if (alive) setSplitOrders(new Set(ids)); });
+    return () => { alive = false; };
+  }, [user]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -469,17 +481,26 @@ export default function MyTickets() {
                     {(() => {
                       // Split with friends: an order of 2+ tickets this buyer
                       // paid for through checkout (mig 20261031220000).
-                      const counts = new Map<string, number>();
-                      for (const tk of eventTickets) {
-                        if (tk.orderId && /^(cs|pp)_/.test(tk.orderId)) counts.set(tk.orderId, (counts.get(tk.orderId) ?? 0) + 1);
+                      // Paused (mig 20261117100000): unless VITE_EXOS_SOCIAL=on,
+                      // only an order that already has a split, to its checklist.
+                      const on = socialEnabled();
+                      let order: string | undefined;
+                      if (on) {
+                        const counts = new Map<string, number>();
+                        for (const tk of eventTickets) {
+                          if (tk.orderId && /^(cs|pp)_/.test(tk.orderId)) counts.set(tk.orderId, (counts.get(tk.orderId) ?? 0) + 1);
+                        }
+                        order = [...counts].find(([, n]) => n >= 2)?.[0];
+                      } else {
+                        order = eventTickets.map((tk) => tk.orderId).find((o): o is string => !!o && splitOrders.has(o));
                       }
-                      const order = [...counts].find(([, n]) => n >= 2)?.[0];
                       return order ? (
                         <Link
                           to={`/split/${encodeURIComponent(order)}`}
+                          data-testid="split-link"
                           className="disp block text-center mt-3 border border-white/20 text-white/60 py-3 text-base tracking-wide hover:border-white hover:text-white transition-colors"
                         >
-                          SPLIT WITH FRIENDS
+                          {on ? 'SPLIT WITH FRIENDS' : 'FRIENDS PAYING YOU BACK'}
                         </Link>
                       ) : null;
                     })()}

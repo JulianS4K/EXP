@@ -434,6 +434,20 @@ await check('edit event: Promote on Discord', async (page, run) => {
   exos_event_quotas: () => [],
 }, fns: discordFns }) });
 
+// claude/exos-focus-core: social / "friends" features are paused (mig
+// 20261117100000); a default build answers their links with "not available".
+await check('social features paused: "not available" (group chat)', async (page, run) => {
+  await page.goto(BASE + '/groups');
+  await page.getByRole('heading', { name: "Group chat isn't available" }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, mock: ownerMock() });
+await check('social features paused: "not available" (split with friends)', async (page, run) => {
+  await page.goto(BASE + '/split/cs_a11y_1');
+  await page.getByRole('heading', { name: "Split with friends isn't available" }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, mock: ownerMock({ rpcs: { exos_split_get: () => ({ session_id: 'cs_a11y_1', event_id: EV, amount_cents: 4000,
+  quantity: 2, currency: 'usd', split: null, tickets: [], shares: [] }) } }) });
+
 await browser.close();
 
 let failed = false;

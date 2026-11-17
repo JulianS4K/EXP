@@ -12,8 +12,8 @@ export function GroupPayUnavailable() {
     <div className="max-w-xl mx-auto px-4 py-10" data-testid="group-pay-unavailable">
       <h1 className="text-2xl font-black text-slate-900 mb-4">{GROUP_PAY_OFF_TEXT}</h1>
       <p className="text-slate-700 mb-3">
-        Paying for seats separately isn't offered right now. To go with friends, buy the tickets together: after
-        checkout, "Split with friends" sends each friend their ticket and a link to pay you back.
+        Paying for seats separately isn't offered right now. To go with friends, buy the tickets together, then
+        send each friend their ticket from My Tickets.
       </p>
       <Link to="/" className="text-sm font-black text-brand-primary">Browse events</Link>
     </div>

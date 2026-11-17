@@ -286,7 +286,8 @@ for m in \
   20261113110000_exos_fair_day \
   20261113120000_exos_attendance_report \
   20261113130000_exos_discord \
-  20261114100000_exos_leftovers_15; do
+  20261114100000_exos_leftovers_15 \
+  20261117100000_exos_social_off; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -532,7 +533,8 @@ for m in \
          20261113110000_exos_fair_day \
          20261113120000_exos_attendance_report \
          20261113130000_exos_discord \
-         20261114100000_exos_leftovers_15; do
+         20261114100000_exos_leftovers_15 \
+         20261117100000_exos_social_off; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -679,5 +681,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk
 # claude/exos-discord (mig 20261113130000): Discord promotion: the channel webhook URL check (discord.com / discordapp.com webhook paths only, never echoed), Vault-only token, roles (owner / manager; writes switch owner only), cross-org refusal, one post per event per kind (dry runs and errors re-queue, sent never), rate limits, lease-checked marks, the bot install state ('discord' provider, finish token), one server per org, Show on Discord re-sync, audit rows
 # claude/exos-wave15-leftovers (mig 20261114100000): DC12-DC15 (the automatic reminder: roles, window, once per event, the button's limits; deleting an event deletes its Discord event: recorded before the delete, lease, backoff, gates, disconnect skips, a raced create; Send a test: roles, 3 an hour, audit) and K18 in test_pos_kiosk.sql (kiosk prints per kiosk session)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discord.sql"
+# claude/exos-focus-core (mig 20261117100000): social / friends features paused by the operator 2026-11-17: off by default (platform setting social_features_enabled), the admin-only audited setter, new starts refuse with XSOFF (a split or a friend added to one, a new matched type, a group chat, a join, a member added, a texts opt-in) before any write, the relay stops (queued relay / confirmation texts skipped, inbound answered "paused" once a day, STOP still works), and what exists keeps working (the split's paid tick sends the ticket and its claim link claims, an existing matched type edits and shows, a member re-joins and posts); the suites above turn it on for themselves
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_social_off.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

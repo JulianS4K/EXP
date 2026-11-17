@@ -33,6 +33,10 @@ const OFF_WORDS: Record<string, string[]> = {
   'group-pay': ['pay separately', 'paying separately', 'each friend pays', 'friends pay for their own', 'group pay', 'cover the rest'],
   'attendance-report': ['attendance report', 'by postal code', 'XLSX', 'sales pace'], // claude/exos-attendance-report
   'discord-promotion': ['Discord'], // claude/exos-discord
+  // Paused by the operator 2026-11-17 (claude/exos-focus-core):
+  'split-with-friends': ['split with friends', 'split the cost', 'pay you back', 'pay them back', 'pay back'],
+  'matched-seats': ['matched seat', 'matched seats', 'tables or crews', 'grouped with', 'meet new people', 'strangers'],
+  'group-chat': ['group chat', 'group chats', 'masked number', 'chat with'],
 };
 
 /** Every text node on its own line, so words from neighbouring elements don't run together. */

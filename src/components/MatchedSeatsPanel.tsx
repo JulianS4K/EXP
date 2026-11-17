@@ -5,6 +5,13 @@
 // swap, place leftovers, remove someone (optionally blocking them from that
 // group), lock, reveal now, refund leftovers through exos-refund, and read
 // reports. Owner / manager only (every call is checked in SQL).
+//
+// Paused (operator 2026-11-17, mig 20261117100000): unless the build sets
+// VITE_EXOS_SOCIAL=on, no ticket type can be made matched (SQL refuses it too,
+// XSOFF) and "Match now" / "Reshuffle" are gone (exos-match /run needs
+// EXOS_SOCIAL=on). A type already sold as matched seats keeps everything else
+// here, so its buyers are grouped at the cutoff, revealed and, for leftovers,
+// refunded; with none, the panel isn't shown at all.
 
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Shuffle, Users } from 'lucide-react';
@@ -18,6 +25,7 @@ import {
   reviewReport, setMatchConfig, swapMembers, upsertSpot, type StaffView,
 } from '../lib/matchedSeatsApi';
 import { refundOrder } from '../lib/refundsApi';
+import { socialEnabled } from '../lib/socialFlag';
 
 const input = 'border border-slate-200 rounded-lg px-2 py-1 text-sm w-full';
 
@@ -25,7 +33,7 @@ function when(ms: number | null): string {
   return ms ? new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
 }
 
-function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }) {
+function TierMatching({ tierId, tierName, onLoaded }: { tierId: string; tierName: string; onLoaded?: (tierId: string, matched: boolean) => void }) {
   const { toast } = useToast();
   const [view, setView] = useState<StaffView | null | undefined>(undefined);
   const [draft, setDraft] = useState<ConfigDraft>(draftFromConfig(null));
@@ -37,12 +45,13 @@ function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }
     try {
       const v = await getStaffViewOrNull(tierId);
       setView(v);
+      onLoaded?.(tierId, !!v);
       if (v) setDraft(draftFromConfig(v.config));
     } catch (e: any) {
       toast({ kind: 'error', message: e?.message || 'Could not load matched seats.' });
       setView(null);
     }
-  }, [tierId, toast]);
+  }, [tierId, toast, onLoaded]);
   useEffect(() => { void load(); }, [load]);
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
@@ -59,6 +68,9 @@ function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }
   };
 
   if (view === undefined) return null;
+  const on = socialEnabled();
+  // Paused: only a type that is already matched.
+  if (!on && !view) return null;
   const open = !view || view.config.status === 'open';
   const set = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const spotName = (id: string | null) => view?.spots.find((s) => s.id === id)?.name ?? '—';
@@ -144,6 +156,7 @@ function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }
 
           {/* Matching */}
           <div className="flex flex-wrap gap-2 mt-5">
+            {on && (
             <button type="button" disabled={busy || view.config.status === 'revealed' || unrevealed.some((g) => g.status === 'locked')}
               className="bg-brand-primary text-black text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1"
               onClick={() => void run(async () => {
@@ -153,13 +166,16 @@ function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }
               })}>
               <Users className="w-3.5 h-3.5" /> Match now
             </button>
+            )}
             {!open && (
               <>
+                {on && (
                 <button type="button" disabled={busy || unrevealed.length === 0 || unrevealed.some((g) => g.status === 'locked')}
                   className="bg-slate-100 text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1"
                   onClick={() => void run(() => matchNow(tierId, true), 'Re-matched with a new seed.')}>
                   <Shuffle className="w-3.5 h-3.5" /> Reshuffle
                 </button>
+                )}
                 <button type="button" disabled={busy || unrevealed.length === 0} className="bg-slate-100 text-xs font-bold px-4 py-2 rounded-lg"
                   onClick={() => {
                     const locked = unrevealed.some((g) => g.status === 'locked');
@@ -293,17 +309,27 @@ function TierMatching({ tierId, tierName }: { tierId: string; tierName: string }
 
 export default function MatchedSeatsPanel({ event, canManage }: { event: Event; canManage: boolean }) {
   const tiers = event.ticketTiers ?? [];
+  const on = socialEnabled();
+  // Paused: which ticket types are already matched (the panel shows only then).
+  const [matched, setMatched] = useState<Record<string, boolean>>({});
+  const onLoaded = useCallback((tierId: string, m: boolean) => {
+    setMatched((prev) => (prev[tierId] === m ? prev : { ...prev, [tierId]: m }));
+  }, []);
   if (!canManage || tiers.length === 0) return null;
+  const shown = on || Object.values(matched).some(Boolean);
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-sm mb-8">
+    <div className="bg-white rounded-2xl p-6 shadow-sm mb-8" hidden={!shown} data-testid="matched-seats-panel">
       <h3 className="text-lg font-black text-slate-900 flex items-center gap-2 mb-1">
         <Users className="w-5 h-5" /> Matched seats
       </h3>
       <p className="text-sm text-slate-500 mb-4">
-        Sell seats instead of known tables: Exos groups the buyers at the cutoff, you review, and each guest learns
-        their spot, the time and the others' first names at reveal time.
+        {on
+          ? <>Sell seats instead of known tables: Exos groups the buyers at the cutoff, you review, and each guest learns
+            their spot, the time and the others' first names at reveal time.</>
+          : <>New matched ticket types are paused. The ones below were sold as matched seats before the pause: their
+            buyers are still grouped at the cutoff and told their spot at reveal time.</>}
       </p>
-      {tiers.map((t) => <div key={t.id}><TierMatching tierId={t.id} tierName={t.name} /></div>)}
+      {tiers.map((t) => <div key={t.id}><TierMatching tierId={t.id} tierName={t.name} onLoaded={onLoaded} /></div>)}
     </div>
   );
 }

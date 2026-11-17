@@ -255,11 +255,16 @@ tiers and discount codes, into a series of dates.
 
 > **"Pay separately" (v2) is paused** (operator decision, 2026-11-09). It isn't offered on any event:
 > the event page has no "Pay separately" button, and group links (`/group-pay/...`) say "Group pay
-> isn't available". **"Split with friends" (v1) is available as usual.** The description of v2 below
-> is kept for reference only.
+> isn't available". The description of v2 below is kept for reference only.
+>
+> **"Split with friends" (v1) is paused too** (operator decision, 2026-11-17: Exos is focusing on ticket
+> selling, promotion and distribution; mig `20261117100000`). Buyers can't start a new split or add
+> friends to one; a split made before the pause keeps its paid / not-paid checklist, ticking a friend
+> paid still sends their ticket, and every claim link still works. Buyers can still send any ticket to
+> a friend from My Tickets (transfers are unaffected). Matched seats and group chats are paused the same
+> day (`docs/matched-seats.md`, `docs/group-chat.md`).
 
-Buyers can bring friends with **Split with friends** below. You don't switch anything on; it uses your
-normal prices, fees, codes and limits.
+Both used your normal prices, fees, codes and limits.
 
 - **Split with friends** (`/split/:sessionId`, after a purchase): the buyer pays for every ticket,
   sends each friend their ticket, and the friends pay the buyer back by Venmo or Cash App. Exos never

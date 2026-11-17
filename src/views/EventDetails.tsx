@@ -76,6 +76,7 @@ import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } fro
 // Matched seats (mig 20261031210000): the optional quiz before checkout.
 import { getPublicMatchedTiers, saveIntake, type PublicMatchedTier } from '../lib/matchedSeatsApi';
 import { answersBody, EMPTY_ANSWERS, type QuizAnswers } from '../lib/matchedSeats';
+import { socialEnabled } from '../lib/socialFlag';
 
 // Shown only for some events or after a tap, and the heaviest pieces of the
 // page: split out so the first load (often a slow Instagram webview) skips them.
@@ -1372,7 +1373,10 @@ export default function EventDetails() {
                   </div>
                 )}
 
-                {/* Matched seats: how it works + the optional quiz (signed in; guests answer on their ticket). */}
+                {/* Matched seats: how it works + the optional quiz (signed in; guests answer on their ticket).
+                    Paused (mig 20261117100000): no ticket type becomes matched any more, and without
+                    VITE_EXOS_SOCIAL=on there is no quiz; a type already sold as matched seats still says
+                    so here, so nobody is grouped without being told. */}
                 {(() => {
                   const m = matchedTiers.find((x) => x.tierId === (selectedTierId ?? allTiers[0]?.id));
                   if (!m) return null;
@@ -1385,7 +1389,7 @@ export default function EventDetails() {
                           ? formatInTz(new Date(m.revealAt), event.timezone, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
                           : 'before the event'}.
                       </p>
-                      {m.quizEnabled && m.status === 'open' && (user
+                      {socialEnabled() && m.quizEnabled && m.status === 'open' && (user
                         ? <Suspense fallback={null}><MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} /></Suspense>
                         : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
                     </div>

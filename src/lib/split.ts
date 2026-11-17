@@ -191,3 +191,15 @@ export async function noteNudge(shareId: string): Promise<void> {
   const { error } = await supabase.rpc('exos_split_nudged', { p_share_id: shareId });
   if (error) throw new Error(clean(error.message));
 }
+
+/**
+ * The orders this host already split (exos_group_splits, RLS: the host's own
+ * rows). While split with friends is paused (mig 20261117100000), My Tickets
+ * links only these, so a pay-back checklist that exists stays reachable.
+ * Best effort: an error reads as none.
+ */
+export async function listMySplitOrders(hostUid: string): Promise<string[]> {
+  const { data, error } = await supabase.from('exos_group_splits').select('session_id').eq('host_uid', hostUid).limit(200);
+  if (error || !Array.isArray(data)) return [];
+  return data.map((r: { session_id: string }) => r.session_id);
+}

@@ -21,13 +21,21 @@
 // exos_mail / exos-mail-drain and texts through exos_sms_outbox /
 // exos-sms-drain (dry run unless EXOS_SMS_LIVE=on).
 //
+// Paused (operator 2026-11-17, mig 20261117100000; _shared/socialGate.ts): no
+// ticket type becomes matched any more (SQL, XSOFF). /run answers 403
+// social_off unless EXOS_SOCIAL=on (unset = off), before the JWT, the body or
+// any DB call; /cron keeps grouping and revealing the types matched before
+// the pause, so their buyers get their table.
+//
 // Deploy with --no-verify-jwt (the cron path has no JWT; /run checks it).
-// Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET.
+// Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, CRON_SECRET,
+//      EXOS_SOCIAL (unset = off: /run refused).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { matchGroups, type MatchMember, type MatchSpot, type UndersubscribedPolicy } from "../_shared/matching.ts";
+import { socialOffFromError, socialOffGate } from "../_shared/socialGate.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BODY = 4096;
@@ -130,6 +138,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json(await cron(sb));
     }
     if (route === "run" || route === "exos-match") {
+      // exos: social off: staff "Match now" / "Reshuffle" are paused.
+      const off = socialOffGate(Deno.env.get("EXOS_SOCIAL"));
+      if (off) return json(off.body, off.status);
       const sbUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
         global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } },
       });
@@ -147,6 +158,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       } catch (e) {
         // deno-lint-ignore no-explicit-any
         const code = String((e as any)?.code ?? "");
+        // deno-lint-ignore no-explicit-any
+        const soff = socialOffFromError(e as any);
+        if (soff) return json(soff.body, soff.status);
         // deno-lint-ignore no-explicit-any
         const msg = String((e as any)?.message ?? "matching failed").replace(/^exos_match_\w+: /, "");
         if (code === "42501") return json({ error: msg }, 403);

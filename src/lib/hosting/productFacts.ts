@@ -160,7 +160,31 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/lib/groupPay.ts', 'src/components/GroupPayStart.tsx', 'src/views/GroupPayHost.tsx', 'src/views/GroupPaySeat.tsx',
       'supabase/migrations/20261108120000_exos_group_pay.sql', 'supabase/migrations/20261110110000_exos_group_pay_2.sql',
       'supabase/migrations/20261111120000_exos_group_pay_off.sql', 'src/lib/groupPayFlag.ts'],
-    note: 'Paused by operator 2026-11-09: dormant behind the group_pay_enabled platform setting, EXOS_GROUP_PAY on exos-checkout and VITE_EXOS_GROUP_PAY in the build, all off. "Split with friends" (the host pays, friends pay back) is unaffected.',
+    note: 'Paused by operator 2026-11-09: dormant behind the group_pay_enabled platform setting, EXOS_GROUP_PAY on exos-checkout and VITE_EXOS_GROUP_PAY in the build, all off. "Split with friends" (the host pays, friends pay back) is paused too since 2026-11-17 (split-with-friends).',
+  },
+  // Social / "friends" features, paused by the operator 2026-11-17 (focus on
+  // selling, promotion and distribution; mig 20261117100000, lib/socialFlag.ts).
+  {
+    id: 'split-with-friends', audience: 'fan', status: 'off',
+    claim: 'A buyer who paid for several tickets can send each friend their ticket with a Venmo or Cash App link to pay them back.',
+    code: ['src/lib/split.ts', 'src/views/SplitWithFriends.tsx', 'supabase/migrations/20261031220000_exos_payments_paypal_cashapp_split.sql',
+      'supabase/migrations/20261117100000_exos_social_off.sql', 'src/lib/socialFlag.ts'],
+    note: 'Paused by operator 2026-11-17: no new split, behind the social_features_enabled platform setting and VITE_EXOS_SOCIAL in the build, both off. A split made before the pause keeps its pay-back checklist and claim links; plain ticket transfers are unaffected.',
+  },
+  {
+    id: 'matched-seats', audience: 'organizer', status: 'off',
+    claim: 'Organizers can sell matched seats: buyers are grouped into tables or crews, and each learns their spot and the others\' first names before the event.',
+    code: ['src/lib/matching.ts', 'src/components/MatchedSeatsPanel.tsx', 'src/components/TicketMatchedGroup.tsx',
+      'supabase/functions/exos-match/index.ts', 'supabase/migrations/20261031210000_exos_matched_seats.sql',
+      'supabase/migrations/20261117100000_exos_social_off.sql'],
+    note: 'Paused by operator 2026-11-17: no ticket type becomes matched (social_features_enabled, VITE_EXOS_SOCIAL, and EXOS_SOCIAL on exos-match /run, all off). Types matched before the pause are still grouped and revealed.',
+  },
+  {
+    id: 'group-chat', audience: 'fan', status: 'off',
+    claim: 'Ticket holders can join a group chat for an event, in the app or by text through a masked number.',
+    code: ['src/views/GroupChat.tsx', 'src/views/MyGroups.tsx', 'src/views/OrgGroups.tsx', 'supabase/functions/exos-sms-relay/index.ts',
+      'supabase/migrations/20261031230000_exos_group_chat.sql', 'supabase/migrations/20261117100000_exos_social_off.sql'],
+    note: 'Paused by operator 2026-11-17: no new group, member or texts opt-in, and the relay stops (social_features_enabled and VITE_EXOS_SOCIAL, both off). The relay never went live: it is a dry run until EXOS_SMS_RELAY=on and needs US A2P 10DLC registration.',
   },
   {
     id: 'refunds', audience: 'fan', status: 'at_launch',
