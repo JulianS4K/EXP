@@ -1,6 +1,6 @@
 # Kanban Board / Product Roadmap
 
-**Focus (operator 2026-11-17): core ticket selling, promotion, distribution. Paused: social/friends features (group buy, matched seats, group chat/relay), event tokens (#121, parked), Spanish (#120, parked), Communities (#75, closed), Ticket Evolution exchange resale (EVO build, see Channels below).**
+**Focus (operator 2026-11-17): core ticket selling, promotion, distribution. Paused: social/friends features (group buy, matched seats, group chat/relay), event tokens (#121, parked), Spanish (#120, parked), Communities (#75, closed), Ticket Evolution exchange resale on Exos (EVO build, off: Exos stays a primary platform; see Channels below).**
 
 ## Prod state vs this repo (updated 2026-11-05)
 
@@ -753,8 +753,8 @@ distribution of Exos's own inventory, not resale.
   physical delivery and bulk inventory update / delete are forbidden. **Open with TEvo**: the signature scheme,
   whether order ticket groups echo `remote_id`, event search, webhook / Order Integration payloads,
   transfer_source values (`docs/marketplace/tevo/README.md`). Events are linked to TEvo by staff until then.
-- ⏸️ **Ticket Evolution exchange resale, buyer side ("EVO build")** (operator 2026-11-17: planned, **paused**; not
-  started, no branch). Exos as a resale site on the TEvo exchange, per TEvo's guide "Building a Ticket Resale Website
+- ⛔ **Ticket Evolution exchange resale, buyer side ("EVO build")** (operator 2026-11-17: **off**; Exos stays a primary
+  platform and does not resell other events' inventory; not started, no branch; the plan below is kept for reference). Exos as a resale site on the TEvo exchange, per TEvo's guide "Building a Ticket Resale Website
   or App Using the Ticket Evolution API" (victorylive Confluence, API space, page 354910253): show **all** exchange
   inventory next to Exos events, then sell it.
   - **Browse (reads only, no authorization needed):** new GET-only edge function `exos-exchange` (`/v9/events`,
