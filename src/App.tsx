@@ -214,7 +214,7 @@ export default function App() {
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
-                    {/* Split with friends is paused (mig 20261117100000): the view shows "not available" unless the
+                    {/* Split with friends is paused (mig 20261117190000): the view shows "not available" unless the
                         order already has a split (its pay-back checklist still works) or VITE_EXOS_SOCIAL=on. */}
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
                     {/* Group pay v2 is paused (mig 20261111120000): "not available" unless VITE_EXOS_GROUP_PAY=on. */}
@@ -293,7 +293,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/booking-requests" element={<OrgInbound />} />
                     <Route path="/orgs/:orgId/venue-requests" element={<OrgVenueRequests />} />
                     <Route path="/orgs/:orgId/orders" element={<OrgOrders />} />
-                    {/* Group chats are paused (mig 20261117100000): "not available" unless VITE_EXOS_SOCIAL=on. */}
+                    {/* Group chats are paused (mig 20261117190000): "not available" unless VITE_EXOS_SOCIAL=on. */}
                     <Route path="/orgs/:orgId/groups" element={<SocialGate feature="chat"><OrgGroups /></SocialGate>} />
                     <Route path="/groups" element={<SocialGate feature="chat"><MyGroups /></SocialGate>} />
                     <Route path="/groups/:groupId" element={<SocialGate feature="chat"><GroupChat /></SocialGate>} />

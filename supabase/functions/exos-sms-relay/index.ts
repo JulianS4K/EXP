@@ -9,7 +9,7 @@
 // are always recorded (compliance doesn't wait for the switch). US A2P 10DLC
 // registration of the pool numbers comes before turning it on.
 //
-// Paused (operator 2026-11-17, mig 20261117100000; _shared/socialGate.ts):
+// Paused (operator 2026-11-17, mig 20261117190000; _shared/socialGate.ts):
 // while the social_features_enabled setting is off the relay STOPS in SQL: no
 // new opt-in (XSOFF), nothing relayed or queued, queued relay / confirmation
 // texts skipped at the claim, and a member's text answered "group texts are

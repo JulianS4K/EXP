@@ -194,7 +194,7 @@ export async function noteNudge(shareId: string): Promise<void> {
 
 /**
  * The orders this host already split (exos_group_splits, RLS: the host's own
- * rows). While split with friends is paused (mig 20261117100000), My Tickets
+ * rows). While split with friends is paused (mig 20261117190000), My Tickets
  * links only these, so a pay-back checklist that exists stays reachable.
  * Best effort: an error reads as none.
  */

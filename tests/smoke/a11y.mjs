@@ -435,7 +435,7 @@ await check('edit event: Promote on Discord', async (page, run) => {
 }, fns: discordFns }) });
 
 // claude/exos-focus-core: social / "friends" features are paused (mig
-// 20261117100000); a default build answers their links with "not available".
+// 20261117190000); a default build answers their links with "not available".
 await check('social features paused: "not available" (group chat)', async (page, run) => {
   await page.goto(BASE + '/groups');
   await page.getByRole('heading', { name: "Group chat isn't available" }).waitFor({ timeout: 8000 });

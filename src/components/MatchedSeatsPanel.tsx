@@ -6,7 +6,7 @@
 // group), lock, reveal now, refund leftovers through exos-refund, and read
 // reports. Owner / manager only (every call is checked in SQL).
 //
-// Paused (operator 2026-11-17, mig 20261117100000): unless the build sets
+// Paused (operator 2026-11-17, mig 20261117190000): unless the build sets
 // VITE_EXOS_SOCIAL=on, no ticket type can be made matched (SQL refuses it too,
 // XSOFF) and "Match now" / "Reshuffle" are gone (exos-match /run needs
 // EXOS_SOCIAL=on). A type already sold as matched seats keeps everything else

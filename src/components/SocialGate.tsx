@@ -1,4 +1,4 @@
-// The paused social features' pages (operator 2026-11-17, mig 20261117100000):
+// The paused social features' pages (operator 2026-11-17, mig 20261117190000):
 // a plain "not available" page unless the build sets VITE_EXOS_SOCIAL=on. The
 // view inside is never rendered (or even loaded: it's lazy) while off.
 

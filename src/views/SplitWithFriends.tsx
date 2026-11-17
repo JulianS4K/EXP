@@ -8,7 +8,7 @@
 // checklist the host ticks. Send mode: tickets now (default) or once marked
 // paid.
 //
-// Paused (operator 2026-11-17, mig 20261117100000): unless the build sets
+// Paused (operator 2026-11-17, mig 20261117190000): unless the build sets
 // VITE_EXOS_SOCIAL=on, an order with no split shows "not available" and no
 // friends can be added; an order that already has a split keeps its
 // checklist (ticking paid still sends an 'on_paid' ticket, nudges still

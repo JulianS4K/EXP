@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // Social / "friends" features are paused (operator 2026-11-17, mig
-// 20261117100000). A default build (no VITE_EXOS_SOCIAL) shows no way to start
+// 20261117190000). A default build (no VITE_EXOS_SOCIAL) shows no way to start
 // one: the group chat routes show "not available", /split shows it for an
 // order with no split, the event editor's matched-seats panel is hidden unless
 // a ticket type is already matched (and never offers "Sell as matched seats",

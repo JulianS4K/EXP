@@ -1374,7 +1374,7 @@ export default function EventDetails() {
                 )}
 
                 {/* Matched seats: how it works + the optional quiz (signed in; guests answer on their ticket).
-                    Paused (mig 20261117100000): no ticket type becomes matched any more, and without
+                    Paused (mig 20261117190000): no ticket type becomes matched any more, and without
                     VITE_EXOS_SOCIAL=on there is no quiz; a type already sold as matched seats still says
                     so here, so nobody is grouped without being told. */}
                 {(() => {

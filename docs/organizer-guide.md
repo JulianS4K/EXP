@@ -258,7 +258,7 @@ tiers and discount codes, into a series of dates.
 > isn't available". The description of v2 below is kept for reference only.
 >
 > **"Split with friends" (v1) is paused too** (operator decision, 2026-11-17: Exos is focusing on ticket
-> selling, promotion and distribution; mig `20261117100000`). Buyers can't start a new split or add
+> selling, promotion and distribution; mig `20261117190000`). Buyers can't start a new split or add
 > friends to one; a split made before the pause keeps its paid / not-paid checklist, ticking a friend
 > paid still sends their ticket, and every claim link still works. Buyers can still send any ticket to
 > a friend from My Tickets (transfers are unaffected). Matched seats and group chats are paused the same

@@ -25,7 +25,7 @@
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
--- Social features are paused (operator 2026-11-17, mig 20261117100000) and off
+-- Social features are paused (operator 2026-11-17, mig 20261117190000) and off
 -- by default: on for this file only (rolled back with it).
 SELECT public.exos_set_social_features_enabled(true, 'test_paypal_payments.sql: setup');
 ALTER TABLE public.exos_checkout_sessions ENABLE ROW LEVEL SECURITY;

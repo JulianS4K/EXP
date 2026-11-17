@@ -2,7 +2,7 @@
 
 > **Paused (operator 2026-11-17).** Exos is focusing on ticket selling,
 > promotion and distribution, so group chats and the relay are hidden, code
-> kept (mig `20261117100000_exos_social_off`, `docs/security.md`). While the
+> kept (mig `20261117190000_exos_social_off`, `docs/security.md`). While the
 > `social_features_enabled` platform setting is off (the default),
 > `exos_group_create`, `exos_group_join` (for a new member),
 > `exos_group_add_member` and `exos_group_sms_opt_in` answer `XSOFF`, and the

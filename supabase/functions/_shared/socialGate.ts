@@ -1,5 +1,5 @@
 // Social / "friends" features are paused (operator 2026-11-17, mig
-// 20261117100000): split with friends, matched seats, group chats and the
+// 20261117190000): split with friends, matched seats, group chats and the
 // masked SMS relay. Nothing new can start; what exists keeps working.
 //
 // The SQL switch (exos_platform_settings social_features_enabled, off by

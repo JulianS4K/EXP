@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Social / "friends" features paused (operator 2026-11-17, mig
--- 20261117100000). Self-contained (cf5 prefix), rolled back. Runs after
+-- 20261117190000). Self-contained (cf5 prefix), rolled back. Runs after
 -- test_matched_seats.sql, test_paypal_payments.sql and test_group_chat.sql,
 -- which turn the switch on for themselves (rolled back with them).
 --   SO1 off by default: the setting row is JSON false; a missing row or any

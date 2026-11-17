@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 // Social / "friends" features are paused (operator 2026-11-17, mig
-// 20261117100000): Exos narrows to ticket selling, promotion and distribution.
+// 20261117190000): Exos narrows to ticket selling, promotion and distribution.
 // Hidden, code kept: split with friends (/split/:sessionId), matched seats
 // (the event editor panel, the event page quiz, the ticket's group card) and
 // group chats (/groups, /groups/:groupId, /orgs/:orgId/groups) are only built

@@ -21,7 +21,7 @@
 // exos_mail / exos-mail-drain and texts through exos_sms_outbox /
 // exos-sms-drain (dry run unless EXOS_SMS_LIVE=on).
 //
-// Paused (operator 2026-11-17, mig 20261117100000; _shared/socialGate.ts): no
+// Paused (operator 2026-11-17, mig 20261117190000; _shared/socialGate.ts): no
 // ticket type becomes matched any more (SQL, XSOFF). /run answers 403
 // social_off unless EXOS_SOCIAL=on (unset = off), before the JWT, the body or
 // any DB call; /cron keeps grouping and revealing the types matched before

@@ -55,7 +55,7 @@ export default function MyTickets() {
   const { toast } = useToast();
   const t = useT();
   const [tickets, setTickets] = useState<(Ticket & { event?: Event })[]>([]);
-  // Split with friends is paused (mig 20261117100000): only orders that already
+  // Split with friends is paused (mig 20261117190000): only orders that already
   // have a split keep their link (to the pay-back checklist).
   const [splitOrders, setSplitOrders] = useState<Set<string>>(new Set());
   const [groupedTickets, setGroupedTickets] = useState<{ [eventId: string]: (Ticket & { event?: Event })[] }>({});
@@ -481,7 +481,7 @@ export default function MyTickets() {
                     {(() => {
                       // Split with friends: an order of 2+ tickets this buyer
                       // paid for through checkout (mig 20261031220000).
-                      // Paused (mig 20261117100000): unless VITE_EXOS_SOCIAL=on,
+                      // Paused (mig 20261117190000): unless VITE_EXOS_SOCIAL=on,
                       // only an order that already has a split, to its checklist.
                       const on = socialEnabled();
                       let order: string | undefined;

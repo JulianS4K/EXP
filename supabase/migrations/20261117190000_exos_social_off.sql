@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 20261117100000 — Exos: social / "friends" features switched off
+-- Migration 20261117190000 — Exos: social / "friends" features switched off
 --                            (operator 2026-11-17: focus on ticket selling,
 --                            promotion and distribution)
 --
@@ -175,7 +175,7 @@ SELECT pg_temp.exos_patch_n('public.exos_split_save(text,jsonb,text,text,text,te
   '/* exos: social off */',
   $o$  IF v_uid IS NULL THEN
     RAISE EXCEPTION 'exos_split_save: not authenticated'$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000: paused by the operator 2026-11-17
+  $n$  /* exos: social off */ -- mig 20261117190000: paused by the operator 2026-11-17
   IF NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Split with friends isn''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -193,7 +193,7 @@ SELECT pg_temp.exos_patch_n('public.exos_match_set_config(uuid,jsonb)',
   $o$  SELECT * INTO v_old FROM public.exos_match_configs WHERE tier_id = p_tier_id FOR UPDATE;
 $o$,
   $n$  SELECT * INTO v_old FROM public.exos_match_configs WHERE tier_id = p_tier_id FOR UPDATE;
-  /* exos: social off */ -- mig 20261117100000
+  /* exos: social off */ -- mig 20261117190000
   IF v_old.tier_id IS NULL AND NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Matched seats aren''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -206,7 +206,7 @@ SELECT pg_temp.exos_patch_n('public.exos_group_create(uuid,text,text,uuid,text,i
   '/* exos: social off */',
   $o$  IF NOT public._exos_group_staff(p_org_id) THEN
     RAISE EXCEPTION 'exos_group_create: owner or manager only'$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000
+  $n$  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Group chat isn''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -217,7 +217,7 @@ SELECT pg_temp.exos_patch_n('public.exos_group_create(uuid,text,text,uuid,text,i
 SELECT pg_temp.exos_patch_n('public.exos_group_join(uuid)',
   '/* exos: social off */',
   $o$  IF g.join_policy = 'invite' THEN$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000
+  $n$  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Group chat isn''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -226,7 +226,7 @@ SELECT pg_temp.exos_patch_n('public.exos_group_join(uuid)',
 SELECT pg_temp.exos_patch_n('public.exos_group_add_member(uuid,uuid,text)',
   '/* exos: social off */',
   $o$  IF p_role NOT IN ('member', 'host') THEN$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000
+  $n$  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Group chat isn''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -238,7 +238,7 @@ SELECT pg_temp.exos_patch_n('public.exos_group_sms_opt_in(uuid,text,text)',
   '/* exos: social off */',
   $o$  IF v_uid IS NULL OR NOT public.exos_is_group_member(p_group_id) THEN
     RAISE EXCEPTION 'exos_group_sms_opt_in: not a member'$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000
+  $n$  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     RAISE EXCEPTION 'Group texts aren''t available' USING ERRCODE = 'XSOFF';
   END IF;
@@ -255,7 +255,7 @@ $o$,
   $n$  IF NOT g.relay_enabled OR g.daily_sms_cap = 0 THEN
     RETURN jsonb_build_object('queued', 0, 'capped', 0);
   END IF;
-  /* exos: social off */ -- mig 20261117100000: the relay stops while paused
+  /* exos: social off */ -- mig 20261117190000: the relay stops while paused
   IF NOT public._exos_social_on() THEN
     RETURN jsonb_build_object('queued', 0, 'capped', 0, 'paused', true);
   END IF;
@@ -268,7 +268,7 @@ SELECT pg_temp.exos_patch_n('public.exos_sms_relay_claim(integer)',
   $o$BEGIN
   UPDATE public.exos_sms_relay_outbox o SET status = 'skipped', error = 'no longer opted in'$o$,
   $n$BEGIN
-  /* exos: social off */ -- mig 20261117100000
+  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     UPDATE public.exos_sms_relay_outbox o SET status = 'skipped', error = 'group texts paused'
      WHERE o.kind <> 'reply'
@@ -281,7 +281,7 @@ SELECT pg_temp.exos_patch_n('public.exos_sms_relay_claim(integer)',
 SELECT pg_temp.exos_patch_n('public.exos_sms_relay_inbound(text,text,text,text,text,text)',
   '/* exos: social off */',
   $o$  IF p_provider_ref IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_group_messages WHERE provider_ref = left(p_provider_ref, 80)) THEN$o$,
-  $n$  /* exos: social off */ -- mig 20261117100000
+  $n$  /* exos: social off */ -- mig 20261117190000
   IF NOT public._exos_social_on() THEN
     IF NOT EXISTS (SELECT 1 FROM public.exos_sms_relay_outbox WHERE assignment_id = a.id AND kind = 'reply'
                     AND body LIKE 'Exos: group texts are paused%' AND created_at > now() - interval '1 day') THEN

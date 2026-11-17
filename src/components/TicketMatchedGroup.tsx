@@ -4,7 +4,7 @@
 // and the others' first names. After meeting: "would meet again" (shown only
 // when mutual), report and block. Renders nothing for an ordinary ticket.
 //
-// Paused (operator 2026-11-17, mig 20261117100000): no ticket type becomes
+// Paused (operator 2026-11-17, mig 20261117190000): no ticket type becomes
 // matched any more, so this only ever shows for a type sold as matched seats
 // before the pause. Unless the build sets VITE_EXOS_SOCIAL=on it keeps what the
 // holder bought (when groups form, their spot, time and table, report and

@@ -2,7 +2,7 @@
 
 > **Paused (operator 2026-11-17).** Exos is focusing on ticket selling,
 > promotion and distribution, so matched seats are hidden, code kept
-> (mig `20261117100000_exos_social_off`, `docs/security.md`). No ticket type
+> (mig `20261117190000_exos_social_off`, `docs/security.md`). No ticket type
 > can become matched: `exos_match_set_config` answers `XSOFF` for a type with
 > no config while the `social_features_enabled` platform setting is off (the
 > default), the event report shows the panel only for a type matched before

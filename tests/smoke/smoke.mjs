@@ -1573,7 +1573,7 @@ await run('group pay off (default build): no "Pay separately" on the event page,
   }
   assert(!log.some((l) => /exos_group_/.test(l)), 'nothing asked of the server: ' + log.filter((l) => /exos_group_/.test(l)).join(', '));
 }, { signedIn: true });
-// ── Social / "friends" features paused (operator 2026-11-17, mig 20261117100000,
+// ── Social / "friends" features paused (operator 2026-11-17, mig 20261117190000,
 // claude/exos-focus-core): the default build (no VITE_EXOS_SOCIAL) shows none of
 // their entry points, and their links say "not available". What exists keeps
 // working: an order already split keeps its pay-back checklist. ──
