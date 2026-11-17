@@ -83,6 +83,9 @@ export interface FeedEventRow {
   // Online / hybrid + noindex (mig 20261005090000); likewise optional.
   format?: string | null;
   noindex?: boolean | null;
+  // Per-language title / description (mig 20261114130000); selected only for
+  // ?lang=es once the column exists.
+  i18n?: unknown;
 }
 
 export interface FeedTierRow {
@@ -127,6 +130,8 @@ export interface FeedOptions {
   /** Public SPA base, e.g. https://exos.example.com/bridge (no trailing slash). */
   appBase: string;
   now?: Date;
+  /** 'es' (?lang=es): the organizer's Spanish title / description where set (mig 20261114130000). */
+  lang?: 'en' | 'es';
 }
 
 /** The categories Google tailors its event experience to (concerts, sports, theatre, exhibits, workshops). */
@@ -191,6 +196,8 @@ export interface SchemaEvent {
   url: string;
   name: string;
   description?: string;
+  /** 'es' in the Spanish feed (?lang=es). */
+  inLanguage?: string;
   startDate: Iso;
   endDate?: Iso;
   doorTime?: Iso;
@@ -436,6 +443,24 @@ export function feedItem(
   };
 }
 
+/**
+ * A row with the organizer's Spanish title and description in place of the
+ * default ones, field by field (blank or missing: the default stays). The
+ * Spanish description replaces summary + description (it's written whole).
+ */
+export function spanishRow(e: FeedEventRow): FeedEventRow {
+  const es = e.i18n && typeof e.i18n === 'object' && !Array.isArray(e.i18n) ? (e.i18n as { es?: unknown }).es : undefined;
+  if (!es || typeof es !== 'object') return e;
+  const { title, description } = es as { title?: unknown; description?: unknown };
+  const t = typeof title === 'string' && title.trim() ? title : null;
+  const d = typeof description === 'string' && description.trim() ? description : null;
+  return {
+    ...e,
+    ...(t ? { name: t } : {}),
+    ...(d ? { description: d, description_md: null, summary: null } : {}),
+  };
+}
+
 /** The whole feed (a snapshot), plus the events left out and why. */
 export function buildGoogleFeed(input: FeedInput, opts: FeedOptions): { feed: GoogleFeed; skipped: SkippedEvent[] } {
   const now = opts.now ?? new Date();
@@ -443,7 +468,8 @@ export function buildGoogleFeed(input: FeedInput, opts: FeedOptions): { feed: Go
   for (const t of input.tiers) byEvent.set(t.event_id, [...(byEvent.get(t.event_id) ?? []), t]);
   const items: GoogleFeedItem[] = [];
   const skipped: SkippedEvent[] = [];
-  for (const e of [...input.events].sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)) || a.id.localeCompare(b.id))) {
+  const rows = opts.lang === 'es' ? input.events.map(spanishRow) : input.events;
+  for (const e of [...rows].sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)) || a.id.localeCompare(b.id))) {
     const tiers = byEvent.get(e.id) ?? [];
     const buy = input.buy?.get(e.id) ?? null;
     const why = feedBlocker(e, tiers, now, buy);
@@ -451,7 +477,9 @@ export function buildGoogleFeed(input: FeedInput, opts: FeedOptions): { feed: Go
       skipped.push({ event_id: e.id, name: e.name, reason: why });
       continue;
     }
-    items.push(feedItem(e, tiers, input.geo.get(e.id) ?? null, input.orgs.get(e.org_id) ?? null, opts, buy));
+    const item = feedItem(e, tiers, input.geo.get(e.id) ?? null, input.orgs.get(e.org_id) ?? null, opts, buy);
+    if (opts.lang === 'es') item.event.inLanguage = 'es';
+    items.push(item);
   }
   return {
     feed: {

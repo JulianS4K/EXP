@@ -8,7 +8,14 @@
 //
 // Coverage (2026-09-11): navbar, event page + claim card, waitlist, add-ons,
 // My Tickets, ticket pass (TicketDetail incl. attendee editor), Alerts feed,
-// transfer claim page. Organizer/dashboard surfaces are still English-only.
+// transfer claim page. Wave 15 (docs/i18n-review.md) adds the buy box and
+// checkout, sending a ticket, wallet buttons (checkout.ts), the door app
+// (door.ts) and the door POS (pos.ts). Organizer/dashboard surfaces are still
+// English-only, except the event editor's Spanish title / description fields.
+
+import { checkoutEn, checkoutEs } from './checkout';
+import { doorEn, doorEs } from './door';
+import { posEn, posEs } from './pos';
 
 export type Lang = 'en' | 'es';
 
@@ -135,6 +142,11 @@ export const en = {
   'claim.otherOptions': 'Other ways to sign in',
 
   'common.cancel': 'Cancel',
+  'common.language': 'Language',
+
+  ...checkoutEn,
+  ...doorEn,
+  ...posEn,
 } as const;
 
 export type DictKey = keyof typeof en;
@@ -262,6 +274,91 @@ export const es: Record<DictKey, string> = {
   'claim.otherOptions': 'Otras formas de iniciar sesión',
 
   'common.cancel': 'Cancelar',
+  'common.language': 'Idioma',
+
+  ...checkoutEs,
+  ...doorEs,
+  ...posEs,
 };
 
 export const DICTS: Record<Lang, Record<DictKey, string>> = { en, es };
+
+/** Key prefixes per surface; the completeness test checks each (src/lib/i18n/dict.test.ts). */
+export const NAMESPACES = {
+  buyer: ['nav.', 'event.', 'addon.', 'waitlist.', 'tickets.', 'ticket.', 'alerts.', 'claim.', 'common.',
+    'page.', 'checkout.', 'guest.', 'questions.', 'transfer.', 'wallet.'],
+  door: ['door.'],
+  pos: ['pos.'],
+} as const;
+
+/**
+ * Money and legal wording: refund policy, the all-in price and fees, stored
+ * value (gift cards, donations), and the money lines of the door POS. A human
+ * reviews the Spanish of each before launch; never ship a machine translation
+ * of these alone (docs/i18n-review.md lists them with their status).
+ */
+export const REVIEW_KEYS: readonly DictKey[] = [
+  'page.refund.none', 'page.refund.until_7d', 'page.refund.until_24h', 'page.refund.until_start',
+  'checkout.allInFeesTax', 'checkout.allInFees', 'checkout.allInTax', 'checkout.allIn', 'checkout.feesIncluded',
+  'checkout.priceRises', 'checkout.limits',
+  'checkout.donationNote', 'checkout.giftApplied', 'checkout.giftCode', 'checkout.giftHave',
+  'guest.paidBody', 'guest.freeBody',
+  'transfer.warning', 'transfer.shareBody',
+  'door.voided',
+  'pos.inclTax', 'pos.card.refunded', 'pos.card.declined', 'pos.card.canceled', 'pos.cardOff',
+];
+
+/** {name} placeholders in a string, sorted (the test checks en and es match). */
+export function placeholders(s: string): string[] {
+  return [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
+}
+
+/** Fill {name} placeholders; unknown ones stay as written. */
+export function interpolate(template: string, vars?: Record<string, string | number>): string {
+  if (!vars) return template;
+  return template.replace(/\{(\w+)\}/g, (_, k) => (k in vars ? String(vars[k]) : `{${k}}`));
+}
+
+/** t() outside React: English for any key missing from the language. */
+export function translate(lang: Lang, key: DictKey, vars?: Record<string, string | number>): string {
+  const table = DICTS[lang] ?? en;
+  return interpolate(table[key] ?? en[key] ?? key, vars);
+}
+
+/** The page's language as LanguageProvider set it on <html lang> (checkout sends it). */
+export function documentLang(): Lang {
+  try {
+    return typeof document !== 'undefined' && document.documentElement.lang === 'es' ? 'es' : 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+/** An event's text in a language: the organizer's Spanish title / description, else the default. */
+export function eventText(
+  ev: { title: string; description?: string; i18n?: EventI18n | null },
+  lang: Lang,
+): { title: string; description: string | null; translated: boolean } {
+  const t = lang === 'es' ? ev.i18n?.es : undefined;
+  const title = typeof t?.title === 'string' && t.title.trim() ? t.title : null;
+  const description = typeof t?.description === 'string' && t.description.trim() ? t.description : null;
+  return { title: title ?? ev.title, description, translated: !!(title || description) };
+}
+
+/** exos_events.i18n (mig 20261114130000): only Spanish, both fields optional. */
+export interface EventI18n {
+  es?: { title?: string; description?: string };
+}
+
+/** Caps the database enforces (_exos_event_i18n_ok). */
+export const EVENT_I18N_LIMITS = { title: 200, description: 20000 } as const;
+
+/** Clean an editor draft into the column's shape (blank fields dropped). */
+export function eventI18nPayload(draft: { title?: string; description?: string }): EventI18n {
+  const title = (draft.title ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, EVENT_I18N_LIMITS.title);
+  const description = (draft.description ?? '').trim().slice(0, EVENT_I18N_LIMITS.description);
+  const es: { title?: string; description?: string } = {};
+  if (title) es.title = title;
+  if (description) es.description = description;
+  return Object.keys(es).length ? { es } : {};
+}

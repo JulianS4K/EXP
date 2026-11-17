@@ -65,7 +65,8 @@ import {
 import MemberPassRedeem from '../components/MemberPassRedeem';
 import { claimFreeAddons } from '../lib/addons';
 import VoucherField, { type AppliedVoucher } from '../components/VoucherField';
-import { useT } from '../context/LanguageContext';
+import { useLanguage } from '../context/LanguageContext';
+import { eventText } from '../lib/i18n/dict';
 import { paymentsEnabled } from '../lib/payments';
 import { eventTakesPayPal, payPalCartFragment, stashPayPalCart, venmoPossible, type PayPalCart } from '../lib/paypal';
 import SubscribeCalendar from '../components/SubscribeCalendar';
@@ -89,7 +90,7 @@ const RESUME_TTL_MS = 10 * 60 * 1000;
 
 export default function EventDetails() {
   const { id } = useParams();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const { user, isAdmin, signIn, isAuthModalOpen } = useAuth();
   // Set when Buy opened the sign-in modal on this page (state still intact).
   const pendingBuyRef = useRef(false);
@@ -373,16 +374,16 @@ export default function EventDetails() {
   const tierWindowStatus = (
     tier: NonNullable<typeof event>['ticketTiers'] extends (infer T)[] ? T : never,
   ): string | null => {
-    const t = tier as {
+    const w = tier as {
       salesStart?: { toMillis: () => number } | null;
       salesEnd?: { toMillis: () => number } | null;
     };
     const now = Date.now();
-    if (t.salesStart && t.salesStart.toMillis() > now) {
-      return `Sales open at ${formatInTz(new Date(t.salesStart.toMillis()), event?.timezone, { dateStyle: 'medium', timeStyle: 'short' })}.`;
+    if (w.salesStart && w.salesStart.toMillis() > now) {
+      return t('checkout.salesOpenAt', { time: formatInTz(new Date(w.salesStart.toMillis()), event?.timezone, { dateStyle: 'medium', timeStyle: 'short' }) });
     }
-    if (t.salesEnd && t.salesEnd.toMillis() < now) {
-      return 'Sales for this tier have ended.';
+    if (w.salesEnd && w.salesEnd.toMillis() < now) {
+      return t('checkout.salesEnded');
     }
     return null;
   };
@@ -458,7 +459,7 @@ export default function EventDetails() {
   const answersReady = (): boolean => {
     if (!asksQuestions || Object.keys(answerProblems).length === 0) return true;
     setShowAnswerErrors(true);
-    toast({ kind: 'info', message: 'Answer the organizer\'s questions first.' });
+    toast({ kind: 'info', message: t('checkout.answerFirst') });
     questionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return false;
   };
@@ -481,7 +482,7 @@ export default function EventDetails() {
     try {
       sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
     } catch { /* storage blocked */ }
-    toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
+    toast({ kind: 'info', message: t('checkout.signInToGrab') });
     await signIn();
   };
 
@@ -515,13 +516,13 @@ export default function EventDetails() {
       }
       toast({
         kind: 'success',
-        title: issued > 1 ? `${issued} tickets on their way` : 'Your ticket is on its way',
-        message: `Check ${email} for your claim link${issued > 1 ? 's' : ''}.`,
+        title: issued > 1 ? t('checkout.sentManyTitle', { n: issued }) : t('checkout.sentOneTitle'),
+        message: t(issued > 1 ? 'checkout.checkEmailMany' : 'checkout.checkEmailOne', { email }),
       });
     } catch (err: any) {
       console.error('Guest free claim failed:', err);
       seatTaken(err);
-      toast({ kind: 'error', message: err?.message || 'Could not send your tickets.' });
+      toast({ kind: 'error', message: err?.message || t('checkout.sendFailed') });
     } finally {
       setPurchasing(false);
     }
@@ -607,7 +608,7 @@ export default function EventDetails() {
       console.error('Checkout failed:', err);
       seatTaken(err);
       priceMoved(err);
-      toast({ kind: 'error', message: err?.message || 'Could not start checkout.' });
+      toast({ kind: 'error', message: err?.message || t('checkout.startFailed') });
       setPurchasing(false);
     }
   };
@@ -615,7 +616,7 @@ export default function EventDetails() {
   const handlePurchase = async () => {
     if (!event) return;
     if (seatedSelected && seatSel.length === 0) {
-      toast({ kind: 'info', message: 'Pick your seats on the map first.' });
+      toast({ kind: 'info', message: t('checkout.pickSeats') });
       return;
     }
     // Tell a buyer paid tickets aren't on sale yet BEFORE asking them to sign in.
@@ -625,7 +626,7 @@ export default function EventDetails() {
     }
     // Timed entry: a slot first (mig 20261030150000).
     if (slotTier && !slotId) {
-      toast({ kind: 'info', message: 'Pick a date and time slot first.' });
+      toast({ kind: 'info', message: t('checkout.pickSlot') });
       return;
     }
     // Checkout questions: answered before checkout, signed in or not.
@@ -654,7 +655,7 @@ export default function EventDetails() {
     // (voucher-unlocked) tier that isn't loaded would charge the wrong price.
     const tier = selectedTierId ? allTiers.find((t) => t.id === selectedTierId) : allTiers[0];
     if (!tier?.id) {
-      toast({ kind: 'error', message: selectedTierId ? 'That ticket type is no longer available. Pick another.' : 'No ticket tier available for this event yet.' });
+      toast({ kind: 'error', message: selectedTierId ? t('checkout.tierGone') : t('checkout.noTier') });
       return;
     }
     // Matched seats: save the optional quiz first (per account and tier; copied
@@ -664,7 +665,7 @@ export default function EventDetails() {
       try {
         await saveIntake(tier.id, answersBody(quiz, { tags: matchedTier.quizTags, languages: matchedTier.quizLanguages }));
       } catch (err: any) {
-        toast({ kind: 'error', message: err?.message || 'Check your answers.' });
+        toast({ kind: 'error', message: err?.message || t('checkout.checkAnswers') });
         return;
       }
     }
@@ -775,7 +776,7 @@ export default function EventDetails() {
       navigate(`/my-tickets?claimed=${ids.length}`);
     } catch (err: any) {
       console.error('Free claim failed:', err);
-      toast({ kind: 'error', message: err?.message || 'Could not reserve tickets. Please try again.' });
+      toast({ kind: 'error', message: err?.message || t('checkout.reserveFailed') });
     } finally {
       setPurchasing(false);
     }
@@ -801,7 +802,7 @@ export default function EventDetails() {
     if (!saved || saved.id !== event.id || !saved.at || Date.now() - saved.at > RESUME_TTL_MS) return;
     if (saved.tierId && (event.ticketTiers ?? []).some((t) => t.id === saved!.tierId)) setSelectedTierId(saved.tierId);
     if (saved.qty && saved.qty > 0) setQuantity(Math.min(maxPerOrder, saved.qty));
-    toast({ kind: 'info', message: "You're signed in. Check your tickets and tap Buy to finish." });
+    toast({ kind: 'info', message: t('checkout.signedInFinish') });
     buyCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, event?.id]);
@@ -852,7 +853,7 @@ export default function EventDetails() {
         await navigator.share(shareData);
       } else {
         // Clipboard API first, execCommand after (in-app browsers often refuse the API).
-        if (await copyText(window.location.href)) toast({ kind: 'success', message: 'Link copied to clipboard.' });
+        if (await copyText(window.location.href)) toast({ kind: 'success', message: t('checkout.linkCopied') });
         else toast({ kind: 'info', message: window.location.href });
       }
     } catch (err) {
@@ -935,8 +936,9 @@ export default function EventDetails() {
     window.location.href = `sms:?&body=${encodeURIComponent(text)}`;
   };
 
-  if (loading) return <div className="wall min-h-screen"><div className="max-w-7xl mx-auto p-24 text-center type text-white/50 uppercase tracking-[0.3em] animate-pulse">loading experience details…</div></div>;
-  if (!event) return <div className="wall min-h-screen"><div className="max-w-7xl mx-auto p-20 text-center type text-white/50 uppercase tracking-widest text-xs">event not found.</div></div>;
+  if (loading) return <div className="wall min-h-screen"><div className="max-w-7xl mx-auto p-24 text-center type text-white/50 uppercase tracking-[0.3em] animate-pulse">{t('page.loading')}</div></div>;
+  if (!event) return <div className="wall min-h-screen"><div className="max-w-7xl mx-auto p-20 text-center type text-white/50 uppercase tracking-widest text-xs">{t('page.notFound')}</div></div>;
+  const shown = eventText(event, lang);
 
   // Helper: live sold/capacity for a given tier from the sub-collection,
   // falling back to the embedded values if the sub-collection hasn't loaded
@@ -1081,7 +1083,9 @@ export default function EventDetails() {
                     {ageLabel(event.minAge)}
                   </span>
                 )}
-                <h1 className="disp text-5xl md:text-7xl tracking-tight leading-[0.85]">{event.title}</h1>
+                {/* The organizer's Spanish title for a Spanish visitor (mig 20261114130000), else the default. */}
+                <h1 className="disp text-5xl md:text-7xl tracking-tight leading-[0.85]"
+                  lang={shown.title !== event.title ? 'es' : undefined}>{shown.title}</h1>
                 {event.summary && (
                   <p className="type text-base md:text-lg text-white/80 mt-3 max-w-2xl">{event.summary}</p>
                 )}
@@ -1094,7 +1098,7 @@ export default function EventDetails() {
                    <Calendar className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">date &amp; time</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('page.dateTime')}</p>
                    <p className="disp text-xl tracking-tight">{formatInTz(event.date.toDate(), event.timezone, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
                    {event.date && eventStatus !== 'cancelled' && (
                      <p className="type text-[11px] text-brand-primary uppercase tracking-widest mt-1">
@@ -1146,13 +1150,13 @@ export default function EventDetails() {
                    <MapPin className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">location</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('page.location')}</p>
                    <p className="disp text-xl tracking-tight">{privateLoc ? pubLoc.title : event.location}</p>
                    {privateLoc && pubLoc.detail && <p className="type text-xs text-white/70 mt-1">{pubLoc.detail}</p>}
                    {pubLoc.note && <p className="type text-xs text-white/60 mt-1">{pubLoc.note}</p>}
                    {isOnline(event.format) && (
                      <p className="type text-xs text-white/60 mt-1">
-                       {event.format === 'hybrid' ? 'Also online. ' : ''}Ticket holders get the join link on their ticket.
+                       {event.format === 'hybrid' ? `${t('page.alsoOnline')} ` : ''}{t('page.onlineJoin')}
                      </p>
                    )}
                 </div>
@@ -1171,7 +1175,7 @@ export default function EventDetails() {
                 <EventArtistLineup lineup={lineup} timezone={event.timezone} />
               ) : event.performers && event.performers.length > 0 ? (
                 <div className="p-7 bg-[#111] sm:col-span-2">
-                  <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">performers</p>
+                  <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('page.performers')}</p>
                   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
                     {event.performers.map((name, i) => {
                       const links = linksForArtist(name, event.artistLinks);
@@ -1198,7 +1202,7 @@ export default function EventDetails() {
                    <Tag className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">genres</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('page.genres')}</p>
                    <p className="disp text-xl tracking-tight">
                       {event.genres?.join(', ') || event.category}
                       {event.subgenres && event.subgenres.length > 0 && <span className="text-white/60 ml-2">({event.subgenres.join(', ')})</span>}
@@ -1208,10 +1212,12 @@ export default function EventDetails() {
             </div>
 
             <div className="mb-14">
-              <h2 className="disp text-3xl tracking-tight mb-6 border-l-4 border-brand-primary pl-4">ABOUT THE EVENT</h2>
+              <h2 className="disp text-3xl tracking-tight mb-6 border-l-4 border-brand-primary pl-4">{t('page.about')}</h2>
               {/* Markdown "About" when the organizer wrote one (rendered from an
                   allowlist, never as HTML); else the plain description. */}
-              {event.descriptionMd?.trim() ? (
+              {shown.description ? (
+                <p lang="es" className="type text-white/60 text-base leading-relaxed whitespace-pre-wrap">{shown.description}</p>
+              ) : event.descriptionMd?.trim() ? (
                 <RichText source={event.descriptionMd} className="type text-white/60 text-base leading-relaxed space-y-4" />
               ) : (
                 <p className="type text-white/60 text-base leading-relaxed whitespace-pre-wrap">{event.description}</p>
@@ -1231,8 +1237,8 @@ export default function EventDetails() {
                     {(org?.name || 'O').charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">presented by</p>
-                    <h3 className="disp text-2xl tracking-tight">{org?.name || 'Event Organizer'}</h3>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">{t('page.presentedBy')}</p>
+                    <h3 className="disp text-2xl tracking-tight">{org?.name || t('page.organizer')}</h3>
                     {org?.marketing?.socials && Object.values(org.marketing.socials).some(Boolean) ? (
                       <SocialLinks socials={org.marketing.socials} className="flex items-center gap-3 mt-2" />
                     ) : null}
@@ -1253,10 +1259,10 @@ export default function EventDetails() {
                   <LinkOutBuyCard event={event} linkOut={event.linkOut}
                     onBuy={() => trackPixelEvent('InitiateCheckout', { content_ids: [event.id], content_name: event.title })} />
                 ) : !locationSalesOpen ? (
-                  <p role="status" className="type text-sm text-white/80">Tickets go on sale once the location is announced.</p>
+                  <p role="status" className="type text-sm text-white/80">{t('checkout.salesAfterLocation')}</p>
                 ) : (<>
                 <div className="mb-8">
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">{t('checkout.price')}</p>
                     {/* The order total: tickets plus add-ons (what Stripe will charge). */}
                     <p className="disp text-6xl neon tracking-tight">
                       {priceToDisplay * quantity + addonSel.totalCents / 100 === 0
@@ -1269,13 +1275,14 @@ export default function EventDetails() {
                       </p>
                     )}
                     <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
+                      {/* All-in price wording: REVIEW_KEYS (lib/i18n/dict.ts). */}
                       {feesIncluded.length > 0
-                        ? `all-in · incl. fees${selectedTier?.exclusiveTaxPercent ? ' & tax' : ''} · nothing added at checkout`
-                        : selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
+                        ? t(selectedTier?.exclusiveTaxPercent ? 'checkout.allInFeesTax' : 'checkout.allInFees')
+                        : t(selectedTier?.exclusiveTaxPercent ? 'checkout.allInTax' : 'checkout.allIn')}
                     </p>
                     {feesIncluded.length > 0 && (
                       <p className="type mt-1 text-[11px] text-white/50">
-                        Each ticket includes {feesIncluded.map((f) => `${formatCurrency(f.amount, event.currency)} ${f.name.toLowerCase()}`).join(', ')}.
+                        {t('checkout.feesIncluded', { fees: feesIncluded.map((f) => `${formatCurrency(f.amount, event.currency)} ${f.name.toLowerCase()}`).join(', ') })}
                       </p>
                     )}
                     {selectedTier && (() => {
@@ -1299,7 +1306,7 @@ export default function EventDetails() {
                       const nextAllIn = tierAllInPrice(selectedTier, next.price);
                       return (
                         <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent">
-                          ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
+                          ⏱ {t('checkout.priceRises', { amount: formatCurrency(nextAllIn, event.currency) })}{' '}
                           {formatInTz(new Date(next.startsAt), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
                       );
@@ -1351,7 +1358,7 @@ export default function EventDetails() {
                          {tier.accessible && (
                            <p className="type text-[11px] text-sky-200 mb-3 flex items-start gap-1.5">
                              <AccessIcon className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
-                             <span><span className="font-bold">Accessible</span>{tier.accessibleNote ? ` · ${tier.accessibleNote}` : ''}</span>
+                             <span><span className="font-bold">{t('checkout.accessible')}</span>{tier.accessibleNote ? ` · ${tier.accessibleNote}` : ''}</span>
                            </p>
                          )}
                          <TableTierInfo eventId={event.id} tierId={tier.id} price={buyerTierPrice(tier)} currency={event.currency} />
@@ -1387,7 +1394,7 @@ export default function EventDetails() {
                       </p>
                       {m.quizEnabled && m.status === 'open' && (user
                         ? <Suspense fallback={null}><MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} /></Suspense>
-                        : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
+                        : <p className="type text-[11px] text-white/50">{t('checkout.quizLater')}</p>)}
                     </div>
                   );
                 })()}
@@ -1404,7 +1411,7 @@ export default function EventDetails() {
                 {/* Series: the other dates of this show. */}
                 {moreDates.length > 0 && (
                   <div className="mb-8">
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">More dates</p>
+                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('page.moreDates')}</p>
                     <div className="flex flex-wrap gap-2">
                       {moreDates.slice(0, 8).map((d) => (
                         <button key={d.id} type="button" onClick={() => navigate(`/event/${d.id}`)}
@@ -1418,7 +1425,7 @@ export default function EventDetails() {
 
                 {seatedSelected && (
                 <div className="mb-8">
-                  <Suspense fallback={<p className="type text-[11px] text-white/50 uppercase tracking-widest">Loading the seat map…</p>}>
+                  <Suspense fallback={<p className="type text-[11px] text-white/50 uppercase tracking-widest">{t('checkout.loadingSeats')}</p>}>
                   <SeatPicker
                     eventId={event.id}
                     tiers={visibleTiers.filter((x) => seatedTierIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name, price: buyerTierPrice(x) }))}
@@ -1436,7 +1443,7 @@ export default function EventDetails() {
 
                 {(!soldOut || canBypass) && !seatedSelected && (
                 <div className="mb-8">
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('checkout.quantity')}</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
                       <button
                         type="button"
@@ -1456,7 +1463,7 @@ export default function EventDetails() {
                         <Plus className="w-4 h-4 text-white" />
                       </button>
                    </div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
+                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-2">{t('checkout.limits', { perOrder: maxPerOrder, perAccount: maxPerAccount })}</p>
                 </div>
                 )}
 
@@ -1473,7 +1480,7 @@ export default function EventDetails() {
                          value={attendeeNames[i] ?? ''}
                          maxLength={80}
                          onChange={(e) => setAttendeeNames((prev) => { const next = [...prev]; next[i] = e.target.value; return next; })}
-                         aria-label={`Name on ticket ${i + 1}`}
+                         aria-label={t('checkout.nameOnTicket', { n: i + 1 })}
                          placeholder={i === 0 ? t('event.ticketYou', { n: 1, name: user?.displayName || t('event.you') }) : t('event.ticketFriend', { n: i + 1 })}
                          className="type w-full bg-black border border-white/10 px-3 py-2.5 text-white text-sm placeholder-white/25 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60"
                        />
@@ -1500,7 +1507,7 @@ export default function EventDetails() {
                 <div className="space-y-6 mb-6">
                   <div className="divide-y divide-white/5 border-t border-white/5">
                     <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
-                      <span className="text-white/60">status</span>
+                      <span className="text-white/60">{t('checkout.status')}</span>
                       <span className={soldOut ? 'text-brand-accent' : paidNotOnSale ? 'text-white/60' : 'neon'}>
                         {soldOut ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon') : t('event.available')}
                       </span>
@@ -1508,7 +1515,7 @@ export default function EventDetails() {
                     {/* Paid tickets that can't be bought yet: no "N available" next to "On sale soon". */}
                     {!paidNotOnSale && (
                     <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
-                      <span className="text-white/60">tickets available</span>
+                      <span className="text-white/60">{t('checkout.ticketsAvailable')}</span>
                       <span className="text-white">
                         {selectedTier
                           ? (() => {
@@ -1560,7 +1567,7 @@ export default function EventDetails() {
                   quantity={quantity}
                   signedIn={!!user}
                   onIssued={(n) => {
-                    toast({ kind: 'success', message: `${n} ticket${n === 1 ? '' : 's'} added to My Tickets.` });
+                    toast({ kind: 'success', message: t(n === 1 ? 'checkout.addedOneToMyTickets' : 'checkout.addedToMyTickets', { n }) });
                     window.location.href = publicUrl('my-tickets');
                   }}
                 />
@@ -1597,7 +1604,7 @@ export default function EventDetails() {
                     onClick={goToPayPal}
                     className="disp w-full mt-3 border border-white/30 text-white py-3 text-base tracking-wide hover:border-white transition-colors disabled:opacity-40"
                   >
-                    {venmoPossible(event.currency) ? 'Pay with Venmo / PayPal' : 'Pay with PayPal'}
+                    {venmoPossible(event.currency) ? t('checkout.payVenmo') : t('checkout.payPal')}
                   </button>
                 )}
                 {/* Group buy v2 (mig 20261108120000): friends each pay their own seat. Timed

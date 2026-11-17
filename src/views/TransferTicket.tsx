@@ -8,12 +8,14 @@ import { queueEmail } from '../lib/mail';
 import { publicUrl } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useToast } from '../context/ToastContext';
+import { useT } from '../context/LanguageContext';
 
 export default function TransferTicket() {
   const { id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const t = useT();
   const [ticket, setTicket] = useState<Ticket | null>(null);
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,7 +64,7 @@ export default function TransferTicket() {
     if (normalisedEmail === user.email?.toLowerCase()) {
       toast({
         kind: 'warn',
-        message: "You can't transfer a ticket to your own account.",
+        message: t('transfer.self'),
       });
       setSending(false);
       return;
@@ -92,12 +94,12 @@ export default function TransferTicket() {
       setCompletedReceiverEmail(normalisedEmail);
       toast({
         kind: 'success',
-        title: 'Transfer sent',
-        message: `Sent to ${normalisedEmail}. We emailed you a receipt; copy the link to send via SMS or anywhere else.`,
+        title: t('transfer.sentTitle'),
+        message: t('transfer.sentBody', { email: normalisedEmail }),
       });
     } catch (error: any) {
       console.error('Transfer failed:', error);
-      toast({ kind: 'error', message: error?.message || 'Could not send the transfer.' });
+      toast({ kind: 'error', message: error?.message || t('transfer.failed') });
     } finally {
       setSending(false);
     }
@@ -105,12 +107,12 @@ export default function TransferTicket() {
 
   if (loading) return (
     <div className="wall min-h-screen flex items-center justify-center">
-      <p className="disp text-3xl tracking-tight text-white/20 animate-pulse" style={{ transform: 'skewX(-4deg)' }}>LOADING TICKET…</p>
+      <p className="disp text-3xl tracking-tight text-white/20 animate-pulse" style={{ transform: 'skewX(-4deg)' }}>{t('transfer.loading')}</p>
     </div>
   );
   if (!ticket || ticket.ownerId !== user?.uid) return (
     <div className="wall min-h-screen flex items-center justify-center">
-      <p className="disp text-4xl tracking-tight text-brand-accent" style={{ transform: 'skewX(-4deg)' }}>ACCESS DENIED</p>
+      <p className="disp text-4xl tracking-tight text-brand-accent" style={{ transform: 'skewX(-4deg)' }}>{t('transfer.denied')}</p>
     </div>
   );
 
@@ -126,7 +128,7 @@ export default function TransferTicket() {
         setTimeout(() => setLinkCopied(false), 2500);
       } catch (err) {
         console.warn('Clipboard write failed:', err);
-        toast({ kind: 'warn', message: 'Copy failed — long-press the link to copy manually.' });
+        toast({ kind: 'warn', message: t('transfer.copyFailed') });
       }
     };
     return (
@@ -134,8 +136,8 @@ export default function TransferTicket() {
         <div className="max-w-2xl mx-auto px-4 py-16 relative z-10">
           <div className="flex items-center justify-between mb-14">
             <div>
-              <p className="type text-brand-primary text-[12px] uppercase tracking-widest mb-2">// transfer sent</p>
-              <h1 className="disp text-5xl tracking-tight leading-none" style={{ transform: 'skewX(-4deg)' }}>SHARE THE LINK</h1>
+              <p className="type text-brand-primary text-[12px] uppercase tracking-widest mb-2">{t('transfer.kickerSent')}</p>
+              <h1 className="disp text-5xl tracking-tight leading-none" style={{ transform: 'skewX(-4deg)' }}>{t('transfer.shareTitle')}</h1>
             </div>
             <div className="w-14 h-14 bg-brand-primary flex items-center justify-center">
               <Check className="text-black w-6 h-6" />
@@ -143,9 +145,9 @@ export default function TransferTicket() {
           </div>
 
           <div className="bg-[#111] border border-white/10 p-9 mb-8">
-            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">sent to</p>
+            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">{t('transfer.sentTo')}</p>
             <p className="disp text-3xl tracking-tight leading-none mb-8 break-all">{completedReceiverEmail}</p>
-            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">claim link</p>
+            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">{t('transfer.claimLink')}</p>
             <div className="bg-black border border-white/10 p-5 flex items-center justify-between gap-3 mb-6">
               <code className="type text-[11px] text-white/70 break-all flex-1">{claimUrl}</code>
               <button
@@ -156,11 +158,11 @@ export default function TransferTicket() {
                 }`}
               >
                 {linkCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                {linkCopied ? 'COPIED' : 'COPY'}
+                {linkCopied ? t('transfer.copied') : t('transfer.copy')}
               </button>
             </div>
             <p className="type text-[12px] text-white/60 leading-relaxed">
-              We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them.
+              {t('transfer.shareBody', { email: completedReceiverEmail })}
             </p>
           </div>
 
@@ -169,7 +171,7 @@ export default function TransferTicket() {
             onClick={() => navigate('/my-tickets')}
             className="disp w-full bg-white text-black py-4 text-xl tracking-wide hover:bg-brand-primary transition-all"
           >
-            BACK TO TICKETS
+            {t('transfer.back')}
           </button>
         </div>
       </div>
@@ -181,8 +183,8 @@ export default function TransferTicket() {
       <div className="max-w-2xl mx-auto px-4 py-16 relative z-10">
         <div className="flex items-center justify-between mb-14">
           <div>
-            <p className="type text-brand-primary text-[12px] uppercase tracking-widest mb-2">// transfer ticket</p>
-            <h1 className="disp text-5xl tracking-tight leading-none" style={{ transform: 'skewX(-4deg)' }}>SEND TICKET</h1>
+            <p className="type text-brand-primary text-[12px] uppercase tracking-widest mb-2">{t('transfer.kicker')}</p>
+            <h1 className="disp text-5xl tracking-tight leading-none" style={{ transform: 'skewX(-4deg)' }}>{t('transfer.title')}</h1>
           </div>
           <div className="w-14 h-14 bg-white flex items-center justify-center">
             <Send className="text-black w-6 h-6" />
@@ -195,15 +197,15 @@ export default function TransferTicket() {
                 <img src={event?.image} alt="" className="xerox w-full h-full object-cover" />
              </div>
              <div>
-                <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-1">ticket details</p>
+                <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-1">{t('transfer.details')}</p>
                 <h2 className="disp text-3xl tracking-tight leading-none mb-2">{event?.title}</h2>
-                <p className="type text-[11px] text-brand-primary uppercase tracking-widest">tier: {ticket.tierName || 'GENERAL'}</p>
+                <p className="type text-[11px] text-brand-primary uppercase tracking-widest">{t('transfer.tier', { tier: ticket.tierName || t('transfer.general') })}</p>
              </div>
           </div>
 
           <form onSubmit={handleTransfer} className="space-y-8">
             <div className="space-y-3">
-              <label htmlFor="transfer-email" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">recipient email</label>
+              <label htmlFor="transfer-email" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">{t('transfer.email')}</label>
               <div className="relative">
                 <UserPlus className="absolute left-5 top-1/2 -translate-y-1/2 text-brand-primary w-5 h-5" aria-hidden="true" />
                 <input
@@ -211,7 +213,7 @@ export default function TransferTicket() {
                   required
                   type="email"
                   autoComplete="email"
-                  placeholder="enter recipient email address"
+                  placeholder={t('transfer.emailPlaceholder')}
                   className="type w-full bg-white/5 border border-white/10 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
                   value={recipientEmail}
                   onChange={(e) => setRecipientEmail(e.target.value)}
@@ -220,23 +222,23 @@ export default function TransferTicket() {
             </div>
 
             <div className="space-y-3">
-              <label htmlFor="transfer-name" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">recipient name (optional)</label>
+              <label htmlFor="transfer-name" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">{t('transfer.name')}</label>
               <input
                 id="transfer-name"
                 type="text"
                 maxLength={100}
                 autoComplete="off"
-                placeholder="who you're sending it to, for your receipt"
+                placeholder={t('transfer.namePlaceholder')}
                 className="type w-full bg-white/5 border border-white/10 py-5 px-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
               />
-              <p className="type text-[11px] text-white/60 ml-1">You'll get an email receipt now, and another when it's accepted, saying who claimed it.</p>
+              <p className="type text-[11px] text-white/60 ml-1">{t('transfer.receiptHint')}</p>
             </div>
 
             <div className="p-6 bg-black border border-white/5 flex items-start gap-4">
                <ShieldAlert className="w-6 h-6 text-brand-accent shrink-0" />
-               <p className="type text-[12px] text-white/60 leading-relaxed">Warning: Sending this ticket permanently removes it from your account. The recipient receives it instantly once you authorize. This cannot be undone.</p>
+               <p className="type text-[12px] text-white/60 leading-relaxed">{t('transfer.warning')}</p>
             </div>
 
             <button
@@ -244,7 +246,7 @@ export default function TransferTicket() {
               disabled={sending}
               className="disp w-full bg-brand-primary text-black py-4 text-xl tracking-wide hover:scale-[1.01] transition-transform disabled:opacity-20"
             >
-              {sending ? 'SENDING…' : 'SEND TICKET'}
+              {sending ? t('transfer.sending') : t('transfer.send')}
             </button>
           </form>
         </div>

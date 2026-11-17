@@ -434,6 +434,49 @@ await check('edit event: Promote on Discord', async (page, run) => {
   exos_event_quotas: () => [],
 }, fns: discordFns }) });
 
+// claude/exos-spanish (mig 20261114130000): the buyer checkout and the door in
+// Spanish, blocking, with <html lang="es"> checked (axe's html-has-lang /
+// valid-lang rules read it too).
+const esInit = (page) => page.addInitScript(() => localStorage.setItem('exos.lang', 'es'));
+const assertEs = async (page) => {
+  const l = await page.evaluate(() => document.documentElement.lang);
+  if (l !== 'es') throw new Error('<html lang> is ' + l);
+};
+await check('es: checkout (guest email dialog)', async (page, run) => {
+  await esInit(page);
+  await page.goto(BASE + '/checkout?products=' + TIER2 + ':2');
+  await page.waitForURL(/\/event\//, { timeout: 8000 });
+  await text(page, 'Fall Party');
+  await page.getByRole('button', { name: /Comprar Entradas/i }).first().click();
+  await page.getByRole('dialog').filter({ hasText: '¿A dónde te enviamos tus entradas?' }).waitFor({ timeout: 8000 });
+  await assertEs(page);
+  await run();
+}, { mock: checkoutMock });
+
+await check('es: door scanner (/checkin)', async (page, run) => {
+  await esInit(page);
+  await page.goto(BASE + '/checkin/' + EV);
+  await text(page, 'Acceso en puerta');
+  await page.waitForLoadState('networkidle');
+  await assertEs(page);
+  await run('tickets');
+  await page.getByRole('tab', { name: 'Vender' }).click();
+  await text(page, 'Vender en la puerta');
+  await page.waitForLoadState('networkidle');
+  await run('sell');
+}, { signedIn: true, mock: ownerMock({ rpcs: {
+  exos_event_door_extras: () => ({ tables: [], ticket_access: {}, lists: [], guests: [] }),
+  exos_event_checkin_roster: () => [], exos_event_checkin_roster_since: () => [], exos_event_door_roster: () => [],
+  exos_server_time: () => new Date().toISOString(),
+}, fns: { 'exos-pos': (b) => (b.action === 'walkup_catalog'
+  ? { body: { data: { event: { id: EV, name: 'Fall Party', status: 'published', currency: 'USD' }, role: 'owner', can_comp: true,
+      card: { connected: false, message: null }, fee_base: 'card-tickets', questions: [],
+      tiers: [{ tier_id: 'f0f0f0f0-0000-4000-8000-000000000001', name: 'Door GA', price_cents: 2500, price_source: 'door', step_name: null,
+        step_remaining: null, tax: null, unit_total_cents: 2500, remaining: 42 }],
+      drawers: [{ id: 'f0f0f0f0-0000-4000-8000-0000000000d1', device_id: null, mine: true, opened_at: new Date().toISOString(),
+        open_float_cents: 10000, cash_cents: 10000 }] } } }
+  : { body: { data: [] } }) } }) });
+
 await browser.close();
 
 let failed = false;

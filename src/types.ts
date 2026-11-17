@@ -352,6 +352,9 @@ export interface Event {
   // Who may check people in by name at the door (mig 20260929130000):
   // 'staff' (default), 'managers' or 'off'. Undefined until the column exists.
   doorNameCheckin?: import('./lib/door/nameCheckinMode').NameCheckinMode;
+  // The organizer's Spanish title / description (mig 20261114130000); {} or
+  // undefined when there is none (or before the column exists).
+  i18n?: import('./lib/i18n/dict').EventI18n;
   // Store page content (mig 20260929120000). All undefined until the columns
   // exist on the database this build talks to.
   summary?: string;

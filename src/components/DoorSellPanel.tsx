@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Banknote, CreditCard, Gift, Loader2, Mail, Minus, Plus, Printer, QrCode, RotateCcw, Ticket, Wallet } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { useLanguage } from '../context/LanguageContext';
 import { formatCents } from '../lib/refunds';
 import { parseCash } from '../lib/drawerRecount';
 import {
@@ -58,6 +59,13 @@ function downloadPdf(bytes: Uint8Array, name: string) {
 
 export default function DoorSellPanel({ eventId }: { eventId: string }) {
   const { toast } = useToast();
+  // The Sell tab in the device's language (lib/i18n/pos.ts); English keeps the shared texts.
+  const { t, lang } = useLanguage();
+  const cardText = (state: CardSaleState, decline?: string | null) =>
+    lang === 'en' ? cardStateText(state, decline) : t(`pos.card.${state}`);
+  const missingText = (m: typeof missing) => lang === 'en'
+    ? `${missingAnswersText(m)}. Ask them, or skip the questions.`
+    : t('pos.missing', { n: m.length, names: m.slice(0, 3).map((x) => (x.ticket ? `${x.label} (${t('questions.ticket', { n: x.ticket })})` : x.label)).join(', ') });
   const [cat, setCat] = useState<WalkupCatalog | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [sales, setSales] = useState<WalkupOrder[]>([]);
@@ -135,7 +143,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
 
   const sell = async (skipQuestions = false) => {
     if (!cat || !tier || !quote) return;
-    if (needsDrawer && !drawer) { toast({ kind: 'error', message: 'Open a cash drawer first.' }); return; }
+    if (needsDrawer && !drawer) { toast({ kind: 'error', message: t('pos.toastNeedDrawer') }); return; }
     setBusy(true);
     try {
       const o = await sellWalkup({
@@ -149,7 +157,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       setCodeAt(0);
       setSendTo(o.buyer_email ?? '');
       resetSale();
-      toast({ kind: 'success', message: `Sold ${o.quantity} × ${o.tier_name}${o.questions_skipped ? ' (questions skipped)' : ''}` });
+      toast({ kind: 'success', message: `${t('pos.toastSold', { qty: o.quantity, tier: o.tier_name })}${o.questions_skipped ? ' (questions skipped)' : ''}` });
       void load();
     } catch (e) {
       // The same key retries the same sale; a refusal keeps it for a fix and retry.
@@ -167,9 +175,9 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       setCodes(null);
       setCodeAt(0);
       setSendTo(r.order.buyer_email ?? '');
-      toast({ kind: 'success', message: `Paid by card: ${r.order.quantity} × ${r.order.tier_name}` });
+      toast({ kind: 'success', message: t('pos.toastPaidCard', { qty: r.order.quantity, tier: r.order.tier_name }) });
     } else {
-      toast({ kind: 'error', message: cardStateText(r.state, r.decline_code) });
+      toast({ kind: 'error', message: cardText(r.state, r.decline_code) });
     }
     setQty(1); setReceived(null); setName(''); setEmail(''); setDraft(EMPTY_DRAFT); setShowQs(false);
     setOrderKey(newOrderKey());
@@ -278,7 +286,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
     try {
       await emailSale(done.id, sendTo.trim());
       setCodes(null);
-      toast({ kind: 'success', message: `Sent to ${sendTo.trim()}` });
+      toast({ kind: 'success', message: t('pos.toastSentTo', { email: sendTo.trim() }) });
       void load();
     } catch (e) {
       toast({ kind: 'error', message: posErrorText(e) });
@@ -303,7 +311,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       const r = opt.kind === 'refund'
         ? await refundSale(o.id, reason.trim(), opt.override, drawerId)
         : await voidSale(o.id, reason.trim(), drawerId);
-      toast({ kind: 'success', message: r.cash_returned_cents ? `Hand back ${money(r.cash_returned_cents)} from the drawer.` : 'Done.' });
+      toast({ kind: 'success', message: r.cash_returned_cents ? t('pos.toastHandBack', { amount: money(r.cash_returned_cents) }) : t('pos.toastDone') });
       if (done?.id === o.id) { setDone(null); setCodes(null); }
       void load();
     } catch (e) {
@@ -352,7 +360,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
     try {
       const r = await closeDrawer(drawer.id, cents);
       toast({ kind: r.variance_cents === 0 ? 'success' : 'error',
-        message: r.variance_cents === 0 ? 'Drawer balanced.' : `Drawer ${r.variance_cents < 0 ? 'short' : 'over'} ${money(Math.abs(r.variance_cents))}.` });
+        message: r.variance_cents === 0 ? t('pos.toastBalanced') : t(r.variance_cents < 0 ? 'pos.toastShort' : 'pos.toastOver', { amount: money(Math.abs(r.variance_cents)) }) });
       setCountText('');
       void load();
     } catch (e) {
@@ -363,7 +371,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
   };
 
   if (loadErr) return <p role="alert" className="text-sm text-rose-600">{loadErr}</p>;
-  if (!cat) return <p className="text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading the till…</p>;
+  if (!cat) return <p className="text-sm text-slate-400 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> {t('pos.loading')}</p>;
 
   const code = codes?.[codeAt] ?? null;
 
@@ -371,46 +379,46 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
     <div className="space-y-6 text-slate-900">
       {/* After a sale: hand the ticket over. */}
       {done && (
-        <section aria-label="Hand the ticket over" className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 space-y-3">
+        <section aria-label={t('pos.handOver')} className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 space-y-3">
           <p className="text-lg font-black">
-            Sold {done.quantity} × {done.tier_name} · {done.payment_method === 'comp' ? 'comp' : money(done.total_cents)}
+            {t('pos.soldLine', { qty: done.quantity, tier: done.tier_name, amount: done.payment_method === 'comp' ? t('pos.comp') : money(done.total_cents) })}
           </p>
           {code ? (
             <div className="bg-white rounded-xl p-3 flex flex-col items-center gap-2">
               {/* Our own SVG from the print code, as a data URL (no remote image service sees it). */}
-              <img alt="Ticket QR code" width={280} height={280} className="w-full max-w-[280px] h-auto"
+              <img alt={t('pos.qrAlt')} width={280} height={280} className="w-full max-w-[280px] h-auto"
                 src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(qrSvg(code.print_code, 280))}`} />
               <p className="text-xs text-slate-500 text-center">
-                Ticket {codeAt + 1} of {codes!.length}: the buyer photographs this. It gets in once.
+                {t('pos.qrHint', { n: codeAt + 1, total: codes!.length })}
               </p>
               {codes!.length > 1 && (
                 <button type="button" onClick={() => setCodeAt((codeAt + 1) % codes!.length)} className={`${BIG} border border-slate-300 w-full`}>
-                  Next ticket
+                  {t('pos.nextTicket')}
                 </button>
               )}
             </div>
           ) : null}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" disabled={busy} onClick={() => void showQr(done)} className={`${BIG} bg-slate-900 text-white flex items-center justify-center gap-2`}>
-              <QrCode className="w-5 h-5" /> Show QR
+              <QrCode className="w-5 h-5" /> {t('pos.showQr')}
             </button>
             <button type="button" disabled={busy} onClick={() => void print(done)} className={`${BIG} border border-slate-300 bg-white flex items-center justify-center gap-2`}>
-              <Printer className="w-5 h-5" /> Print
+              <Printer className="w-5 h-5" /> {t('pos.print')}
             </button>
           </div>
           <div className="flex gap-2">
             <label className="flex-1">
-              <span className="sr-only">Email the tickets to</span>
-              <input type="email" inputMode="email" value={sendTo} onChange={(e) => setSendTo(e.target.value)} placeholder="Email the tickets"
+              <span className="sr-only">{t('pos.emailTo')}</span>
+              <input type="email" inputMode="email" value={sendTo} onChange={(e) => setSendTo(e.target.value)} placeholder={t('pos.emailPlaceholder')}
                 className={INPUT} />
             </label>
             <button type="button" disabled={busy || !sendTo.trim()} onClick={() => void sendEmail()}
               className={`${BIG} border border-slate-300 bg-white flex items-center gap-2`}>
-              <Mail className="w-5 h-5" /> Send
+              <Mail className="w-5 h-5" /> {t('pos.send')}
             </button>
           </div>
-          <button type="button" onClick={() => { setDone(null); setCodes(null); }} className={`${BIG} w-full bg-emerald-600 text-white`}>
-            New sale
+          <button type="button" onClick={() => { setDone(null); setCodes(null); }} className={`${BIG} w-full bg-emerald-700 text-white`}>
+            {t('pos.newSale')}
           </button>
         </section>
       )}
@@ -418,29 +426,29 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       {/* The sale. */}
       <section aria-labelledby="sell-h" className="space-y-4">
         <h2 id="sell-h" className="text-sm font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
-          <Ticket className="w-4 h-4" /> Sell at the door
+          <Ticket className="w-4 h-4" /> {t('pos.sellAtDoor')}
         </h2>
-        {cat.tiers.length === 0 && <p className="text-sm text-slate-500">This event has no ticket types to sell.</p>}
-        <div role="radiogroup" aria-label="Ticket type" className="grid gap-2">
-          {cat.tiers.map((t) => {
-            const out = t.remaining !== null && t.remaining <= 0;
-            const on = t.tier_id === tierId;
+        {cat.tiers.length === 0 && <p className="text-sm text-slate-500">{t('pos.noTiers')}</p>}
+        <div role="radiogroup" aria-label={t('pos.ticketType')} className="grid gap-2">
+          {cat.tiers.map((tr) => {
+            const out = tr.remaining !== null && tr.remaining <= 0;
+            const on = tr.tier_id === tierId;
             return (
-              <button key={t.tier_id} type="button" role="radio" aria-checked={on} disabled={out}
-                onClick={() => { setTierId(t.tier_id); setQty(1); }}
+              <button key={tr.tier_id} type="button" role="radio" aria-checked={on} disabled={out}
+                onClick={() => { setTierId(tr.tier_id); setQty(1); }}
                 className={`min-h-[60px] rounded-xl border-2 px-4 py-2 text-left flex items-center justify-between gap-3 ${
                   on ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white'} disabled:opacity-40`}>
                 <span>
-                  <span className="block font-black">{t.name}</span>
+                  <span className="block font-black">{tr.name}</span>
                   <span className={`block text-xs ${on ? 'text-white/70' : 'text-slate-500'}`}>
-                    {t.price_source === 'door' ? 'Door price' : t.step_name ? t.step_name : 'Price'}
-                    {t.step_remaining !== null ? ` · ${t.step_remaining} at this price` : ''}
+                    {tr.price_source === 'door' ? t('pos.doorPrice') : tr.step_name ? tr.step_name : t('pos.price')}
+                    {tr.step_remaining !== null ? t('pos.atThisPrice', { n: tr.step_remaining }) : ''}
                   </span>
                 </span>
                 <span className="text-right">
-                  <span className="block text-lg font-black">{money(t.unit_total_cents)}</span>
+                  <span className="block text-lg font-black">{money(tr.unit_total_cents)}</span>
                   <span className={`block text-xs ${on ? 'text-white/70' : 'text-slate-500'}`}>
-                    {out ? 'Sold out' : t.remaining === null ? 'No limit' : `${t.remaining} left`}
+                    {out ? t('pos.soldOut') : tr.remaining === null ? t('pos.noLimit') : t('pos.left', { n: tr.remaining })}
                   </span>
                 </span>
               </button>
@@ -451,40 +459,40 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
         {tier && quote && (
           <>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-bold">Quantity</span>
+              <span className="text-sm font-bold">{t('pos.quantity')}</span>
               <div className="flex items-center gap-2">
-                <button type="button" aria-label="One fewer" disabled={qty <= 1} onClick={() => setQty(qty - 1)}
+                <button type="button" aria-label={t('pos.fewer')} disabled={qty <= 1} onClick={() => setQty(qty - 1)}
                   className="w-14 h-14 rounded-xl border border-slate-300 bg-white flex items-center justify-center disabled:opacity-40">
                   <Minus className="w-5 h-5" />
                 </button>
                 <output aria-live="polite" className="w-10 text-center text-2xl font-black">{qty}</output>
-                <button type="button" aria-label="One more" disabled={qty >= maxQty} onClick={() => setQty(qty + 1)}
+                <button type="button" aria-label={t('pos.more')} disabled={qty >= maxQty} onClick={() => setQty(qty + 1)}
                   className="w-14 h-14 rounded-xl border border-slate-300 bg-white flex items-center justify-center disabled:opacity-40">
                   <Plus className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            <div role="radiogroup" aria-label="Payment" className="grid grid-cols-3 gap-2">
+            <div role="radiogroup" aria-label={t('pos.payment')} className="grid grid-cols-3 gap-2">
               <button type="button" role="radio" aria-checked={payment === 'cash'} onClick={() => setPayment('cash')}
                 className={`${BIG} flex flex-col items-center justify-center gap-1 ${payment === 'cash' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white'}`}>
-                <Banknote className="w-5 h-5" /> Cash
+                <Banknote className="w-5 h-5" /> {t('pos.cash')}
               </button>
               <button type="button" role="radio" aria-checked={payment === 'comp'} disabled={!cat.can_comp}
-                title={cat.can_comp ? undefined : 'Comps need an owner or manager'} onClick={() => setPayment('comp')}
+                title={cat.can_comp ? undefined : t('pos.compsNeedManager')} onClick={() => setPayment('comp')}
                 className={`${BIG} flex flex-col items-center justify-center gap-1 ${payment === 'comp' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white'} disabled:opacity-40`}>
-                <Gift className="w-5 h-5" /> Comp
+                <Gift className="w-5 h-5" /> {t('pos.compButton')}
               </button>
               <button type="button" role="radio" aria-checked={payment === 'card'} disabled={!cat.card.connected || !!cardSale}
-                title={cat.card.connected ? undefined : cat.card.message || WALKUP_CARD_MESSAGE} onClick={() => setPayment('card')}
+                title={cat.card.connected ? undefined : cat.card.message || (lang === 'en' ? WALKUP_CARD_MESSAGE : t('pos.cardOff'))} onClick={() => setPayment('card')}
                 className={`${BIG} flex flex-col items-center justify-center gap-1 ${payment === 'card' ? 'bg-slate-900 text-white' : 'border border-slate-300 bg-white'} disabled:opacity-40`}>
-                <CreditCard className="w-5 h-5" /> Card
+                <CreditCard className="w-5 h-5" /> {t('pos.card')}
               </button>
             </div>
-            {!cat.card.connected && <p className="text-xs text-slate-500">{cat.card.message || WALKUP_CARD_MESSAGE}</p>}
+            {!cat.card.connected && <p className="text-xs text-slate-500">{cat.card.message || (lang === 'en' ? WALKUP_CARD_MESSAGE : t('pos.cardOff'))}</p>}
             {payment === 'card' && readers.length > 1 && (
               <label className="block text-sm">
-                <span className="block font-bold mb-1">Reader</span>
+                <span className="block font-bold mb-1">{t('pos.reader')}</span>
                 <select value={readerId ?? ''} onChange={(e) => setReaderId(e.target.value || null)} className={INPUT}>
                   {readers.map((r) => <option key={r.device_id} value={r.device_id}>{r.label}</option>)}
                 </select>
@@ -493,13 +501,13 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
 
             <div className="rounded-2xl bg-slate-900 text-white p-4">
               <p className="text-xs uppercase tracking-widest text-white/60">
-                {payment === 'comp' ? 'Comp' : payment === 'card' ? `Due · on ${reader?.label ?? 'the reader'}` : 'Due'}
+                {payment === 'comp' ? t('pos.compButton') : payment === 'card' ? t('pos.dueOn', { reader: reader?.label ?? t('pos.theReader') }) : t('pos.due')}
               </p>
               <p className="text-4xl font-black">{money(payment === 'comp' ? 0 : quote.cashDueCents)}</p>
-              {quote.taxCents > 0 && <p className="text-xs text-white/60">incl. {money(quote.taxCents)} tax</p>}
+              {quote.taxCents > 0 && <p className="text-xs text-white/60">{t('pos.inclTax', { amount: money(quote.taxCents) })}</p>}
               {payment === 'cash' && quote.cashDueCents > 0 && (
                 <>
-                  <div className="grid grid-cols-2 gap-2 mt-3" aria-label="Cash received">
+                  <div className="grid grid-cols-2 gap-2 mt-3" aria-label={t('pos.cashReceived')}>
                     {quickCash(quote.cashDueCents).map((c) => (
                       <button key={c} type="button" onClick={() => setReceived(c)}
                         className={`min-h-[48px] rounded-xl font-black ${received === c ? 'bg-white text-slate-900' : 'bg-white/10'}`}>
@@ -509,7 +517,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                   </div>
                   {change && (
                     <p aria-live="polite" className="mt-3 text-2xl font-black">
-                      {change.shortCents > 0 ? `Still ${money(change.shortCents)} short` : `Change ${money(change.changeCents)}`}
+                      {change.shortCents > 0 ? t('pos.short', { amount: money(change.shortCents) }) : t('pos.change', { amount: money(change.changeCents) })}
                     </p>
                   )}
                 </>
@@ -518,18 +526,18 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
 
             <div className="grid gap-2">
               <label className="block text-sm">
-                <span className="block font-bold mb-1">Name (optional)</span>
+                <span className="block font-bold mb-1">{t('pos.nameOptional')}</span>
                 <input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} autoComplete="off" className={INPUT} />
               </label>
               <label className="block text-sm">
-                <span className="block font-bold mb-1">Email (optional: sends the ticket)</span>
+                <span className="block font-bold mb-1">{t('pos.emailOptional')}</span>
                 <input type="email" inputMode="email" value={email} maxLength={254} onChange={(e) => setEmail(e.target.value)} autoComplete="off" className={INPUT} />
               </label>
               {asks && (
                 <div>
                   <button type="button" aria-expanded={showQs} onClick={() => setShowQs(!showQs)} className="text-sm font-bold underline min-h-[44px]"
                     data-testid="walkup-questions-toggle">
-                    {showQs ? 'Hide' : 'Ask'} the event's questions{missing.length > 0 ? ` (${missing.length} required)` : ''}
+                    {t(showQs ? 'pos.hideQuestions' : 'pos.askQuestions')}{missing.length > 0 ? t('pos.requiredCount', { n: missing.length }) : ''}
                   </button>
                   {showQs && (
                     <CheckoutQuestionsForm questions={doorQuestions(cat.questions)} ticketTiers={ticketTiers} value={draft} onChange={setDraft}
@@ -539,34 +547,34 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
               )}
             </div>
 
-            {needsDrawer && !drawer && <p role="alert" className="text-sm text-amber-700">Open a cash drawer below to take cash.</p>}
+            {needsDrawer && !drawer && <p role="alert" className="text-sm text-amber-700">{t('pos.openDrawerFirst')}</p>}
             {missing.length > 0 && !cardSale && (
-              <p className="text-sm text-amber-700" data-testid="walkup-missing">{missingAnswersText(missing)}. Ask them, or skip the questions.</p>
+              <p className="text-sm text-amber-700" data-testid="walkup-missing">{missingText(missing)}</p>
             )}
             {cardSale ? (
               <div role="status" aria-live="polite" className="rounded-2xl border-2 border-sky-500 bg-sky-50 p-4 space-y-3">
                 <p className="text-lg font-black flex items-center gap-2">
                   {!cardStateDone(cardSale.state) && <Loader2 className="w-5 h-5 animate-spin" />}
-                  {money(cardSale.order.total_cents)} · {cardStateText(cardSale.state)}
+                  {money(cardSale.order.total_cents)} · {cardText(cardSale.state)}
                 </p>
                 <button type="button" onClick={() => void cancelCard(cardSale.order.id, 'cancelled at the door')}
                   className={`${BIG} w-full border border-slate-300 bg-white`}>
-                  Cancel the card payment
+                  {t('pos.cancelCard')}
                 </button>
               </div>
             ) : payment === 'card' ? (
               <>
                 <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0 || missing.length > 0}
                   onClick={() => void chargeCard()}
-                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-700 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
                   {busy && <Loader2 className="w-5 h-5 animate-spin" />}
-                  <CreditCard className="w-5 h-5" /> Charge {money(quote.totalCents)} on reader
+                  <CreditCard className="w-5 h-5" /> {t('pos.chargeOnReader', { amount: money(quote.totalCents) })}
                 </button>
                 {missing.length > 0 && (
                   <button type="button" disabled={busy || !reader || (tier.remaining !== null && tier.remaining < qty) || quote.totalCents <= 0}
                     onClick={() => void chargeCard(true)} data-testid="walkup-skip-questions"
                     className={`${BIG} w-full border-2 border-amber-500 text-amber-800 bg-white disabled:opacity-50`}>
-                    Skip questions · charge {money(quote.totalCents)}
+                    {t('pos.skipCharge', { amount: money(quote.totalCents) })}
                   </button>
                 )}
               </>
@@ -574,15 +582,15 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
               <>
                 <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty) || missing.length > 0}
                   onClick={() => void sell()}
-                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-600 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
+                  className={`${BIG} w-full min-h-[60px] text-base bg-emerald-700 text-white disabled:opacity-50 flex items-center justify-center gap-2`}>
                   {busy && <Loader2 className="w-5 h-5 animate-spin" />}
-                  {payment === 'comp' ? `Comp ${qty} ticket${qty === 1 ? '' : 's'}` : `Take ${money(quote.cashDueCents)} · sell ${qty}`}
+                  {payment === 'comp' ? t(qty === 1 ? 'pos.compOne' : 'pos.compN', { n: qty }) : t('pos.takeSell', { amount: money(quote.cashDueCents), n: qty })}
                 </button>
                 {missing.length > 0 && (
                   <button type="button" disabled={busy || (needsDrawer && !drawer) || (tier.remaining !== null && tier.remaining < qty)}
                     onClick={() => void sell(true)} data-testid="walkup-skip-questions"
                     className={`${BIG} w-full border-2 border-amber-500 text-amber-800 bg-white disabled:opacity-50`}>
-                    Skip questions · {payment === 'comp' ? `comp ${qty}` : `sell ${qty}`}
+                    {payment === 'comp' ? t('pos.skipComp', { n: qty }) : t('pos.skipSell', { n: qty })}
                   </button>
                 )}
               </>
@@ -593,8 +601,8 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
 
       {/* Recent sales. */}
       <section aria-labelledby="recent-h" className="space-y-2">
-        <h2 id="recent-h" className="text-sm font-black uppercase tracking-widest text-slate-500">Recent sales</h2>
-        {sales.length === 0 && <p className="text-sm text-slate-500">No door sales yet.</p>}
+        <h2 id="recent-h" className="text-sm font-black uppercase tracking-widest text-slate-500">{t('pos.recent')}</h2>
+        {sales.length === 0 && <p className="text-sm text-slate-500">{t('pos.noSales')}</p>}
         <ul className="space-y-2">
           {sales.map((o) => {
             const opt = reverseOption({ status: o.status, createdAt: o.created_at, scanned: o.tickets_scanned, rungByMe: o.rung_by_me, role: cat.role });
@@ -618,7 +626,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
                 {opt.kind !== 'none' && (
                   <button type="button" disabled={busy} onClick={() => void reverse(o)}
                     className="min-h-[48px] px-3 rounded-xl border border-rose-300 text-rose-700 text-xs font-black uppercase tracking-widest flex items-center gap-1">
-                    <RotateCcw className="w-4 h-4" /> {opt.kind === 'refund' ? (opt.override ? 'Refund*' : 'Refund') : opt.kind === 'cancel' ? 'Cancel' : 'Void'}
+                    <RotateCcw className="w-4 h-4" /> {opt.kind === 'refund' ? (opt.override ? t('pos.refundOverride') : t('pos.refund')) : opt.kind === 'cancel' ? t('pos.cancel') : t('pos.void')}
                   </button>
                 )}
               </li>
@@ -630,7 +638,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
       {/* The cash drawer. */}
       <section aria-labelledby="drawer-h" className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
         <h2 id="drawer-h" className="text-sm font-black uppercase tracking-widest text-slate-500 flex items-center gap-2">
-          <Wallet className="w-4 h-4" /> Cash drawer
+          <Wallet className="w-4 h-4" /> {t('pos.drawerTitle')}
         </h2>
         {cat.drawers.some((d) => !d.mine || cat.drawers.length > 1) && (
           <label className="block text-sm">
@@ -645,24 +653,24 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
         )}
         {drawer ? (
           <>
-            <p className="text-lg font-black">In the drawer: {money(drawer.cash_cents)}</p>
-            <p className="text-xs text-slate-500">Float {money(drawer.open_float_cents)}</p>
+            <p className="text-lg font-black">{t('pos.inDrawer', { amount: money(drawer.cash_cents) })}</p>
+            <p className="text-xs text-slate-500">{t('pos.float', { amount: money(drawer.open_float_cents) })}</p>
             <div className="grid grid-cols-2 gap-2">
-              <label className="text-sm"><span className="block font-bold mb-1">Paid-out amount</span>
+              <label className="text-sm"><span className="block font-bold mb-1">{t('pos.payOutAmount')}</span>
                 <input inputMode="decimal" value={poAmount} onChange={(e) => setPoAmount(e.target.value)} placeholder="20.00" className={INPUT} /></label>
-              <label className="text-sm"><span className="block font-bold mb-1">For</span>
+              <label className="text-sm"><span className="block font-bold mb-1">{t('pos.payOutFor')}</span>
                 <input value={poReason} maxLength={300} onChange={(e) => setPoReason(e.target.value)} placeholder="Ice for the bar" className={INPUT} /></label>
             </div>
-            <button type="button" disabled={busy} onClick={() => void doPaidOut()} className={`${BIG} w-full border border-slate-300`}>Pay out</button>
-            <label className="block text-sm"><span className="block font-bold mb-1">Counted cash at close</span>
+            <button type="button" disabled={busy} onClick={() => void doPaidOut()} className={`${BIG} w-full border border-slate-300`}>{t('pos.payOut')}</button>
+            <label className="block text-sm"><span className="block font-bold mb-1">{t('pos.countedAtClose')}</span>
               <input inputMode="decimal" value={countText} onChange={(e) => setCountText(e.target.value)} placeholder="412.50" className={INPUT} /></label>
-            <button type="button" disabled={busy} onClick={() => void doClose()} className={`${BIG} w-full bg-slate-900 text-white`}>Count and close</button>
+            <button type="button" disabled={busy} onClick={() => void doClose()} className={`${BIG} w-full bg-slate-900 text-white`}>{t('pos.countClose')}</button>
           </>
         ) : (
           <>
-            <label className="block text-sm"><span className="block font-bold mb-1">Opening float</span>
+            <label className="block text-sm"><span className="block font-bold mb-1">{t('pos.openingFloat')}</span>
               <input inputMode="decimal" value={floatText} onChange={(e) => setFloatText(e.target.value)} className={INPUT} /></label>
-            <button type="button" disabled={busy} onClick={() => void doOpenDrawer()} className={`${BIG} w-full bg-slate-900 text-white`}>Open a drawer</button>
+            <button type="button" disabled={busy} onClick={() => void doOpenDrawer()} className={`${BIG} w-full bg-slate-900 text-white`}>{t('pos.openDrawer')}</button>
           </>
         )}
       </section>

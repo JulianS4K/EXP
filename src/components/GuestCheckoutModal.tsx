@@ -9,6 +9,7 @@ import { Mail, X } from 'lucide-react';
 import { isGuestEmail } from '../lib/guestCheckout';
 import { currentInAppState, escapeReasons } from '../lib/inAppBrowser';
 import { EscapeHatch } from './InAppBrowserBanner';
+import { useT } from '../context/LanguageContext';
 
 const LAST_EMAIL_KEY = 'exos.guestEmail';
 
@@ -26,6 +27,7 @@ interface GuestCheckoutModalProps {
 
 export default function GuestCheckoutModal({ open, busy, onClose, onContinue, onSignIn, free = false, escapeUrl }: GuestCheckoutModalProps) {
   // Inside Instagram / Facebook: card works here, wallets usually don't.
+  const t = useT();
   const [inApp] = useState(currentInAppState);
   const walletsHere = !inApp.kind || escapeReasons(inApp).every((r) => r === 'storage');
   const [email, setEmail] = useState(() => {
@@ -48,22 +50,22 @@ export default function GuestCheckoutModal({ open, busy, onClose, onContinue, on
           <form onSubmit={submit} noValidate>
             <div className="flex items-start justify-between mb-4">
               <h2 id="guest-checkout-title" className="text-2xl font-black uppercase italic tracking-tighter text-white">
-                Where should we send your tickets?
+                {t('guest.title')}
               </h2>
-              <button type="button" onClick={onClose} aria-label="Close" className="p-1 text-white/60 hover:text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary">
+              <button type="button" onClick={onClose} aria-label={t('guest.close')} className="p-1 text-white/60 hover:text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <p className="text-white/60 text-sm mb-4">
               {free
-                ? "No account needed. We'll email your free tickets. To show your QR at the door, open the email and sign in with a one-time code."
-                : `No account needed. Pay with ${walletsHere ? 'Apple Pay, Google Pay or card' : 'card'}, and we'll email your tickets. To show your QR at the door, open the email and sign in with a one-time code.`}
+                ? t('guest.freeBody')
+                : t('guest.paidBody', { methods: t(walletsHere ? 'guest.methodsWallets' : 'guest.methodsCard') })}
             </p>
             {!free && !walletsHere && (
-              <EscapeHatch url={escapeUrl} state={inApp} lead="Card works right here."
+              <EscapeHatch url={escapeUrl} state={inApp} lead={t('guest.cardHere')}
                 className="mb-4 border border-white/10 bg-white/5 p-3 text-xs text-white/70" />
             )}
-            <label htmlFor="guest-email" className="type text-[11px] text-white/60 uppercase tracking-widest">Email</label>
+            <label htmlFor="guest-email" className="type text-[11px] text-white/60 uppercase tracking-widest">{t('guest.email')}</label>
             <div className="mt-1 mb-2 flex items-center gap-2 bg-white/5 border border-white/20 focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/40 px-3">
               <Mail className="w-4 h-4 text-white/60" aria-hidden="true" />
               <input
@@ -82,20 +84,20 @@ export default function GuestCheckoutModal({ open, busy, onClose, onContinue, on
                 placeholder="you@example.com"
               />
             </div>
-            {touched && !valid && <p id="guest-email-error" className="text-red-400 text-xs mb-2" role="alert">Enter a valid email.</p>}
+            {touched && !valid && <p id="guest-email-error" className="text-red-400 text-xs mb-2" role="alert">{t('guest.emailInvalid')}</p>}
             <button
               type="submit"
               disabled={busy}
               className="w-full mt-2 bg-brand-primary text-black font-black uppercase tracking-wider py-4 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
             >
-              {free ? (busy ? 'Sending…' : 'Send my tickets') : (busy ? 'Starting checkout…' : 'Continue to payment')}
+              {free ? (busy ? t('guest.sending') : t('guest.send')) : (busy ? t('guest.starting') : t('guest.continue'))}
             </button>
             <button
               type="button"
               onClick={onSignIn}
               className="w-full mt-3 text-white/60 hover:text-white text-sm underline underline-offset-4"
             >
-              Have an account? Sign in instead
+              {t('guest.signIn')}
             </button>
           </form>
     </Dialog>

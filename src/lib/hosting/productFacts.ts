@@ -358,6 +358,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
       'supabase/functions/exos-discord/index.ts', 'supabase/functions/_shared/channels/discord.ts',
       'supabase/migrations/20261113130000_exos_discord.sql', 'supabase/migrations/20261114100000_exos_leftovers_15.sql'],
     note: 'Branch claude/exos-discord: not on main, migration not applied. Branch claude/exos-wave15-leftovers adds an automatic reminder (24 or 48 hours before, off by default), deleting the Discord event when the Exos event is deleted, and a test message. Dark until EXOS_DISCORD_ENABLED=on; a dry run until the org switch and EXOS_DISCORD_WRITES=on; the bot needs the platform\'s Discord application (docs/discord.md).',
+  },  {
+    id: 'spanish', audience: 'fan', status: 'not_shipped',
+    claim: 'Exos works in Spanish for ticket buyers and door staff: the event page, checkout, tickets, sending a ticket, the main buyer emails, the door scanner and the door till. Organizers can add a Spanish title and description to an event.',
+    code: ['src/lib/i18n/dict.ts', 'src/lib/i18n/checkout.ts', 'src/lib/i18n/door.ts', 'src/lib/i18n/pos.ts',
+      'supabase/functions/_shared/mail-es.ts', 'supabase/migrations/20261114130000_exos_event_i18n.sql'],
+    note: 'Branch claude/exos-spanish: not on main, migration not applied. The money and legal wording waits for a human review (docs/i18n-review.md); organizer screens are English.',
   },
 ];
 

@@ -94,6 +94,12 @@ not when the org turned it off (`exos_orgs.post_event_emails_enabled`, default o
 Onboarding stops when done: the day-3 nudge is skipped once the org has an event, the day-7 nudge once Stripe is
 connected. Windows are bounded, so the first run after deploy doesn't mail orgs about their distant past.
 
+## Language
+
+Buyer mail goes in the recipient's language: a trigger stamps `exos_mail.lang` (their latest order's language, else
+their account's, else English) and the drain sends the Spanish version when there is one, else the English row as
+queued, never half translated. What is translated and the review checklist: `docs/i18n-review.md`.
+
 ## Scheduling
 
 `exos_send_mail_followups()` (service role, `cron_should_fire` gated, 20 s budget) queues every scheduled

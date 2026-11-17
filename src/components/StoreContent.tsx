@@ -3,6 +3,8 @@
 // Each renders nothing when the organizer left it empty.
 
 import { RichText } from '../lib/richText';
+import { useT } from '../context/LanguageContext';
+import type { DictKey } from '../lib/i18n/dict';
 import {
   ageLabel, refundPolicyText, roleLabel, videoEmbedUrl,
   type FaqEntry, type GalleryImage, type LineupEntry, type MinAge, type RefundPolicy,
@@ -104,17 +106,19 @@ export function EventVideo({ url, title }: { url?: string; title: string }) {
 export function EventGoodToKnow({
   minAge, refundPolicy, policyNotes, whatToBring,
 }: { minAge?: MinAge | null; refundPolicy?: RefundPolicy | null; policyNotes?: string; whatToBring?: string }) {
-  const refund = refundPolicy ? refundPolicyText(refundPolicy) : '';
+  const t = useT();
+  // Refund policy wording is legal text: REVIEW_KEYS (lib/i18n/dict.ts).
+  const refund = refundPolicy && refundPolicyText(refundPolicy) ? t(`page.refund.${refundPolicy}` as DictKey) : '';
   const bring = whatToBring?.trim();
   if (minAge == null && !refund && !policyNotes && !bring) return null;
   return (
     <section aria-labelledby="good-to-know-heading" className="mb-14 border border-white/10 bg-[#111] p-6 md:p-8">
-      <h2 id="good-to-know-heading" className="disp text-2xl tracking-wide text-white mb-4">Good to know</h2>
+      <h2 id="good-to-know-heading" className="disp text-2xl tracking-wide text-white mb-4">{t('page.goodToKnow')}</h2>
       <ul className="space-y-2 type text-sm text-white/80">
         {minAge != null && (
           <li className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-brand-primary shrink-0" aria-hidden="true" />
-            {minAge > 0 ? `Ages ${ageLabel(minAge)}. Bring a valid photo ID.` : 'All ages welcome.'}
+            {minAge > 0 ? t('page.ages', { age: ageLabel(minAge) }) : t('page.allAges')}
           </li>
         )}
         {refund && (
@@ -125,7 +129,7 @@ export function EventGoodToKnow({
       </ul>
       {bring && (
         <p className="type text-sm text-white/80 leading-relaxed whitespace-pre-line mt-4">
-          <span className="text-white font-bold">What to bring: </span>{bring}
+          <span className="text-white font-bold">{t('page.whatToBring')} </span>{bring}
         </p>
       )}
       {policyNotes && <p className="type text-sm text-white/70 leading-relaxed whitespace-pre-line mt-4">{policyNotes}</p>}
