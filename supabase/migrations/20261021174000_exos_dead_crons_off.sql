@@ -1,0 +1,16 @@
+-- 20261021174000_exos_dead_crons_off — RECORD ONLY. This file runs nothing.
+--
+-- Applied directly to prod on 2026-10-21 (prod version 20261021172311,
+-- name "20261021174000_exos_dead_crons_off"); its file lived only in
+-- JulianS4K/Terminal-2. Recorded here 2026-11-17 because EXP is the home of
+-- every Exos migration and Terminal-2 is reference only.
+--
+-- What it did on prod: deactivated the two Exos cron jobs that were failing
+-- on every run (operator-directed). Both were turned back on later; as of
+-- 2026-11-17 prod has 14 active Exos jobs. Re-running it would switch jobs
+-- off again, so the SQL is kept as a comment, not as code.
+--
+-- Original SQL, verbatim from supabase_migrations.schema_migrations:
+--   SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'exos-mail-drain-2min'),  active := false);
+--   SELECT cron.alter_job((SELECT jobid FROM cron.job WHERE jobname = 'exos-wallet-push-5min'), active := false);
+SELECT 1;
