@@ -54,10 +54,11 @@
 --     with (lib/attribution.ts), sanitized again here.
 --
 -- Touches:  C: TABLE exos_drop_signups, exos_drop_confirms, exos_drop_settings,
---              exos_drop_sms_codes
+--              exos_drop_sms_codes, exos_drop_leave_tokens, exos_drop_sms_countries
 --              (RLS on, no client grants: RPCs only)
 --           C: FUNCTION exos_drop_status, exos_drop_signup, exos_drop_confirm,
 --              exos_drop_confirm_code, exos_drop_leave (anon + authenticated);
+--              exos_drop_set_sms_countries (owner; audited);
 --              exos_drop_join, exos_drop_verify_sms, exos_drop_leave_mine
 --              (authenticated);
 --              exos_drop_list_summary (owner / manager / finance),
@@ -199,12 +200,31 @@ CREATE TABLE IF NOT EXISTS public.exos_drop_sms_codes (
   signup_id  uuid REFERENCES public.exos_drop_signups (id) ON DELETE SET NULL,
   phone      text NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
   fails      int NOT NULL DEFAULT 0 CHECK (fails >= 0),          -- wrong codes typed for this send
+  -- Sent to an account new to the org (no verified number or paid order with
+  -- it before): those share 100 of the org's 300 a day.
+  newcomer   boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_user_idx ON public.exos_drop_sms_codes (user_id, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_phone_idx ON public.exos_drop_sms_codes (phone, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_org_idx ON public.exos_drop_sms_codes (org_id, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_signup_idx ON public.exos_drop_sms_codes (signup_id);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_at_idx ON public.exos_drop_sms_codes (created_at);
+
+-- Countries an org may text verification codes to beyond its own (owner
+-- only, audited; exos_drop_set_sms_countries). ISO 3166-1 alpha-2 codes.
+CREATE TABLE IF NOT EXISTS public.exos_drop_sms_countries (
+  org_id     uuid PRIMARY KEY REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  countries  text[] NOT NULL DEFAULT '{}' CHECK (cardinality(countries) <= 30),
+  updated_by uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.exos_drop_sms_countries ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_drop_sms_countries FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_drop_sms_countries TO service_role;
+DROP TRIGGER IF EXISTS exos_drop_sms_countries_touch ON public.exos_drop_sms_countries;
+CREATE TRIGGER exos_drop_sms_countries_touch BEFORE UPDATE ON public.exos_drop_sms_countries
+  FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
 ALTER TABLE public.exos_drop_sms_codes ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_drop_sms_codes FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_drop_sms_codes TO service_role;
@@ -347,6 +367,88 @@ LANGUAGE sql IMMUTABLE
 SET search_path = public, pg_temp
 AS $$ SELECT encode(sha256(convert_to(coalesce(p, ''), 'UTF8')), 'hex') $$;
 REVOKE ALL ON FUNCTION public._exos_drop_hash(text) FROM PUBLIC, anon, authenticated;
+
+-- A mobile number as the drop list takes it: no extension or dial-string
+-- characters (x, ext, ;, #, ",", any letter), E.164, and a +1 number must be
+-- a real NANP one. exos_sms_normalize_phone itself is unchanged for its
+-- other callers.
+CREATE OR REPLACE FUNCTION public._exos_drop_phone(p_raw text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN coalesce(p_raw, '') ~ '[A-Za-z;#,]' THEN NULL
+    WHEN n ~ '^\+1' AND n !~ '^\+1[2-9][0-9]{9}$' THEN NULL
+    ELSE n END
+    FROM (SELECT public.exos_sms_normalize_phone(p_raw) AS n) x
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_phone(text) FROM PUBLIC, anon, authenticated;
+
+-- Country calling codes Exos texts verification codes to (ISO 3166-1
+-- alpha-2). NANP countries share +1. Anything not here can't be texted.
+CREATE OR REPLACE FUNCTION public._exos_drop_calling_code(p_iso text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE upper(btrim(coalesce(p_iso, '')))
+    WHEN 'US' THEN '1' WHEN 'CA' THEN '1' WHEN 'PR' THEN '1' WHEN 'VI' THEN '1' WHEN 'GU' THEN '1'
+    WHEN 'GB' THEN '44' WHEN 'IE' THEN '353' WHEN 'FR' THEN '33' WHEN 'DE' THEN '49' WHEN 'ES' THEN '34'
+    WHEN 'IT' THEN '39' WHEN 'NL' THEN '31' WHEN 'BE' THEN '32' WHEN 'PT' THEN '351' WHEN 'AT' THEN '43'
+    WHEN 'CH' THEN '41' WHEN 'SE' THEN '46' WHEN 'NO' THEN '47' WHEN 'DK' THEN '45' WHEN 'FI' THEN '358'
+    WHEN 'PL' THEN '48' WHEN 'AU' THEN '61' WHEN 'NZ' THEN '64' WHEN 'MX' THEN '52' WHEN 'BR' THEN '55'
+    WHEN 'AR' THEN '54' WHEN 'CO' THEN '57' WHEN 'JP' THEN '81' WHEN 'KR' THEN '82' WHEN 'SG' THEN '65'
+    WHEN 'IN' THEN '91' WHEN 'ZA' THEN '27' WHEN 'IL' THEN '972' WHEN 'AE' THEN '971'
+  END
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_calling_code(text) FROM PUBLIC, anon, authenticated;
+
+-- May this org text a code to this number? Its own country by default (+1
+-- for US / CA and the rest of NANP; an org with no country counts as US),
+-- plus the countries an owner allowed.
+CREATE OR REPLACE FUNCTION public._exos_drop_phone_country_ok(p_org_id uuid, p_phone text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM (
+      SELECT public._exos_drop_calling_code(coalesce((SELECT o.country FROM public.exos_orgs o WHERE o.id = p_org_id), 'US')) AS cc
+      UNION
+      SELECT public._exos_drop_calling_code(c)
+        FROM public.exos_drop_sms_countries a, unnest(a.countries) c WHERE a.org_id = p_org_id) x
+     WHERE x.cc IS NOT NULL AND p_phone LIKE '+' || x.cc || '%')
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_phone_country_ok(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- Owner only (or admin): the extra countries the org's drop list may text
+-- codes to. Every code must be one Exos texts (_exos_drop_calling_code).
+CREATE OR REPLACE FUNCTION public.exos_drop_set_sms_countries(p_org_id uuid, p_countries text[])
+RETURNS text[]
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_new text[]; v_old text[];
+BEGIN
+  IF auth.uid() IS NULL OR NOT (public.exos_is_admin() OR public.exos_has_org_role(p_org_id, ARRAY['owner'])) THEN
+    RAISE EXCEPTION 'exos_drop_set_sms_countries: owners only' USING ERRCODE = '42501';
+  END IF;
+  SELECT coalesce(array_agg(DISTINCT upper(btrim(c)) ORDER BY upper(btrim(c))), '{}') INTO v_new
+    FROM unnest(coalesce(p_countries, '{}'::text[])) c WHERE btrim(c) <> '';
+  IF cardinality(v_new) > 30 OR EXISTS (SELECT 1 FROM unnest(v_new) c WHERE public._exos_drop_calling_code(c) IS NULL) THEN
+    RAISE EXCEPTION 'exos_drop_set_sms_countries: pick up to 30 supported countries (ISO codes like GB)' USING ERRCODE = '22023';
+  END IF;
+  SELECT countries INTO v_old FROM public.exos_drop_sms_countries WHERE org_id = p_org_id FOR UPDATE;
+  INSERT INTO public.exos_drop_sms_countries AS x (org_id, countries, updated_by) VALUES (p_org_id, v_new, auth.uid())
+  ON CONFLICT (org_id) DO UPDATE SET countries = EXCLUDED.countries, updated_by = EXCLUDED.updated_by;
+  /* exos: audit drop_list.sms_countries_set */
+  PERFORM public._exos_audit(p_org_id, 'drop_list.sms_countries_set', 'org', p_org_id::text, NULL,
+    jsonb_build_object('sms_countries', jsonb_build_array(array_to_string(v_old, ','), array_to_string(v_new, ','))));
+  RETURN v_new;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_drop_set_sms_countries(uuid, text[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_drop_set_sms_countries(uuid, text[]) TO authenticated, service_role;
 
 -- May this number get the drop-list text for this org? A hard stop: any
 -- STOP on record (exos_sms_stops, until START deletes it) or an opt-out on
@@ -647,7 +749,10 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- stores the consent. Code limits (SMS pumping), every one checked before
 -- the outbox under per-account, per-org and per-number locks, over actual
 -- sends logged in exos_drop_sms_codes: 5 a day per account, 5 a day per
--- number (all accounts and orgs), 300 a day per org, 3 per number per 10
+-- number (all accounts and orgs), 300 a day per org of which accounts new to
+-- the org (no verified number or paid order with it) share 100, 2,000 a day
+-- platform-wide (exos_platform_settings drop_sms_codes_daily_cap), 3 per
+-- number per 10
 -- minutes (shared with the order proofs), 60 s apart and 5 in all per
 -- signup, at most 2 different numbers per signup (the second replaces the
 -- first), and no new code to a number with 10 wrong codes typed in a day
@@ -656,6 +761,10 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- page that very moment and it works for 10 minutes, so a held code is
 -- useless (user-requested one-time codes are exempt in the usual practice,
 -- as are the order-proof codes on the same outbox).
+-- Numbers: no extensions or dial strings, a real NANP number for +1, and
+-- only the org's own country (+1 for US / CA) unless its owner allowed more
+-- (exos_drop_set_sms_countries, audited); others: "texts aren't available
+-- for this number" before anything is logged or sent.
 -- A number that replied STOP gets no text but counts as a send and answers
 -- 'sent' (so the answer doesn't reveal a STOP). 10 joins a minute per account.
 CREATE OR REPLACE FUNCTION public.exos_drop_join(
@@ -669,6 +778,7 @@ DECLARE
   v_email text;
   v_phone text;
   v_code  text;
+  v_new   boolean;
   v_src   jsonb := CASE WHEN jsonb_typeof(p_source) = 'object' THEN p_source ELSE '{}'::jsonb END;
   e       record;
   s       public.exos_drop_signups%ROWTYPE;
@@ -687,13 +797,18 @@ BEGIN
     RAISE EXCEPTION 'exos_drop_join: this event isn''t taking signups' USING ERRCODE = 'P0002';
   END IF;
   IF coalesce(p_sms, false) THEN
-    v_phone := public.exos_sms_normalize_phone(p_phone);
+    v_phone := public._exos_drop_phone(p_phone);
     IF v_phone IS NULL THEN
-      RAISE EXCEPTION 'exos_drop_join: enter a mobile number, e.g. +1 212 555 0100' USING ERRCODE = '22023';
+      RAISE EXCEPTION 'exos_drop_join: enter a mobile number, e.g. +1 212 555 0100 (no extension)' USING ERRCODE = '22023';
     END IF;
   END IF;
   SELECT ev.id, ev.org_id, ev.name, o.name AS org_name INTO e
     FROM public.exos_events ev JOIN public.exos_orgs o ON o.id = ev.org_id WHERE ev.id = p_event_id;
+  -- Only the org's own country (and the ones its owner allowed): no codes to
+  -- premium or far-away numbers. Before anything is logged or sent.
+  IF v_phone IS NOT NULL AND NOT public._exos_drop_phone_country_ok(e.org_id, v_phone) THEN
+    RAISE EXCEPTION 'exos_drop_join: texts aren''t available for this number' USING ERRCODE = '22023';
+  END IF;
 
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_drop:' || p_event_id::text || ':' || v_email, 0));
   INSERT INTO public.exos_drop_signups AS x (org_id, event_id, email, user_id, email_consent_text, confirmed_at,
@@ -717,6 +832,12 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-org:' || e.org_id::text, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-proof-phone:' || v_phone, 0));
     SELECT * INTO s FROM public.exos_drop_signups WHERE id = s.id;
+    -- New to the org: no verified number and no paid order with it before.
+    v_new := NOT EXISTS (SELECT 1 FROM public.exos_drop_signups x
+                          WHERE x.org_id = e.org_id AND x.user_id = v_uid AND x.sms_consented_at IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
+                          WHERE cs.org_id = e.org_id AND cs.buyer_uid = v_uid
+                            AND cs.status IN ('fulfilled', 'partially_refunded', 'refunded'));
     IF (s.sms_code_at IS NOT NULL AND s.sms_code_at >= now() - interval '60 seconds')
        OR s.sms_code_sends >= 5
        OR (NOT EXISTS (SELECT 1 FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id AND l.phone = v_phone)
@@ -729,12 +850,18 @@ BEGIN
             WHERE l.phone = v_phone AND l.created_at > now() - interval '1 day') >= 10
        OR (SELECT count(*) FROM public.exos_drop_sms_codes l
             WHERE l.org_id = e.org_id AND l.created_at > now() - interval '1 day') >= 300
+       OR (v_new AND (SELECT count(*) FROM public.exos_drop_sms_codes l
+                       WHERE l.org_id = e.org_id AND l.newcomer AND l.created_at > now() - interval '1 day') >= 100)
+       -- Platform-wide: exos_platform_settings drop_sms_codes_daily_cap (2,000 by default).
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l WHERE l.created_at > now() - interval '1 day')
+          >= coalesce((SELECT (ps.value #>> '{}')::int FROM public.exos_platform_settings ps
+                        WHERE ps.key = 'drop_sms_codes_daily_cap' AND jsonb_typeof(ps.value) = 'number'), 2000)
        OR (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
             WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') >= 3 THEN
       RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'try_again');
     END IF;
     v_code := public._exos_proof_code();
-    INSERT INTO public.exos_drop_sms_codes (user_id, org_id, signup_id, phone) VALUES (v_uid, e.org_id, s.id, v_phone);
+    INSERT INTO public.exos_drop_sms_codes (user_id, org_id, signup_id, phone, newcomer) VALUES (v_uid, e.org_id, s.id, v_phone, v_new);
     UPDATE public.exos_drop_signups
        SET sms_pending_phone = v_phone, sms_code_hash = public._exos_proof_hash(id, 'drop_sms', v_code),
            sms_code_at = now(), sms_code_attempts = 0, sms_code_sends = sms_code_sends + 1

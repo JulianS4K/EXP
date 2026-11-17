@@ -17,6 +17,9 @@
 --   DL3b SMS pumping: 2 numbers per signup, 60 s apart, 5 code sends a day
 --       per account, 5 per number (all accounts and orgs), 300 per org; the
 --       same try_again whichever cap, nothing reaches the outbox past one
+--   DL3c numbers: no extensions / dial strings, real NANP for +1; only the
+--       org's country unless its owner allowed more (audited); accounts new
+--       to the org share 100 of its 300 a day; the platform-wide daily cap
 --   DL4 rate limits: 10 a minute per network (then no row, same answer), 3
 --       confirm mails a day per address and event
 --   DL5 roles: summary owner / manager / finance; content, scanner, an
@@ -111,7 +114,7 @@ DECLARE r record; v_anon text[]; v_auth text[]; v_svc text[];
 BEGIN
   FOR r IN SELECT c.relname, c.relrowsecurity FROM pg_class c
             WHERE c.relname IN ('exos_drop_signups', 'exos_drop_confirms', 'exos_drop_settings', 'exos_drop_sms_codes',
-                                'exos_drop_leave_tokens') LOOP
+                                'exos_drop_leave_tokens', 'exos_drop_sms_countries') LOOP
     ASSERT r.relrowsecurity, 'DL0 RLS on ' || r.relname;
     ASSERT NOT has_table_privilege('anon', 'public.' || r.relname, 'SELECT')
        AND NOT has_table_privilege('authenticated', 'public.' || r.relname, 'SELECT')
@@ -131,8 +134,8 @@ BEGIN
     'DL0 anon surface: ' || array_to_string(v_anon, ',');
   ASSERT (SELECT array_agg(x ORDER BY x) FROM unnest(v_auth) x) = ARRAY['exos_drop_confirm', 'exos_drop_confirm_code',
     'exos_drop_email_consent_text', 'exos_drop_join', 'exos_drop_leave', 'exos_drop_leave_mine', 'exos_drop_list_export',
-    'exos_drop_list_set_presale', 'exos_drop_list_summary', 'exos_drop_signup', 'exos_drop_sms_consent_text', 'exos_drop_status',
-    'exos_drop_verify_sms'],
+    'exos_drop_list_set_presale', 'exos_drop_list_summary', 'exos_drop_set_sms_countries', 'exos_drop_signup',
+    'exos_drop_sms_consent_text', 'exos_drop_status', 'exos_drop_verify_sms'],
     'DL0 authenticated surface: ' || array_to_string(v_auth, ',');
   ASSERT 'exos_drop_list_blast' = ANY (v_svc) AND 'exos_drop_list_sweep' = ANY (v_svc), 'DL0 service jobs';
   ASSERT NOT has_function_privilege('authenticated', 'public.exos_drop_list_blast(int)', 'EXECUTE'), 'DL0 blast service only';
@@ -407,6 +410,68 @@ BEGIN
   ASSERT t = ARRAY['try_again', 'try_again', 'try_again', 'try_again', 'try_again'], 'DL3b one answer whichever cap';
   DELETE FROM public.exos_drop_sms_codes WHERE user_id = pg_temp.u('d5');
   RAISE NOTICE 'OK  DL3b SMS code caps: 2 numbers per signup, 60 s, 5 a day per account, 5 per number, 10 wrong codes per number, 300 per org; one try_again';
+END $$;
+
+-- DL3c: number format, country, newcomer sub-cap, platform cap -------------
+DO $$
+DECLARE j jsonb; a text[];
+BEGIN
+  INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
+    (pg_temp.u('d6'), 'd70-d6@x.com', now()), (pg_temp.u('d7'), 'd70-d7@x.com', now());
+  -- Formats: extensions and dial strings refused, +1 must be NANP; the shared normalizer is unchanged.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d6'));
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '212 555 9911 ext 7')$q$) LIKE '22023%no extension%', 'DL3c ext';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '212x5559911')$q$) LIKE '22023%', 'DL3c x';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '212-555-9911#')$q$) LIKE '22023%', 'DL3c #';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '2125559911;7')$q$) LIKE '22023%', 'DL3c ;';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '212 555 9911, 7')$q$) LIKE '22023%', 'DL3c ,';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '+1 112 555 0000')$q$) LIKE '22023%', 'DL3c +1 must be NANP';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT public.exos_sms_normalize_phone('+1 112 555 0000') = '+11125550000', 'DL3c exos_sms_normalize_phone unchanged';
+
+  -- Another country: refused before anything is logged or sent.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d6'));
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '+44 7700 900123')$q$) = '22023 exos_drop_join: texts aren''t available for this number',
+    'DL3c off-country refused';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_drop_sms_codes WHERE phone = '+447700900123')
+     AND NOT EXISTS (SELECT 1 FROM public.exos_rsvp_sms_outbox WHERE phone = '+447700900123'), 'DL3c nothing logged or sent';
+  -- The owner allows GB (audited); a manager can't; unknown codes refused.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a2'));
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_set_sms_countries(pg_temp.u('1'), ARRAY['GB'])$q$) LIKE '42501%', 'DL3c manager refused';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_set_sms_countries(pg_temp.u('1'), ARRAY['XX'])$q$) LIKE '22023%', 'DL3c unknown country';
+  a := public.exos_drop_set_sms_countries(pg_temp.u('1'), ARRAY[' gb ', 'GB']);
+  ASSERT a = ARRAY['GB'], 'DL3c allowlist: ' || a::text;
+  PERFORM pg_temp.as_('postgres');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE org_id = pg_temp.u('1') AND action = 'drop_list.sms_countries_set'
+                   AND actor_uid = pg_temp.u('a1') AND changes->'sms_countries'->>1 = 'GB'), 'DL3c audited';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d6'));
+  ASSERT public.exos_drop_join(pg_temp.u('91'), true, '+44 7700 900123')->>'sms_code' = 'sent', 'DL3c allowlisted country works';
+  -- Another org (B, US) still refuses GB.
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('94'), true, '+44 7700 900124')$q$) LIKE '22023%aren''t available%', 'DL3c per org';
+
+  -- Accounts new to the org share 100 a day; an established one (a proved number with the org) still gets a code.
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT newcomer FROM public.exos_drop_sms_codes WHERE phone = '+447700900123'), 'DL3c a new account''s send is marked';
+  INSERT INTO public.exos_drop_sms_codes (user_id, org_id, phone, newcomer, created_at)
+  SELECT pg_temp.u('d5'), pg_temp.u('1'), '+1212555' || lpad(g::text, 4, '0'), true, now() - interval '3 hours' FROM generate_series(5000, 5099) g;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d7'));
+  ASSERT public.exos_drop_join(pg_temp.u('91'), true, '+12125550340')->>'sms_code' = 'try_again', 'DL3c newcomer sub-cap';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'));
+  ASSERT public.exos_drop_join(pg_temp.u('92'), true, '+12125550341')->>'sms_code' = 'sent', 'DL3c established account unaffected';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT NOT newcomer FROM public.exos_drop_sms_codes WHERE phone = '+12125550341'), 'DL3c established send not marked';
+
+  -- The platform-wide daily cap (a setting).
+  INSERT INTO public.exos_platform_settings (key, value) VALUES ('drop_sms_codes_daily_cap', '1'::jsonb)
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d7'));
+  ASSERT public.exos_drop_join(pg_temp.u('94'), true, '+12125550342')->>'sms_code' = 'try_again', 'DL3c platform cap';
+  PERFORM pg_temp.as_('postgres');
+  DELETE FROM public.exos_platform_settings WHERE key = 'drop_sms_codes_daily_cap';
+  DELETE FROM public.exos_drop_sms_codes WHERE user_id = pg_temp.u('d5');
+  RAISE NOTICE 'OK  DL3c numbers: no ext / dial strings, NANP for +1, org country unless the owner allows more (audited), newcomer sub-cap, platform cap';
 END $$;
 
 -- DL4 -----------------------------------------------------------------------
