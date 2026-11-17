@@ -107,7 +107,7 @@ DO $$
 DECLARE r record; v_anon text[]; v_auth text[]; v_def text; f text;
 BEGIN
   FOR r IN SELECT c.relname, c.relrowsecurity FROM pg_class c
-            WHERE c.relname IN ('exos_wroom_settings', 'exos_wroom_entries') AND c.relkind = 'r' LOOP
+            WHERE c.relname IN ('exos_wroom_settings', 'exos_wroom_entries', 'exos_wroom_counts') AND c.relkind = 'r' LOOP
     ASSERT r.relrowsecurity, 'WR0 RLS on ' || r.relname;
     ASSERT NOT has_table_privilege('anon', 'public.' || r.relname, 'SELECT,INSERT,UPDATE,DELETE')
        AND NOT has_table_privilege('authenticated', 'public.' || r.relname, 'SELECT,INSERT,UPDATE,DELETE'),
@@ -124,13 +124,13 @@ BEGIN
   ASSERT (SELECT array_agg(x ORDER BY x) FROM unnest(v_auth) x)
        = ARRAY['exos_wroom_configure', 'exos_wroom_join', 'exos_wroom_status', 'exos_wroom_summary'],
     'WR0 authenticated surface: ' || array_to_string(v_auth, ',');
-  ASSERT has_function_privilege('service_role', 'public.exos_wroom_require(uuid,uuid,text)', 'EXECUTE')
-     AND NOT has_function_privilege('authenticated', 'public.exos_wroom_require(uuid,uuid,text)', 'EXECUTE'), 'WR0 require: service only';
+  ASSERT has_function_privilege('service_role', 'public.exos_wroom_require(uuid,uuid,text,uuid,text)', 'EXECUTE')
+     AND NOT has_function_privilege('authenticated', 'public.exos_wroom_require(uuid,uuid,text,uuid,text)', 'EXECUTE'), 'WR0 require: service only';
   FOREACH f IN ARRAY ARRAY['public.exos_create_hold(uuid,uuid,integer,integer,text)',
                            'public.exos_create_guest_hold(uuid,uuid,integer,text,text,text)',
                            'public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)'] LOOP
     v_def := pg_get_functiondef(f::regprocedure);
-    ASSERT position(E'\nBEGIN\n  PERFORM public._exos_wroom_gate(p_event_id, p_tier_id);  /* exos: waiting room gate */\n' in v_def) > 0
+    ASSERT position(E'\nBEGIN\n  PERFORM public._exos_wroom_gate(p_event_id, p_tier_id, ' in v_def) > 0
        AND position('/* exos: waiting room gate */' in v_def) < position('RAISE EXCEPTION' in v_def)
        AND (length(v_def) - length(replace(v_def, '/* exos: waiting room gate */', ''))) = length('/* exos: waiting room gate */'),
       'WR0 gate first, once: ' || f;
@@ -350,16 +350,44 @@ BEGIN
   PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', NULL);
   ASSERT pg_temp.st(format('SELECT public.exos_create_guest_hold(%L, %L, 1, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'),
                            'guest@x.com', md5('g1'))) LIKE 'XWR01%', 'WR5 guest hold without a token';
-  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L)', pg_temp.u('e1'), pg_temp.u('c1'), v_wait)) LIKE 'XWR01%', 'WR5 require waiting';
-  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), v_adm2), 'WR5 require admitted';
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, NULL, %L)', pg_temp.u('e1'), pg_temp.u('c1'), v_wait, 'guest@x.com')) LIKE 'XWR01%', 'WR5 require waiting';
+  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), v_adm2, NULL, 'Guest@x.com '), 'WR5 require admitted';
+  -- The turn is now the guest's: another buyer (an account, another email) is refused.
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'), v_adm2,
+                           pg_temp.u('b2'))) LIKE 'XWR01%', 'WR5 a bound turn refuses another account';
   PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', v_adm2);
   ASSERT public.exos_create_guest_hold(pg_temp.u('e1'), pg_temp.u('c1'), 1, 'guest@x.com', md5('g1'), NULL) IS NOT NULL, 'WR5 guest hold admitted';
-  -- The drop list presale type bypasses the room (members only, until the on-sale).
+  ASSERT pg_temp.st(format('SELECT public.exos_create_guest_hold(%L, %L, 1, %L, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c1'),
+                           'other@x.com', md5('g2'))) LIKE 'XWR01%', 'WR5 the guest''s turn refuses another email';
+  -- The same guest again: one live cart (the first hold is released, never two).
+  ASSERT public.exos_create_guest_hold(pg_temp.u('e1'), pg_temp.u('c1'), 1, 'guest@x.com', md5('g1'), NULL) IS NOT NULL, 'WR5 same guest again';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT count(*) FROM public.exos_cart_holds WHERE event_id = pg_temp.u('e1') AND buyer_email = 'guest@x.com' AND status = 'active') = 1,
+    'WR5 one live cart per turn';
+  -- b1's turn (v_adm, bound by the hold above) refuses b2's account.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '198.51.100.1', v_adm);
+  ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c1'))) LIKE 'XWR01%',
+    'WR5 another account on a bound turn';
+  ASSERT pg_temp.st(format('SELECT public.exos_claim_free_tickets(%L, %L, 1)', pg_temp.u('e1'), pg_temp.u('c3'))) LIKE 'XWR01%',
+    'WR5 another account, free claim';
+  -- A roomless event named with this room's ticket type: the type's event is checked.
+  PERFORM pg_temp.as_('service_role');
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, NULL, %L, NULL)', pg_temp.u('e3'), pg_temp.u('c1'), pg_temp.u('b2')))
+    LIKE 'XWR01%', 'WR5 event taken from the type';
+  -- The drop list presale type bypasses the room in its early window (members
+  -- only, their code, until the public on-sale it was set against); after, it queues.
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_settings SET public_on_sale_at = now() + interval '30 minutes' WHERE event_id = pg_temp.u('e1');
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'));
   v_err := pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e1'), pg_temp.u('c2')));
   ASSERT v_err NOT LIKE 'XWR01%', 'WR5 presale type not queued: ' || v_err;
   PERFORM pg_temp.as_('service_role');
-  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c2'), NULL), 'WR5 require: presale type';
+  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c2'), NULL, pg_temp.u('b2'), NULL), 'WR5 require: presale type';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_settings SET public_on_sale_at = now() - interval '1 second' WHERE event_id = pg_temp.u('e1');
+  PERFORM pg_temp.as_('service_role');
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, NULL, %L, NULL)', pg_temp.u('e1'), pg_temp.u('c2'), pg_temp.u('b2'))) LIKE 'XWR01%',
+    'WR5 presale type after the public on-sale: queued';
   -- Another event's admitted token: e2 has its own room (on sale now).
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   PERFORM public.exos_wroom_configure(pg_temp.u('e2'), true, 15, 60, 10, 10);
@@ -370,7 +398,7 @@ BEGIN
   ASSERT pg_temp.st(format('SELECT public.exos_create_hold(%L, %L, 1, 600, NULL)', pg_temp.u('e2'), pg_temp.u('c4'))) LIKE 'XWR01%',
     'WR5 cross-event token refused';
   PERFORM pg_temp.as_('service_role');
-  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L)', pg_temp.u('e2'), pg_temp.u('c4'), v_adm)) LIKE 'XWR01%',
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_require(%L, %L, %L, %L, NULL)', pg_temp.u('e2'), pg_temp.u('c4'), v_adm, pg_temp.u('b1'))) LIKE 'XWR01%',
     'WR5 cross-event require refused';
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE used_at IS NOT NULL AND event_id = pg_temp.u('e1')) = 2, 'WR5 two used';
@@ -378,7 +406,7 @@ BEGIN
   j := public.exos_wroom_summary(pg_temp.u('e1'));
   ASSERT (j->'counts'->>'checked_out')::int = 2 AND (j->'counts'->>'admitted')::int = 96 AND (j->'counts'->>'waiting')::int = 107
      AND (j->'counts'->>'total')::int = 205 AND j->>'phase' = 'live', 'WR5 counts: ' || j::text;
-  RAISE NOTICE 'OK  WR5 gate: admitted token passes (hold, free claim, guest hold, require) and is marked used; none / waiting / malformed / other event XWR01; presale type bypasses';
+  RAISE NOTICE 'OK  WR5 gate: admitted token passes (hold, free claim, guest hold, require) and is marked used; none / waiting / malformed / other event XWR01; presale type bypasses in its window only; a turn is bound to its first buyer (account or guest email), one live cart; the event is taken from the type';
 END $$;
 
 -- WR6 -----------------------------------------------------------------------
@@ -426,13 +454,49 @@ BEGIN
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' IN ('waiting', 'admitted'), 'WR7 another network mints';
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2')) = v_n + 61, 'WR7 nothing stored when busy';
-  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network, then busy with nothing stored; known tokens still poll';
+  -- IPv6: rotating /64s inside one /48 hits the /48's 120 a minute.
+  FOR i IN 1..120 LOOP
+    PERFORM pg_temp.as_('anon', NULL, '2001:db8:1:' || to_hex(i) || '::1');
+    j := public.exos_wroom_join(pg_temp.u('e2'));
+    ASSERT j->>'state' IN ('waiting', 'full'), 'WR7 v6 ' || i || ': ' || j::text;
+  END LOOP;
+  PERFORM pg_temp.as_('anon', NULL, '2001:db8:1:ff::1');
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'busy', 'WR7 /48 rate limit';
+  PERFORM pg_temp.as_('postgres');
+  -- ...and only 20 of them got a place: 20 per /48 per run.
+  ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2')) = v_n + 61 + 20, 'WR7 20 per /48 per run';
+  -- An IPv4 address: 200 per run (shared NAT). 139 more rows from 100.64.0.1's network hash, then full.
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'), extract(epoch FROM now())
+    FROM public.exos_wroom_settings s, generate_series(1, 200) g WHERE s.event_id = pg_temp.u('e2');
+  ASSERT (SELECT sum(n) FROM public.exos_wroom_counts WHERE event_id = pg_temp.u('e2')) = v_n + 61 + 20, 'WR7 the shards count every place';
+  INSERT INTO public.exos_wroom_counts (event_id, run_id, shard, org_id, n)
+  SELECT pg_temp.u('e2'), s.run_id, 0, pg_temp.u('1'), 200 FROM public.exos_wroom_settings s WHERE s.event_id = pg_temp.u('e2')
+  ON CONFLICT (event_id, run_id, shard) DO UPDATE SET n = public.exos_wroom_counts.n + 200;
+  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
+  j := public.exos_wroom_join(pg_temp.u('e2'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network' AND NOT j ? 'token', 'WR7 200 per IPv4 per run: ' || j::text;
+  -- The room's cap: the organizer sets 100 (fewer than are in line): newcomers get "full".
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 100);
+  ASSERT (j->>'cap')::int = 100 AND (j->>'max_entries')::int = 100, 'WR7 cap set: ' || j::text;
+  PERFORM pg_temp.as_('anon', NULL, '100.64.0.4');
+  j := public.exos_wroom_join(pg_temp.u('e2'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'room', 'WR7 room full: ' || j::text;
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'), v_tok)->>'state' IN ('waiting', 'admitted'), 'WR7 people in line keep their place';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 0);
+  ASSERT j->>'max_entries' IS NULL AND (j->>'cap')::int = 1000, 'WR7 automatic cap (5 x 100, at least 1,000): ' || j::text;
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_configure(%L, true, NULL, NULL, NULL, NULL, 50)', pg_temp.u('e2'))) LIKE '22023%', 'WR7 cap bounds';
+  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); per run 20 per /48 and 200 per IPv4 address, and the room cap (full); known tokens still poll';
 END $$;
 
 -- WR8 -----------------------------------------------------------------------
 DO $$
 DECLARE j jsonb; v_tok text; v_old text; h uuid;
 BEGIN
+  PERFORM pg_temp.as_('postgres');
   -- Idle: e2's line emptied (everyone admitted) 11 minutes ago.
   UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes'
    WHERE event_id = pg_temp.u('e2') AND state = 'waiting';
@@ -453,7 +517,7 @@ BEGIN
   PERFORM pg_temp.as_('anon');
   ASSERT public.exos_wroom_join(pg_temp.u('e1')) = '{"state": "off"}'::jsonb, 'WR8 off: no token';
   PERFORM pg_temp.as_('service_role');
-  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), NULL), 'WR8 off: require passes';
+  ASSERT public.exos_wroom_require(pg_temp.u('e1'), pg_temp.u('c1'), NULL, NULL, 'a@x.com'), 'WR8 off: require passes';
   -- On again: a new run; the old tokens are dead, the line starts empty.
   SELECT token INTO v_old FROM wr_tok WHERE n = 1;
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));

@@ -175,7 +175,7 @@ async function vu(i, deadline, stepTag) {
     const t0 = performance.now();
     const email = `vu${i}.${stepTag}@loadtest.invalid`;
     const svc = { ...hdr, 'x-exos-queue': tok };
-    await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_wroom_require($1, $2, $3) AS ok', [EV, TIER, tok]);
+    await request('checkout_sql', 'service_role', hdr, 'SELECT public.exos_wroom_require($1, $2, $3, NULL, $4) AS ok', [EV, TIER, tok, email]);
     await request('checkout_sql', 'service_role', hdr,
       'SELECT t.id, t.price, t.capacity, t.sold, e.org_id, e.status FROM public.exos_ticket_tiers t JOIN public.exos_events e ON e.id = t.event_id WHERE t.id = $1 AND t.event_id = $2', [TIER, EV]);
     await request('checkout_sql', 'service_role', hdr, 'SELECT * FROM public.exos_public_event_sale($1)', [EV]);

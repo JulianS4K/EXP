@@ -274,7 +274,13 @@ finance can see the counts).
   again, at the back. `/event/<id>/queue` is the same line on a lighter page you can link to.
 - **Only admitted buyers can check out.** While the room is open, checkout, seat holds and free
   claims for the event refuse anyone without a current turn; the check runs in the database before
-  anything else.
+  anything else. A turn belongs to the first buyer who uses it (their account, or the email a guest
+  pays with): passing the link to a friend doesn't let a second person in, and one turn holds one
+  cart at a time.
+- **How big the line can get:** at most "Most people in line" (blank = automatic: 5 times the
+  public capacity, at least 1,000). Beyond that, and beyond a per-network share that stops one
+  network filling the line, newcomers see "The waiting room is full" and the page tries again each
+  minute.
 - **Who skips the line:** your drop list's presale ticket type (confirmed list members, with their
   code, until the public on-sale), and sales that never go through the public checkout: partner API
   reservations, the box office, the door and comps.

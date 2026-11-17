@@ -14,6 +14,12 @@
 #          30-ticket type at once: 30 holds, never more; every waiting one
 #          refused (XWR01); an admission is marked used only when its hold
 #          committed
+#   race 4 one admitted token, 10 different buyers at once (each keeps its
+#          transaction open): exactly one hold; the others refused (XWR02 while
+#          the first is open, XWR01 once the turn is bound); the turn bound to
+#          that one buyer
+#   race 5 the same buyer twice at once on one token: one hold, the other
+#          XWR02 (one checkout per turn at a time)
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -49,9 +55,9 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner@r
 # 300 people in line (random places, all seen just now).
 VALUES=""
 for n in $(seq 1 300); do VALUES+="('$(tok $n)'),"; done
-$P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,arrived_at,order_key)
+$P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash,arrived_at,order_key)
          SELECT '$O','$EV',(SELECT run_id FROM exos_wroom_settings WHERE event_id='$EV'),
-                public._exos_wroom_hash('$EV', v.t), now() - interval '3 minutes', public._exos_wroom_rand()
+                public._exos_wroom_hash('$EV', v.t), md5(v.t) || md5(v.t), now() - interval '3 minutes', public._exos_wroom_rand()
            FROM (VALUES ${VALUES%,}) v(t);
        UPDATE exos_wroom_settings SET on_sale_at = now() - interval '1 minute', drawn_at = now() - interval '1 minute'
         WHERE event_id='$EV';" >/dev/null
@@ -107,7 +113,7 @@ $P -c "UPDATE exos_wroom_entries SET state='admitted', admitted_at=now(), admit_
        UPDATE exos_wroom_entries SET state='waiting', admitted_at=NULL, admit_expires_at=NULL
         WHERE event_id='$EV' AND token_hash IN (SELECT public._exos_wroom_hash('$EV', t) FROM unnest(ARRAY[$(for n in $(seq 251 260); do echo -n "'$(tok $n)',"; done | sed 's/,$//')]) t);
        UPDATE exos_wroom_settings SET advanced_at = now() + interval '1 hour' WHERE event_id='$EV';" >/dev/null
-hold() {  # $1 = buyer (fan n), $2 = token n
+hold() {  # $1 = buyer (fan n), $2 = token n, $3 = seconds to keep the transaction open
   local uid; uid="e7e00000-0000-0000-0000-$(printf '%012x' $((1000 + $1)))"
   $P -c "BEGIN;
          SELECT set_config('app.uid','$uid',true);
@@ -115,6 +121,7 @@ hold() {  # $1 = buyer (fan n), $2 = token n
          SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.51.100.8\",\"x-exos-queue\":\"$(tok $2)\"}',true);
          SET LOCAL ROLE authenticated;
          SELECT public.exos_create_hold('$EV','$T',1,600,NULL) IS NOT NULL;
+         SELECT count(*) FROM pg_sleep(${3:-0});
          COMMIT;" 2>&1 || true
 }
 for n in $(seq 1 50); do hold "$n" "$n" > "$OUT/h.$n" & done
@@ -129,5 +136,36 @@ if [[ "$holds" == 30 && "$qty" == 30 && "$ok" == 30 && "$queued" == 10 && "$used
   echo "OK   race 3 50 admitted + 10 waiting buyers at once on 30 tickets: 30 holds, 10 refused (XWR01), 30 admissions used"
 else
   echo "FAIL race 3: holds $holds (qty $qty), ok $ok, queued $queued, used $used"; cat "$OUT"/h.* "$OUT"/w.* | grep -v '^t$' | sort | uniq -c | head -5; fail=1
+fi
+
+# race 4 ---------------------------------------------------------------------
+# Token 270: admitted, unused. Buyers 41..50 had holds released for room.
+$P -c "UPDATE exos_cart_holds SET status='released', released_at=now() WHERE event_id='$EV';
+       UPDATE exos_wroom_entries SET state='admitted', admitted_at=now(), admit_expires_at=now() + interval '10 minutes',
+              used_at=NULL, redeemer_hash=NULL
+        WHERE event_id='$EV' AND token_hash IN (public._exos_wroom_hash('$EV','$(tok 270)'), public._exos_wroom_hash('$EV','$(tok 271)'));" >/dev/null
+for n in $(seq 41 50); do hold "$n" 270 0.5 > "$OUT/r4.$n" & done
+wait
+ok4=$(cat "$OUT"/r4.* | grep -c '^t$' || true)
+busy4=$(cat "$OUT"/r4.* | grep -c 'already checking out' || true)
+wait4=$(cat "$OUT"/r4.* | grep -c 'wait for your turn' || true)
+held4=$($P -c "SELECT count(*) FROM exos_cart_holds WHERE event_id='$EV' AND status='active'")
+bound=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE token_hash=public._exos_wroom_hash('$EV','$(tok 270)') AND redeemer_hash IS NOT NULL")
+if [[ "$ok4" == 1 && $((busy4 + wait4)) == 9 && "$held4" == 1 && "$bound" == 1 ]]; then
+  echo "OK   race 4 one token, 10 buyers at once: 1 hold, 9 refused ($busy4 busy, $wait4 not theirs), bound to one buyer"
+else
+  echo "FAIL race 4: ok $ok4, busy $busy4, wait $wait4, active holds $held4, bound $bound"; cat "$OUT"/r4.* | grep -v '^t$' | sort | uniq -c | head -5; fail=1
+fi
+
+# race 5 ---------------------------------------------------------------------
+hold 45 271 0.5 > "$OUT/r5.a" &
+hold 45 271 0.5 > "$OUT/r5.b" &
+wait
+ok5=$(cat "$OUT"/r5.* | grep -c '^t$' || true)
+busy5=$(cat "$OUT"/r5.* | grep -c 'already checking out' || true)
+if [[ "$ok5" == 1 && "$busy5" == 1 ]]; then
+  echo "OK   race 5 the same buyer twice at once on one turn: one hold, the other refused (XWR02)"
+else
+  echo "FAIL race 5: ok $ok5, busy $busy5"; cat "$OUT"/r5.*; fail=1
 fi
 exit $fail

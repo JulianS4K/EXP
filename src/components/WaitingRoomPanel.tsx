@@ -33,10 +33,10 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
   const { toast } = useToast();
   const [s, setS] = useState<RoomSummary | null>(null);
   const [form, setForm] = useState<Record<keyof RoomSettingsInput, string>>({
-    windowMinutes: '15', admitPerMinute: '200', admissionMinutes: '10', idleCloseMinutes: '10',
+    windowMinutes: '15', admitPerMinute: '200', admissionMinutes: '10', idleCloseMinutes: '10', maxEntries: '',
   });
   const [busy, setBusy] = useState(false);
-  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId() };
+  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId(), cap: useId() };
 
   const load = useCallback(() => {
     if (!canView) return;
@@ -54,13 +54,15 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
     setForm({
       windowMinutes: String(s.windowMinutes), admitPerMinute: String(s.admitPerMinute),
       admissionMinutes: String(s.admissionMinutes), idleCloseMinutes: String(s.idleCloseMinutes),
+      maxEntries: s.maxEntries == null ? '' : String(s.maxEntries),
     });
-  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes, s?.maxEntries]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!canView || !s) return null;
 
   const input: RoomSettingsInput = {
     windowMinutes: Number(form.windowMinutes), admitPerMinute: Number(form.admitPerMinute),
     admissionMinutes: Number(form.admissionMinutes), idleCloseMinutes: Number(form.idleCloseMinutes),
+    maxEntries: form.maxEntries.trim() === '' ? 0 : Number(form.maxEntries),
   };
   const err = settingsProblem(input);
   const on = s.enabled && !s.closedAt;
@@ -81,10 +83,10 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
     ['Waiting', s.counts.waiting], ['Admitted', s.counts.admitted],
     ['Checked out', s.counts.checkedOut], ['Expired', s.counts.expired],
   ];
-  const field = (k: keyof RoomSettingsInput, id: string, label: string, min: number, max: number) => (
+  const field = (k: keyof RoomSettingsInput, id: string, label: string, min: number, max: number, placeholder?: string) => (
     <div>
       <label htmlFor={id} className={LBL}>{label}</label>
-      <input id={id} type="number" min={min} max={max} value={form[k]} disabled={!s.canManage}
+      <input id={id} type="number" min={min} max={max} value={form[k]} disabled={!s.canManage} placeholder={placeholder}
         onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.value }))} className={FLD} />
     </div>
   );
@@ -116,11 +118,12 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
           ))}
         </dl>
       )}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end mb-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end mb-3">
         {field('windowMinutes', ids.win, 'Opens before on-sale (min)', 0, 240)}
         {field('admitPerMinute', ids.rate, 'Let in per minute', 1, 20000)}
         {field('admissionMinutes', ids.adm, 'Time to check out (min)', 2, 60)}
         {field('idleCloseMinutes', ids.idle, 'Close when idle for (min)', 1, 240)}
+        {field('maxEntries', ids.cap, 'Most people in line', 100, 1000000, s.cap ? `Automatic (${s.cap.toLocaleString()})` : 'Automatic')}
       </div>
       {s.canManage ? (
         <div className="flex flex-wrap gap-2 items-center">

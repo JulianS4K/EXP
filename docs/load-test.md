@@ -45,42 +45,54 @@ checkout calls), `hold` (the guest hold alone) and `checkout_pre_stripe` (all se
 
 ### The room paced at 1,200 a minute (20 checkouts a second)
 
-`npm run loadtest -- --steps 100,1000,5000,10000 --rate 1200 --max-step 120`
+`npm run loadtest -- --steps 100,1000,5000,10000 --rate 1200 --max-step 120`, on the final code (one buyer per
+turn, the per-network and room caps), plus a second 10,000 run:
 
 | VUs | Op | Requests | p50 ms | p95 ms | p99 ms | Errors |
 |---|---|---|---|---|---|---|
-| 100 | event_read | 200 | 3.4 | 8.0 | 13.0 | 0 % |
-| 100 | token_mint | 100 | 2.7 | 7.8 | 8.6 | 0 % |
-| 100 | poll | 103 | 1.8 | 6.0 | 8.6 | 0 % |
-| 100 | hold | 100 | 5.8 | 10.0 | 13.6 | 0 % |
-| 100 | checkout_pre_stripe | 100 | 15.5 | 26.5 | 33.8 | 0 % |
-| 1,000 | event_read | 2,000 | 2.7 | 6.2 | 10.0 | 0 % |
-| 1,000 | token_mint | 1,000 | 2.1 | 5.7 | 8.9 | 0 % |
-| 1,000 | poll | 4,228 | 1.4 | 4.2 | 6.9 | 0 % |
-| 1,000 | hold | 1,000 | 9.7 | 22.5 | 35.9 | 0 % |
-| 1,000 | checkout_pre_stripe | 1,000 | 17.5 | 34.4 | 48.1 | 0 % |
-| 5,000 | event_read | 10,000 | 2.5 | 6.1 | 11.1 | 0 % |
-| 5,000 | token_mint | 5,000 | 2.5 | 8.3 | 14.9 | 0 % |
-| 5,000 | poll | 45,020 | 2.0 | 3.8 | 6.2 | 0 % |
-| 5,000 | hold | 2,321 | 16.1 | 46.8 | 69.1 | 0 % |
-| 5,000 | checkout_pre_stripe | 2,321 | 23.7 | 55.5 | 79.5 | 0 % |
-| 10,000 | event_read | 20,000 | 63.4 | 288.2 | 334.0 | 0 % |
-| 10,000 | token_mint | 10,000 | 71.4 | 303.0 | 358.1 | 0 % |
-| 10,000 | poll | 74,281 | 3.1 | 82.4 | 250.3 | 0 % |
-| 10,000 | hold | 2,328 | 20.5 | 167.3 | 294.4 | 0 % |
-| 10,000 | checkout_pre_stripe | 2,328 | 30.7 | 801.2 | 1,737.5 | 0 % |
+| 100 | event_read | 200 | 3.1 | 5.7 | 8.6 | 0 % |
+| 100 | token_mint | 100 | 2.8 | 6.3 | 8.5 | 0 % |
+| 100 | poll | 106 | 1.7 | 4.2 | 6.3 | 0 % |
+| 100 | hold | 100 | 5.5 | 7.6 | 9.6 | 0 % |
+| 100 | checkout_pre_stripe | 100 | 14.0 | 19.6 | 25.1 | 0 % |
+| 1,000 | event_read | 2,000 | 2.7 | 4.7 | 6.3 | 0 % |
+| 1,000 | token_mint | 1,000 | 2.4 | 4.5 | 8.4 | 0 % |
+| 1,000 | poll | 4,168 | 1.3 | 2.6 | 5.3 | 0 % |
+| 1,000 | hold | 1,000 | 10.0 | 19.9 | 28.7 | 0 % |
+| 1,000 | checkout_pre_stripe | 1,000 | 17.3 | 29.0 | 36.4 | 0 % |
+| 5,000 | event_read | 10,000 | 2.9 | 13.2 | 31.2 | 0 % |
+| 5,000 | token_mint | 5,000 | 3.5 | 21.1 | 44.8 | 0 % |
+| 5,000 | poll | 45,004 | 2.3 | 8.1 | 12.8 | 0 % |
+| 5,000 | hold | 2,325 | 21.2 | 58.4 | 86.5 | 0 % |
+| 5,000 | checkout_pre_stripe | 2,325 | 33.2 | 74.5 | 105.2 | 0 % |
+| 10,000 | event_read | 20,000 | 73.6 | 2,400 | 2,718 | 0 % |
+| 10,000 | token_mint | 10,000 | 97.6 | 2,820 | 2,891 | 0 % |
+| 10,000 | poll | 72,106 | 3.9 | 2,245 | 2,741 | 0 % |
+| 10,000 | hold | 2,323 | 29.2 | 958.6 | 1,725 | 0 % |
+| 10,000 | checkout_pre_stripe | 2,323 | 43.5 | 9,361 | 13,466 | 0 % |
+| 10,000 (run 2) | event_read | 20,000 | 182.9 | 1,473 | 1,534 | 0 % |
+| 10,000 (run 2) | token_mint | 10,000 | 199.1 | 1,529 | 1,598 | 0 % |
+| 10,000 (run 2) | poll | 73,475 | 4.1 | 700.3 | 1,485 | 0 % |
+| 10,000 (run 2) | hold | 2,325 | 27.2 | 549.1 | 1,464 | 0 % |
+| 10,000 (run 2) | checkout_pre_stripe | 2,325 | 44.0 | 4,670 | 7,776 | 0 % |
 
 Every VU got a token and a place; no request failed. At 5,000 and 10,000 VUs the room let in 20 a
-second as set (about 2,330 holds in the step) and the rest were still in line, with a correct place,
-when the step ended. Peak load at 10,000 VUs is the ramp: 500 arrivals a second, each a page read, a
-mint and a poll, on the same 4 vCPUs as the load generator; that is where the 10,000 p95s come from.
+second as set (about 2,325 holds in the step) and the rest were still in line, with a correct place,
+when the step ended.
 
-**Headline (10,000 buyers in 20 seconds, room on):** event page p95 288 ms, queue join p95 303 ms,
-queue poll p95 82 ms, hold p95 167 ms, checkout SQL before Stripe p95 0.8 s, 0 errors.
+**Headline.** 5,000 buyers arriving in 20 seconds: event page p95 13 ms, queue join p95 21 ms, queue
+poll p95 8 ms, hold p95 58 ms, checkout SQL before Stripe p95 75 ms, 0 errors. 10,000 buyers in 20
+seconds: 0 errors, poll p50 4 ms and hold p50 29 ms, but p95 of 1.5-2.8 s on the page read, the join
+and the poll across two runs. That is the arrival burst (500 new buyers a second, each a page read, a
+join and a poll) saturating this 4-vCPU box, which also runs the 10,000 VUs: every request waits for
+one of the 40 connections. An earlier 10,000 run, before the one-buyer-per-turn and cap checks,
+measured p95 288 ms (page), 303 ms (join), 82 ms (poll), 167 ms (hold) and 0.8 s (checkout SQL); the
+gap between runs on this shared sandbox is as large as the gap between versions, so treat the 10,000
+p95s as "about 0.3 to 3 s at the arrival peak on 4 vCPUs", to be measured on the real instance.
 
 ### The room set faster than checkout can go (3,000 a minute)
 
-`npm run loadtest -- --steps 5000,10000 --rate 3000 --max-step 120`
+`npm run loadtest -- --steps 5000,10000 --rate 3000 --max-step 120` (run before the one-buyer-per-turn and cap checks)
 
 | VUs | Op | Requests | p50 ms | p95 ms | p99 ms | Errors |
 |---|---|---|---|---|---|---|

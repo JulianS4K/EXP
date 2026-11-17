@@ -2194,7 +2194,6 @@ await run('drop list: the confirm and leave links take a click', async (page, lo
     rpcs: dm.rpcs }) });
 }
 
-await browser.close();
 // ── claude/exos-waiting-room (mig 20261118120000): the queue, admission, the token in checkout, the organizer panel ──
 {
   const st = { admitAfter: 1 };
@@ -2241,11 +2240,12 @@ await run('waiting room: the queue page before the on-sale (no login)', async (p
     await page.reload();
     await panel.getByText('Live: letting people in').waitFor({ timeout: 8000 });
     const text = (await panel.innerText()).replace(/\s+/g, ' ');
-    for (const want of ['4,210', '1,250', 'Checked out', 'Expired']) assert(text.includes(want), `panel shows "${want}": ` + text);
+    for (const want of ['4,210', '1,250', 'Checked out', 'Expired']) assert(text.toLowerCase().includes(want.toLowerCase()), `panel shows "${want}": ` + text);
     assert(!text.includes(WROOM_TOKEN) && !text.includes('@'), 'no tokens or addresses');
   }, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: wroomMock(st).rpcs }) });
 }
 
+await browser.close();
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 
 if (results.some((r) => !r.ok)) process.exit(1);

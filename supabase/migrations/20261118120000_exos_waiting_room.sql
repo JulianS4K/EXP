@@ -36,12 +36,15 @@
 --     exos_create_guest_hold and exos_claim_free_tickets refuse (XWR01) unless
 --     the request carries an admitted, unexpired token for THAT event in the
 --     x-exos-queue header (PostgREST's request.headers), checked first thing
---     in the body (marker /* exos: waiting room gate */). exos-checkout also
---     calls exos_wroom_require (service role) before anything else, which
---     covers the bypass-voucher checkouts that skip the hold.
---   * Bypass, on purpose: the drop list presale type (mig 20261118100000):
---     its buyers are confirmed list members, the code works only for them and
---     only until the public on-sale, the type has its own capacity, and
+--     in the body (marker /* exos: waiting room gate */); the event is also
+--     taken from the ticket type. exos-checkout also calls exos_wroom_require
+--     (service role) with the event and type it resolved, before any hold,
+--     write or Stripe call, which covers the bypass-voucher checkouts that
+--     skip the hold.
+--   * Bypass, on purpose: the drop list presale type (mig 20261118100000)
+--     during its early window (before the public on-sale it was set
+--     against): its buyers are confirmed list members, the code works only
+--     for them and only until the public on-sale, the type has its own capacity, and
 --     queuing them behind the public line defeats the presale. Partner API
 --     reservations and staff sales (POS, door, kiosk, comps) never use these
 --     three functions: they are credentialed, rate limited per key or staff
@@ -50,12 +53,21 @@
 --   * Closing: the organizer turns it off, or, after the on-sale, nobody has
 --     been waiting for idle_close_minutes (checked on read). Then everyone
 --     buys as usual. Turning it on again starts a new run (old tokens die).
---   * No PII: an entry is a token hash, times and a state. No IP (the rate
---     limit bucket is an md5 of the network in exos_rate_windows), no user,
---     no email. A caller only ever sees its own place in line.
+--   * One buyer per turn: the first checkout / hold / claim binds the
+--     admission to its buyer (SHA-256 of event + account id or guest email);
+--     anyone else with the token is refused, and two checkouts on one turn at
+--     the same time are refused (XWR02). The hold functions keep one live cart
+--     per buyer and event, so a turn never holds two carts.
+--   * Stuffing: minting is limited per network (IPv4 address / IPv6 /64: 60 a
+--     minute; IPv6 /48: 120 a minute), per run per network (20 per /48, 200
+--     per IPv4 address), and by the room's cap (organizer's number, else 5 x
+--     the public capacity, at least 1,000): over those, "full".
+--   * No PII: an entry is a token hash, times, a state, a hash of the
+--     redeeming buyer and of the minting network (salted with the run). No
+--     IP, user id or email in clear. A caller only ever sees its own place.
 --   * No cron: everything runs on read.
 --
--- Touches:  C: TABLE exos_wroom_settings, exos_wroom_entries (RLS on, no client
+-- Touches:  C: TABLE exos_wroom_settings, exos_wroom_entries, exos_wroom_counts (RLS on, no client
 --              grants: RPCs only)
 --           C: FUNCTION exos_wroom_join, exos_wroom_status (anon + authenticated;
 --              H3 allowlist), exos_wroom_summary (owner / manager / finance),
@@ -82,6 +94,8 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_settings (
   admit_per_minute    int NOT NULL DEFAULT 200 CHECK (admit_per_minute BETWEEN 1 AND 20000),
   admission_minutes   int NOT NULL DEFAULT 10 CHECK (admission_minutes BETWEEN 2 AND 60),
   idle_close_minutes  int NOT NULL DEFAULT 10 CHECK (idle_close_minutes BETWEEN 1 AND 240),
+  -- Most people in one run's line; NULL = 5 x the public capacity (at least 1,000).
+  max_entries         int CHECK (max_entries IS NULL OR max_entries BETWEEN 100 AND 1000000),
   -- One run per "turned on": entries of another run are dead.
   run_id              uuid NOT NULL DEFAULT gen_random_uuid(),
   enabled_at          timestamptz,
@@ -120,8 +134,14 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   state             text NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'admitted', 'expired')),
   admitted_at       timestamptz,
   admit_expires_at  timestamptz,
-  -- First checkout / hold / free claim made with the admission.
+  -- First checkout / hold / free claim made with the admission, and who made
+  -- it: SHA-256(event:uid:<id> or event:email:<address>). The turn is that
+  -- buyer's from then on.
   used_at           timestamptz,
+  redeemer_hash     text CHECK (redeemer_hash IS NULL OR redeemer_hash ~ '^[0-9a-f]{64}$'),
+  -- SHA-256(run:network) of the minting network (IPv6 /48, an IPv4 address),
+  -- for the per-network cap of a run. Never the address itself.
+  net_hash          text NOT NULL CHECK (net_hash ~ '^[0-9a-f]{64}$'),
   last_seen_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT exos_wroom_entries_admit_chk CHECK ((state = 'waiting') = (admitted_at IS NULL))
 );
@@ -130,9 +150,26 @@ CREATE INDEX IF NOT EXISTS exos_wroom_entries_line_idx
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_undrawn_idx
   ON public.exos_wroom_entries (event_id, run_id) WHERE order_key IS NULL;
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_org_idx ON public.exos_wroom_entries (org_id);
+CREATE INDEX IF NOT EXISTS exos_wroom_entries_net_idx ON public.exos_wroom_entries (event_id, run_id, net_hash);
 ALTER TABLE public.exos_wroom_entries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_wroom_entries FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_wroom_entries TO service_role;
+
+-- How many places a run has handed out, in 16 shards (a mint adds 1 to a
+-- random shard): the room cap is read as a sum of 16 rows instead of a count
+-- of the whole line, and parallel mints rarely wait on the same row.
+CREATE TABLE IF NOT EXISTS public.exos_wroom_counts (
+  event_id  uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
+  run_id    uuid NOT NULL,
+  shard     smallint NOT NULL CHECK (shard BETWEEN 0 AND 15),
+  org_id    uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  n         int NOT NULL DEFAULT 0 CHECK (n >= 0),
+  PRIMARY KEY (event_id, run_id, shard)
+);
+CREATE INDEX IF NOT EXISTS exos_wroom_counts_org_idx ON public.exos_wroom_counts (org_id);
+ALTER TABLE public.exos_wroom_counts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_wroom_counts FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_wroom_counts TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. Helpers (no client grants)
@@ -174,6 +211,36 @@ BEGIN
   RETURN nullif(btrim(coalesce(h ->> 'x-exos-queue', '')), '');
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_header_token() FROM PUBLIC, anon, authenticated;
+
+-- The wider network for the queue's limits: an IPv6 address's /48 (one
+-- customer's whole allocation: rotating /64s inside it doesn't help), an IPv4
+-- address as is, 'unknown' without a trusted IP.
+CREATE OR REPLACE FUNCTION public._exos_wroom_wide_bucket()
+RETURNS text
+LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE v text := public._exos_request_ip(); i inet;
+BEGIN
+  IF v IS NULL THEN RETURN 'unknown'; END IF;
+  i := v::inet;
+  IF family(i) = 6 THEN RETURN network(set_masklen(i, 48))::text; END IF;
+  RETURN host(i);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_wide_bucket() FROM PUBLIC, anon, authenticated;
+
+-- The most people one run's line may hold: the organizer's number, or 5 x
+-- the public sellable capacity (at least 1,000).
+CREATE OR REPLACE FUNCTION public._exos_wroom_cap(s public.exos_wroom_settings)
+RETURNS int
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce(s.max_entries, greatest(1000, least(1000000, 5 * coalesce((
+    SELECT sum(t.capacity) FROM public.exos_ticket_tiers t
+     WHERE t.event_id = s.event_id AND t.visibility = 'public' AND t.capacity > 0), 0)))::int)
+$$;
+REVOKE ALL ON FUNCTION public._exos_wroom_cap(public.exos_wroom_settings) FROM PUBLIC, anon, authenticated;
 
 -- Where a room stands: 'off' (none, turned off or closed), 'before' (the
 -- window hasn't opened), 'lobby' (open, before the on-sale), 'live'.
@@ -326,65 +393,95 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_view(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
--- The gate: may this request start a checkout, a hold or a free claim for
--- this event (and ticket type)? Returns when there is no open room, for the
--- drop list presale type, or for an admitted, unexpired token of this event's
--- current run (marking its first use). Raises XWR01 otherwise.
-CREATE OR REPLACE FUNCTION public._exos_wroom_gate_token(p_event_id uuid, p_tier_id uuid, p_token text)
+-- The gate: may this buyer start a checkout, a hold or a free claim for this
+-- event (and ticket type)? p_buyer is 'uid:<id>' or 'email:<address>'.
+-- Returns when there is no open room, for the drop list presale type in its
+-- early window, or for an admitted, unexpired token of this event's current
+-- run that is unused or already this buyer's (the first use binds the turn to
+-- its buyer). The event is also taken from the ticket type, so a request
+-- can't name a roomless event for another event's type. Raises XWR01 (wait
+-- your turn) or XWR02 (the turn is checking out in another window: one at a
+-- time; the hold functions keep one live cart per buyer and event, so a turn
+-- never holds two carts).
+CREATE OR REPLACE FUNCTION public._exos_wroom_gate_token(p_event_id uuid, p_tier_id uuid, p_token text, p_buyer text)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  s  public.exos_wroom_settings%ROWTYPE;
-  ph record;
+  s       public.exos_wroom_settings%ROWTYPE;
+  ph      record;
+  e       public.exos_wroom_entries%ROWTYPE;
+  v_tev   uuid;
+  v_h     text;
+  v_r     text;
 BEGIN
+  SELECT t.event_id INTO v_tev FROM public.exos_ticket_tiers t WHERE t.id = p_tier_id;
+  IF v_tev IS NOT NULL AND v_tev IS DISTINCT FROM p_event_id THEN
+    PERFORM public._exos_wroom_gate_token(v_tev, p_tier_id, p_token, p_buyer);
+  END IF;
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   IF NOT FOUND OR NOT s.enabled OR s.closed_at IS NOT NULL THEN RETURN; END IF;
   ph := public._exos_wroom_phase(s);
   IF ph.phase IN ('off', 'before') THEN RETURN; END IF;
-  IF p_tier_id IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_drop_settings ds
-                                        WHERE ds.event_id = p_event_id AND ds.presale_tier_id = p_tier_id) THEN
-    RETURN;  -- the drop list presale: members only, until the public on-sale
+  IF p_tier_id IS NOT NULL AND v_tev = p_event_id AND EXISTS (SELECT 1 FROM public.exos_drop_settings ds
+                                        WHERE ds.event_id = p_event_id AND ds.presale_tier_id = p_tier_id
+                                          AND now() < ds.public_on_sale_at) THEN
+    RETURN;  -- the drop list presale window: members only (their code), until the public on-sale
   END IF;
   PERFORM public._exos_wroom_advance(p_event_id);  -- may close an idle room
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   IF s.closed_at IS NOT NULL THEN RETURN; END IF;
-  IF coalesce(p_token, '') ~ '^[0-9a-f]{64}$' THEN
-    UPDATE public.exos_wroom_entries e
-       SET used_at = coalesce(e.used_at, now()), last_seen_at = now()
-     WHERE e.token_hash = public._exos_wroom_hash(p_event_id, p_token)
-       AND e.event_id = p_event_id AND e.run_id = s.run_id
-       AND e.state = 'admitted' AND e.admit_expires_at > now();
-    IF FOUND THEN RETURN; END IF;
+  IF coalesce(p_token, '') !~ '^[0-9a-f]{64}$' OR coalesce(p_buyer, '') !~ '^(uid|email):.+$' THEN
+    RAISE EXCEPTION 'exos waiting room: wait for your turn in the queue' USING ERRCODE = 'XWR01';
   END IF;
-  RAISE EXCEPTION 'exos waiting room: wait for your turn in the queue' USING ERRCODE = 'XWR01';
+  v_h := public._exos_wroom_hash(p_event_id, p_token);
+  v_r := encode(sha256(convert_to(p_event_id::text || ':' || lower(p_buyer), 'UTF8')), 'hex');
+  -- One checkout per turn at a time (held until this transaction ends).
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('exos_wroom_turn:' || v_h, 0)) THEN
+    RAISE EXCEPTION 'exos waiting room: your turn is already checking out in another window' USING ERRCODE = 'XWR02';
+  END IF;
+  SELECT * INTO e FROM public.exos_wroom_entries x
+   WHERE x.token_hash = v_h AND x.event_id = p_event_id AND x.run_id = s.run_id
+   FOR UPDATE;
+  IF NOT FOUND OR e.state <> 'admitted' OR e.admit_expires_at <= now()
+     OR (e.redeemer_hash IS NOT NULL AND e.redeemer_hash <> v_r) THEN
+    RAISE EXCEPTION 'exos waiting room: wait for your turn in the queue' USING ERRCODE = 'XWR01';
+  END IF;
+  UPDATE public.exos_wroom_entries x
+     SET used_at = coalesce(x.used_at, now()), redeemer_hash = coalesce(x.redeemer_hash, v_r), last_seen_at = now()
+   WHERE x.id = e.id;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_wroom_gate_token(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_wroom_gate_token(uuid, uuid, text, text) FROM PUBLIC, anon, authenticated;
 
 -- The same, with the token from the request's x-exos-queue header (what the
--- three hold / claim functions call first).
-CREATE OR REPLACE FUNCTION public._exos_wroom_gate(p_event_id uuid, p_tier_id uuid)
+-- three hold / claim functions call first, with their buyer).
+CREATE OR REPLACE FUNCTION public._exos_wroom_gate(p_event_id uuid, p_tier_id uuid, p_buyer text)
 RETURNS void
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-  -- Fast path for the common case: no room for this event.
-  IF NOT EXISTS (SELECT 1 FROM public.exos_wroom_settings s WHERE s.event_id = p_event_id AND s.enabled) THEN
+  -- Fast path for the common case: no room for this event (or the type's).
+  IF NOT EXISTS (SELECT 1 FROM public.exos_wroom_settings s
+                  WHERE s.enabled AND (s.event_id = p_event_id
+                    OR s.event_id = (SELECT t.event_id FROM public.exos_ticket_tiers t WHERE t.id = p_tier_id))) THEN
     RETURN;
   END IF;
-  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, public._exos_wroom_header_token());
+  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, public._exos_wroom_header_token(), p_buyer);
 END $$;
-REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 3. The queue (anon + authenticated; no login needed)
 -- ---------------------------------------------------------------------------
 -- Arrive: with the browser's token, its state; without one (or with a dead
--- one) a new token while the room is open. Minting: 60 a minute per network
--- (generous: phones on one carrier share addresses), over that "busy" with a
--- retry hint and nothing stored. No room: { state: 'off' } (buy as usual).
+-- one) a new token while the room is open. Minting, checked before any
+-- write: 60 a minute per network (an IPv4 address or an IPv6 /64; generous,
+-- phones on one carrier share addresses) and 120 a minute per IPv6 /48, over
+-- that "busy" with a retry hint and nothing stored; per run at most 20 places
+-- per IPv6 /48 and 200 per IPv4 address (shared NAT), and at most the room's
+-- cap in all, over those "full". No room: { state: 'off' } (buy as usual).
 CREATE OR REPLACE FUNCTION public.exos_wroom_join(p_event_id uuid, p_token text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -395,6 +492,9 @@ DECLARE
   ph      record;
   v_id    uuid;
   v_token text;
+  v_narrow text := public._exos_request_ip_bucket();
+  v_wide  text := public._exos_wroom_wide_bucket();
+  v_net   text;
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
@@ -416,15 +516,31 @@ BEGIN
       RETURN public._exos_wroom_view(p_event_id, v_id, p_token);
     END IF;
   END IF;
-  IF NOT public.exos_rate_hit('wroom-ip:' || md5(public._exos_request_ip_bucket()), 60) THEN
+  IF NOT public.exos_rate_hit('wroom-ip:' || md5(v_narrow), 60)
+     OR (v_wide <> v_narrow AND NOT public.exos_rate_hit('wroom-net:' || md5(v_wide), 120)) THEN
     RETURN jsonb_build_object('state', 'busy', 'retry_after_ms', 5000);
   END IF;
+  v_net := encode(sha256(convert_to(s.run_id::text || ':' || v_wide, 'UTF8')), 'hex');
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_wroom_net:' || v_net, 0));
+  IF (SELECT count(*) FROM public.exos_wroom_entries x
+       WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net_hash = v_net)
+     >= (CASE WHEN position(':' in v_wide) > 0 THEN 20 ELSE 200 END) THEN
+    RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
+  END IF;
+  -- The room's cap (soft: parallel arrivals at the edge may pass it by a few).
+  IF (SELECT coalesce(sum(c.n), 0) FROM public.exos_wroom_counts c WHERE c.event_id = p_event_id AND c.run_id = s.run_id)
+     >= public._exos_wroom_cap(s) THEN
+    RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000);
+  END IF;
   v_token := encode(extensions.gen_random_bytes(32), 'hex');
-  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, order_key)
-  VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token),
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, order_key)
+  VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), v_net,
           -- After the draw a newcomer goes to the back (arrival order).
           CASE WHEN s.drawn_at IS NOT NULL THEN extract(epoch FROM now()) END)
   RETURNING id INTO v_id;
+  INSERT INTO public.exos_wroom_counts AS c (event_id, run_id, shard, org_id, n)
+  VALUES (p_event_id, s.run_id, floor(random() * 16)::smallint, s.org_id, 1)
+  ON CONFLICT (event_id, run_id, shard) DO UPDATE SET n = c.n + 1;
   RETURN public._exos_wroom_view(p_event_id, v_id, v_token);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_join(uuid, text) FROM PUBLIC;
@@ -470,18 +586,22 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_status(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_status(uuid, text) TO anon, authenticated, service_role;
 
--- exos-checkout's first check (service role): the token from the body.
-CREATE OR REPLACE FUNCTION public.exos_wroom_require(p_event_id uuid, p_tier_id uuid, p_token text)
+-- exos-checkout's check (service role), with the event and type it resolved,
+-- the token from the body and the buyer (the account, else the guest email).
+CREATE OR REPLACE FUNCTION public.exos_wroom_require(p_event_id uuid, p_tier_id uuid, p_token text,
+  p_buyer_uid uuid, p_email text)
 RETURNS boolean
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, p_token);
+  PERFORM public._exos_wroom_gate_token(p_event_id, p_tier_id, p_token,
+    CASE WHEN p_buyer_uid IS NOT NULL THEN 'uid:' || p_buyer_uid::text
+         ELSE 'email:' || lower(btrim(coalesce(p_email, ''))) END);
   RETURN true;
 END $$;
-REVOKE ALL ON FUNCTION public.exos_wroom_require(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_wroom_require(uuid, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_wroom_require(uuid, uuid, text, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_wroom_require(uuid, uuid, text, uuid, text) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 4. Organizers
@@ -535,6 +655,8 @@ BEGIN
     'admit_per_minute', coalesce(s.admit_per_minute, 200),
     'admission_minutes', coalesce(s.admission_minutes, 10),
     'idle_close_minutes', coalesce(s.idle_close_minutes, 10),
+    'max_entries', s.max_entries,
+    'cap', CASE WHEN s.event_id IS NOT NULL THEN public._exos_wroom_cap(s) END,
     'on_sale_at', CASE WHEN s.event_id IS NOT NULL AND ph.phase <> 'off' THEN ph.on_sale_at END,
     'opens_at', CASE WHEN s.event_id IS NOT NULL AND ph.phase <> 'off' THEN ph.opens_at END,
     'closed_at', s.closed_at, 'closed_reason', s.closed_reason,
@@ -554,7 +676,9 @@ GRANT EXECUTE ON FUNCTION public.exos_wroom_summary(uuid) TO authenticated, serv
 CREATE OR REPLACE FUNCTION public.exos_wroom_configure(
   p_event_id uuid, p_enabled boolean,
   p_window_minutes int DEFAULT NULL, p_admit_per_minute int DEFAULT NULL,
-  p_admission_minutes int DEFAULT NULL, p_idle_close_minutes int DEFAULT NULL
+  p_admission_minutes int DEFAULT NULL, p_idle_close_minutes int DEFAULT NULL,
+  -- The most people in line: NULL keeps it, 0 = automatic (5 x capacity).
+  p_max_entries int DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -575,8 +699,9 @@ BEGIN
   IF (p_window_minutes IS NOT NULL AND p_window_minutes NOT BETWEEN 0 AND 240)
      OR (p_admit_per_minute IS NOT NULL AND p_admit_per_minute NOT BETWEEN 1 AND 20000)
      OR (p_admission_minutes IS NOT NULL AND p_admission_minutes NOT BETWEEN 2 AND 60)
-     OR (p_idle_close_minutes IS NOT NULL AND p_idle_close_minutes NOT BETWEEN 1 AND 240) THEN
-    RAISE EXCEPTION 'exos_wroom_configure: window 0-240 min, 1-20000 a minute, admission 2-60 min, idle close 1-240 min'
+     OR (p_idle_close_minutes IS NOT NULL AND p_idle_close_minutes NOT BETWEEN 1 AND 240)
+     OR (p_max_entries IS NOT NULL AND p_max_entries <> 0 AND p_max_entries NOT BETWEEN 100 AND 1000000) THEN
+    RAISE EXCEPTION 'exos_wroom_configure: window 0-240 min, 1-20000 a minute, admission 2-60 min, idle close 1-240 min, line 100-1000000 people'
       USING ERRCODE = '22023';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_wroom:' || p_event_id::text, 0));
@@ -585,12 +710,13 @@ BEGIN
   v_on := p_enabled AND NOT v_live;   -- off (or closed) -> on: a new run
   IF v_on THEN
     DELETE FROM public.exos_wroom_entries WHERE event_id = p_event_id;
+    DELETE FROM public.exos_wroom_counts WHERE event_id = p_event_id;
   END IF;
   INSERT INTO public.exos_wroom_settings AS w (event_id, org_id, enabled, window_minutes, admit_per_minute,
-                                               admission_minutes, idle_close_minutes, enabled_at, updated_by,
+                                               admission_minutes, idle_close_minutes, max_entries, enabled_at, updated_by,
                                                closed_at, closed_reason)
   VALUES (p_event_id, v_org, p_enabled, coalesce(p_window_minutes, 15), coalesce(p_admit_per_minute, 200),
-          coalesce(p_admission_minutes, 10), coalesce(p_idle_close_minutes, 10),
+          coalesce(p_admission_minutes, 10), coalesce(p_idle_close_minutes, 10), nullif(p_max_entries, 0),
           CASE WHEN p_enabled THEN now() END, auth.uid(),
           CASE WHEN NOT p_enabled THEN now() END, CASE WHEN NOT p_enabled THEN 'organizer' END)
   ON CONFLICT (event_id) DO UPDATE
@@ -599,6 +725,7 @@ BEGIN
          admit_per_minute = coalesce(p_admit_per_minute, w.admit_per_minute),
          admission_minutes = coalesce(p_admission_minutes, w.admission_minutes),
          idle_close_minutes = coalesce(p_idle_close_minutes, w.idle_close_minutes),
+         max_entries = CASE WHEN p_max_entries IS NULL THEN w.max_entries ELSE nullif(p_max_entries, 0) END,
          updated_by = EXCLUDED.updated_by,
          run_id = CASE WHEN v_on THEN gen_random_uuid() ELSE w.run_id END,
          enabled_at = CASE WHEN v_on THEN now() ELSE w.enabled_at END,
@@ -617,11 +744,12 @@ BEGIN
                        'window_minutes', jsonb_build_array(o.window_minutes, n.window_minutes),
                        'admit_per_minute', jsonb_build_array(o.admit_per_minute, n.admit_per_minute),
                        'admission_minutes', jsonb_build_array(o.admission_minutes, n.admission_minutes),
-                       'idle_close_minutes', jsonb_build_array(o.idle_close_minutes, n.idle_close_minutes)));
+                       'idle_close_minutes', jsonb_build_array(o.idle_close_minutes, n.idle_close_minutes),
+                       'max_entries', jsonb_build_array(o.max_entries, n.max_entries)));
   RETURN public.exos_wroom_summary(p_event_id);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. The gate in the hold / claim functions (marker patches)
@@ -632,26 +760,26 @@ GRANT EXECUTE ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, i
 -- matches prod's body whatever its exact text (supabase/README.md rule 4).
 DO $$
 DECLARE
-  f     text;
+  r     record;
   v_def text;
   v_at  int;
 BEGIN
-  FOREACH f IN ARRAY ARRAY[
-      'public.exos_create_hold(uuid,uuid,integer,integer,text)',
-      'public.exos_create_guest_hold(uuid,uuid,integer,text,text,text)',
-      'public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)'] LOOP
-    IF to_regprocedure(f) IS NULL THEN
-      RAISE EXCEPTION '%: not present', f;
+  FOR r IN SELECT * FROM (VALUES
+      ('public.exos_create_hold(uuid,uuid,integer,integer,text)', $q$'uid:' || coalesce(auth.uid()::text, '')$q$),
+      ('public.exos_create_guest_hold(uuid,uuid,integer,text,text,text)', $q$'email:' || lower(btrim(coalesce(p_email, '')))$q$),
+      ('public.exos_claim_free_tickets(uuid,uuid,integer,text,text,text)', $q$'uid:' || coalesce(auth.uid()::text, '')$q$)) v(f, buyer) LOOP
+    IF to_regprocedure(r.f) IS NULL THEN
+      RAISE EXCEPTION '%: not present', r.f;
     END IF;
-    v_def := replace(pg_get_functiondef(f::regprocedure), chr(13), '');
+    v_def := replace(pg_get_functiondef(r.f::regprocedure), chr(13), '');
     IF position('/* exos: waiting room gate */' in v_def) > 0 THEN
       CONTINUE;
     END IF;
     v_at := position(E'\nBEGIN\n' in v_def);
     IF v_at = 0 OR v_at > position('RAISE EXCEPTION' in v_def) OR v_at < position('$function$' in v_def) THEN
-      RAISE EXCEPTION '%: no top-level BEGIN before the first RAISE', f;
+      RAISE EXCEPTION '%: no top-level BEGIN before the first RAISE', r.f;
     END IF;
-    EXECUTE overlay(v_def placing E'\nBEGIN\n  PERFORM public._exos_wroom_gate(p_event_id, p_tier_id);  /* exos: waiting room gate */\n'
-                    from v_at for 7);
+    EXECUTE overlay(v_def placing E'\nBEGIN\n  PERFORM public._exos_wroom_gate(p_event_id, p_tier_id, ' || r.buyer
+                                  || E');  /* exos: waiting room gate */\n' from v_at for 7);
   END LOOP;
 END $$;

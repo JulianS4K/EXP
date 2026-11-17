@@ -69,7 +69,8 @@ export default function WaitingRoomGate({ eventId, timezone, children }: {
   const schedule = useCallback((s: RoomStatus, run: (join: boolean) => void) => {
     if (timer.current) clearTimeout(timer.current);
     if (s.state === 'off') return;   // no room: nothing to poll
-    timer.current = setTimeout(() => run(s.state === 'before' || s.state === 'busy' || s.state === 'unknown'), nextPollMs(s));
+    timer.current = setTimeout(() => run(s.state === 'before' || s.state === 'busy' || s.state === 'unknown' || s.state === 'full'),
+      nextPollMs(s));
   }, []);
 
   const run = useCallback(async (join: boolean) => {

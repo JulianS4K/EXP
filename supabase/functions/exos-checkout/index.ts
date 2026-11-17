@@ -176,7 +176,7 @@ import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_s
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
 
 // exos: waiting room — ids are checked before they reach the queue check.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -241,27 +241,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
   const buyerUid = user?.id ?? null;
   const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
-  // exos: waiting room (mig 20261118120000): while the event's room is open,
-  // only an admitted queue token of THIS event may start a checkout. Checked in
-  // SQL first, before any other read, hold or Stripe call; the hold functions
-  // check the same token again (x-exos-queue header). Before the migration
-  // (no function) nothing changes.
+  // exos: waiting room (mig 20261118120000): the browser's queue token; checked
+  // in SQL once the event and ticket type are resolved (below).
   const queueToken = typeof p.queue_token === "string" && /^[0-9a-f]{64}$/.test(p.queue_token) ? p.queue_token : "";
-  if (typeof p.event_id === "string" && UUID_RE.test(p.event_id)) {
-    const sbq = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const { error: wrErr } = await sbq.rpc("exos_wroom_require", {
-      p_event_id: p.event_id,
-      p_tier_id: typeof p.tier_id === "string" && UUID_RE.test(p.tier_id) ? p.tier_id : null,
-      p_token: queueToken || null,
-    });
-    if (wrErr && wrErr.code === "XWR01") {
-      return json({ error: "you're in the queue: wait for your turn", reason: "waiting_room" }, 409);
-    }
-    if (wrErr && !["PGRST202", "42883"].includes(String(wrErr.code))) {
-      console.error("exos-checkout: waiting room check failed", wrErr.message);
-      return json({ error: "could not check the queue, try again" }, 503);
-    }
-  }
   // exos: group pay — the seat (or the host's cover) decides the event, type and quantity
   // (after the sign-in / guest-email checks: no database read for a stranger).
   const groupIn = await groupCheckout(p, user?.id ?? null);
@@ -334,6 +316,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
     return json({ error: "quantity must be 1-10" }, 400);
   }
+  // Canonical ids only (lower-case, hyphenated): every check below sees the
+  // same value the database resolves, never a variant it would also accept.
+  if (!UUID_RE.test(String(event_id)) || !UUID_RE.test(String(tier_id))) {
+    return json({ error: "invalid event_id / tier_id" }, 400);
+  }
 
   // Trusted reads (price/capacity/connected account) + ledger write via service_role.
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -343,6 +330,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .select("id, name, price, price_schedule, capacity, sold, event_id, visibility, tax_rate_id, exos_tax_rules(rate_percent, price_includes_tax), exos_events!inner(id, org_id, name, status, currency)")
     .eq("id", tier_id).eq("event_id", event_id).maybeSingle();
   if (tierErr || !tier) return json({ error: "tier not found" }, 404);
+
+  // exos: waiting room (mig 20261118120000): while the event's room is open,
+  // only an admitted queue token of THIS event may go on, and the turn is
+  // bound to its first buyer (the account, else the guest email). Checked in
+  // SQL with the event and type as the database resolved them, before any
+  // hold, write or Stripe call; the hold functions check the same
+  // token again (x-exos-queue header), so no path past this one skips it.
+  // Before the migration (no function) nothing changes.
+  {
+    const t0 = tier as unknown as { id: string; event_id: string };
+    const { error: wrErr } = await sb.rpc("exos_wroom_require", {
+      p_event_id: t0.event_id, p_tier_id: t0.id, p_token: queueToken || null,
+      p_buyer_uid: buyerUid, p_email: buyerUid ? null : buyerEmail,
+    });
+    if (wrErr?.code === "XWR01") return json({ error: "you're in the queue: wait for your turn", reason: "waiting_room" }, 409);
+    if (wrErr?.code === "XWR02") {
+      return json({ error: "your turn is already checking out in another window", reason: "waiting_room_busy" }, 409);
+    }
+    if (wrErr && !["PGRST202", "42883"].includes(String(wrErr.code))) {
+      console.error("exos-checkout: waiting room check failed", wrErr.message);
+      return json({ error: "could not check the queue, try again" }, 503);
+    }
+  }
 
   // Reserved seating (mig 20261030140000). Read on its own so a database
   // without the column reads as general admission.
@@ -1001,8 +1011,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_ip_hash: ipHash,
         p_voucher_code: voucherUnlocksTier ? voucherCode : null,
       }).setHeader("x-exos-queue", queueToken);
-    if (holdErr?.code === "XWR01") {
-      return json({ error: "you're in the queue: wait for your turn", reason: "waiting_room" }, 409);
+    if (holdErr?.code === "XWR01" || holdErr?.code === "XWR02") {
+      return json({
+        error: holdErr.code === "XWR01" ? "you're in the queue: wait for your turn" : "your turn is already checking out in another window",
+        reason: holdErr.code === "XWR01" ? "waiting_room" : "waiting_room_busy",
+      }, 409);
     }
     if (holdErr) {
       return json({

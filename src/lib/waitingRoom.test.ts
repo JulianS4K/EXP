@@ -73,7 +73,7 @@ describe('polling', () => {
 
 describe('queue state', () => {
   it('holds the buy box back while in line, never when off, before or admitted', () => {
-    for (const st of ['lobby', 'waiting', 'expired', 'busy', 'unknown'] as const) expect(blocksBuying({ state: st })).toBe(true);
+    for (const st of ['lobby', 'waiting', 'expired', 'busy', 'unknown', 'full'] as const) expect(blocksBuying({ state: st })).toBe(true);
     for (const st of ['off', 'before', 'admitted'] as const) expect(blocksBuying({ state: st })).toBe(false);
     expect(blocksBuying(null)).toBe(false);
   });
@@ -87,6 +87,9 @@ describe('queue state', () => {
       .toContain('Tickets go on sale at 17:00. Everyone here before then gets a random place');
     expect(queueView(parseStatus({ state: 'admitted', admitted_until: '2026-11-20T17:10:00Z' }), fmt).detail).toBe('Pick your tickets and check out by 17:10.');
     expect(queueView(parseStatus({ state: 'expired' }), fmt).rejoin).toBe(true);
+    expect(queueView(parseStatus({ state: 'full', reason: 'room' }), fmt).heading).toBe('The waiting room is full');
+    expect(queueView(parseStatus({ state: 'full', reason: 'network' }), fmt).detail).toContain('your network');
+    expect(nextPollMs(parseStatus({ state: 'full', poll_after_ms: 60000 }), () => 0.5)).toBe(60000);
     expect(waitWords(90)).toBe('about 1.5 hours');
     expect(waitWords(12)).toBe('about 12 minutes');
   });
@@ -123,5 +126,9 @@ describe('organizer settings', () => {
     expect(settingsProblem({ ...ok, admissionMinutes: 1 })).toMatch(/check out/);
     expect(settingsProblem({ ...ok, windowMinutes: 241 })).toMatch(/before the on-sale/);
     expect(settingsProblem({ ...ok, idleCloseMinutes: 1.5 })).toMatch(/nobody waits/);
+    expect(settingsProblem({ ...ok, maxEntries: 0 })).toBeNull();
+    expect(settingsProblem({ ...ok, maxEntries: 50 })).toMatch(/Most people in line/);
+    expect(parseSummary({ max_entries: 5000, cap: 5000 })).toMatchObject({ maxEntries: 5000, cap: 5000 });
+    expect(parseSummary({ cap: 1000 }).maxEntries).toBeNull();
   });
 });

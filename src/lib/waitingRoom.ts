@@ -7,7 +7,7 @@
 import { supabase } from './supabase';
 
 /** What the server answers for this browser (exos_wroom_join / _status). */
-export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy';
+export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy' | 'full';
 
 export interface RoomStatus {
   state: RoomState;
@@ -22,9 +22,11 @@ export interface RoomStatus {
   admitPerMinute?: number;
   pollAfterMs?: number;
   retryAfterMs?: number;
+  /** 'full': the room ('room') or this network's share of it ('network'). */
+  reason?: 'room' | 'network';
 }
 
-const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy'];
+const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full'];
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
 function date(v: unknown): Date | null {
@@ -54,6 +56,7 @@ export function parseStatus(raw: unknown): RoomStatus {
     admitPerMinute: num(r.admit_per_minute),
     pollAfterMs: num(r.poll_after_ms),
     retryAfterMs: num(r.retry_after_ms),
+    reason: r.reason === 'room' || r.reason === 'network' ? r.reason : undefined,
   };
 }
 
@@ -111,7 +114,7 @@ export function queueHeader(eventId: string): string {
  */
 export function nextPollMs(s: RoomStatus, rand: () => number = Math.random): number {
   const base = s.state === 'busy' ? (s.retryAfterMs ?? 5000)
-    : s.pollAfterMs ?? (s.state === 'waiting' ? 15000 : 30000);
+    : s.pollAfterMs ?? (s.state === 'waiting' ? 15000 : s.state === 'full' ? 60000 : 30000);
   const jittered = base * (0.75 + 0.5 * Math.min(Math.max(rand(), 0), 1));
   return Math.round(Math.min(Math.max(jittered, 2000), 300000));
 }
@@ -119,7 +122,7 @@ export function nextPollMs(s: RoomStatus, rand: () => number = Math.random): num
 /** Does this state hold the buy box back (show the queue instead)? */
 export function blocksBuying(s: RoomStatus | null): boolean {
   return !!s && (s.state === 'lobby' || s.state === 'waiting' || s.state === 'expired' || s.state === 'busy'
-    || s.state === 'unknown');
+    || s.state === 'unknown' || s.state === 'full');
 }
 
 /** "about 3 minutes" / "less than a minute". */
@@ -172,6 +175,14 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
         detail: 'Holding your spot to join the line. This takes a few seconds.',
         rejoin: false,
       };
+    case 'full':
+      return {
+        heading: 'The waiting room is full',
+        detail: s.reason === 'network'
+          ? 'Too many people on your network have joined this line. This page tries again every minute.'
+          : 'The line is as long as the organizer allows. This page tries again every minute.',
+        rejoin: false,
+      };
     case 'unknown':
       return { heading: 'Joining the line', detail: 'One moment.', rejoin: false };
     case 'before':
@@ -221,6 +232,10 @@ export interface RoomSummary {
   admitPerMinute: number;
   admissionMinutes: number;
   idleCloseMinutes: number;
+  /** The organizer's line cap, or null (automatic). */
+  maxEntries: number | null;
+  /** The cap in force. */
+  cap: number | null;
   onSaleAt: Date | null;
   opensAt: Date | null;
   closedAt: Date | null;
@@ -241,6 +256,8 @@ export function parseSummary(raw: unknown): RoomSummary {
     admitPerMinute: num(r.admit_per_minute) ?? 200,
     admissionMinutes: num(r.admission_minutes) ?? 10,
     idleCloseMinutes: num(r.idle_close_minutes) ?? 10,
+    maxEntries: num(r.max_entries) ?? null,
+    cap: num(r.cap) ?? null,
     onSaleAt: date(r.on_sale_at),
     opensAt: date(r.opens_at),
     closedAt: date(r.closed_at),
@@ -259,6 +276,8 @@ export interface RoomSettingsInput {
   admitPerMinute: number;
   admissionMinutes: number;
   idleCloseMinutes: number;
+  /** Most people in line; 0 = automatic (5 x capacity, at least 1,000). */
+  maxEntries?: number;
 }
 
 /** The same bounds exos_wroom_configure checks; null when fine. */
@@ -268,6 +287,7 @@ export function settingsProblem(s: RoomSettingsInput): string | null {
   if (!int(s.admitPerMinute, 1, 20000)) return 'Let in per minute: 1 to 20,000.';
   if (!int(s.admissionMinutes, 2, 60)) return 'Time to check out: 2 to 60 minutes.';
   if (!int(s.idleCloseMinutes, 1, 240)) return 'Close when nobody waits for: 1 to 240 minutes.';
+  if (s.maxEntries != null && s.maxEntries !== 0 && !int(s.maxEntries, 100, 1000000)) return 'Most people in line: 100 to 1,000,000, or blank for automatic.';
   return null;
 }
 
@@ -280,7 +300,7 @@ export async function getRoomSummary(eventId: string): Promise<RoomSummary> {
 export async function configureRoom(eventId: string, enabled: boolean, s: RoomSettingsInput): Promise<RoomSummary> {
   const { data, error } = await supabase.rpc('exos_wroom_configure', {
     p_event_id: eventId, p_enabled: enabled, p_window_minutes: s.windowMinutes, p_admit_per_minute: s.admitPerMinute,
-    p_admission_minutes: s.admissionMinutes, p_idle_close_minutes: s.idleCloseMinutes,
+    p_admission_minutes: s.admissionMinutes, p_idle_close_minutes: s.idleCloseMinutes, p_max_entries: s.maxEntries ?? 0,
   });
   if (error) throw new Error(error.message.replace(/^exos_wroom_configure: /, ''));
   return parseSummary(data);
