@@ -20,6 +20,10 @@
 #          that one buyer
 #   race 5 the same buyer twice at once on one token: one hold, the other
 #          XWR02 (one checkout per turn at a time)
+#   race 6 40 newcomers join at once (40 networks) while the room recounts:
+#          40 places, and the next recount's live count equals an exact count
+#          of the live line (waiting and seen in 3 minutes, or admitted and
+#          neither expired nor used)
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -55,9 +59,9 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner@r
 # 300 people in line (random places, all seen just now).
 VALUES=""
 for n in $(seq 1 300); do VALUES+="('$(tok $n)'),"; done
-$P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash,arrived_at,order_key)
+$P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash,net32_hash,arrived_at,order_key)
          SELECT '$O','$EV',(SELECT run_id FROM exos_wroom_settings WHERE event_id='$EV'),
-                public._exos_wroom_hash('$EV', v.t), md5(v.t) || md5(v.t), now() - interval '3 minutes', public._exos_wroom_rand()
+                public._exos_wroom_hash('$EV', v.t), md5(v.t) || md5(v.t), md5(v.t) || md5(v.t), now() - interval '3 minutes', public._exos_wroom_rand()
            FROM (VALUES ${VALUES%,}) v(t);
        UPDATE exos_wroom_settings SET on_sale_at = now() - interval '1 minute', drawn_at = now() - interval '1 minute'
         WHERE event_id='$EV';" >/dev/null
@@ -167,5 +171,28 @@ if [[ "$ok5" == 1 && "$busy5" == 1 ]]; then
   echo "OK   race 5 the same buyer twice at once on one turn: one hold, the other refused (XWR02)"
 else
   echo "FAIL race 5: ok $ok5, busy $busy5"; cat "$OUT"/r5.*; fail=1
+fi
+
+# race 6 ---------------------------------------------------------------------
+before=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV'")
+$P -c "UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV'" >/dev/null
+for n in $(seq 1 40); do
+  $P -c "BEGIN; SELECT set_config('request.headers','{\"cf-connecting-ip\":\"203.0.113.$n\"}',true);
+         SET LOCAL ROLE anon; SELECT public.exos_wroom_join('$EV')->>'state'; SELECT count(*) FROM pg_sleep(0.2); COMMIT;" \
+    > "$OUT/r6.$n" 2>&1 &
+done
+wait
+joined=$(cat "$OUT"/r6.* | grep -c '^waiting$' || true)
+after=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV'")
+$P -c "UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV';
+       SELECT public._exos_wroom_recount('$EV');" >/dev/null
+live=$($P -c "SELECT live_count FROM exos_wroom_settings WHERE event_id='$EV'")
+exact=$($P -c "SELECT count(*) FROM exos_wroom_entries x WHERE x.event_id='$EV'
+               AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
+                 OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))")
+if [[ "$joined" == 40 && $((after - before)) == 40 && "$live" == "$exact" ]]; then
+  echo "OK   race 6 40 parallel joins: 40 places; live count $live = an exact count of the live line"
+else
+  echo "FAIL race 6: joined $joined, new rows $((after - before)), live $live vs exact $exact"; cat "$OUT"/r6.* | sort | uniq -c | head -5; fail=1
 fi
 exit $fail

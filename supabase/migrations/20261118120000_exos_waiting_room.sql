@@ -60,8 +60,11 @@
 --     per buyer and event, so a turn never holds two carts.
 --   * Stuffing: minting is limited per network (IPv4 address / IPv6 /64: 60 a
 --     minute; IPv6 /48: 120 a minute), per run per network (20 per /48, 200
---     per IPv4 address), and by the room's cap (organizer's number, else 5 x
---     the public capacity, at least 1,000): over those, "full".
+--     per IPv4 address, 100 live per IPv6 /32), and by the room's cap on the
+--     LIVE line (organizer's number, else 5 x the public capacity, at least
+--     1,000; abandoned, expired and used places free up): over those, "full".
+--     A CAPTCHA in front of minting is the real fix for distributed stuffing
+--     (follow-up).
 --   * No PII: an entry is a token hash, times, a state, a hash of the
 --     redeeming buyer and of the minting network (salted with the run). No
 --     IP, user id or email in clear. A caller only ever sees its own place.
@@ -96,6 +99,12 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_settings (
   idle_close_minutes  int NOT NULL DEFAULT 10 CHECK (idle_close_minutes BETWEEN 1 AND 240),
   -- Most people in one run's line; NULL = 5 x the public capacity (at least 1,000).
   max_entries         int CHECK (max_entries IS NULL OR max_entries BETWEEN 100 AND 1000000),
+  -- The live line (waiting and seen in the last 3 minutes, or admitted and not
+  -- yet expired or used) at the last recount (at most every 5 s), and the
+  -- counter round that mints since then add to (exos_wroom_counts).
+  live_count          int NOT NULL DEFAULT 0 CHECK (live_count >= 0),
+  count_round         int NOT NULL DEFAULT 0 CHECK (count_round >= 0),
+  counted_at          timestamptz,
   -- One run per "turned on": entries of another run are dead.
   run_id              uuid NOT NULL DEFAULT gen_random_uuid(),
   enabled_at          timestamptz,
@@ -142,6 +151,8 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   -- SHA-256(run:network) of the minting network (IPv6 /48, an IPv4 address),
   -- for the per-network cap of a run. Never the address itself.
   net_hash          text NOT NULL CHECK (net_hash ~ '^[0-9a-f]{64}$'),
+  -- The same for the IPv6 /32 (an IPv4 address as itself), for the /32 quota.
+  net32_hash        text NOT NULL CHECK (net32_hash ~ '^[0-9a-f]{64}$'),
   last_seen_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT exos_wroom_entries_admit_chk CHECK ((state = 'waiting') = (admitted_at IS NULL))
 );
@@ -151,20 +162,23 @@ CREATE INDEX IF NOT EXISTS exos_wroom_entries_undrawn_idx
   ON public.exos_wroom_entries (event_id, run_id) WHERE order_key IS NULL;
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_org_idx ON public.exos_wroom_entries (org_id);
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_net_idx ON public.exos_wroom_entries (event_id, run_id, net_hash);
+CREATE INDEX IF NOT EXISTS exos_wroom_entries_net32_idx ON public.exos_wroom_entries (event_id, run_id, net32_hash);
 ALTER TABLE public.exos_wroom_entries ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_wroom_entries FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_wroom_entries TO service_role;
 
--- How many places a run has handed out, in 16 shards (a mint adds 1 to a
--- random shard): the room cap is read as a sum of 16 rows instead of a count
--- of the whole line, and parallel mints rarely wait on the same row.
+-- Places handed out since the last recount, per counter round, in 16 shards
+-- (a mint adds 1 to a random shard): the room cap reads the live count of the
+-- last recount plus 16 rows, never a count of the whole line per arrival, and
+-- parallel mints rarely wait on the same row.
 CREATE TABLE IF NOT EXISTS public.exos_wroom_counts (
   event_id  uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
   run_id    uuid NOT NULL,
+  round     int NOT NULL CHECK (round >= 0),
   shard     smallint NOT NULL CHECK (shard BETWEEN 0 AND 15),
   org_id    uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
   n         int NOT NULL DEFAULT 0 CHECK (n >= 0),
-  PRIMARY KEY (event_id, run_id, shard)
+  PRIMARY KEY (event_id, run_id, round, shard)
 );
 CREATE INDEX IF NOT EXISTS exos_wroom_counts_org_idx ON public.exos_wroom_counts (org_id);
 ALTER TABLE public.exos_wroom_counts ENABLE ROW LEVEL SECURITY;
@@ -229,6 +243,21 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_wide_bucket() FROM PUBLIC, anon, authenticated;
 
+-- The IPv6 /32 of the caller (one provider's allocation), else the wide bucket.
+CREATE OR REPLACE FUNCTION public._exos_wroom_net32()
+RETURNS text
+LANGUAGE plpgsql STABLE
+SET search_path = public, pg_temp
+AS $$
+DECLARE v text := public._exos_request_ip(); i inet;
+BEGIN
+  IF v IS NULL THEN RETURN 'unknown'; END IF;
+  i := v::inet;
+  IF family(i) = 6 THEN RETURN network(set_masklen(i, 32))::text; END IF;
+  RETURN host(i);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_net32() FROM PUBLIC, anon, authenticated;
+
 -- The most people one run's line may hold: the organizer's number, or 5 x
 -- the public sellable capacity (at least 1,000).
 CREATE OR REPLACE FUNCTION public._exos_wroom_cap(s public.exos_wroom_settings)
@@ -260,6 +289,34 @@ BEGIN
   phase := CASE WHEN now() < opens_at THEN 'before' WHEN now() < on_sale_at THEN 'lobby' ELSE 'live' END;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_phase(public.exos_wroom_settings) FROM PUBLIC, anon, authenticated;
+
+-- The live line, recounted at most every 5 s per event (try-lock: one at a
+-- time, the others skip): waiting and seen in the last 3 minutes, or admitted
+-- and not yet expired or used. Abandoned, expired and used places free up.
+-- Mints since then go to the next counter round. Runs in any open phase.
+CREATE OR REPLACE FUNCTION public._exos_wroom_recount(p_event_id uuid)
+RETURNS void
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE s public.exos_wroom_settings%ROWTYPE; v_n int;
+BEGIN
+  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
+  IF NOT FOUND OR s.counted_at > now() - interval '5 seconds' THEN RETURN; END IF;
+  IF NOT pg_try_advisory_xact_lock(hashtextextended('exos_wroom_count:' || p_event_id::text, 0)) THEN RETURN; END IF;
+  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
+  IF s.counted_at > now() - interval '5 seconds' THEN RETURN; END IF;
+  SELECT count(*) INTO v_n FROM public.exos_wroom_entries x
+   WHERE x.event_id = p_event_id AND x.run_id = s.run_id
+     AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
+       OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL));
+  UPDATE public.exos_wroom_settings
+     SET live_count = v_n, counted_at = now(), count_round = count_round + 1
+   WHERE event_id = p_event_id;
+  DELETE FROM public.exos_wroom_counts c
+   WHERE c.event_id = p_event_id AND (c.run_id <> s.run_id OR c.round < s.count_round);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_recount(uuid) FROM PUBLIC, anon, authenticated;
 
 -- One admission round: the draw (once), expiries, the next batch, and the
 -- idle close. Runs on read; at most every 5 seconds per event and never two
@@ -480,8 +537,11 @@ REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text) FROM PUBLIC, an
 -- write: 60 a minute per network (an IPv4 address or an IPv6 /64; generous,
 -- phones on one carrier share addresses) and 120 a minute per IPv6 /48, over
 -- that "busy" with a retry hint and nothing stored; per run at most 20 places
--- per IPv6 /48 and 200 per IPv4 address (shared NAT), and at most the room's
--- cap in all, over those "full". No room: { state: 'off' } (buy as usual).
+-- per IPv6 /48 and 200 per IPv4 address (shared NAT), at most 100 live places
+-- per IPv6 /32, and the room's cap on the LIVE line (abandoned, expired and
+-- used places free up), over those "full" (the page retries each minute).
+-- Distributed stuffing needs a CAPTCHA in front of minting (follow-up).
+-- No room: { state: 'off' } (buy as usual).
 CREATE OR REPLACE FUNCTION public.exos_wroom_join(p_event_id uuid, p_token text DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -495,6 +555,8 @@ DECLARE
   v_narrow text := public._exos_request_ip_bucket();
   v_wide  text := public._exos_wroom_wide_bucket();
   v_net   text;
+  v_n32   text := public._exos_wroom_net32();
+  v_net32 text;
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
@@ -527,20 +589,34 @@ BEGIN
      >= (CASE WHEN position(':' in v_wide) > 0 THEN 20 ELSE 200 END) THEN
     RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
   END IF;
-  -- The room's cap (soft: parallel arrivals at the edge may pass it by a few).
-  IF (SELECT coalesce(sum(c.n), 0) FROM public.exos_wroom_counts c WHERE c.event_id = p_event_id AND c.run_id = s.run_id)
+  v_net32 := encode(sha256(convert_to(s.run_id::text || ':' || v_n32, 'UTF8')), 'hex');
+  IF position(':' in v_n32) > 0 THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos_wroom_net:' || v_net32, 0));
+    IF (SELECT count(*) FROM public.exos_wroom_entries x
+         WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net32_hash = v_net32
+           AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
+             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))) >= 100 THEN
+      RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
+    END IF;
+  END IF;
+  -- The room's cap on the live line: the last recount plus the mints since
+  -- (soft: arrivals in flight at a recount may pass it by a few).
+  PERFORM public._exos_wroom_recount(p_event_id);
+  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
+  IF s.live_count + (SELECT coalesce(sum(c.n), 0) FROM public.exos_wroom_counts c
+                      WHERE c.event_id = p_event_id AND c.run_id = s.run_id AND c.round = s.count_round)
      >= public._exos_wroom_cap(s) THEN
     RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000);
   END IF;
   v_token := encode(extensions.gen_random_bytes(32), 'hex');
-  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, order_key)
-  VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), v_net,
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  VALUES (s.org_id, p_event_id, s.run_id, public._exos_wroom_hash(p_event_id, v_token), v_net, v_net32,
           -- After the draw a newcomer goes to the back (arrival order).
           CASE WHEN s.drawn_at IS NOT NULL THEN extract(epoch FROM now()) END)
   RETURNING id INTO v_id;
-  INSERT INTO public.exos_wroom_counts AS c (event_id, run_id, shard, org_id, n)
-  VALUES (p_event_id, s.run_id, floor(random() * 16)::smallint, s.org_id, 1)
-  ON CONFLICT (event_id, run_id, shard) DO UPDATE SET n = c.n + 1;
+  INSERT INTO public.exos_wroom_counts AS c (event_id, run_id, round, shard, org_id, n)
+  VALUES (p_event_id, s.run_id, s.count_round, floor(random() * 16)::smallint, s.org_id, 1)
+  ON CONFLICT (event_id, run_id, round, shard) DO UPDATE SET n = c.n + 1;
   RETURN public._exos_wroom_view(p_event_id, v_id, v_token);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_join(uuid, text) FROM PUBLIC;
@@ -734,6 +810,8 @@ BEGIN
          admit_clock = CASE WHEN v_on THEN NULL ELSE w.admit_clock END,
          advanced_at = CASE WHEN v_on THEN NULL ELSE w.advanced_at END,
          last_waiting_at = CASE WHEN v_on THEN NULL ELSE w.last_waiting_at END,
+         live_count = CASE WHEN v_on THEN 0 ELSE w.live_count END,
+         counted_at = CASE WHEN v_on THEN NULL ELSE w.counted_at END,
          closed_at = CASE WHEN NOT p_enabled THEN coalesce(w.closed_at, now()) WHEN v_on THEN NULL ELSE w.closed_at END,
          closed_reason = CASE WHEN NOT p_enabled THEN coalesce(w.closed_reason, 'organizer')
                               WHEN v_on THEN NULL ELSE w.closed_reason END

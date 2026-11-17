@@ -278,9 +278,10 @@ finance can see the counts).
   pays with): passing the link to a friend doesn't let a second person in, and one turn holds one
   cart at a time.
 - **How big the line can get:** at most "Most people in line" (blank = automatic: 5 times the
-  public capacity, at least 1,000). Beyond that, and beyond a per-network share that stops one
-  network filling the line, newcomers see "The waiting room is full" and the page tries again each
-  minute.
+  public capacity, at least 1,000) people *in line now*: anyone who closed the page for 3 minutes, or
+  whose turn lapsed or was used, no longer counts. Beyond that, and beyond a per-network share that
+  stops one network filling the line, newcomers see "The waiting room is full" and the page tries
+  again each minute.
 - **Who skips the line:** your drop list's presale ticket type (confirmed list members, with their
   code, until the public on-sale), and sales that never go through the public checkout: partner API
   reservations, the box office, the door and comps.
