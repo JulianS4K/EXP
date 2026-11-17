@@ -23,7 +23,7 @@ import DropListCTA from './DropListCTA';
 
 const OPEN = {
   open: true, onSaleAt: new Date('2026-11-20T17:00:00Z'), listPresale: false, joined: false, sms: false, phoneHint: null,
-  smsPending: false, pendingHint: null,
+  smsPending: false, pendingHint: null, smsCode: null,
   emailConsentText: 'Email me once when tickets for Show from Org go on sale. I can leave this list at any time.',
   smsConsentText: 'Text me once at this number when tickets for Show from Org go on sale. Reply STOP to cancel.',
 };
@@ -86,6 +86,17 @@ describe('DropListCTA', () => {
     fireEvent.click(screen.getByRole('button', { name: /notify me/i }));
     await screen.findByText(/try again in a minute/i);
     expect(screen.queryByText(/check your email/i)).toBeNull();
+  });
+
+  it('a texted-code limit: on the list by email, says try the text later', async () => {
+    h.user = { uid: 'u1', email: 'fan@x.com', emailVerified: true };
+    h.join.mockResolvedValue({ ...OPEN, joined: true, smsCode: 'try_again' });
+    render(<DropListCTA eventId="e1" />);
+    fireEvent.click(await screen.findByLabelText(/also text me/i));
+    fireEvent.change(screen.getByLabelText(/mobile number/i), { target: { value: '212 555 0101' } });
+    fireEvent.click(screen.getByRole('button', { name: /notify me/i }));
+    await screen.findByText(/couldn't text a code/i);
+    expect(screen.getByText(/you're on the list/i)).toBeTruthy();
   });
 
   it('already joined: says so, with a way to leave', async () => {

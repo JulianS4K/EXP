@@ -53,7 +53,8 @@
 --   * Tracking: the first-touch promoter code and UTM tags the visitor arrived
 --     with (lib/attribution.ts), sanitized again here.
 --
--- Touches:  C: TABLE exos_drop_signups, exos_drop_confirms, exos_drop_settings
+-- Touches:  C: TABLE exos_drop_signups, exos_drop_confirms, exos_drop_settings,
+--              exos_drop_sms_codes
 --              (RLS on, no client grants: RPCs only)
 --           C: FUNCTION exos_drop_status, exos_drop_signup, exos_drop_confirm,
 --              exos_drop_confirm_code, exos_drop_leave (anon + authenticated);
@@ -106,7 +107,7 @@ CREATE TABLE IF NOT EXISTS public.exos_drop_signups (
   sms_code_sends     int NOT NULL DEFAULT 0 CHECK (sms_code_sends >= 0),
   left_at            timestamptz,
   -- The blast mail's leave link token, hashed (each confirm mail has its own,
-  -- on exos_drop_confirms.leave_hash).
+  -- in exos_drop_leave_tokens).
   blast_leave_hash   text UNIQUE CHECK (blast_leave_hash IS NULL OR blast_leave_hash ~ '^[0-9a-f]{64}$'),
   -- The blast: claimed once (blasted_at), what went out, and the text's fate.
   blasted_at         timestamptz,
@@ -142,8 +143,6 @@ CREATE TABLE IF NOT EXISTS public.exos_drop_confirms (
   token_hash         text NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
   code_hash          text NOT NULL CHECK (code_hash ~ '^[0-9a-f]{64}$'),
   browser_token_hash text NOT NULL CHECK (browser_token_hash ~ '^[0-9a-f]{64}$'),
-  -- This mail's leave link token, hashed.
-  leave_hash         text NOT NULL UNIQUE CHECK (leave_hash ~ '^[0-9a-f]{64}$'),
   attempts           int NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   used_at            timestamptz,
   created_at         timestamptz NOT NULL DEFAULT now()
@@ -175,6 +174,40 @@ GRANT ALL ON public.exos_drop_settings TO service_role;
 DROP TRIGGER IF EXISTS exos_drop_settings_touch ON public.exos_drop_settings;
 CREATE TRIGGER exos_drop_settings_touch BEFORE UPDATE ON public.exos_drop_settings
   FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
+
+-- The leave link of every confirm mail, hashed. Kept as long as the signup
+-- (the sweep's 8-day cut of exos_drop_confirms doesn't touch it), so an old
+-- mail's leave link always works.
+CREATE TABLE IF NOT EXISTS public.exos_drop_leave_tokens (
+  token_hash text PRIMARY KEY CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  signup_id  uuid NOT NULL REFERENCES public.exos_drop_signups (id) ON DELETE CASCADE,
+  org_id     uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_drop_leave_tokens_signup_idx ON public.exos_drop_leave_tokens (signup_id);
+CREATE INDEX IF NOT EXISTS exos_drop_leave_tokens_org_idx ON public.exos_drop_leave_tokens (org_id);
+ALTER TABLE public.exos_drop_leave_tokens ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_drop_leave_tokens FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_drop_leave_tokens TO service_role;
+
+-- Every texted verification code (exos_drop_join), for its daily caps: per
+-- account, per number, per org, and the numbers a signup tried. Two days kept.
+CREATE TABLE IF NOT EXISTS public.exos_drop_sms_codes (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  org_id     uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  signup_id  uuid REFERENCES public.exos_drop_signups (id) ON DELETE SET NULL,
+  phone      text NOT NULL CHECK (phone ~ '^\+[1-9][0-9]{7,14}$'),
+  fails      int NOT NULL DEFAULT 0 CHECK (fails >= 0),          -- wrong codes typed for this send
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_user_idx ON public.exos_drop_sms_codes (user_id, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_phone_idx ON public.exos_drop_sms_codes (phone, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_org_idx ON public.exos_drop_sms_codes (org_id, created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_signup_idx ON public.exos_drop_sms_codes (signup_id);
+ALTER TABLE public.exos_drop_sms_codes ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_drop_sms_codes FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_drop_sms_codes TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. Helpers
@@ -509,9 +542,10 @@ BEGIN
   v_token := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
   v_leave := replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
   v_code  := public._exos_proof_code();
-  INSERT INTO public.exos_drop_confirms (id, signup_id, org_id, token_hash, code_hash, browser_token_hash, leave_hash)
+  INSERT INTO public.exos_drop_confirms (id, signup_id, org_id, token_hash, code_hash, browser_token_hash)
   VALUES (v_cid, s.id, s.org_id, public._exos_drop_hash(v_token), public._exos_proof_hash(v_cid, 'drop', v_code),
-          public._exos_drop_hash(p_browser_token), public._exos_drop_hash(v_leave));
+          public._exos_drop_hash(p_browser_token));
+  INSERT INTO public.exos_drop_leave_tokens (token_hash, signup_id, org_id) VALUES (public._exos_drop_hash(v_leave), s.id, s.org_id);
   PERFORM public.exos_mail_enqueue('drop-confirm', v_email,
     jsonb_build_object('org', jsonb_build_object('id', e.org_id, 'name', e.org_name),
                        'event', jsonb_build_object('id', e.id, 'name', e.name, 'starts_at', e.starts_at,
@@ -610,10 +644,20 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- Texts: never stored on the word of the form. A number gets a one-time
 -- 6-digit code by text (exos_rsvp_sms_outbox, the guest-proof SMS path;
 -- dry run until EXOS_SMS_LIVE=on); only exos_drop_verify_sms with that code
--- stores the consent. Code limits: 60 s apart and 5 in all per signup, 3 per
--- number per 10 minutes (shared with the order proofs), 10 numbers a day
--- per account; a number that replied STOP to the org gets no code (the
--- answer is the same). 10 joins a minute per account.
+-- stores the consent. Code limits (SMS pumping), every one checked before
+-- the outbox under per-account, per-org and per-number locks, over actual
+-- sends logged in exos_drop_sms_codes: 5 a day per account, 5 a day per
+-- number (all accounts and orgs), 300 a day per org, 3 per number per 10
+-- minutes (shared with the order proofs), 60 s apart and 5 in all per
+-- signup, at most 2 different numbers per signup (the second replaces the
+-- first), and no new code to a number with 10 wrong codes typed in a day
+-- across signups. Over any of them: sms_code 'try_again', the same whichever
+-- cap. Quiet hours don't apply to the code: the person asked for it on the
+-- page that very moment and it works for 10 minutes, so a held code is
+-- useless (user-requested one-time codes are exempt in the usual practice,
+-- as are the order-proof codes on the same outbox).
+-- A number that replied STOP gets no text but counts as a send and answers
+-- 'sent' (so the answer doesn't reveal a STOP). 10 joins a minute per account.
 CREATE OR REPLACE FUNCTION public.exos_drop_join(
   p_event_id uuid, p_sms boolean DEFAULT false, p_phone text DEFAULT NULL, p_source jsonb DEFAULT NULL
 ) RETURNS jsonb
@@ -647,10 +691,6 @@ BEGIN
     IF v_phone IS NULL THEN
       RAISE EXCEPTION 'exos_drop_join: enter a mobile number, e.g. +1 212 555 0100' USING ERRCODE = '22023';
     END IF;
-    IF (SELECT count(*) FROM public.exos_drop_signups x
-         WHERE x.user_id = v_uid AND x.sms_code_at > now() - interval '1 day') >= 10 THEN
-      RAISE EXCEPTION 'exos_drop_join: too many text sign-ups today' USING ERRCODE = '54000';
-    END IF;
   END IF;
   SELECT ev.id, ev.org_id, ev.name, o.name AS org_name INTO e
     FROM public.exos_events ev JOIN public.exos_orgs o ON o.id = ev.org_id WHERE ev.id = p_event_id;
@@ -670,22 +710,41 @@ BEGIN
   -- A join is the person's own act: confirms still open for this signup are spent.
   UPDATE public.exos_drop_confirms SET used_at = now() WHERE signup_id = s.id AND used_at IS NULL;
 
-  IF v_phone IS NOT NULL AND v_phone IS DISTINCT FROM s.sms_phone THEN
+  -- A new number, or the same one after leaving (its consent ended): a code.
+  IF v_phone IS NOT NULL AND (v_phone IS DISTINCT FROM s.sms_phone OR s.sms_opted_out_at IS NOT NULL) THEN
+    -- Locks in one order (account, org, number), then every cap, then send.
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-acct:' || v_uid::text, 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos-drop-smscode-org:' || e.org_id::text, 0));
     PERFORM pg_advisory_xact_lock(hashtextextended('exos-proof-phone:' || v_phone, 0));
-    IF (s.sms_code_at IS NULL OR s.sms_code_at < now() - interval '60 seconds') AND s.sms_code_sends < 5
-       AND (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
-             WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') < 3 THEN
-      v_code := public._exos_proof_code();
-      UPDATE public.exos_drop_signups
-         SET sms_pending_phone = v_phone, sms_code_hash = public._exos_proof_hash(id, 'drop_sms', v_code),
-             sms_code_at = now(), sms_code_attempts = 0, sms_code_sends = sms_code_sends + 1
-       WHERE id = s.id;
-      IF NOT public._exos_drop_phone_stopped(e.org_id, v_phone) THEN
-        INSERT INTO public.exos_rsvp_sms_outbox (org_id, phone, body)
-        VALUES (e.org_id, v_phone, v_code || ' is your code to get one text when tickets for '
-                || left(coalesce(e.name, 'the event'), 60) || ' go on sale. It works for 10 minutes. Don''t share it.');
-      END IF;
+    SELECT * INTO s FROM public.exos_drop_signups WHERE id = s.id;
+    IF (s.sms_code_at IS NOT NULL AND s.sms_code_at >= now() - interval '60 seconds')
+       OR s.sms_code_sends >= 5
+       OR (NOT EXISTS (SELECT 1 FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id AND l.phone = v_phone)
+           AND (SELECT count(DISTINCT l.phone) FROM public.exos_drop_sms_codes l WHERE l.signup_id = s.id) >= 2)
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.user_id = v_uid AND l.created_at > now() - interval '1 day') >= 5
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.phone = v_phone AND l.created_at > now() - interval '1 day') >= 5
+       OR (SELECT coalesce(sum(l.fails), 0) FROM public.exos_drop_sms_codes l
+            WHERE l.phone = v_phone AND l.created_at > now() - interval '1 day') >= 10
+       OR (SELECT count(*) FROM public.exos_drop_sms_codes l
+            WHERE l.org_id = e.org_id AND l.created_at > now() - interval '1 day') >= 300
+       OR (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
+            WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') >= 3 THEN
+      RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'try_again');
     END IF;
+    v_code := public._exos_proof_code();
+    INSERT INTO public.exos_drop_sms_codes (user_id, org_id, signup_id, phone) VALUES (v_uid, e.org_id, s.id, v_phone);
+    UPDATE public.exos_drop_signups
+       SET sms_pending_phone = v_phone, sms_code_hash = public._exos_proof_hash(id, 'drop_sms', v_code),
+           sms_code_at = now(), sms_code_attempts = 0, sms_code_sends = sms_code_sends + 1
+     WHERE id = s.id;
+    IF NOT public._exos_drop_phone_stopped(e.org_id, v_phone) THEN
+      INSERT INTO public.exos_rsvp_sms_outbox (org_id, phone, body)
+      VALUES (e.org_id, v_phone, v_code || ' is your code to get one text when tickets for '
+              || left(coalesce(e.name, 'the event'), 60) || ' go on sale. It works for 10 minutes. Don''t share it.');
+    END IF;
+    RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'sent');
   END IF;
   RETURN public.exos_drop_status(p_event_id);
 END $$;
@@ -713,6 +772,10 @@ BEGIN
   END IF;
   IF s.sms_code_hash <> public._exos_proof_hash(s.id, 'drop_sms', v_code) THEN
     UPDATE public.exos_drop_signups SET sms_code_attempts = sms_code_attempts + 1 WHERE id = s.id;
+    -- Counted per number too: 10 wrong codes in a day across signups stop new codes to it.
+    UPDATE public.exos_drop_sms_codes l SET fails = l.fails + 1
+     WHERE l.id = (SELECT l2.id FROM public.exos_drop_sms_codes l2
+                    WHERE l2.signup_id = s.id AND l2.phone = s.sms_pending_phone ORDER BY l2.created_at DESC LIMIT 1);
     RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('verified', false);
   END IF;
   UPDATE public.exos_drop_signups x
@@ -758,7 +821,7 @@ DECLARE v_sid uuid; v_h text;
 BEGIN
   IF coalesce(p_token, '') !~ '^[0-9a-f]{64}$' THEN RETURN jsonb_build_object('ok', false); END IF;
   v_h := public._exos_drop_hash(p_token);
-  SELECT coalesce((SELECT c.signup_id FROM public.exos_drop_confirms c WHERE c.leave_hash = v_h),
+  SELECT coalesce((SELECT lt.signup_id FROM public.exos_drop_leave_tokens lt WHERE lt.token_hash = v_h),
                   (SELECT s.id FROM public.exos_drop_signups s WHERE s.blast_leave_hash = v_h)) INTO v_sid;
   IF v_sid IS NULL THEN RETURN jsonb_build_object('ok', false); END IF;
   PERFORM public._exos_drop_leave_signups(ARRAY[v_sid]);
@@ -1195,6 +1258,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE v_c int; v_s int; v_e int;
 BEGIN
+  DELETE FROM public.exos_drop_sms_codes WHERE created_at < now() - interval '2 days';
   DELETE FROM public.exos_drop_confirms WHERE created_at < now() - interval '8 days';
   GET DIAGNOSTICS v_c = ROW_COUNT;
   DELETE FROM public.exos_drop_signups WHERE confirmed_at IS NULL AND created_at < now() - interval '30 days';

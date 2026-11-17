@@ -14,6 +14,9 @@
 --   DL3 signed in: one click, confirmed; an unconfirmed account refused; a
 --       guest's pending row for the same address joins it (dedupe); texts
 --       need a number and store the SQL consent words
+--   DL3b SMS pumping: 2 numbers per signup, 60 s apart, 5 code sends a day
+--       per account, 5 per number (all accounts and orgs), 300 per org; the
+--       same try_again whichever cap, nothing reaches the outbox past one
 --   DL4 rate limits: 10 a minute per network (then no row, same answer), 3
 --       confirm mails a day per address and event
 --   DL5 roles: summary owner / manager / finance; content, scanner, an
@@ -107,7 +110,8 @@ DO $$
 DECLARE r record; v_anon text[]; v_auth text[]; v_svc text[];
 BEGIN
   FOR r IN SELECT c.relname, c.relrowsecurity FROM pg_class c
-            WHERE c.relname IN ('exos_drop_signups', 'exos_drop_confirms', 'exos_drop_settings') LOOP
+            WHERE c.relname IN ('exos_drop_signups', 'exos_drop_confirms', 'exos_drop_settings', 'exos_drop_sms_codes',
+                                'exos_drop_leave_tokens') LOOP
     ASSERT r.relrowsecurity, 'DL0 RLS on ' || r.relname;
     ASSERT NOT has_table_privilege('anon', 'public.' || r.relname, 'SELECT')
        AND NOT has_table_privilege('authenticated', 'public.' || r.relname, 'SELECT')
@@ -183,8 +187,8 @@ BEGIN
             FROM public.exos_drop_signups WHERE id = v_sid), 'DL2 pending row, sanitized source, consent words';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_drop_confirms WHERE signup_id = v_sid AND (token_hash = v_tok OR code_hash = v_code)),
     'DL2 only hashes stored';
-  ASSERT EXISTS (SELECT 1 FROM public.exos_drop_confirms WHERE signup_id = v_sid AND leave_hash = public._exos_drop_hash(m.payload->>'leave_token'))
-     AND NOT EXISTS (SELECT 1 FROM public.exos_drop_confirms WHERE signup_id = v_sid AND leave_hash = m.payload->>'leave_token'),
+  ASSERT EXISTS (SELECT 1 FROM public.exos_drop_leave_tokens WHERE signup_id = v_sid AND token_hash = public._exos_drop_hash(m.payload->>'leave_token'))
+     AND NOT EXISTS (SELECT 1 FROM public.exos_drop_leave_tokens WHERE token_hash = m.payload->>'leave_token'),
     'DL2 the leave token is stored hashed';
 
   -- A second signup (another browser): pending again, same answer, both links live.
@@ -282,6 +286,21 @@ BEGIN
   ASSERT (j->>'sms_pending')::boolean AND NOT EXISTS (SELECT 1 FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550178'),
     'DL3 no code to a stopped number';
   UPDATE public.exos_drop_signups SET left_at = now() WHERE email IN ('d70-x@x.com', 'd70-b@x.com') AND event_id = pg_temp.u('e1');
+  -- Leave, then re-join with the same proved number: a new code, texts back on after it.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'));
+  PERFORM public.exos_drop_leave_mine(pg_temp.u('e1'));
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE email = 'd70-fan1@x.com' AND event_id = pg_temp.u('e1');
+  UPDATE public.exos_rsvp_sms_outbox SET created_at = now() - interval '20 minutes' WHERE phone = '+12125550101';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'));
+  j := public.exos_drop_join(pg_temp.u('e1'), true, '+12125550101');
+  ASSERT j->>'sms_code' = 'sent' AND (j->>'sms_pending')::boolean AND NOT (j->>'sms')::boolean, 'DL3 re-join gets a code: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  v_code := (SELECT substring(o.body FROM '^[0-9]{6}') FROM public.exos_rsvp_sms_outbox o WHERE o.phone = '+12125550101'
+              ORDER BY created_at DESC LIMIT 1);
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'));
+  ASSERT (public.exos_drop_verify_sms(pg_temp.u('e1'), v_code)->>'sms')::boolean, 'DL3 texts back on after re-joining';
+  PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_drop_signups WHERE event_id = pg_temp.u('e1') AND email = 'd70-fan1@x.com') = 1, 'DL3 dedupe';
   ASSERT (SELECT user_id = pg_temp.u('b1') AND confirmed_at IS NOT NULL AND sms_phone = '+12125550101'
             AND sms_consent_text = public.exos_drop_sms_consent_text('D70 Hall', 'D70 Drop') AND sms_consent_text ~* 'reply stop'
@@ -298,6 +317,96 @@ BEGIN
   ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('e2'))$q$) LIKE 'P0002%', 'DL3 on-sale event refused';
   PERFORM pg_temp.as_('postgres');
   RAISE NOTICE 'OK  DL3 signed in: one click, confirmed email required, dedupe with the guest row, texts only for a number proved by a texted code';
+END $$;
+
+-- DL3b: SMS pumping caps on the texted code ---------------------------------
+DO $$
+DECLARE j jsonb; t text[] := '{}'; i int;
+BEGIN
+  INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
+    (pg_temp.u('d1'), 'd70-d1@x.com', now()), (pg_temp.u('d2'), 'd70-d2@x.com', now()),
+    (pg_temp.u('d3'), 'd70-d3@x.com', now()), (pg_temp.u('d4'), 'd70-d4@x.com', now()),
+    (pg_temp.u('d5'), 'd70-d5@x.com', now());
+  INSERT INTO public.exos_events (id, org_id, name, slug, status, starts_at, timezone, total_tickets, created_by) VALUES
+    (pg_temp.u('91'), pg_temp.u('1'), 'D70 G1', 'd70-g1', 'published', now() + interval '30 days', 'America/New_York', 100, pg_temp.u('a1')),
+    (pg_temp.u('92'), pg_temp.u('1'), 'D70 G2', 'd70-g2', 'published', now() + interval '30 days', 'America/New_York', 100, pg_temp.u('a1')),
+    (pg_temp.u('93'), pg_temp.u('1'), 'D70 G3', 'd70-g3', 'published', now() + interval '30 days', 'America/New_York', 100, pg_temp.u('a1')),
+    (pg_temp.u('94'), pg_temp.u('2'), 'D70 G4', 'd70-g4', 'published', now() + interval '30 days', 'America/New_York', 100, pg_temp.u('a6'));
+  INSERT INTO public.exos_ticket_tiers (event_id, name, price, capacity, sales_start)
+  SELECT x, 'GA', 20, 100, now() + interval '2 days' FROM unnest(ARRAY[pg_temp.u('91'), pg_temp.u('92'), pg_temp.u('93'), pg_temp.u('94')]) x;
+
+  -- Per signup: 2 different numbers (the second replaces the first), not 3.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d1'));
+  ASSERT public.exos_drop_join(pg_temp.u('91'), true, '+12125550301')->>'sms_code' = 'sent', 'DL3b first number';
+  ASSERT pg_temp.st($q$SELECT public.exos_drop_join(pg_temp.u('91'), true, '+12125550399')$q$) = 'ok', 'DL3b call';
+  ASSERT public.exos_drop_join(pg_temp.u('91'), true, '+12125550398')->>'sms_code' = 'try_again', 'DL3b 60 s apart';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE user_id = pg_temp.u('d1');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d1'));
+  j := public.exos_drop_join(pg_temp.u('91'), true, '+12125550302');
+  ASSERT j->>'sms_code' = 'sent' AND j->>'pending_hint' = '…0302', 'DL3b the second number replaces the first: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE user_id = pg_temp.u('d1');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d1'));
+  j := public.exos_drop_join(pg_temp.u('91'), true, '+12125550303');
+  t := t || (j->>'sms_code');
+  ASSERT j->>'sms_code' = 'try_again' AND j->>'pending_hint' = '…0302', 'DL3b no third number: ' || j::text;
+
+  -- Per account: 5 code sends a day, over actual sends, across events.
+  ASSERT public.exos_drop_join(pg_temp.u('92'), true, '+12125550304')->>'sms_code' = 'sent', 'DL3b send 3';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE user_id = pg_temp.u('d1');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d1'));
+  ASSERT public.exos_drop_join(pg_temp.u('92'), true, '+12125550305')->>'sms_code' = 'sent', 'DL3b send 4';
+  ASSERT public.exos_drop_join(pg_temp.u('93'), true, '+12125550306')->>'sms_code' = 'sent', 'DL3b send 5';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE user_id = pg_temp.u('d1');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d1'));
+  j := public.exos_drop_join(pg_temp.u('93'), true, '+12125550307');
+  t := t || (j->>'sms_code');
+  PERFORM pg_temp.as_('postgres');
+  ASSERT j->>'sms_code' = 'try_again', 'DL3b account cap';
+  ASSERT (SELECT count(*) FROM public.exos_drop_sms_codes WHERE user_id = pg_temp.u('d1')) = 5
+     AND NOT EXISTS (SELECT 1 FROM public.exos_rsvp_sms_outbox WHERE phone IN ('+12125550303', '+12125550307')), 'DL3b 5 sends, nothing past the cap';
+
+  -- Per number: 5 a day across accounts and orgs (4 earlier sends logged).
+  INSERT INTO public.exos_drop_sms_codes (user_id, org_id, phone, created_at)
+  SELECT pg_temp.u('d5'), pg_temp.u('2'), '+12125550310', now() - interval '3 hours' FROM generate_series(1, 4);
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d3'));
+  ASSERT public.exos_drop_join(pg_temp.u('91'), true, '+12125550310')->>'sms_code' = 'sent', 'DL3b number send 5';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d4'));
+  j := public.exos_drop_join(pg_temp.u('92'), true, '+12125550310');
+  t := t || (j->>'sms_code');
+  ASSERT j->>'sms_code' = 'try_again', 'DL3b number cap across accounts';
+
+  -- Per org: 300 a day (another org unaffected).
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_drop_sms_codes (user_id, org_id, phone, created_at)
+  SELECT pg_temp.u('d5'), pg_temp.u('1'), '+1212555' || lpad(g::text, 4, '0'), now() - interval '3 hours' FROM generate_series(4000, 4299) g;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d2'));
+  j := public.exos_drop_join(pg_temp.u('93'), true, '+12125550320');
+  t := t || (j->>'sms_code');
+  ASSERT j->>'sms_code' = 'try_again', 'DL3b org cap';
+  ASSERT public.exos_drop_join(pg_temp.u('94'), true, '+12125550321')->>'sms_code' = 'sent', 'DL3b another org unaffected';
+  PERFORM pg_temp.as_('postgres');
+  -- 10 wrong codes for a number in a day (across signups) stop new codes to it.
+  INSERT INTO public.exos_drop_sms_codes (user_id, org_id, phone, fails, created_at)
+  VALUES (pg_temp.u('d5'), pg_temp.u('2'), '+12125550330', 9, now() - interval '3 hours');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d3'));
+  ASSERT public.exos_drop_join(pg_temp.u('94'), true, '+12125550330')->>'sms_code' = 'sent', 'DL3b code after 9 fails';
+  ASSERT NOT (public.exos_drop_verify_sms(pg_temp.u('94'), '000000')->>'verified')::boolean
+      OR NOT (public.exos_drop_verify_sms(pg_temp.u('94'), '000001')->>'verified')::boolean, 'DL3b a wrong code';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT sum(fails) FROM public.exos_drop_sms_codes WHERE phone = '+12125550330') >= 10, 'DL3b failed verifies counted per number';
+  UPDATE public.exos_drop_signups SET sms_code_at = now() - interval '2 minutes' WHERE user_id = pg_temp.u('d4');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('d4'));
+  j := public.exos_drop_join(pg_temp.u('94'), true, '+12125550330');
+  t := t || (j->>'sms_code');
+  PERFORM pg_temp.as_('postgres');
+  ASSERT j->>'sms_code' = 'try_again', 'DL3b 10 wrong codes stop new codes to the number';
+  ASSERT t = ARRAY['try_again', 'try_again', 'try_again', 'try_again', 'try_again'], 'DL3b one answer whichever cap';
+  DELETE FROM public.exos_drop_sms_codes WHERE user_id = pg_temp.u('d5');
+  RAISE NOTICE 'OK  DL3b SMS code caps: 2 numbers per signup, 60 s, 5 a day per account, 5 per number, 10 wrong codes per number, 300 per org; one try_again';
 END $$;
 
 -- DL4 -----------------------------------------------------------------------
@@ -328,9 +437,8 @@ BEGIN
   PERFORM pg_temp.as_('postgres');
   ASSERT (SELECT count(*) FROM public.exos_drop_signups WHERE email_key = 'fold@x.com') = 5, 'DL4 +tags share the address limit';
   -- 10 confirm mails a day per address across events.
-  INSERT INTO public.exos_drop_confirms (id, signup_id, org_id, token_hash, code_hash, browser_token_hash, leave_hash)
-  SELECT gen_random_uuid(), s.id, s.org_id, md5(random()::text) || md5(random()::text), repeat('0', 64), repeat('0', 64),
-         md5(random()::text) || md5(random()::text)
+  INSERT INTO public.exos_drop_confirms (id, signup_id, org_id, token_hash, code_hash, browser_token_hash)
+  SELECT gen_random_uuid(), s.id, s.org_id, md5(random()::text) || md5(random()::text), repeat('0', 64), repeat('0', 64)
     FROM public.exos_drop_signups s, generate_series(1, 5) WHERE s.email_key = 'fold@x.com' AND s.email IN ('fold+1@x.com', 'fold+2@x.com');
   PERFORM pg_temp.as_('anon', NULL, '192.0.2.31');
   j := public.exos_drop_signup(pg_temp.u('e9'), 'fold+9@x.com', pg_temp.bt('fo9'));
@@ -730,16 +838,27 @@ END $$;
 
 -- DL9 -----------------------------------------------------------------------
 DO $$
-DECLARE j jsonb;
+DECLARE j jsonb; v_tok text;
 BEGIN
   UPDATE public.exos_drop_signups SET created_at = now() - interval '31 days' WHERE email = 'burst1@x.com';
   UPDATE public.exos_drop_confirms SET created_at = now() - interval '9 days'
    WHERE signup_id = (SELECT id FROM public.exos_drop_signups WHERE email = 'burst2@x.com');
   UPDATE public.exos_events SET starts_at = now() - interval '31 days' WHERE id = pg_temp.u('e9');
+  -- lv3 (DL11, confirmed): its confirm mails are 9 days old.
+  UPDATE public.exos_drop_confirms SET created_at = now() - interval '9 days'
+   WHERE signup_id = (SELECT id FROM public.exos_drop_signups WHERE email = 'lv3@x.com');
   j := public.exos_drop_list_sweep();
   ASSERT (j->>'unconfirmed')::int = 1 AND (j->>'past_events')::int = 1 AND (j->>'confirms')::int >= 1, 'DL9 sweep: ' || j::text;
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_drop_signups WHERE email = 'burst1@x.com' OR event_id = pg_temp.u('e9')), 'DL9 gone';
-  RAISE NOTICE 'OK  DL9 sweep: unconfirmed after 30 days, confirm rows after 8, lists 30 days after the event';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_drop_confirms c JOIN public.exos_drop_signups s ON s.id = c.signup_id WHERE s.email = 'lv3@x.com'),
+    'DL9 old confirm rows swept';
+  v_tok := (SELECT payload->>'leave_token' FROM public.exos_mail WHERE template = 'drop-confirm' AND to_email = 'lv3@x.com'
+             ORDER BY created_at DESC, id LIMIT 1);
+  PERFORM pg_temp.as_('anon');
+  ASSERT (public.exos_drop_leave(v_tok)->>'ok')::boolean, 'DL9 a 9-day-old confirm mail''s leave link still works';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT left_at IS NOT NULL FROM public.exos_drop_signups WHERE email = 'lv3@x.com'), 'DL9 left by the old link';
+  RAISE NOTICE 'OK  DL9 sweep: unconfirmed after 30 days, confirm rows after 8 (leave links kept), lists 30 days after the event';
 END $$;
 
 ROLLBACK;
