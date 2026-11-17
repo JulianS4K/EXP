@@ -31,7 +31,7 @@
 //     offline (or with this ticket's scans still queued on a re-entry list,
 //     which the server hasn't seen yet) the saved list and this device's
 //     marks do.
-//   * Fair days (mig 20261113110000): on a list for one fair day (entryDay)
+//   * Fair days (mig 20261113192000): on a list for one fair day (entryDay)
 //     a ticket used on ANOTHER day may enter; without re-entry it enters once
 //     that day, whichever of the day's lists ('used'); a ticket type with a
 //     day limit (the any-day pass: 1) is 'day-limit' once it has used that

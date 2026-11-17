@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 20261113110000 — Exos: fair-day setup (county fairs, rodeos, state
+-- Migration 20261113192000 — Exos: fair-day setup (county fairs, rodeos, state
 --   fairs): day passes, multi-day and any-day passes, parking and camping,
 --   and gate throughput. docs/organizer-guide.md "Fairs and multi-day events",
 --   docs/booking.md, docs/security.md "Fair days and gate throughput".
@@ -151,11 +151,11 @@ BEGIN
   END IF;
 END $$;
 COMMENT ON COLUMN public.exos_checkin_lists.entry_day IS
-  'A list for one fair day (mig 20261113110000). Without re-entry a ticket enters once per day (every list with this '
+  'A list for one fair day (mig 20261113192000). Without re-entry a ticket enters once per day (every list with this '
   'day), not once per event; the ticket type''s max_entry_days is checked. NULL = an ordinary list.';
 COMMENT ON COLUMN public.exos_ticket_tiers.max_entry_days IS
   'At most this many different fair days (exos_checkin_lists.entry_day) per ticket: 1 = an any-day pass. NULL = no '
-  'limit. mig 20261113110000.';
+  'limit. mig 20261113192000.';
 CREATE INDEX IF NOT EXISTS exos_checkin_lists_event_day_idx
   ON public.exos_checkin_lists (event_id, entry_day) WHERE entry_day IS NOT NULL;
 
@@ -295,7 +295,7 @@ $o$,
     RETURN jsonb_build_object('ok', false, 'reason', 'in-transfer');
   END IF;
 
-  /* exos: fair days 1 */ -- mig 20261113110000: a list for one fair day admits a
+  /* exos: fair days 1 */ -- mig 20261113192000: a list for one fair day admits a
   -- ticket once that day (re-entry lists: per list, as before) and checks the
   -- ticket type's day limit. The ticket row lock serializes two gates. On a
   -- day list or a re-entry list a used ticket isn't refused by its status, so
@@ -363,7 +363,7 @@ SELECT pg_temp.exos_patch_n(
   $o$    IF v_list.allow_reentry THEN
       v_refusal := public._exos_list_inside(t.id, v_list.id, v_scan_at);
 $o$,
-  $n$    /* exos: fair days 1 */ -- mig 20261113110000 (see exos_check_in_ticket).
+  $n$    /* exos: fair days 1 */ -- mig 20261113192000 (see exos_check_in_ticket).
     IF v_list.entry_day IS NOT NULL THEN
       v_refusal := public._exos_checkin_day_refusal(t.id, t.tier_id, v_list.id, v_scan_at);
       IF v_refusal IS NOT NULL THEN

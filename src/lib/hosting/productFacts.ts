@@ -139,7 +139,7 @@ export const PRODUCT_FACTS: ProductFact[] = [
     id: 'attendance-report', audience: 'organizer', status: 'not_shipped',
     claim: 'Organizers get an attendance report for each event: attendees by billing postal code (areas with fewer than 5 buyers grouped together, never named) and daily sales pace against an earlier event, downloadable as XLSX along with the settlement, sales tax and journal reports.',
     code: ['src/lib/attendanceReport.ts', 'src/lib/xlsx.ts', 'src/components/AttendanceReportPanel.tsx',
-      'supabase/functions/exos-api/attendance.ts', 'supabase/migrations/20261113120000_exos_attendance_report.sql'],
+      'supabase/functions/exos-api/attendance.ts', 'supabase/migrations/20261113193000_exos_attendance_report.sql'],
     note: 'Branch claude/exos-attendance-report (wave 13): not on main, migration not applied. Postal codes exist only for paid orders since mig 20261106140000, so the rollup is empty until card payments are on.',
   },
   {
@@ -261,8 +261,8 @@ export const PRODUCT_FACTS: ProductFact[] = [
     id: 'fair-days', audience: 'organizer', status: 'live',
     claim: 'Fairs and rodeos can set up day passes, multi-day and any-day passes, parking and camping in one step, with a check-in list per day that admits each pass only on its days, a lot list for parking and camping codes, and gate-by-gate entries every 15 minutes on the door report.',
     code: ['src/lib/fairSetup.ts', 'src/components/FairSetupPanel.tsx', 'src/components/DoorThroughputPanel.tsx',
-      'src/lib/door/lists.ts', 'supabase/migrations/20261113110000_exos_fair_day.sql'],
-    note: 'Live once mig 20261113110000 is applied (scripts/rollout-prod.sh); selling paid passes needs payments on (docs/payments-go-live.md).',
+      'src/lib/door/lists.ts', 'supabase/migrations/20261113192000_exos_fair_day.sql'],
+    note: 'Live once mig 20261113192000 is applied (scripts/rollout-prod.sh); selling paid passes needs payments on (docs/payments-go-live.md).',
   },
   {
     id: 'walkup-questions', audience: 'organizer', status: 'live',
@@ -360,7 +360,7 @@ export const PRODUCT_FACTS: ProductFact[] = [
   {
     id: 'kiosk-mode', audience: 'organizer', status: 'off',
     claim: 'Organizers can run self-serve ticket kiosks: a locked screen that sells one event\'s tickets by card on its own reader, resets after each buyer, and only staff with the PIN can leave.',
-    code: ['src/views/Kiosk.tsx', 'src/lib/kiosk.ts', 'supabase/functions/exos-pos/index.ts', 'supabase/migrations/20261113100000_exos_kiosk.sql'],
+    code: ['src/views/Kiosk.tsx', 'src/lib/kiosk.ts', 'supabase/functions/exos-pos/index.ts', 'supabase/migrations/20261113191000_exos_kiosk.sql'],
     note: 'Built, but it sells only by card at the door, which is off until EXOS_POS_CARD=on; until then a kiosk shows "unavailable".',
   },
   {
@@ -380,7 +380,7 @@ export const PRODUCT_FACTS: ProductFact[] = [
     claim: 'Organizers can promote events in their own Discord server: an announcement in a channel when an event is published, and the event on the server\'s Discord events list, kept in step with Exos.',
     code: ['src/components/DiscordPanel.tsx', 'src/components/DiscordEventPanel.tsx', 'src/lib/discord.ts',
       'supabase/functions/exos-discord/index.ts', 'supabase/functions/_shared/channels/discord.ts',
-      'supabase/migrations/20261113130000_exos_discord.sql', 'supabase/migrations/20261114100000_exos_leftovers_15.sql'],
+      'supabase/migrations/20261113194000_exos_discord.sql', 'supabase/migrations/20261114100000_exos_leftovers_15.sql'],
     note: 'Branch claude/exos-discord: not on main, migration not applied. Branch claude/exos-wave15-leftovers adds an automatic reminder (24 or 48 hours before, off by default), deleting the Discord event when the Exos event is deleted, and a test message. Dark until EXOS_DISCORD_ENABLED=on; a dry run until the org switch and EXOS_DISCORD_WRITES=on; the bot needs the platform\'s Discord application (docs/discord.md).',
   },
 ];

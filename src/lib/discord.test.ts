@@ -34,7 +34,7 @@ describe('webhook URL check', () => {
   });
   it('is the same rule as the edge function and the SQL', () => {
     for (const u of [...good, ...bad]) expect(webhookUrlParts(u) !== null, u).toBe(webhookUrlOk(u));
-    const sql = readFileSync(resolve(__dirname, '../../supabase/migrations/20261113130000_exos_discord.sql'), 'utf8');
+    const sql = readFileSync(resolve(__dirname, '../../supabase/migrations/20261113194000_exos_discord.sql'), 'utf8');
     // The SQL pattern is the same regex, without JS's escaped '/'.
     expect(sql).toContain(`'${WEBHOOK_URL_RE.source.replace(/\\\//g, '/')}'`);
   });

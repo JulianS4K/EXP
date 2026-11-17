@@ -1,4 +1,4 @@
-// Org settings → Discord (mig 20261113130000; docs/discord.md): promote events
+// Org settings → Discord (mig 20261113194000; docs/discord.md): promote events
 // in the org's own Discord server. A channel webhook for announcements, the
 // platform's bot for Discord scheduled events, and the switches. Hidden
 // unless the operator turned Discord on (exos-discord /config). The webhook

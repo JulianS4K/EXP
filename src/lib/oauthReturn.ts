@@ -1,6 +1,6 @@
 // Coming back from an OAuth sign-in (Connect Google Ads: exos-oauth-google;
 // Connect Eventbrite: exos-eventbrite-oauth; mig 20261029140000; Add Exos bot
-// to a Discord server: exos-discord, mig 20261113130000). Pure, so
+// to a Discord server: exos-discord, mig 20261113194000). Pure, so
 // vitest covers it (oauthReturn.test.ts); the screen is
 // components/OAuthFinish.tsx, mounted by the org settings page.
 //

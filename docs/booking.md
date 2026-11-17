@@ -70,7 +70,7 @@ The rental terms stay on the hold for the settlement port to read.
 
 A fair, rodeo or other multi-day run is one event, not one per night:
 convert the first night, then run **Fair / multi-day setup** on the draft
-(mig 20261113110000; `docs/organizer-guide.md` "Fairs and multi-day
+(mig 20261113192000; `docs/organizer-guide.md` "Fairs and multi-day
 events"). It adds a day pass and a check-in list per day (each list carries
 its date as the fair day), the multi-day and any-day passes, parking and
 camping on a lot list, and moves the event's end to the last day's close.

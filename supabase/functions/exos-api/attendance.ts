@@ -1,4 +1,4 @@
-// claude/exos-attendance-report (mig 20261113120000, docs/api/attendance.json):
+// claude/exos-attendance-report (mig 20261113193000, docs/api/attendance.json):
 // an event's attendance report for the organization's credential.
 //
 //   GET /v1/events/:id/attendance   orders:read   ?compare=<event id>

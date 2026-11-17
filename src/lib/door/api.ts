@@ -25,7 +25,7 @@ export async function fetchDoorEvent(eventId: string, signal?: AbortSignal): Pro
     console.warn('check-in lists unavailable', err);
     ev.checkinLists = undefined;
   }
-  // Fair days (mig 20261113110000): the ticket types' day limits, saved with
+  // Fair days (mig 20261113192000): the ticket types' day limits, saved with
   // the header so the device applies them offline. Only read for an event
   // with fair-day lists; a failed read keeps the ones the page had.
   if (ev.checkinLists?.some((l) => l.entryDay)) {
@@ -81,7 +81,7 @@ export async function fetchDoorSummary(eventId: string): Promise<DoorSummary | n
   return parseDoorSummary(data);
 }
 
-/** Per-gate throughput (exos_door_throughput, mig 20261113110000). null when
+/** Per-gate throughput (exos_door_throughput, mig 20261113192000). null when
  *  this database doesn't have it yet, or the caller may not see it. */
 export async function fetchDoorThroughput(
   eventId: string, from: string | null, until: string | null, bucketMinutes: number,

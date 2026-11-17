@@ -1,5 +1,5 @@
 // exos-discord — promote Exos events on the organizer's own Discord server
-// (mig 20261113130000; docs/discord.md). Two levels, both off until
+// (mig 20261113194000; docs/discord.md). Two levels, both off until
 // EXOS_DISCORD_ENABLED=on, both a dry run unless the org's writes switch AND
 // EXOS_DISCORD_WRITES=on:
 //

@@ -1,5 +1,5 @@
 -- ============================================================================
--- Migration 20261113130000 — Exos (Bridge / D4): promote events on Discord
+-- Migration 20261113194000 — Exos (Bridge / D4): promote events on Discord
 --
 -- Lane:     d4 (exos / bridge ticketing infra)
 -- Touches:  C: TABLE exos_discord_links (one row per org: the channel
@@ -162,7 +162,7 @@ DROP TRIGGER IF EXISTS exos_discord_links_touch ON public.exos_discord_links;
 CREATE TRIGGER exos_discord_links_touch BEFORE UPDATE ON public.exos_discord_links
   FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
 COMMENT ON TABLE public.exos_discord_links IS
-  'Discord per org: the channel webhook id (token in Vault exos_discord_webhook:<org>), the linked server, the switches. Service role only; exos_discord_* RPCs. mig 20261113130000.';
+  'Discord per org: the channel webhook id (token in Vault exos_discord_webhook:<org>), the linked server, the switches. Service role only; exos_discord_* RPCs. mig 20261113194000.';
 
 -- One row: the platform-wide circuit breaker. scope 'bot' (the bot token got
 -- a 401: bot calls stop; cleared by a new token or the operator) or 'all'
@@ -183,7 +183,7 @@ ALTER TABLE public.exos_discord_platform ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.exos_discord_platform FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.exos_discord_platform TO service_role;
 COMMENT ON TABLE public.exos_discord_platform IS
-  'Discord circuit breaker and global-429 pause, one row. Service role only; exos_discord_call_gate / _result / breaker_clear. mig 20261113130000.';
+  'Discord circuit breaker and global-429 pause, one row. Service role only; exos_discord_call_gate / _result / breaker_clear. mig 20261113194000.';
 
 CREATE TABLE IF NOT EXISTS public.exos_discord_posts (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -216,7 +216,7 @@ DROP TRIGGER IF EXISTS exos_discord_posts_touch ON public.exos_discord_posts;
 CREATE TRIGGER exos_discord_posts_touch BEFORE UPDATE ON public.exos_discord_posts
   FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
 COMMENT ON TABLE public.exos_discord_posts IS
-  'One Discord announcement per event per kind (publish / reminder) through the org''s channel webhook. Service role only. mig 20261113130000.';
+  'One Discord announcement per event per kind (publish / reminder) through the org''s channel webhook. Service role only. mig 20261113194000.';
 
 CREATE TABLE IF NOT EXISTS public.exos_discord_event_syncs (
   event_id     uuid PRIMARY KEY REFERENCES public.exos_events (id) ON DELETE CASCADE,
@@ -251,7 +251,7 @@ DROP TRIGGER IF EXISTS exos_discord_event_syncs_touch ON public.exos_discord_eve
 CREATE TRIGGER exos_discord_event_syncs_touch BEFORE UPDATE ON public.exos_discord_event_syncs
   FOR EACH ROW EXECUTE FUNCTION public.exos_touch_updated_at();
 COMMENT ON TABLE public.exos_discord_event_syncs IS
-  'An Exos event shown on the org''s Discord server as an EXTERNAL scheduled event (Exos is the source). Service role only. mig 20261113130000.';
+  'An Exos event shown on the org''s Discord server as an EXTERNAL scheduled event (Exos is the source). Service role only. mig 20261113194000.';
 
 -- ===========================================================================
 -- 3. Helpers

@@ -1,4 +1,4 @@
-// Kiosk mode setup (mig 20261113100000, docs/pos.md "Kiosk mode"), in the
+// Kiosk mode setup (mig 20261113191000, docs/pos.md "Kiosk mode"), in the
 // door app's Sell tab for owners and managers: mark a register device as this
 // event's kiosk (its card reader, a printer, the admin PIN), start kiosk mode
 // on this screen, end a kiosk's session or turn it off. The rules are in SQL

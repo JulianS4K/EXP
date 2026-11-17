@@ -1,5 +1,5 @@
 -- ============================================================================
--- Fair days (mig 20261113110000)
+-- Fair days (mig 20261113192000)
 --   FD0 grants, helpers private, markers, schema checks
 --   FD1 exos_fair_setup: owner / manager only (scanner, finance, another org
 --       refused, same message for an unknown event); bad plans refused with

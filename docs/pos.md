@@ -59,7 +59,7 @@ an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own t
 | Register UI: walk-up tickets on a phone | ✅ | `/checkin/:event` → Sell (`components/DoorSellPanel`) |
 | Register UI: bar and merch | ⬜ later | SPA route |
 | Card at the door on smart readers (S700, WisePOS E), from the web door app | ✅ authored, off until `EXOS_POS_CARD=on` | "Card at the door" below; the Sell tab |
-| Kiosk mode: a self-serve screen, one event, card only on its reader, PIN exit, auto-reset | ✅ authored, sells only with `EXOS_POS_CARD=on` | mig 20261113100000, "Kiosk mode" below, `/kiosk` |
+| Kiosk mode: a self-serve screen, one event, card only on its reader, PIN exit, auto-reset | ✅ authored, sells only with `EXOS_POS_CARD=on` | mig 20261113191000, "Kiosk mode" below, `/kiosk` |
 | Tap to Pay on iPhone, Bluetooth readers | ⬜ later (server side ready: `connection_token`, `card_payment` mode `sdk`) | needs the native wrapper app |
 
 ## Data model
@@ -323,7 +323,7 @@ only today), and whether card walk-ups count toward promoter commissions (decisi
 
 ## Kiosk mode
 
-Mig `20261113100000`, `src/views/Kiosk.tsx`, `exos-pos` (`kiosk_*`). A **self-serve screen** at a fair gate: the
+Mig `20261113191000`, `src/views/Kiosk.tsx`, `exos-pos` (`kiosk_*`). A **self-serve screen** at a fair gate: the
 public buys tickets for one event by card on the kiosk's own reader, with no staff at the screen. An RFP pass / fail
 line (county and state fairs). Sales need `EXOS_POS_CARD=on` like every card at the door; with it off, the kiosk
 screen says it's unavailable.
