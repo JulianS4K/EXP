@@ -209,7 +209,7 @@ CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_user_idx ON public.exos_drop_sms_
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_phone_idx ON public.exos_drop_sms_codes (phone, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_org_idx ON public.exos_drop_sms_codes (org_id, created_at);
 CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_signup_idx ON public.exos_drop_sms_codes (signup_id);
-CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_at_idx ON public.exos_drop_sms_codes (created_at);
+CREATE INDEX IF NOT EXISTS exos_drop_sms_codes_new_idx ON public.exos_drop_sms_codes (created_at) WHERE newcomer;
 
 -- Countries an org may text verification codes to beyond its own (owner
 -- only, audited; exos_drop_set_sms_countries). ISO 3166-1 alpha-2 codes.
@@ -394,6 +394,12 @@ SET search_path = public, pg_temp
 AS $$
   SELECT CASE upper(btrim(coalesce(p_iso, '')))
     WHEN 'US' THEN '1' WHEN 'CA' THEN '1' WHEN 'PR' THEN '1' WHEN 'VI' THEN '1' WHEN 'GU' THEN '1'
+    WHEN 'MP' THEN '1' WHEN 'AS' THEN '1'
+    -- NANP countries outside US / CA: matched by area code (_exos_drop_nanp_iso), never by +1.
+    WHEN 'BS' THEN '1' WHEN 'BB' THEN '1' WHEN 'AI' THEN '1' WHEN 'AG' THEN '1' WHEN 'VG' THEN '1'
+    WHEN 'KY' THEN '1' WHEN 'BM' THEN '1' WHEN 'GD' THEN '1' WHEN 'TC' THEN '1' WHEN 'JM' THEN '1'
+    WHEN 'MS' THEN '1' WHEN 'SX' THEN '1' WHEN 'LC' THEN '1' WHEN 'DM' THEN '1' WHEN 'VC' THEN '1'
+    WHEN 'DO' THEN '1' WHEN 'TT' THEN '1' WHEN 'KN' THEN '1'
     WHEN 'GB' THEN '44' WHEN 'IE' THEN '353' WHEN 'FR' THEN '33' WHEN 'DE' THEN '49' WHEN 'ES' THEN '34'
     WHEN 'IT' THEN '39' WHEN 'NL' THEN '31' WHEN 'BE' THEN '32' WHEN 'PT' THEN '351' WHEN 'AT' THEN '43'
     WHEN 'CH' THEN '41' WHEN 'SE' THEN '46' WHEN 'NO' THEN '47' WHEN 'DK' THEN '45' WHEN 'FI' THEN '358'
@@ -404,21 +410,54 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_drop_calling_code(text) FROM PUBLIC, anon, authenticated;
 
--- May this org text a code to this number? Its own country by default (+1
--- for US / CA and the rest of NANP; an org with no country counts as US),
--- plus the countries an owner allowed.
+-- The country of a +1 number by its area code, for the NANP members that
+-- aren't the US / Canada (the classic SMS-pumping targets): their own
+-- countries, which an owner must opt into. '900' (premium rate) is never
+-- textable. NULL: US, Canada and the US territories (PR 787/939, VI 340,
+-- GU 671, MP 670, AS 684), which count as the US group. From the NANPA
+-- assignments as known 2026-11 (nationalnanpa.com wasn't reachable from the
+-- build sandbox to re-check).
+CREATE OR REPLACE FUNCTION public._exos_drop_nanp_iso(p_phone text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE substr(coalesce(p_phone, ''), 3, 3)
+    WHEN '242' THEN 'BS' WHEN '246' THEN 'BB' WHEN '264' THEN 'AI' WHEN '268' THEN 'AG' WHEN '284' THEN 'VG'
+    WHEN '345' THEN 'KY' WHEN '441' THEN 'BM' WHEN '473' THEN 'GD' WHEN '649' THEN 'TC' WHEN '658' THEN 'JM'
+    WHEN '876' THEN 'JM' WHEN '664' THEN 'MS' WHEN '721' THEN 'SX' WHEN '758' THEN 'LC' WHEN '767' THEN 'DM'
+    WHEN '784' THEN 'VC' WHEN '809' THEN 'DO' WHEN '829' THEN 'DO' WHEN '849' THEN 'DO' WHEN '868' THEN 'TT'
+    WHEN '869' THEN 'KN' WHEN '900' THEN '900'
+  END
+  WHERE coalesce(p_phone, '') LIKE '+1%'
+$$;
+REVOKE ALL ON FUNCTION public._exos_drop_nanp_iso(text) FROM PUBLIC, anon, authenticated;
+
+-- May this org text a code to this number? The org's own country (an org
+-- with no country counts as US) plus the countries its owner allowed. A +1
+-- number is placed by its area code: the US group (US, Canada and the US
+-- territories, kept together) or one of the other NANP countries, each its
+-- own opt-in; '900' never. Other numbers by calling-code prefix.
 CREATE OR REPLACE FUNCTION public._exos_drop_phone_country_ok(p_org_id uuid, p_phone text)
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM (
-      SELECT public._exos_drop_calling_code(coalesce((SELECT o.country FROM public.exos_orgs o WHERE o.id = p_org_id), 'US')) AS cc
-      UNION
-      SELECT public._exos_drop_calling_code(c)
-        FROM public.exos_drop_sms_countries a, unnest(a.countries) c WHERE a.org_id = p_org_id) x
-     WHERE x.cc IS NOT NULL AND p_phone LIKE '+' || x.cc || '%')
+  WITH allowed AS (
+    SELECT upper(coalesce((SELECT o.country FROM public.exos_orgs o WHERE o.id = p_org_id), 'US')) AS iso
+    UNION
+    SELECT upper(c) FROM public.exos_drop_sms_countries a, unnest(a.countries) c WHERE a.org_id = p_org_id
+  ), nanp AS (SELECT public._exos_drop_nanp_iso(p_phone) AS iso)
+  SELECT CASE
+    WHEN p_phone LIKE '+1%' THEN
+      CASE WHEN (SELECT iso FROM nanp) = '900' THEN false
+           WHEN (SELECT iso FROM nanp) IS NOT NULL THEN EXISTS (SELECT 1 FROM allowed a WHERE a.iso = (SELECT iso FROM nanp))
+           ELSE EXISTS (SELECT 1 FROM allowed a WHERE a.iso IN ('US', 'CA', 'PR', 'VI', 'GU', 'MP', 'AS')) END
+    ELSE EXISTS (SELECT 1 FROM allowed a
+                  WHERE public._exos_drop_calling_code(a.iso) IS DISTINCT FROM '1'
+                    AND public._exos_drop_calling_code(a.iso) IS NOT NULL
+                    AND p_phone LIKE '+' || public._exos_drop_calling_code(a.iso) || '%')
+  END
 $$;
 REVOKE ALL ON FUNCTION public._exos_drop_phone_country_ok(uuid, text) FROM PUBLIC, anon, authenticated;
 
@@ -750,8 +789,13 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- the outbox under per-account, per-org and per-number locks, over actual
 -- sends logged in exos_drop_sms_codes: 5 a day per account, 5 a day per
 -- number (all accounts and orgs), 300 a day per org of which accounts new to
--- the org (no verified number or paid order with it) share 100, 2,000 a day
--- platform-wide (exos_platform_settings drop_sms_codes_daily_cap), 3 per
+-- the org (no verified number or paid order with it) share 100, and 2,000
+-- newcomer sends a day platform-wide (exos_platform_settings
+-- drop_sms_codes_daily_cap). The platform cap counts and blocks newcomers
+-- only: an org's established accounts (a proved number or paid order with
+-- it) are never stopped by other orgs, and with 100 newcomers per org at
+-- most, filling it takes 20 orgs' worth of new accounts. The trade-off: on
+-- such a day new accounts everywhere wait. 3 per
 -- number per 10
 -- minutes (shared with the order proofs), 60 s apart and 5 in all per
 -- signup, at most 2 different numbers per signup (the second replaces the
@@ -762,7 +806,9 @@ GRANT EXECUTE ON FUNCTION public.exos_drop_confirm_code(uuid, text, text) TO ano
 -- useless (user-requested one-time codes are exempt in the usual practice,
 -- as are the order-proof codes on the same outbox).
 -- Numbers: no extensions or dial strings, a real NANP number for +1, and
--- only the org's own country (+1 for US / CA) unless its owner allowed more
+-- only the org's own country (+1 for US / CA / US territories; the other
+-- NANP countries, by area code, are their own opt-in; 900 never) unless its
+-- owner allowed more
 -- (exos_drop_set_sms_countries, audited); others: "texts aren't available
 -- for this number" before anything is logged or sent.
 -- A number that replied STOP gets no text but counts as a send and answers
@@ -852,10 +898,12 @@ BEGIN
             WHERE l.org_id = e.org_id AND l.created_at > now() - interval '1 day') >= 300
        OR (v_new AND (SELECT count(*) FROM public.exos_drop_sms_codes l
                        WHERE l.org_id = e.org_id AND l.newcomer AND l.created_at > now() - interval '1 day') >= 100)
-       -- Platform-wide: exos_platform_settings drop_sms_codes_daily_cap (2,000 by default).
-       OR (SELECT count(*) FROM public.exos_drop_sms_codes l WHERE l.created_at > now() - interval '1 day')
+       -- Platform-wide, newcomers only: exos_platform_settings drop_sms_codes_daily_cap
+       -- (2,000 by default). Established accounts never hit it, so orgs filling it
+       -- can't stop anyone's regulars; each org's newcomers take at most 100 of it.
+       OR (v_new AND (SELECT count(*) FROM public.exos_drop_sms_codes l WHERE l.newcomer AND l.created_at > now() - interval '1 day')
           >= coalesce((SELECT (ps.value #>> '{}')::int FROM public.exos_platform_settings ps
-                        WHERE ps.key = 'drop_sms_codes_daily_cap' AND jsonb_typeof(ps.value) = 'number'), 2000)
+                        WHERE ps.key = 'drop_sms_codes_daily_cap' AND jsonb_typeof(ps.value) = 'number'), 2000))
        OR (SELECT count(*) FROM public.exos_rsvp_sms_outbox o
             WHERE o.phone = v_phone AND o.created_at > now() - interval '10 minutes') >= 3 THEN
       RETURN public.exos_drop_status(p_event_id) || jsonb_build_object('sms_code', 'try_again');
