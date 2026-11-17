@@ -7,7 +7,7 @@
 import { supabase } from './supabase';
 
 /** What the server answers for this browser (exos_wroom_join / _status). */
-export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy' | 'full';
+export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy' | 'full' | 'challenge';
 
 export interface RoomStatus {
   state: RoomState;
@@ -27,7 +27,7 @@ export interface RoomStatus {
   reason?: 'room' | 'network' | 'idle' | 'lapsed';
 }
 
-const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full'];
+const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full', 'challenge'];
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
 function date(v: unknown): Date | null {
@@ -123,7 +123,7 @@ export function nextPollMs(s: RoomStatus, rand: () => number = Math.random): num
 /** Does this state hold the buy box back (show the queue instead)? */
 export function blocksBuying(s: RoomStatus | null): boolean {
   return !!s && (s.state === 'lobby' || s.state === 'waiting' || s.state === 'expired' || s.state === 'busy'
-    || s.state === 'unknown' || s.state === 'full');
+    || s.state === 'unknown' || s.state === 'full' || s.state === 'challenge');
 }
 
 /** "about 3 minutes" / "less than a minute". */
@@ -192,6 +192,8 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
       };
     case 'unknown':
       return { heading: 'Joining the line', detail: 'One moment.', rejoin: false };
+    case 'challenge':
+      return { heading: 'One quick check', detail: "Confirm you're a person to get your place in line.", rejoin: false };
     case 'before':
       return {
         heading: 'Tickets are not on sale yet',
@@ -201,6 +203,37 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
     default:
       return { heading: '', detail: '', rejoin: false };
   }
+}
+
+// --- Turnstile (a room's CAPTCHA in front of new places) ---------------------
+/** The platform's Cloudflare Turnstile site key (public), or '' when not set up. */
+export const TURNSTILE_SITE_KEY: string =
+  (((import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_TURNSTILE_SITE_KEY) ?? '').trim();
+/** The widget's action; exos-wroom-join refuses a token made for another. */
+export const TURNSTILE_ACTION = 'wroom';
+export const TURNSTILE_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+
+/** What the queue shows for a room asking for the check: the widget, a
+ *  "can't take new places" note without a site key, or nothing. */
+export function challengeMode(s: RoomStatus | null, siteKey: string): 'widget' | 'unavailable' | null {
+  if (s?.state !== 'challenge') return null;
+  return siteKey ? 'widget' : 'unavailable';
+}
+
+/** A new place after the check passed (exos-wroom-join). Keeps the token. */
+export async function joinWithChallenge(eventId: string, turnstileToken: string): Promise<RoomStatus> {
+  const { data, error } = await supabase.functions.invoke('exos-wroom-join', {
+    body: { event_id: eventId, token: readToken(eventId), turnstile_token: turnstileToken },
+  });
+  if (error) {
+    let reason = '';
+    try { reason = ((await (error as { context?: Response }).context?.json()) as { reason?: string })?.reason ?? ''; } catch { /* not JSON */ }
+    if (reason === 'challenge_failed' || reason === 'challenge_required') return { state: 'challenge' };
+    throw new Error(error.message);
+  }
+  const s = parseStatus(data);
+  if (s.token) saveToken(eventId, s.token);
+  return s;
 }
 
 // --- RPCs -------------------------------------------------------------------
@@ -241,6 +274,8 @@ export interface RoomSummary {
   idleCloseMinutes: number;
   /** The organizer's line cap, or null (automatic). */
   maxEntries: number | null;
+  /** Cloudflare Turnstile in front of new places. */
+  turnstile: boolean;
   /** The cap in force. */
   cap: number | null;
   onSaleAt: Date | null;
@@ -264,6 +299,7 @@ export function parseSummary(raw: unknown): RoomSummary {
     admissionMinutes: num(r.admission_minutes) ?? 10,
     idleCloseMinutes: num(r.idle_close_minutes) ?? 10,
     maxEntries: num(r.max_entries) ?? null,
+    turnstile: r.turnstile === true,
     cap: num(r.cap) ?? null,
     onSaleAt: date(r.on_sale_at),
     opensAt: date(r.opens_at),
@@ -285,6 +321,8 @@ export interface RoomSettingsInput {
   idleCloseMinutes: number;
   /** Most people in line; 0 = automatic (5 x capacity, at least 1,000). */
   maxEntries?: number;
+  /** Turnstile on / off (undefined keeps it). */
+  turnstile?: boolean;
 }
 
 /** The same bounds exos_wroom_configure checks; null when fine. */
@@ -308,6 +346,7 @@ export async function configureRoom(eventId: string, enabled: boolean, s: RoomSe
   const { data, error } = await supabase.rpc('exos_wroom_configure', {
     p_event_id: eventId, p_enabled: enabled, p_window_minutes: s.windowMinutes, p_admit_per_minute: s.admitPerMinute,
     p_admission_minutes: s.admissionMinutes, p_idle_close_minutes: s.idleCloseMinutes, p_max_entries: s.maxEntries ?? 0,
+    ...(s.turnstile === undefined ? {} : { p_turnstile: s.turnstile }),
   });
   if (error) throw new Error(error.message.replace(/^exos_wroom_configure: /, ''));
   return parseSummary(data);

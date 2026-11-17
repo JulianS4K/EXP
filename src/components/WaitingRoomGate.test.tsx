@@ -2,11 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const h = vi.hoisted(() => ({ join: vi.fn(), poll: vi.fn(), rejoin: vi.fn() }));
+const h = vi.hoisted(() => ({ join: vi.fn(), poll: vi.fn(), rejoin: vi.fn(), challenge: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 vi.mock('../lib/waitingRoom', async (orig) => ({
   ...(await orig<typeof import('../lib/waitingRoom')>()),
-  joinRoom: h.join, pollRoom: h.poll, rejoinRoom: h.rejoin,
+  joinRoom: h.join, pollRoom: h.poll, rejoinRoom: h.rejoin, joinWithChallenge: h.challenge,
 }));
 
 import WaitingRoomGate from './WaitingRoomGate';
@@ -18,6 +18,9 @@ beforeEach(() => {
   h.join.mockReset();
   h.poll.mockReset();
   h.rejoin.mockReset();
+  h.challenge.mockReset();
+  document.head.querySelectorAll('script[src*="challenges.cloudflare.com"]').forEach((n) => n.remove());
+  delete (window as unknown as { turnstile?: unknown }).turnstile;
 });
 afterEach(() => {
   cleanup();
@@ -72,5 +75,36 @@ describe('WaitingRoomGate', () => {
     render(<WaitingRoomGate eventId="e1">{BUY}</WaitingRoomGate>);
     fireEvent.click(await screen.findByRole('button', { name: 'Join the line again' }));
     expect(await screen.findByRole('heading', { name: "You're number 900 in line" })).toBeTruthy();
+  });
+
+  it('Turnstile: no site key, no script and a plain note; never on a room without the check', async () => {
+    h.join.mockResolvedValue(parseStatus({ state: 'challenge' }));
+    render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
+    expect(await screen.findByText(/can't take new places/)).toBeTruthy();
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+    cleanup();
+    h.join.mockResolvedValue(parseStatus({ state: 'waiting', position: 5, ahead: 4, eta_minutes: 1 }));
+    render(<WaitingRoomGate eventId="e1" siteKey="site-key">{BUY}</WaitingRoomGate>);
+    await screen.findByRole('heading', { name: "You're number 5 in line" });
+    expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).toBeNull();
+  });
+
+  it('Turnstile: with a site key the widget renders (action wroom) and its token joins through exos-wroom-join', async () => {
+    const render0 = vi.fn((_el: HTMLElement, o: Record<string, unknown>) => { (o.callback as (t: string) => void)('cf-token'); return 'w1'; });
+    (window as unknown as { turnstile?: unknown }).turnstile = { render: render0 };
+    h.join.mockResolvedValue(parseStatus({ state: 'challenge' }));
+    h.challenge.mockResolvedValue(parseStatus({ state: 'waiting', position: 42, ahead: 41, eta_minutes: 1 }));
+    render(<WaitingRoomGate eventId="e1" siteKey="site-key">{BUY}</WaitingRoomGate>);
+    expect(await screen.findByRole('heading', { name: "You're number 42 in line" })).toBeTruthy();
+    expect(render0.mock.calls[0][1]).toMatchObject({ sitekey: 'site-key', action: 'wroom' });
+    expect(h.challenge).toHaveBeenCalledWith('e1', 'cf-token');
+  });
+
+  it('Turnstile: the script is loaded only when the check is shown', async () => {
+    h.join.mockResolvedValue(parseStatus({ state: 'challenge' }));
+    render(<WaitingRoomGate eventId="e1" siteKey="site-key">{BUY}</WaitingRoomGate>);
+    await screen.findByRole('heading', { name: 'One quick check' });
+    await waitFor(() => expect(document.querySelector('script[src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"]')).toBeTruthy());
+    expect(screen.queryByRole('button', { name: 'Buy tickets' })).toBeNull();
   });
 });

@@ -10,8 +10,10 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Clock } from 'lucide-react';
 import {
-  blocksBuying, joinRoom, nextPollMs, pollRoom, queueView, rejoinRoom, type RoomStatus,
+  TURNSTILE_SITE_KEY, blocksBuying, challengeMode, joinRoom, joinWithChallenge, nextPollMs, pollRoom, queueView,
+  rejoinRoom, type RoomStatus,
 } from '../lib/waitingRoom';
+import TurnstileWidget from './TurnstileWidget';
 
 function timeIn(d: Date, tz?: string | null): string {
   try {
@@ -21,10 +23,12 @@ function timeIn(d: Date, tz?: string | null): string {
   }
 }
 
-export function WaitingRoomQueue({ status, timezone, onRejoin, busy }: {
+export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge }: {
   status: RoomStatus; timezone?: string | null; onRejoin: () => void; busy?: boolean;
+  siteKey?: string; onChallenge?: (token: string) => void;
 }) {
   const v = queueView(status, (d) => timeIn(d, timezone));
+  const mode = challengeMode(status, siteKey);
   const titleId = useId();
   return (
     <section data-waiting-room aria-labelledby={titleId} className="border border-white/15 bg-white/5 p-5 space-y-3">
@@ -43,6 +47,10 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy }: {
           </div>
         </div>
       )}
+      {mode === 'widget' && onChallenge && <TurnstileWidget siteKey={siteKey} onToken={onChallenge} />}
+      {mode === 'unavailable' && (
+        <p className="type text-[12px] text-white/75">This waiting room can't take new places right now. Try again later.</p>
+      )}
       {v.rejoin && (
         <button type="button" onClick={onRejoin} disabled={busy}
           className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide disabled:opacity-50">
@@ -57,8 +65,8 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy }: {
 }
 
 /** Shows the queue while it holds this browser back, the children otherwise. */
-export default function WaitingRoomGate({ eventId, timezone, children }: {
-  eventId: string; timezone?: string | null; children: ReactNode;
+export default function WaitingRoomGate({ eventId, timezone, children, siteKey = TURNSTILE_SITE_KEY }: {
+  eventId: string; timezone?: string | null; children: ReactNode; siteKey?: string;
 }) {
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,7 +76,7 @@ export default function WaitingRoomGate({ eventId, timezone, children }: {
 
   const schedule = useCallback((s: RoomStatus, run: (join: boolean) => void) => {
     if (timer.current) clearTimeout(timer.current);
-    if (s.state === 'off') return;   // no room: nothing to poll
+    if (s.state === 'off' || s.state === 'challenge') return;   // no room / waiting on the check: nothing to poll
     timer.current = setTimeout(() => run(s.state === 'before' || s.state === 'busy' || s.state === 'unknown' || s.state === 'full'),
       nextPollMs(s));
   }, []);
@@ -119,9 +127,24 @@ export default function WaitingRoomGate({ eventId, timezone, children }: {
     }
   };
 
+  const challenge = async (token: string) => {
+    setBusy(true);
+    try {
+      const s = await joinWithChallenge(eventId, token);
+      last.current = s;
+      setStatus(s);
+      schedule(s, (j) => void run(j));
+    } catch {
+      /* keep the check on screen; the widget can be solved again */
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Until the first answer, show the buy box (most events have no room).
   if (status && blocksBuying(status)) {
-    return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy} />;
+    return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy}
+      siteKey={siteKey} onChallenge={(t) => void challenge(t)} />;
   }
   return (
     <>

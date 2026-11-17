@@ -8,7 +8,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { Users } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import {
-  configureRoom, getRoomSummary, settingsProblem, type RoomSettingsInput, type RoomSummary,
+  TURNSTILE_SITE_KEY, configureRoom, getRoomSummary, settingsProblem, type RoomSettingsInput, type RoomSummary,
 } from '../lib/waitingRoom';
 
 const LBL = 'block text-[10px] font-black text-slate-600 uppercase tracking-widest mb-1';
@@ -27,16 +27,17 @@ const PHASE: Record<RoomSummary['phase'], string> = {
   off: 'Off', before: 'Armed: opens before the on-sale', lobby: 'Open: people are gathering', live: 'Live: letting people in',
 };
 
-export default function WaitingRoomPanel({ eventId, timezone, canView }: {
-  eventId: string; timezone?: string | null; canView: boolean;
+export default function WaitingRoomPanel({ eventId, timezone, canView, siteKey = TURNSTILE_SITE_KEY }: {
+  eventId: string; timezone?: string | null; canView: boolean; siteKey?: string;
 }) {
   const { toast } = useToast();
   const [s, setS] = useState<RoomSummary | null>(null);
-  const [form, setForm] = useState<Record<keyof RoomSettingsInput, string>>({
+  const [turnstile, setTurnstile] = useState(false);
+  const [form, setForm] = useState<Record<Exclude<keyof RoomSettingsInput, 'turnstile'>, string>>({
     windowMinutes: '15', admitPerMinute: '200', admissionMinutes: '10', idleCloseMinutes: '10', maxEntries: '',
   });
   const [busy, setBusy] = useState(false);
-  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId(), cap: useId() };
+  const ids = { title: useId(), win: useId(), rate: useId(), adm: useId(), idle: useId(), cap: useId(), ts: useId(), tsHelp: useId() };
 
   const load = useCallback(() => {
     if (!canView) return;
@@ -56,13 +57,16 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
       admissionMinutes: String(s.admissionMinutes), idleCloseMinutes: String(s.idleCloseMinutes),
       maxEntries: s.maxEntries == null ? '' : String(s.maxEntries),
     });
-  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes, s?.maxEntries]); // eslint-disable-line react-hooks/exhaustive-deps
+    setTurnstile(s.turnstile);
+  }, [s?.windowMinutes, s?.admitPerMinute, s?.admissionMinutes, s?.idleCloseMinutes, s?.maxEntries, s?.turnstile]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!canView || !s) return null;
 
   const input: RoomSettingsInput = {
     windowMinutes: Number(form.windowMinutes), admitPerMinute: Number(form.admitPerMinute),
     admissionMinutes: Number(form.admissionMinutes), idleCloseMinutes: Number(form.idleCloseMinutes),
     maxEntries: form.maxEntries.trim() === '' ? 0 : Number(form.maxEntries),
+    // Without the platform's keys it can only be turned off, never on.
+    turnstile: siteKey ? turnstile : (s.turnstile ? false : undefined),
   };
   const err = settingsProblem(input);
   const on = s.enabled && !s.closedAt;
@@ -83,7 +87,7 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
     ['Waiting', s.counts.waiting], ['Admitted', s.counts.admitted],
     ['Checked out', s.counts.checkedOut], ['Expired', s.counts.expired],
   ];
-  const field = (k: keyof RoomSettingsInput, id: string, label: string, min: number, max: number, placeholder?: string) => (
+  const field = (k: Exclude<keyof RoomSettingsInput, 'turnstile'>, id: string, label: string, min: number, max: number, placeholder?: string) => (
     <div>
       <label htmlFor={id} className={LBL}>{label}</label>
       <input id={id} type="number" min={min} max={max} value={form[k]} disabled={!s.canManage} placeholder={placeholder}
@@ -124,6 +128,18 @@ export default function WaitingRoomPanel({ eventId, timezone, canView }: {
         {field('admissionMinutes', ids.adm, 'Time to check out (min)', 2, 60)}
         {field('idleCloseMinutes', ids.idle, 'Close when idle for (min)', 1, 240)}
         {field('maxEntries', ids.cap, 'Most people in line', 100, 1000000, s.cap ? `Automatic (${s.cap.toLocaleString()})` : 'Automatic')}
+      </div>
+      <div className="mb-3">
+        <label htmlFor={ids.ts} className="flex items-center gap-2 text-xs text-slate-800">
+          <input id={ids.ts} type="checkbox" checked={turnstile && !!siteKey} disabled={!s.canManage || !siteKey}
+            aria-describedby={ids.tsHelp} onChange={(e) => setTurnstile(e.target.checked)} />
+          Human check before joining (Cloudflare Turnstile)
+        </label>
+        <p id={ids.tsHelp} className="text-[11px] text-slate-600 mt-1">
+          {siteKey
+            ? 'Stops bots filling the line, and lets more people per network in (carriers share addresses).'
+            : "Not available: the platform's Cloudflare Turnstile keys aren't set up (docs/self-hosting.md)."}
+        </p>
       </div>
       {s.canManage ? (
         <div className="flex flex-wrap gap-2 items-center">

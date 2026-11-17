@@ -63,13 +63,16 @@
 --     the same time are refused (XWR02). The hold functions keep one live cart
 --     per buyer and event, so a turn never holds two carts.
 --   * Stuffing: minting is limited per network (IPv4 address / IPv6 /64: 60 a
---     minute; IPv6 /48: 120 a minute), by live places per network scaled
---     with the room's cap (IPv6 /48 greatest(20, cap / 50), IPv4 address
---     greatest(200, cap / 10), IPv6 /32 greatest(100, cap / 4)), and by the
---     room's cap on the LIVE line (organizer's number, else 5 x the public capacity, at least
+--     minute; IPv6 /48: 120 a minute), by live places per network (fixed
+--     without a CAPTCHA: 20 per IPv6 /48, 200 per IPv4 address, 100 per IPv6
+--     /32; with the room's Cloudflare Turnstile on, scaled with the cap:
+--     greatest(20, cap / 50), greatest(200, cap / 10), greatest(100, cap / 4)),
+--     and by the room's cap on the LIVE line (organizer's number, else 5 x the public capacity, at least
 --     1,000; abandoned, expired and used places free up): over those, "full".
---     A CAPTCHA in front of minting is the real fix for distributed stuffing
---     (follow-up).
+--   * Turnstile (per room, off by default): new places only through the
+--     exos-wroom-join edge function, which checks the Cloudflare Turnstile
+--     token (siteverify) and calls exos_wroom_join_verified (service role);
+--     the anon join then answers 'challenge' and mints nothing.
 --   * No PII: an entry is a token hash, times, a state, a hash of the
 --     redeeming buyer and of the minting network (salted with the run). No
 --     IP, user id or email in clear. A caller only ever sees its own place.
@@ -77,7 +80,8 @@
 --
 -- Touches:  C: TABLE exos_wroom_settings, exos_wroom_entries, exos_wroom_counts (RLS on, no client
 --              grants: RPCs only)
---           C: FUNCTION exos_wroom_join, exos_wroom_status (anon + authenticated;
+--           C: FUNCTION exos_wroom_join_verified (service role, exos-wroom-join),
+--              exos_wroom_join, exos_wroom_status (anon + authenticated;
 --              H3 allowlist), exos_wroom_summary (owner / manager / finance),
 --              exos_wroom_configure (owner / manager; audited
 --              event.waiting_room), exos_wroom_require (service role), helpers
@@ -104,6 +108,9 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_settings (
   idle_close_minutes  int NOT NULL DEFAULT 10 CHECK (idle_close_minutes BETWEEN 1 AND 240),
   -- Most people in one run's line; NULL = 5 x the public capacity (at least 1,000).
   max_entries         int CHECK (max_entries IS NULL OR max_entries BETWEEN 100 AND 1000000),
+  -- Cloudflare Turnstile in front of minting (exos-wroom-join); needs the
+  -- platform's TURNSTILE_SECRET_KEY and VITE_TURNSTILE_SITE_KEY. Off by default.
+  turnstile           boolean NOT NULL DEFAULT false,
   -- The live line (waiting and seen in the last 3 minutes, or admitted and not
   -- yet expired or used) at the last recount (at most every 5 s), and the
   -- counter round that mints since then add to (exos_wroom_counts).
@@ -573,14 +580,16 @@ REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text) FROM PUBLIC, an
 -- one) a new token while the room is open. Minting, checked before any
 -- write: 60 a minute per network (an IPv4 address or an IPv6 /64; generous,
 -- phones on one carrier share addresses) and 120 a minute per IPv6 /48, over
--- that "busy" with a retry hint and nothing stored; then, on the LIVE line
--- (abandoned, expired and used places free up) and scaled with the room's cap:
--- an IPv6 /48 greatest(20, cap / 50), an IPv4 address greatest(200, cap / 10)
--- (shared NAT), an IPv6 /32 greatest(100, cap / 4), and the cap itself; over
--- those "full" (the page retries each minute).
--- Distributed stuffing needs a CAPTCHA in front of minting (follow-up).
--- No room: { state: 'off' } (buy as usual).
-CREATE OR REPLACE FUNCTION public.exos_wroom_join(p_event_id uuid, p_token text DEFAULT NULL)
+-- that "busy" with a retry hint and nothing stored; then shares of the LIVE
+-- line (abandoned, expired and used places free up, for good) and the room's
+-- cap, over those "full" (the page retries each minute). Shares are fixed
+-- without a CAPTCHA: an IPv6 /48 20, an IPv4 address 200 (shared NAT), an
+-- IPv6 /32 100. With the room's Turnstile on (p_verified: the challenge was
+-- passed in exos-wroom-join) they scale with the cap, so carriers' many phones
+-- get in: greatest(20, cap / 50), greatest(200, cap / 10), greatest(100, cap / 4).
+-- With Turnstile on, a new place needs the challenge: the anon join answers
+-- { state: 'challenge' } and mints nothing. No room: { state: 'off' }.
+CREATE OR REPLACE FUNCTION public._exos_wroom_join_core(p_event_id uuid, p_token text, p_verified boolean)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -596,6 +605,7 @@ DECLARE
   v_n32   text := public._exos_wroom_net32();
   v_net32 text;
   v_cap   int;
+  v_scaled boolean;
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
@@ -620,22 +630,26 @@ BEGIN
       RETURN public._exos_wroom_view(p_event_id, v_id, p_token);
     END IF;
   END IF;
+  -- Turnstile on: a new place only through the challenge (exos-wroom-join).
+  IF s.turnstile AND NOT coalesce(p_verified, false) THEN
+    RETURN jsonb_build_object('state', 'challenge');
+  END IF;
   IF NOT public.exos_rate_hit('wroom-ip:' || md5(v_narrow), 60)
      OR (v_wide <> v_narrow AND NOT public.exos_rate_hit('wroom-net:' || md5(v_wide), 120)) THEN
     RETURN jsonb_build_object('state', 'busy', 'retry_after_ms', 5000);
   END IF;
-  -- Per-network shares of the room, on the live line, scaled with the cap
-  -- (carriers put many phones behind one IPv4 address or in one /48 or /32):
-  -- an IPv6 /48 greatest(20, cap / 50), an IPv4 address greatest(200, cap / 10),
-  -- an IPv6 /32 greatest(100, cap / 4).
+  -- Per-network shares of the live line: fixed without a CAPTCHA, scaled with
+  -- the cap behind Turnstile (see above).
   v_cap := public._exos_wroom_cap(s);
+  v_scaled := s.turnstile AND coalesce(p_verified, false);
   v_net := encode(sha256(convert_to(s.run_id::text || ':' || v_wide, 'UTF8')), 'hex');
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_wroom_net:' || v_net, 0));
   IF (SELECT count(*) FROM public.exos_wroom_entries x
        WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net_hash = v_net
          AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
              OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL)))
-     >= (CASE WHEN position(':' in v_wide) > 0 THEN greatest(20, v_cap / 50) ELSE greatest(200, v_cap / 10) END) THEN
+     >= (CASE WHEN position(':' in v_wide) > 0 THEN CASE WHEN v_scaled THEN greatest(20, v_cap / 50) ELSE 20 END
+              ELSE CASE WHEN v_scaled THEN greatest(200, v_cap / 10) ELSE 200 END END) THEN
     RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
   END IF;
   v_net32 := encode(sha256(convert_to(s.run_id::text || ':' || v_n32, 'UTF8')), 'hex');
@@ -644,7 +658,8 @@ BEGIN
     IF (SELECT count(*) FROM public.exos_wroom_entries x
          WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net32_hash = v_net32
            AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
-             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))) >= greatest(100, v_cap / 4) THEN
+             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL)))
+       >= (CASE WHEN v_scaled THEN greatest(100, v_cap / 4) ELSE 100 END) THEN
       RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
     END IF;
   END IF;
@@ -668,8 +683,38 @@ BEGIN
   ON CONFLICT (event_id, run_id, round, shard) DO UPDATE SET n = c.n + 1;
   RETURN public._exos_wroom_view(p_event_id, v_id, v_token);
 END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_join_core(uuid, text, boolean) FROM PUBLIC, anon, authenticated;
+
+-- The browser's join (anon + authenticated): never verified, so with the
+-- room's Turnstile on it can't mint (answers 'challenge').
+CREATE OR REPLACE FUNCTION public.exos_wroom_join(p_event_id uuid, p_token text DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE sql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT public._exos_wroom_join_core(p_event_id, p_token, false)
+$$;
 REVOKE ALL ON FUNCTION public.exos_wroom_join(uuid, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_join(uuid, text) TO anon, authenticated, service_role;
+
+-- exos-wroom-join (service role) after Cloudflare Turnstile passed. The
+-- network limits read the client's address from the platform headers the edge
+-- function received (cf-connecting-ip, x-forwarded-for), put in place of this
+-- request's own for the transaction, so _exos_request_ip() applies the same
+-- trusted-source rule as for a browser call (request_ip_source).
+CREATE OR REPLACE FUNCTION public.exos_wroom_join_verified(p_event_id uuid, p_token text, p_headers jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  PERFORM set_config('request.headers', jsonb_strip_nulls(jsonb_build_object(
+    'cf-connecting-ip', left(p_headers ->> 'cf-connecting-ip', 64),
+    'x-forwarded-for', left(p_headers ->> 'x-forwarded-for', 512)))::text, true);
+  RETURN public._exos_wroom_join_core(p_event_id, p_token, true);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_wroom_join_verified(uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_wroom_join_verified(uuid, text, jsonb) TO service_role;
 
 -- Poll: the caller's own state and place (and the admission round on read).
 -- An unknown or malformed token answers { state: 'unknown' } (join again);
@@ -785,6 +830,7 @@ BEGIN
     'admission_minutes', coalesce(s.admission_minutes, 10),
     'idle_close_minutes', coalesce(s.idle_close_minutes, 10),
     'max_entries', s.max_entries,
+    'turnstile', coalesce(s.turnstile, false),
     'cap', CASE WHEN s.event_id IS NOT NULL THEN public._exos_wroom_cap(s) END,
     'on_sale_at', CASE WHEN s.event_id IS NOT NULL AND ph.phase <> 'off' THEN ph.on_sale_at END,
     'opens_at', CASE WHEN s.event_id IS NOT NULL AND ph.phase <> 'off' THEN ph.opens_at END,
@@ -807,7 +853,9 @@ CREATE OR REPLACE FUNCTION public.exos_wroom_configure(
   p_window_minutes int DEFAULT NULL, p_admit_per_minute int DEFAULT NULL,
   p_admission_minutes int DEFAULT NULL, p_idle_close_minutes int DEFAULT NULL,
   -- The most people in line: NULL keeps it, 0 = automatic (5 x capacity).
-  p_max_entries int DEFAULT NULL
+  p_max_entries int DEFAULT NULL,
+  -- Cloudflare Turnstile in front of new places: NULL keeps it.
+  p_turnstile boolean DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -842,10 +890,11 @@ BEGIN
     DELETE FROM public.exos_wroom_counts WHERE event_id = p_event_id;
   END IF;
   INSERT INTO public.exos_wroom_settings AS w (event_id, org_id, enabled, window_minutes, admit_per_minute,
-                                               admission_minutes, idle_close_minutes, max_entries, enabled_at, updated_by,
+                                               admission_minutes, idle_close_minutes, max_entries, turnstile, enabled_at, updated_by,
                                                closed_at, closed_reason)
   VALUES (p_event_id, v_org, p_enabled, coalesce(p_window_minutes, 15), coalesce(p_admit_per_minute, 200),
           coalesce(p_admission_minutes, 10), coalesce(p_idle_close_minutes, 10), nullif(p_max_entries, 0),
+          coalesce(p_turnstile, false),
           CASE WHEN p_enabled THEN now() END, auth.uid(),
           CASE WHEN NOT p_enabled THEN now() END, CASE WHEN NOT p_enabled THEN 'organizer' END)
   ON CONFLICT (event_id) DO UPDATE
@@ -855,6 +904,7 @@ BEGIN
          admission_minutes = coalesce(p_admission_minutes, w.admission_minutes),
          idle_close_minutes = coalesce(p_idle_close_minutes, w.idle_close_minutes),
          max_entries = CASE WHEN p_max_entries IS NULL THEN w.max_entries ELSE nullif(p_max_entries, 0) END,
+         turnstile = coalesce(p_turnstile, w.turnstile),
          updated_by = EXCLUDED.updated_by,
          run_id = CASE WHEN v_on THEN gen_random_uuid() ELSE w.run_id END,
          enabled_at = CASE WHEN v_on THEN now() ELSE w.enabled_at END,
@@ -876,11 +926,12 @@ BEGIN
                        'admit_per_minute', jsonb_build_array(o.admit_per_minute, n.admit_per_minute),
                        'admission_minutes', jsonb_build_array(o.admission_minutes, n.admission_minutes),
                        'idle_close_minutes', jsonb_build_array(o.idle_close_minutes, n.idle_close_minutes),
-                       'max_entries', jsonb_build_array(o.max_entries, n.max_entries)));
+                       'max_entries', jsonb_build_array(o.max_entries, n.max_entries),
+                       'turnstile', jsonb_build_array(o.turnstile, n.turnstile)));
   RETURN public.exos_wroom_summary(p_event_id);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_wroom_configure(uuid, boolean, int, int, int, int, int, boolean) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. The gate in the hold / claim functions (marker patches)

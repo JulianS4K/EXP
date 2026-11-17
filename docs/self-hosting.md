@@ -71,6 +71,7 @@ everything else with `--no-verify-jwt`.
 | `DISCORD_APPLICATION_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` | "Add Exos bot to your server" | your Discord application (`docs/discord.md`). Unset: only the channel webhook is offered. Optional `DISCORD_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-discord/callback`) |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
+| `TURNSTILE_SECRET_KEY` | the waiting room's human check (`exos-wroom-join`) | your Cloudflare Turnstile widget's secret key; pair it with `VITE_TURNSTILE_SITE_KEY` below. Unset: organizers can't turn the check on (the toggle is greyed out) and `exos-wroom-join` answers 503 |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
 Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
@@ -93,6 +94,7 @@ npm ci --include=dev && npm run build && npm start
 | `TRUST_PROXY_HOPS` | number of proxies in front (Render: 1) |
 | `EXOS_AI_DISCOVERY` | leave off until you want crawler / AI pages |
 | `VITE_EXOS_LUMA` | `on` shows Luma in the app (Integrations, ticketing choices); set with `EXOS_LUMA_ENABLED` |
+| `VITE_TURNSTILE_SITE_KEY` | build time; the waiting room's human check. Create a Turnstile widget in Cloudflare (Turnstile → Add widget; mode Managed; hostnames: your app host), put its site key here and its secret key in the edge secret `TURNSTILE_SECRET_KEY`, deploy `exos-wroom-join` (`--no-verify-jwt`), rebuild the app. Both unset: the check stays off |
 
 The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bridge/` or change `base` and
 `EXOS_APP_URL` together.

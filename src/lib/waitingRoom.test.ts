@@ -5,7 +5,7 @@ const h = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('./supabase', () => ({ supabase: { rpc: h.rpc } }));
 
 import {
-  blocksBuying, clearToken, joinRoom, nextPollMs, parseStatus, parseSummary, pollRoom, queueBody, queueHeader,
+  blocksBuying, challengeMode, clearToken, joinRoom, nextPollMs, parseStatus, parseSummary, pollRoom, queueBody, queueHeader,
   queueView, readToken, saveToken, settingsProblem, waitWords,
 } from './waitingRoom';
 
@@ -73,7 +73,11 @@ describe('polling', () => {
 
 describe('queue state', () => {
   it('holds the buy box back while in line, never when off, before or admitted', () => {
-    for (const st of ['lobby', 'waiting', 'expired', 'busy', 'unknown', 'full'] as const) expect(blocksBuying({ state: st })).toBe(true);
+    for (const st of ['lobby', 'waiting', 'expired', 'busy', 'unknown', 'full', 'challenge'] as const) expect(blocksBuying({ state: st })).toBe(true);
+    expect(challengeMode({ state: 'challenge' }, 'k')).toBe('widget');
+    expect(challengeMode({ state: 'challenge' }, '')).toBe('unavailable');
+    expect(challengeMode({ state: 'waiting' }, 'k')).toBeNull();
+    expect(challengeMode(null, 'k')).toBeNull();
     for (const st of ['off', 'before', 'admitted'] as const) expect(blocksBuying({ state: st })).toBe(false);
     expect(blocksBuying(null)).toBe(false);
   });

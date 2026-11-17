@@ -482,16 +482,16 @@ BEGIN
   PERFORM pg_temp.as_('postgres');
   -- ...and only 20 of them got a place: 20 per /48 per run.
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2')) = v_n + 61 + 20, 'WR7 20 per /48 per run';
-  -- IPv6 /32: greatest(100, cap / 4) LIVE places, 250 in this 1,000 room. The 20 above are in 2001:db8::/32; 230 more, then a
+  -- IPv6 /32: 100 LIVE places without a CAPTCHA. The 20 above are in 2001:db8::/32; 80 more, then a
   -- fresh /48 and /64 in it is full, another /32 isn't; idle ones free the quota.
   INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-32-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to('wr7-48-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':2001:db8::/32', 'UTF8')), 'hex'), extract(epoch FROM now())
-    FROM public.exos_wroom_settings s, generate_series(1, 230) g WHERE s.event_id = pg_temp.u('e2');
+    FROM public.exos_wroom_settings s, generate_series(1, 80) g WHERE s.event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('anon', NULL, '2001:db8:9999:1::1');
   j := public.exos_wroom_join(pg_temp.u('e2'));
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 250 live per /32 (cap 1,000 / 4): ' || j::text;
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 100 live per /32: ' || j::text;
   PERFORM pg_temp.as_('anon', NULL, '2001:db9:1:1::1');
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 another /32 joins';
   PERFORM pg_temp.as_('postgres');
@@ -550,7 +550,7 @@ BEGIN
   UPDATE public.exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('anon', NULL, '100.64.0.7');
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 expired places free the room';
-  -- Network shares scale with the cap. A fresh /48 with 25 live places: full at a 1,000 room (20)...
+  -- Strict without a CAPTCHA: a fresh /48 with 25 live places is full, even in a 50,000 room.
   PERFORM pg_temp.as_('postgres');
   INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s48-' || g, 'UTF8')), 'hex'),
@@ -558,49 +558,70 @@ BEGIN
          encode(sha256(convert_to('wr7-s32-' || g, 'UTF8')), 'hex'), extract(epoch FROM now())
     FROM public.exos_wroom_settings s, generate_series(1, 25) g WHERE s.event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
-  PERFORM public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 1000);
+  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 50000);
+  ASSERT (j->>'cap')::int = 50000 AND j->>'turnstile' = 'false', 'WR7 cap 50,000, no Turnstile: ' || j::text;
   PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:1::1');
   j := public.exos_wroom_join(pg_temp.u('e2'));
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 /48 share 20 at 1,000: ' || j::text;
-  -- ...but a 50,000 room allows 1,000 from one /48 (50,000 / 50) and 5,000 from one IPv4 address.
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 strict /48 share (20) without Turnstile: ' || j::text;
+  -- Turnstile on: the anon join can't mint (challenge, nothing stored) ...
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
-  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 50000);
-  ASSERT (j->>'cap')::int = 50000, 'WR7 cap 50,000: ' || j::text;
+  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, NULL, true);
+  ASSERT j->>'turnstile' = 'true' AND (j->>'cap')::int = 50000, 'WR7 Turnstile on: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  SELECT count(*) INTO v_n FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2');
+  PERFORM pg_temp.as_('anon', NULL, '198.51.100.77');
+  ASSERT public.exos_wroom_join(pg_temp.u('e2')) = '{"state": "challenge"}'::jsonb, 'WR7 anon join refused while Turnstile is on';
+  ASSERT pg_temp.st(format('SELECT public.exos_wroom_join_verified(%L, NULL, %L)', pg_temp.u('e2'), '{}')) LIKE '42501%',
+    'WR7 the verified join is service role only';
+  -- ... the verified join (exos-wroom-join, service role) scales the shares: 1,000 from one /48 at 50,000.
+  PERFORM pg_temp.as_('service_role', NULL, '10.9.9.9');
+  j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "2001:dba:5:2::1"}');
+  ASSERT j->>'state' = 'waiting' AND j->>'token' ~ '^[0-9a-f]{64}$', 'WR7 more than 20 from one /48 behind Turnstile: ' || j::text;
+  v_tok := j->>'token';
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2')) = v_n + 1, 'WR7 challenge stored nothing';
+  -- A place already held keeps working through the anon join and poll.
   PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:2::1');
-  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 more than 20 from one /48 in a large room';
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'), v_tok)->>'state' = 'waiting', 'WR7 own token without a new challenge';
   PERFORM pg_temp.as_('postgres');
   INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s48b-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':2001:dba:5::/48', 'UTF8')), 'hex'),
          encode(sha256(convert_to('wr7-s32b-' || g, 'UTF8')), 'hex'), extract(epoch FROM now())
     FROM public.exos_wroom_settings s, generate_series(1, 974) g WHERE s.event_id = pg_temp.u('e2');
-  PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:3::1');
-  j := public.exos_wroom_join(pg_temp.u('e2'));
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the /48 share holds at 1,000: ' || j::text;
-  -- IPv4: 100.64.0.3 (its 200 went idle above); at 50,000 its share is 5,000 live places.
-  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
-  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 more than 200 from one IPv4 address in a large room';
+  PERFORM pg_temp.as_('service_role');
+  j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "2001:dba:5:3::1"}');
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled /48 share holds at 1,000: ' || j::text;
+  -- IPv4 behind Turnstile: 5,000 live places at 50,000 (its 200 earlier went idle).
+  j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.3"}');
+  ASSERT j->>'state' = 'waiting', 'WR7 more than 200 from one IPv4 address behind Turnstile: ' || j::text;
   PERFORM pg_temp.as_('postgres');
   INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s4-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'), extract(epoch FROM now())
     FROM public.exos_wroom_settings s, generate_series(1, 4999) g WHERE s.event_id = pg_temp.u('e2');
-  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
-  j := public.exos_wroom_join(pg_temp.u('e2'));
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the IPv4 share holds at 5,000: ' || j::text;
-  PERFORM pg_temp.as_('postgres');
+  PERFORM pg_temp.as_('service_role');
+  j := public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.3"}');
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the scaled IPv4 share holds at 5,000: ' || j::text;
+  -- The verified join reads the address the edge function passed, not its own request's.
+  ASSERT public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.8"}')->>'state' = 'waiting',
+    'WR7 the passed address decides';
   -- Network shares count the live line: those 5,000 going idle free the address.
+  PERFORM pg_temp.as_('postgres');
   UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
    WHERE event_id = pg_temp.u('e2') AND net_hash = encode(sha256(convert_to(
          (SELECT run_id FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e2'))::text || ':100.64.0.3', 'UTF8')), 'hex');
-  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
-  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 idle places free the IPv4 share';
+  PERFORM pg_temp.as_('service_role');
+  ASSERT public.exos_wroom_join_verified(pg_temp.u('e2'), NULL, '{"cf-connecting-ip": "100.64.0.3"}')->>'state' = 'waiting',
+    'WR7 idle places free the IPv4 share';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  PERFORM public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, NULL, false);
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 0);
   ASSERT j->>'max_entries' IS NULL AND (j->>'cap')::int = 1000, 'WR7 automatic cap (5 x 100, at least 1,000): ' || j::text;
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_configure(%L, true, NULL, NULL, NULL, NULL, 50)', pg_temp.u('e2'))) LIKE '22023%', 'WR7 cap bounds';
-  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); live places per network scaled with the cap (/48 max(20, cap/50), IPv4 max(200, cap/10), /32 max(100, cap/4)), checked at 1,000 and 50,000; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
+  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); live places per network fixed without a CAPTCHA (20 per /48, 200 per IPv4, 100 per /32, even at 50,000) and scaled behind Turnstile (1,000 per /48, 5,000 per IPv4 at 50,000), the anon join refused (challenge) while Turnstile is on, the verified join service-only and reading the passed address; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
 END $$;
 
 -- WR8 -----------------------------------------------------------------------

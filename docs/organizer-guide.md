@@ -281,9 +281,13 @@ finance can see the counts).
 - **How big the line can get:** at most "Most people in line" (blank = automatic: 5 times the
   public capacity, at least 1,000) people *in line now*: anyone who closed the page for 3 minutes, or
   whose turn lapsed or was used, no longer counts. Beyond that, and beyond a per-network share that
-  stops one network filling the line (it grows with the room, so a carrier's many phones on one
-  network still get in), newcomers see "The waiting room is full" and the page tries
+  stops one network filling the line, newcomers see "The waiting room is full" and the page tries
   again each minute.
+- **Human check (Cloudflare Turnstile), optional:** turn it on for a big public drop. New arrivals
+  tick a quick check before they get a place, which stops bots filling the line and lets more people
+  in from one network (mobile carriers put many phones behind shared addresses; without the check,
+  one network gets at most 200 places, and 20 or 100 on IPv6). Greyed out until the platform's
+  Turnstile keys are set up.
 - **Who skips the line:** your drop list's presale ticket type (confirmed list members, with their
   code, until the public on-sale), and sales that never go through the public checkout: partner API
   reservations, the box office, the door and comps.
