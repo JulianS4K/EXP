@@ -1,6 +1,6 @@
 # Kanban Board / Product Roadmap
 
-**Focus (operator 2026-11-17): core ticket selling, promotion, distribution. Paused: social/friends features (group buy, matched seats, group chat/relay), event tokens (#121, parked), Spanish (#120, parked), Communities (#75, closed).**
+**Focus (operator 2026-11-17): core ticket selling, promotion, distribution. Paused: social/friends features (group buy, matched seats, group chat/relay), event tokens (#121, parked), Spanish (#120, parked), Communities (#75, closed), Ticket Evolution exchange resale (EVO build, see Channels below).**
 
 ## Prod state vs this repo (updated 2026-11-05)
 
@@ -753,6 +753,22 @@ distribution of Exos's own inventory, not resale.
   physical delivery and bulk inventory update / delete are forbidden. **Open with TEvo**: the signature scheme,
   whether order ticket groups echo `remote_id`, event search, webhook / Order Integration payloads,
   transfer_source values (`docs/marketplace/tevo/README.md`). Events are linked to TEvo by staff until then.
+- ⏸️ **Ticket Evolution exchange resale, buyer side ("EVO build")** (operator 2026-11-17: planned, **paused**; not
+  started, no branch). Exos as a resale site on the TEvo exchange, per TEvo's guide "Building a Ticket Resale Website
+  or App Using the Ticket Evolution API" (victorylive Confluence, API space, page 354910253): show **all** exchange
+  inventory next to Exos events, then sell it.
+  - **Browse (reads only, no authorization needed):** new GET-only edge function `exos-exchange` (`/v9/events`,
+    `/v9/searches/suggestions`, `/v9/events/:id`, `/v9/listings?event_id=`, `/v9/configurations/:id`), dark unless
+    `EXOS_EXCHANGE=on`; SPA `/exchange` + `/exchange/event/:id` behind `VITE_EXOS_EXCHANGE`; all-in estimate =
+    `retail_price` + platform `exchange_markup_bps` (default 0), never `wholesale_price` or seller identity; honor
+    `splits`; short TTL cache + rate limits. Port Terminal-2's proven signing (`X-Signature` over
+    `"GET api.ticketevolution.com<path>?<sorted query>"`, `?` always present; versioned Accept header) into the
+    existing `_shared/marketplace/tevo/transport`.
+  - **Checkout (writes, needs written operator authorization first):** `POST /v9/clients` (+ email / address /
+    phone), `/v9/tax_quotes`, `/v9/orders`. No holds exist on TEvo, so the order is placed at payment. Open
+    decisions: payment (Exos charges on Stripe then buys with the brokerage's evopay, or TEvo's Braintree gateway,
+    or TEvo affiliate/hosted), which account (S4K brokerage 1768 or a new Exos office), TEvo credentials for Exos,
+    and auto-matching Exos events to TEvo events (operator: not yet).
 
 ## All-in pricing (operator decision 2026-09-24)
 
