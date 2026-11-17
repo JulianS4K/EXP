@@ -87,11 +87,15 @@ by hand). For an announced event that isn't on sale yet: the moment promoters se
   (`exos_rsvp_sms_outbox`, the order-proof SMS path; a dry run until `EXOS_SMS_LIVE=on`) and typed back
   (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes (against SMS pumping, logged in
   `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org (of
-  which accounts new to the org, with no proved number or paid order there, share 100), 2,000 a day platform-wide
-  (`exos_platform_settings` `drop_sms_codes_daily_cap`), 3 per
+  which accounts new to the org, with no proved number or paid order there, share 100), 2,000 newcomer sends a day
+  platform-wide (`exos_platform_settings` `drop_sms_codes_daily_cap`; it counts and stops only accounts new to the
+  org, so orgs filling it never stop anyone's regulars, and with 100 per org it takes 20 orgs' newcomers to fill;
+  the trade-off is that on such a day new accounts everywhere wait), 3 per
   number per 10 minutes, 60 s apart, at most 2 numbers per signup, and none to a number with 10 wrong codes typed in a
   day; over any of them the page says try later (the same answer whichever). Numbers: no extensions or dial
-  strings, a real NANP number for +1, and only the org's own country (`exos_orgs.country`; +1 for US / CA) unless its
+  strings, a real NANP number for +1, and only the org's own country (`exos_orgs.country`; +1 for US / CA and the US
+  territories, while the other NANP countries such as Jamaica 876 / 658 or the Dominican Republic 809 / 829 / 849
+  are placed by area code as their own countries, and 900 is never texted) unless its
   owner allows more with `exos_drop_set_sms_countries` (an audited allowlist, RPC only for now); any other number
   gets "texts aren't available for this number" before anything is logged or sent. A number that replied STOP gets
   no text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
