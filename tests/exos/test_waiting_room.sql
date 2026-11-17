@@ -311,11 +311,28 @@ BEGIN
   PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
   ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'waiting'
      AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 97, 'WR4 stale skipped';
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE id = v_stale;
+  -- Abandoned for good: neither a poll nor a join with the same token revives it.
+  SELECT t.token INTO v_tok FROM wr_tok t
+   WHERE public._exos_wroom_hash(t.event_id, t.token) = (SELECT token_hash FROM public.exos_wroom_entries WHERE id = v_stale);
+  PERFORM pg_temp.as_('anon');
+  j := public.exos_wroom_status(pg_temp.u('e1'), v_tok);
+  ASSERT j->>'state' = 'expired' AND j->>'reason' = 'idle' AND NOT j ? 'token', 'WR4 idle poll: ' || j::text;
+  j := public.exos_wroom_join(pg_temp.u('e1'), v_tok);
+  ASSERT j->>'state' = 'expired' AND j->>'reason' = 'idle' AND NOT j ? 'token', 'WR4 idle join with the token: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  ASSERT (SELECT state = 'abandoned' AND last_seen_at = now() - interval '4 minutes' FROM public.exos_wroom_entries WHERE id = v_stale),
+    'WR4 marked abandoned, not revived';
   PERFORM pg_temp.tick(pg_temp.u('e1'), 1);
   PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
-  ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'admitted', 'WR4 back at the front';
-  RAISE NOTICE 'OK  WR4 batches: first round 6 (the front), one round per 5 s, +30 for 30 s, capped at a minute, positions, stale tabs skipped but keep their place';
+  ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'abandoned'
+     AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 98, 'WR4 never admitted';
+  -- The same rule on read before any mark: a 3-minute-idle waiting place answers expired / idle.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '3 minutes'
+   WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key DESC, id LIMIT 1)
+  RETURNING id INTO v_stale;
+  ASSERT public._exos_wroom_view(pg_temp.u('e1'), v_stale) @> '{"state": "expired", "reason": "idle"}'::jsonb, 'WR4 idle on read';
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE id = v_stale;
+  RAISE NOTICE 'OK  WR4 batches: first round 6 (the front), one round per 5 s, +30 for 30 s, capped at a minute, positions; a tab idle 3 minutes is skipped and abandoned for good (poll and join answer expired / idle)';
 END $$;
 
 -- WR5 -----------------------------------------------------------------------
@@ -404,7 +421,7 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE used_at IS NOT NULL AND event_id = pg_temp.u('e1')) = 2, 'WR5 two used';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   j := public.exos_wroom_summary(pg_temp.u('e1'));
-  ASSERT (j->'counts'->>'checked_out')::int = 2 AND (j->'counts'->>'admitted')::int = 96 AND (j->'counts'->>'waiting')::int = 107
+  ASSERT (j->'counts'->>'checked_out')::int = 2 AND (j->'counts'->>'admitted')::int = 96 AND (j->'counts'->>'waiting')::int = 106
      AND (j->'counts'->>'total')::int = 205 AND j->>'phase' = 'live', 'WR5 counts: ' || j::text;
   RAISE NOTICE 'OK  WR5 gate: admitted token passes (hold, free claim, guest hold, require) and is marked used; none / waiting / malformed / other event XWR01; presale type bypasses in its window only; a turn is bound to its first buyer (account or guest email), one live cart; the event is taken from the type';
 END $$;
@@ -430,7 +447,7 @@ BEGIN
     'WR6 swept to expired';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a3'));
   j := public.exos_wroom_summary(pg_temp.u('e1'));
-  ASSERT (j->'counts'->>'expired')::int = 1 AND (j->'counts'->>'admitted')::int = 95, 'WR6 counts: ' || j::text;
+  ASSERT (j->'counts'->>'expired')::int = 2 AND (j->'counts'->>'admitted')::int = 95, 'WR6 counts (1 lapsed + 1 abandoned): ' || j::text;
   RAISE NOTICE 'OK  WR6 admission expires after N minutes: status, gate and counts';
 END $$;
 
@@ -465,16 +482,16 @@ BEGIN
   PERFORM pg_temp.as_('postgres');
   -- ...and only 20 of them got a place: 20 per /48 per run.
   ASSERT (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2')) = v_n + 61 + 20, 'WR7 20 per /48 per run';
-  -- IPv6 /32: at most 100 LIVE places per run. The 20 above are in 2001:db8::/32; 80 more, then a
+  -- IPv6 /32: greatest(100, cap / 4) LIVE places, 250 in this 1,000 room. The 20 above are in 2001:db8::/32; 230 more, then a
   -- fresh /48 and /64 in it is full, another /32 isn't; idle ones free the quota.
   INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
   SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-32-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to('wr7-48-' || g, 'UTF8')), 'hex'),
          encode(sha256(convert_to(s.run_id::text || ':2001:db8::/32', 'UTF8')), 'hex'), extract(epoch FROM now())
-    FROM public.exos_wroom_settings s, generate_series(1, 80) g WHERE s.event_id = pg_temp.u('e2');
+    FROM public.exos_wroom_settings s, generate_series(1, 230) g WHERE s.event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('anon', NULL, '2001:db8:9999:1::1');
   j := public.exos_wroom_join(pg_temp.u('e2'));
-  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 100 live per /32: ' || j::text;
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 250 live per /32 (cap 1,000 / 4): ' || j::text;
   PERFORM pg_temp.as_('anon', NULL, '2001:db9:1:1::1');
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 another /32 joins';
   PERFORM pg_temp.as_('postgres');
@@ -522,7 +539,7 @@ BEGIN
     'WR7 live count after idling: ' || (SELECT live_count FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e2'));
   -- Admitted, unused places count until they expire: 60 idle ones admitted -> full; expired -> free.
   UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes'
-   WHERE id IN (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2') AND state = 'waiting'
+   WHERE id IN (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2') AND state IN ('waiting', 'abandoned')
                   AND last_seen_at < now() - interval '3 minutes' ORDER BY id LIMIT 60);
   UPDATE public.exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('anon', NULL, '100.64.0.6');
@@ -533,11 +550,57 @@ BEGIN
   UPDATE public.exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id = pg_temp.u('e2');
   PERFORM pg_temp.as_('anon', NULL, '100.64.0.7');
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 expired places free the room';
+  -- Network shares scale with the cap. A fresh /48 with 25 live places: full at a 1,000 room (20)...
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s48-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':2001:dba:5::/48', 'UTF8')), 'hex'),
+         encode(sha256(convert_to('wr7-s32-' || g, 'UTF8')), 'hex'), extract(epoch FROM now())
+    FROM public.exos_wroom_settings s, generate_series(1, 25) g WHERE s.event_id = pg_temp.u('e2');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  PERFORM public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 1000);
+  PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:1::1');
+  j := public.exos_wroom_join(pg_temp.u('e2'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 /48 share 20 at 1,000: ' || j::text;
+  -- ...but a 50,000 room allows 1,000 from one /48 (50,000 / 50) and 5,000 from one IPv4 address.
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
+  j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 50000);
+  ASSERT (j->>'cap')::int = 50000, 'WR7 cap 50,000: ' || j::text;
+  PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:2::1');
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 more than 20 from one /48 in a large room';
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s48b-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':2001:dba:5::/48', 'UTF8')), 'hex'),
+         encode(sha256(convert_to('wr7-s32b-' || g, 'UTF8')), 'hex'), extract(epoch FROM now())
+    FROM public.exos_wroom_settings s, generate_series(1, 974) g WHERE s.event_id = pg_temp.u('e2');
+  PERFORM pg_temp.as_('anon', NULL, '2001:dba:5:3::1');
+  j := public.exos_wroom_join(pg_temp.u('e2'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the /48 share holds at 1,000: ' || j::text;
+  -- IPv4: 100.64.0.3 (its 200 went idle above); at 50,000 its share is 5,000 live places.
+  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 more than 200 from one IPv4 address in a large room';
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_entries (org_id, event_id, run_id, token_hash, net_hash, net32_hash, order_key)
+  SELECT pg_temp.u('1'), pg_temp.u('e2'), s.run_id, encode(sha256(convert_to('wr7-s4-' || g, 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'),
+         encode(sha256(convert_to(s.run_id::text || ':100.64.0.3', 'UTF8')), 'hex'), extract(epoch FROM now())
+    FROM public.exos_wroom_settings s, generate_series(1, 4999) g WHERE s.event_id = pg_temp.u('e2');
+  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
+  j := public.exos_wroom_join(pg_temp.u('e2'));
+  ASSERT j->>'state' = 'full' AND j->>'reason' = 'network', 'WR7 the IPv4 share holds at 5,000: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  -- Network shares count the live line: those 5,000 going idle free the address.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
+   WHERE event_id = pg_temp.u('e2') AND net_hash = encode(sha256(convert_to(
+         (SELECT run_id FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e2'))::text || ':100.64.0.3', 'UTF8')), 'hex');
+  PERFORM pg_temp.as_('anon', NULL, '100.64.0.3');
+  ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 idle places free the IPv4 share';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a1'));
   j := public.exos_wroom_configure(pg_temp.u('e2'), true, NULL, NULL, NULL, NULL, 0);
   ASSERT j->>'max_entries' IS NULL AND (j->>'cap')::int = 1000, 'WR7 automatic cap (5 x 100, at least 1,000): ' || j::text;
   ASSERT pg_temp.st(format('SELECT public.exos_wroom_configure(%L, true, NULL, NULL, NULL, NULL, 50)', pg_temp.u('e2'))) LIKE '22023%', 'WR7 cap bounds';
-  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); per run 20 per /48, 200 per IPv4 address, 100 live per /32; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
+  RAISE NOTICE 'OK  WR7 60 new tokens a minute per network and 120 per IPv6 /48 (busy, nothing stored); live places per network scaled with the cap (/48 max(20, cap/50), IPv4 max(200, cap/10), /32 max(100, cap/4)), checked at 1,000 and 50,000; the room cap on the live line (exact recount; idle and expired places free it); known tokens still poll';
 END $$;
 
 -- WR8 -----------------------------------------------------------------------

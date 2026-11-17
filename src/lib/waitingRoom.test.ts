@@ -87,6 +87,9 @@ describe('queue state', () => {
       .toContain('Tickets go on sale at 17:00. Everyone here before then gets a random place');
     expect(queueView(parseStatus({ state: 'admitted', admitted_until: '2026-11-20T17:10:00Z' }), fmt).detail).toBe('Pick your tickets and check out by 17:10.');
     expect(queueView(parseStatus({ state: 'expired' }), fmt).rejoin).toBe(true);
+    expect(queueView(parseStatus({ state: 'expired', reason: 'idle' }), fmt)).toMatchObject({ heading: 'Your place was released', rejoin: true });
+    // The longest poll the page waits (30 s server pace + 25 % jitter) stays well inside the 3-minute idle window.
+    for (const st of ['waiting', 'lobby'] as const) expect(nextPollMs(parseStatus({ state: st, poll_after_ms: 30000 }), () => 1)).toBeLessThanOrEqual(37500);
     expect(queueView(parseStatus({ state: 'full', reason: 'room' }), fmt).heading).toBe('The waiting room is full');
     expect(queueView(parseStatus({ state: 'full', reason: 'network' }), fmt).detail).toContain('your network');
     expect(nextPollMs(parseStatus({ state: 'full', poll_after_ms: 60000 }), () => 0.5)).toBe(60000);

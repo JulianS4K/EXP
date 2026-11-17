@@ -270,8 +270,9 @@ finance can see the counts).
   after the on-sale join at the back, in order.
 - **For buyers:** the event page shows their place and an estimated wait instead of the buy button,
   and updates on its own (no need to sign in or refresh; one place per browser, more tabs don't help).
-  When it's their turn the buy box comes back with the time they have. A turn that lapses can join
-  again, at the back. `/event/<id>/queue` is the same line on a lighter page you can link to.
+  When it's their turn the buy box comes back with the time they have. A turn that lapses, or a
+  place whose page was closed or asleep for 3 minutes, is gone for good: the buyer can join again,
+  at the back. `/event/<id>/queue` is the same line on a lighter page you can link to.
 - **Only admitted buyers can check out.** While the room is open, checkout, seat holds and free
   claims for the event refuse anyone without a current turn; the check runs in the database before
   anything else. A turn belongs to the first buyer who uses it (their account, or the email a guest
@@ -280,7 +281,8 @@ finance can see the counts).
 - **How big the line can get:** at most "Most people in line" (blank = automatic: 5 times the
   public capacity, at least 1,000) people *in line now*: anyone who closed the page for 3 minutes, or
   whose turn lapsed or was used, no longer counts. Beyond that, and beyond a per-network share that
-  stops one network filling the line, newcomers see "The waiting room is full" and the page tries
+  stops one network filling the line (it grows with the room, so a carrier's many phones on one
+  network still get in), newcomers see "The waiting room is full" and the page tries
   again each minute.
 - **Who skips the line:** your drop list's presale ticket type (confirmed list members, with their
   code, until the public on-sale), and sales that never go through the public checkout: partner API

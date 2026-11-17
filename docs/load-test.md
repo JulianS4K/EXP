@@ -90,6 +90,11 @@ measured p95 288 ms (page), 303 ms (join), 82 ms (poll), 167 ms (hold) and 0.8 s
 gap between runs on this shared sandbox is as large as the gap between versions, so treat the 10,000
 p95s as "about 0.3 to 3 s at the arrival peak on 4 vCPUs", to be measured on the real instance.
 
+**Re-run after the live-line cap, scaled network shares and terminal idle places** (counter shards, a
+recount every 5 s, a live count per network on each join), 5,000 VUs, same command: event page p95 11.7 ms,
+join p95 18.6 ms, poll p95 5.1 ms, hold p95 51.1 ms, checkout SQL before Stripe p95 61.9 ms, 0 errors: no
+regression.
+
 ### The room set faster than checkout can go (3,000 a minute)
 
 `npm run loadtest -- --steps 5000,10000 --rate 3000 --max-step 120` (run before the one-buyer-per-turn and cap checks)

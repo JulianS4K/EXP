@@ -22,8 +22,9 @@ export interface RoomStatus {
   admitPerMinute?: number;
   pollAfterMs?: number;
   retryAfterMs?: number;
-  /** 'full': the room ('room') or this network's share of it ('network'). */
-  reason?: 'room' | 'network';
+  /** 'full': the room ('room') or this network's share of it ('network');
+   *  'expired': away 3+ minutes ('idle') or the turn lapsed unused ('lapsed'). */
+  reason?: 'room' | 'network' | 'idle' | 'lapsed';
 }
 
 const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full'];
@@ -56,7 +57,7 @@ export function parseStatus(raw: unknown): RoomStatus {
     admitPerMinute: num(r.admit_per_minute),
     pollAfterMs: num(r.poll_after_ms),
     retryAfterMs: num(r.retry_after_ms),
-    reason: r.reason === 'room' || r.reason === 'network' ? r.reason : undefined,
+    reason: ['room', 'network', 'idle', 'lapsed'].includes(r.reason as string) ? (r.reason as RoomStatus['reason']) : undefined,
   };
 }
 
@@ -164,11 +165,17 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
         rejoin: false,
       };
     case 'expired':
-      return {
-        heading: 'Your turn has passed',
-        detail: 'You can join the line again, at the back.',
-        rejoin: true,
-      };
+      return s.reason === 'idle'
+        ? {
+          heading: 'Your place was released',
+          detail: 'This page was closed or asleep for a few minutes, so your place went to the people still waiting. You can join the line again, at the back.',
+          rejoin: true,
+        }
+        : {
+          heading: 'Your turn has passed',
+          detail: 'You can join the line again, at the back.',
+          rejoin: true,
+        };
     case 'busy':
       return {
         heading: 'Lots of people are arriving',

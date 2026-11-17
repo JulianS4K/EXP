@@ -24,6 +24,10 @@
 #          40 places, and the next recount's live count equals an exact count
 #          of the live line (waiting and seen in 3 minutes, or admitted and
 #          neither expired nor used)
+#   race 7 park and revive: fill a 100-place room, let those places go idle,
+#          fill it again with newcomers, then revive all 100 old tokens at once
+#          (status and join): every old token answers expired / idle, and the
+#          live line stays at the cap
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -194,5 +198,46 @@ if [[ "$joined" == 40 && $((after - before)) == 40 && "$live" == "$exact" ]]; th
   echo "OK   race 6 40 parallel joins: 40 places; live count $live = an exact count of the live line"
 else
   echo "FAIL race 6: joined $joined, new rows $((after - before)), live $live vs exact $exact"; cat "$OUT"/r6.* | sort | uniq -c | head -5; fail=1
+fi
+
+# race 7 ---------------------------------------------------------------------
+$P -c "DELETE FROM exos_cart_holds WHERE event_id='$EV'; DELETE FROM exos_wroom_entries WHERE event_id='$EV';
+       DELETE FROM exos_wroom_counts WHERE event_id='$EV';
+       UPDATE exos_wroom_settings SET max_entries = 100, live_count = 0, counted_at = NULL,
+              advanced_at = now() + interval '1 hour' WHERE event_id='$EV';" >/dev/null
+JOIN="public.exos_wroom_join('$EV')"
+mint() {  # $1 = label, $2 = first network number, $3 = how many: tokens into $OUT/$1.tokens
+  : > "$OUT/$1.tokens"
+  for n in $(seq "$2" $(($2 + $3 - 1))); do
+    $P -c "BEGIN; SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.18.$((n / 250)).$((n % 250 + 1))\"}',true);
+           SET LOCAL ROLE anon; SELECT coalesce($JOIN->>'token', 'none'); COMMIT;" | tail -1 >> "$OUT/$1.tokens"
+  done
+}
+mint old 1 101
+oldok=$(grep -c '^[0-9a-f]\{64\}$' "$OUT/old.tokens" || true)
+$P -c "UPDATE exos_wroom_entries SET last_seen_at = now() - interval '4 minutes' WHERE event_id='$EV';
+       UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV';" >/dev/null
+mint new 201 100
+newok=$(grep -c '^[0-9a-f]\{64\}$' "$OUT/new.tokens" || true)
+i=0
+for t in $(grep '^[0-9a-f]\{64\}$' "$OUT/old.tokens"); do
+  i=$((i + 1))
+  $P -c "BEGIN; SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.19.0.$((i % 250 + 1))\"}',true);
+         SET LOCAL ROLE anon;
+         SELECT public.exos_wroom_status('$EV','$t')->>'reason'; SELECT public.exos_wroom_join('$EV','$t')->>'reason'; COMMIT;" \
+    > "$OUT/r7.$i" 2>&1 &
+done
+wait
+idle=$(cat "$OUT"/r7.* | grep -c '^idle$' || true)
+$P -c "UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV';
+       SELECT public._exos_wroom_recount('$EV');" >/dev/null
+live=$($P -c "SELECT count(*) FROM exos_wroom_entries x WHERE x.event_id='$EV'
+               AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
+                 OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))")
+abandoned=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND state = 'abandoned'")
+if [[ "$oldok" == 100 && "$newok" == 100 && "$idle" == 200 && "$live" == 100 && "$abandoned" == 100 ]]; then
+  echo "OK   race 7 park and revive: 100 places, idle, 100 newcomers, 100 old tokens revived at once all answer expired / idle; live line 100 = the cap"
+else
+  echo "FAIL race 7: first fill $oldok (101st refused?), second fill $newok, idle answers $idle / 200, live $live, abandoned $abandoned"; fail=1
 fi
 exit $fail

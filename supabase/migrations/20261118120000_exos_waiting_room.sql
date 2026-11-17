@@ -30,8 +30,12 @@
 --     gate), at most once every 5 seconds per event, under a try-lock (one
 --     admitter at a time, the others skip). Each run admits
 --     rate * elapsed / 60 of the people at the front who polled in the last 3
---     minutes (a closed tab doesn't take a turn; it keeps its place if it
---     comes back). An admission lasts N minutes, then expires.
+--     minutes. A place not polled for 3 minutes is ABANDONED for good (the
+--     page polls at least every ~40 s, background tabs about once a minute):
+--     it never takes a turn, its token answers "expired, idle" and the page
+--     offers a new join at the back, through every cap. An admission lasts N
+--     minutes, then expires, also for good. So a freed place stays freed:
+--     tokens can't be parked idle and revived past the caps.
 --   * The gate: while the room is open, exos_create_hold,
 --     exos_create_guest_hold and exos_claim_free_tickets refuse (XWR01) unless
 --     the request carries an admitted, unexpired token for THAT event in the
@@ -59,9 +63,10 @@
 --     the same time are refused (XWR02). The hold functions keep one live cart
 --     per buyer and event, so a turn never holds two carts.
 --   * Stuffing: minting is limited per network (IPv4 address / IPv6 /64: 60 a
---     minute; IPv6 /48: 120 a minute), per run per network (20 per /48, 200
---     per IPv4 address, 100 live per IPv6 /32), and by the room's cap on the
---     LIVE line (organizer's number, else 5 x the public capacity, at least
+--     minute; IPv6 /48: 120 a minute), by live places per network scaled
+--     with the room's cap (IPv6 /48 greatest(20, cap / 50), IPv4 address
+--     greatest(200, cap / 10), IPv6 /32 greatest(100, cap / 4)), and by the
+--     room's cap on the LIVE line (organizer's number, else 5 x the public capacity, at least
 --     1,000; abandoned, expired and used places free up): over those, "full".
 --     A CAPTCHA in front of minting is the real fix for distributed stuffing
 --     (follow-up).
@@ -140,7 +145,7 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   -- Place in line: random in [0, 1) for an early arrival (set at the draw),
   -- the arrival epoch (always > 1) for a late one. NULL until the draw.
   order_key         double precision,
-  state             text NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'admitted', 'expired')),
+  state             text NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'admitted', 'expired', 'abandoned')),
   admitted_at       timestamptz,
   admit_expires_at  timestamptz,
   -- First checkout / hold / free claim made with the admission, and who made
@@ -154,7 +159,7 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_entries (
   -- The same for the IPv6 /32 (an IPv4 address as itself), for the /32 quota.
   net32_hash        text NOT NULL CHECK (net32_hash ~ '^[0-9a-f]{64}$'),
   last_seen_at      timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT exos_wroom_entries_admit_chk CHECK ((state = 'waiting') = (admitted_at IS NULL))
+  CONSTRAINT exos_wroom_entries_admit_chk CHECK ((state IN ('waiting', 'abandoned')) = (admitted_at IS NULL))
 );
 CREATE INDEX IF NOT EXISTS exos_wroom_entries_line_idx
   ON public.exos_wroom_entries (event_id, run_id, state, order_key, id);
@@ -306,6 +311,10 @@ BEGIN
   IF NOT pg_try_advisory_xact_lock(hashtextextended('exos_wroom_count:' || p_event_id::text, 0)) THEN RETURN; END IF;
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   IF s.counted_at > now() - interval '5 seconds' THEN RETURN; END IF;
+  -- Places idle for 3 minutes are abandoned for good.
+  UPDATE public.exos_wroom_entries x SET state = 'abandoned'
+   WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.state = 'waiting'
+     AND x.last_seen_at <= now() - interval '3 minutes';
   SELECT count(*) INTO v_n FROM public.exos_wroom_entries x
    WHERE x.event_id = p_event_id AND x.run_id = s.run_id
      AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
@@ -397,6 +406,31 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_advance(uuid) FROM PUBLIC, anon, authenticated;
 
+-- A poll or a return with the token: true and last seen now (at most every
+-- p_every seconds) for a live place; false for an abandoned one, marking a
+-- waiting place idle for 3 minutes abandoned first (under its row lock, so
+-- two polls can't race a place back). Admitted / expired places stay as they
+-- are (their own clock decides).
+CREATE OR REPLACE FUNCTION public._exos_wroom_touch(p_entry_id uuid, p_every int)
+RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE e public.exos_wroom_entries%ROWTYPE;
+BEGIN
+  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = p_entry_id FOR UPDATE;
+  IF NOT FOUND OR e.state = 'abandoned' THEN RETURN false; END IF;
+  IF e.state = 'waiting' AND e.last_seen_at <= now() - interval '3 minutes' THEN
+    UPDATE public.exos_wroom_entries SET state = 'abandoned' WHERE id = p_entry_id;
+    RETURN false;
+  END IF;
+  IF e.last_seen_at < now() - make_interval(secs => p_every) OR p_every = 0 THEN
+    UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE id = p_entry_id;
+  END IF;
+  RETURN true;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_wroom_touch(uuid, int) FROM PUBLIC, anon, authenticated;
+
 -- What a token holder sees: its own state and place, never anyone else's.
 CREATE OR REPLACE FUNCTION public._exos_wroom_view(p_event_id uuid, p_entry_id uuid, p_token text DEFAULT NULL)
 RETURNS jsonb
@@ -426,6 +460,9 @@ BEGIN
   END IF;
   v_base := jsonb_build_object('phase', ph.phase, 'on_sale_at', ph.on_sale_at, 'admit_per_minute', s.admit_per_minute)
             || CASE WHEN p_token IS NOT NULL THEN jsonb_build_object('token', p_token) ELSE '{}'::jsonb END;
+  IF e.state = 'abandoned' OR (e.state = 'waiting' AND e.last_seen_at <= now() - interval '3 minutes') THEN
+    RETURN v_base - 'token' || jsonb_build_object('state', 'expired', 'reason', 'idle');
+  END IF;
   -- The lobby wakes up after the on-sale spread over 15 seconds: the draw
   -- makes being first to ask worth nothing, so nobody needs to stampede.
   IF ph.phase = 'lobby' OR (e.state = 'waiting' AND e.order_key IS NULL) THEN
@@ -437,11 +474,11 @@ BEGIN
     RETURN v_base || jsonb_build_object('state', 'admitted', 'admitted_until', e.admit_expires_at, 'poll_after_ms', 60000);
   END IF;
   IF e.state <> 'waiting' THEN
-    RETURN v_base || jsonb_build_object('state', 'expired');
+    RETURN v_base || jsonb_build_object('state', 'expired', 'reason', 'lapsed');
   END IF;
   SELECT count(*) INTO v_ah FROM public.exos_wroom_entries x
    WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.state = 'waiting'
-     AND (x.order_key, x.id) < (e.order_key, e.id);
+     AND (x.order_key, x.id) < (e.order_key, e.id) AND x.last_seen_at > now() - interval '3 minutes';
   v_eta := ceil((v_ah + 1)::numeric / s.admit_per_minute)::int;
   RETURN v_base || jsonb_build_object('state', 'waiting', 'position', v_ah + 1, 'ahead', v_ah,
     'eta_minutes', v_eta,
@@ -536,10 +573,11 @@ REVOKE ALL ON FUNCTION public._exos_wroom_gate(uuid, uuid, text) FROM PUBLIC, an
 -- one) a new token while the room is open. Minting, checked before any
 -- write: 60 a minute per network (an IPv4 address or an IPv6 /64; generous,
 -- phones on one carrier share addresses) and 120 a minute per IPv6 /48, over
--- that "busy" with a retry hint and nothing stored; per run at most 20 places
--- per IPv6 /48 and 200 per IPv4 address (shared NAT), at most 100 live places
--- per IPv6 /32, and the room's cap on the LIVE line (abandoned, expired and
--- used places free up), over those "full" (the page retries each minute).
+-- that "busy" with a retry hint and nothing stored; then, on the LIVE line
+-- (abandoned, expired and used places free up) and scaled with the room's cap:
+-- an IPv6 /48 greatest(20, cap / 50), an IPv4 address greatest(200, cap / 10)
+-- (shared NAT), an IPv6 /32 greatest(100, cap / 4), and the cap itself; over
+-- those "full" (the page retries each minute).
 -- Distributed stuffing needs a CAPTCHA in front of minting (follow-up).
 -- No room: { state: 'off' } (buy as usual).
 CREATE OR REPLACE FUNCTION public.exos_wroom_join(p_event_id uuid, p_token text DEFAULT NULL)
@@ -557,6 +595,7 @@ DECLARE
   v_net   text;
   v_n32   text := public._exos_wroom_net32();
   v_net32 text;
+  v_cap   int;
 BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
@@ -569,12 +608,15 @@ BEGIN
     RETURN jsonb_build_object('state', 'off');
   END IF;
   -- The browser's own token: one place per browser.
+  -- An abandoned place stays abandoned: "expired, idle" (the page offers a new join).
   IF coalesce(p_token, '') ~ '^[0-9a-f]{64}$' THEN
-    UPDATE public.exos_wroom_entries e SET last_seen_at = now()
+    SELECT e.id INTO v_id FROM public.exos_wroom_entries e
      WHERE e.token_hash = public._exos_wroom_hash(p_event_id, p_token)
-       AND e.event_id = p_event_id AND e.run_id = s.run_id
-    RETURNING e.id INTO v_id;
+       AND e.event_id = p_event_id AND e.run_id = s.run_id;
     IF v_id IS NOT NULL THEN
+      IF NOT public._exos_wroom_touch(v_id, 0) THEN
+        RETURN jsonb_build_object('state', 'expired', 'reason', 'idle', 'phase', ph.phase);
+      END IF;
       RETURN public._exos_wroom_view(p_event_id, v_id, p_token);
     END IF;
   END IF;
@@ -582,11 +624,18 @@ BEGIN
      OR (v_wide <> v_narrow AND NOT public.exos_rate_hit('wroom-net:' || md5(v_wide), 120)) THEN
     RETURN jsonb_build_object('state', 'busy', 'retry_after_ms', 5000);
   END IF;
+  -- Per-network shares of the room, on the live line, scaled with the cap
+  -- (carriers put many phones behind one IPv4 address or in one /48 or /32):
+  -- an IPv6 /48 greatest(20, cap / 50), an IPv4 address greatest(200, cap / 10),
+  -- an IPv6 /32 greatest(100, cap / 4).
+  v_cap := public._exos_wroom_cap(s);
   v_net := encode(sha256(convert_to(s.run_id::text || ':' || v_wide, 'UTF8')), 'hex');
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_wroom_net:' || v_net, 0));
   IF (SELECT count(*) FROM public.exos_wroom_entries x
-       WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net_hash = v_net)
-     >= (CASE WHEN position(':' in v_wide) > 0 THEN 20 ELSE 200 END) THEN
+       WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net_hash = v_net
+         AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
+             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL)))
+     >= (CASE WHEN position(':' in v_wide) > 0 THEN greatest(20, v_cap / 50) ELSE greatest(200, v_cap / 10) END) THEN
     RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
   END IF;
   v_net32 := encode(sha256(convert_to(s.run_id::text || ':' || v_n32, 'UTF8')), 'hex');
@@ -595,7 +644,7 @@ BEGIN
     IF (SELECT count(*) FROM public.exos_wroom_entries x
          WHERE x.event_id = p_event_id AND x.run_id = s.run_id AND x.net32_hash = v_net32
            AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
-             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))) >= 100 THEN
+             OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))) >= greatest(100, v_cap / 4) THEN
       RETURN jsonb_build_object('state', 'full', 'reason', 'network', 'poll_after_ms', 60000);
     END IF;
   END IF;
@@ -605,7 +654,7 @@ BEGIN
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   IF s.live_count + (SELECT coalesce(sum(c.n), 0) FROM public.exos_wroom_counts c
                       WHERE c.event_id = p_event_id AND c.run_id = s.run_id AND c.round = s.count_round)
-     >= public._exos_wroom_cap(s) THEN
+     >= v_cap THEN
     RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000);
   END IF;
   v_token := encode(extensions.gen_random_bytes(32), 'hex');
@@ -648,15 +697,17 @@ BEGIN
   IF coalesce(p_token, '') !~ '^[0-9a-f]{64}$' THEN
     RETURN jsonb_build_object('state', 'unknown', 'phase', ph.phase);
   END IF;
-  -- last_seen_at at most every 20 s per entry (a poll is mostly a read).
   SELECT e.id INTO v_id FROM public.exos_wroom_entries e
    WHERE e.token_hash = public._exos_wroom_hash(p_event_id, p_token)
      AND e.event_id = p_event_id AND e.run_id = s.run_id;
   IF v_id IS NULL THEN
     RETURN jsonb_build_object('state', 'unknown', 'phase', ph.phase);
   END IF;
-  UPDATE public.exos_wroom_entries e SET last_seen_at = now()
-   WHERE e.id = v_id AND e.last_seen_at < now() - interval '20 seconds';
+  -- last_seen_at at most every 20 s per entry; an abandoned place stays so.
+  IF NOT public._exos_wroom_touch(v_id, 20) THEN
+    RETURN jsonb_build_object('state', 'expired', 'reason', 'idle', 'phase', ph.phase);
+  END IF;
+  PERFORM public._exos_wroom_recount(p_event_id);
   RETURN public._exos_wroom_view(p_event_id, v_id);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_status(uuid, text) FROM PUBLIC;
@@ -715,11 +766,13 @@ BEGIN
   PERFORM public._exos_wroom_advance(p_event_id);
   SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
   ph := public._exos_wroom_phase(s);
-  SELECT count(*) FILTER (WHERE e.state = 'waiting') AS waiting,
+  SELECT count(*) FILTER (WHERE e.state = 'waiting' AND e.last_seen_at > now() - interval '3 minutes') AS waiting,
          count(*) FILTER (WHERE e.state = 'admitted' AND e.admit_expires_at > now() AND e.used_at IS NULL) AS admitted,
          count(*) FILTER (WHERE e.used_at IS NOT NULL) AS checked_out,
-         count(*) FILTER (WHERE e.used_at IS NULL AND (e.state = 'expired'
-                            OR (e.state = 'admitted' AND e.admit_expires_at <= now()))) AS expired,
+         -- Expired: turns that lapsed unused, and places abandoned (idle 3 minutes).
+         count(*) FILTER (WHERE e.used_at IS NULL AND (e.state IN ('expired', 'abandoned')
+                            OR (e.state = 'admitted' AND e.admit_expires_at <= now())
+                            OR (e.state = 'waiting' AND e.last_seen_at <= now() - interval '3 minutes'))) AS expired,
          count(*) AS total
     INTO c
     FROM public.exos_wroom_entries e
