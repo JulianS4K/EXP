@@ -12,6 +12,7 @@ import { rememberProofToken, withProofFragment } from './orderProof';
 import type { Attribution } from './attribution';
 import type { AdIds, MarketingConsent } from './adIds';
 import { currentInAppRecord, type InAppRecord } from './inAppBrowser';
+import { queueBody } from './waitingRoom';
 
 /** Ad click ids / browser ids and consent for the checkout record (lib/adIds.ts). */
 interface CheckoutRecordInput {
@@ -90,6 +91,7 @@ export async function startCheckout(input: {
       group_seat: input.groupSeat || undefined,
       group_cover: input.groupCover || undefined,
       ...recordBody(input),
+      ...queueBody(input.eventId), // the waiting room (mig 20261118120000)
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');
@@ -149,6 +151,7 @@ export async function claimFreeAsGuest(input: {
       slot_id: input.slotId || undefined,
       answers: input.answers,
       ...recordBody(input),
+      ...queueBody(input.eventId), // the waiting room (mig 20261118120000)
     },
   });
   if (error) throw await functionError(error, 'Could not send your tickets.');
@@ -179,6 +182,7 @@ export async function startEmbeddedCheckout(input: {
       attribution: input.attribution && Object.keys(input.attribution).length > 0 ? input.attribution : undefined,
       answers: input.answers,
       ...recordBody(input),
+      ...queueBody(input.eventId), // the waiting room (mig 20261118120000)
     },
   });
   if (error) throw await functionError(error, 'Could not start checkout.');

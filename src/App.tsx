@@ -110,6 +110,7 @@ const OrgOrders = lazy(() => import('./views/OrgOrders'));
 const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const DropLink = lazy(() => import('./views/DropLink')); // claude/exos-drop-list
+const WaitingRoom = lazy(() => import('./views/WaitingRoom')); // claude/exos-waiting-room
 const OrgTemplates = lazy(() => import('./views/OrgTemplates'));
 const OrgInbound = lazy(() => import('./views/OrgInbound'));
 const OrgVenueRequests = lazy(() => import('./views/OrgVenueRequests'));
@@ -211,6 +212,7 @@ export default function App() {
                   <Routes>
                     <Route path="/" element={<Home />} />
                     <Route path="/event/:id" element={<EventDetails />} />
+                    <Route path="/event/:id/queue" element={<WaitingRoom />} />
                     <Route path="/e/:slug" element={<SlugRedirect />} />
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />

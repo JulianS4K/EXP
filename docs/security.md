@@ -85,6 +85,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_drop_signup` (mig 20261118100000) | OK (anon + authenticated; rate limited) | A guest's "Notify me". Always `{ ok, status: 'check_email' }` for a well-formed request to an open list: new, pending, already listed or throttled (no enumeration). 10 a minute per network (`_exos_request_ip_bucket`), 120 per event, 5 per address, before any write; 3 confirm mails a day per address and event; none when already listed. Stores the address, the consent words and the sanitized first-touch promoter / UTM tags; no IP. The browser token (64 hex) is stored hashed |
 | `exos_drop_confirm`, `exos_drop_leave` (mig 20261118100000) | OK (anon + authenticated; 64-hex token) | The confirm link (two UUIDv4s, only its SHA-256 stored, 7 days) and the per-signup leave token. Answer ok and the event (and org) name only. The pages take a click, so a mail scanner changes nothing |
 | `exos_drop_confirm_code` (mig 20261118100000) | OK (anon + authenticated; 256-bit browser token) | The 6-digit code from the confirm mail, only with the hashed browser token of the signup that asked for it (the guest-proof pattern, mig 20261105100000): 5 wrong tries spend the code, 20 tries a minute per network, 24 hours. Answers `{ ok }` only, the same false for a wrong code, a spent one or no signup |
+| `exos_wroom_join`, `exos_wroom_status` (mig 20261118120000) | OK (anon + authenticated; rate limited) | The on-sale waiting room, no login. Join mints a queue token only while an event's room is open (32 bytes from `gen_random_bytes`, 64 hex; only SHA-256(event id:token) is stored, so a token for one event matches nothing in another); 60 new tokens a minute per network (`_exos_request_ip_bucket()`, checked before the insert; over it `{ state: 'busy' }` and nothing stored), and a browser presenting its own token gets its place back instead of a new one. Status answers only the caller's own state and place (position, people ahead, estimated minutes, admission end) by that token; an unknown or malformed token answers `unknown`, no room answers `off`. Both run the admission round on read (at most every 5 s per event, try-lock). Never another buyer's place, a count of the line, org data or a token back from status. In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -957,6 +958,25 @@ to review:
   its mail keyed `drop-on-sale:<id>` (`tests/exos/race_drop_list.sh`). Texts re-check consent at queue time (left,
   opted out, a STOP after the consent in `exos_sms_stops`, 8 a month, the org's provider) and go through the
   existing outbox and `exos-sms-drain`, 9:00-20:00 in the event's zone, with "Reply STOP to opt out.".
+
+### Waiting room (mig 20261118120000)
+
+- **Tables.** `exos_wroom_settings` (one row per event), `exos_wroom_entries` (one per queue token: the token's
+  hash, arrival, place, state, admission times, first use): RLS on, no client grants (RPCs only), `org_id` on every
+  row. No email, user, phone or IP is stored.
+- **The gate.** `exos_create_hold`, `exos_create_guest_hold` and `exos_claim_free_tickets` call
+  `_exos_wroom_gate(p_event_id, p_tier_id)` as their first statement (marker `/* exos: waiting room gate */`): with an
+  open room (enabled, in its window, not closed), only an admitted, unexpired token of that event's current run in the
+  request's `x-exos-queue` header passes (XWR01 otherwise); no room is one primary-key read. `exos-checkout` calls
+  `exos_wroom_require` (service role) before any other read, hold or Stripe call, which also covers bypass-voucher
+  checkouts that skip the hold. The drop list presale type passes (members only, until the public on-sale); partner
+  reservations, POS, door, kiosk and comps never call these functions.
+- **Organizers.** `exos_wroom_summary`: owner / manager / finance (or admin); counts only, never a token; another
+  org's event and an unknown id are the same 42501. `exos_wroom_configure`: owner / manager (or admin), bounds checked,
+  audited `event.waiting_room` with the before / after numbers. Content and scanner roles get nothing.
+- **Fairness.** The draw at the on-sale gives early arrivals a place from `gen_random_bytes` under the room's lock; a
+  token's place is never shown before it. Admission rounds run under a try-lock and re-read the room after taking it,
+  so parallel polls admit one round's worth (`tests/exos/race_waiting_room.sh`).
 
 ### Search path
 

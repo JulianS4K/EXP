@@ -7,6 +7,7 @@ import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, 
 import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 import { TIER } from './mock.mjs'; // claude/exos-focus-core
 import { dropMock, HIDDEN } from './mock.mjs'; // claude/exos-drop-list
+import { wroomMock, WROOM_TOKEN } from './mock.mjs'; // claude/exos-waiting-room
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 // Group pay v2 is paused (mig 20261111120000): its steps run against a build
 // with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
@@ -2178,6 +2179,57 @@ await run('drop list: the confirm and leave links take a click', async (page, lo
 }
 
 await browser.close();
+// ── claude/exos-waiting-room (mig 20261118120000): the queue, admission, the token in checkout, the organizer panel ──
+{
+  const st = { admitAfter: 1 };
+  const co = {};
+  await run('waiting room: in line, then admitted; the checkout carries the queue token', async (page, log) => {
+    await stubStripe(page, co);
+    await page.goto(BASE + '/event/' + EV);
+    const q = page.locator('[data-waiting-room]');
+    await q.getByRole('heading', { name: "You're number 3 in line" }).waitFor({ timeout: 8000 });
+    assert(await page.getByRole('button', { name: /Buy Tickets/i }).count() === 0, 'no buy button while in line');
+    assert(await page.evaluate(() => localStorage.getItem('exos.wroom.' + location.pathname.split('/').pop())) === WROOM_TOKEN, 'token kept');
+    await page.getByText("It's your turn").waitFor({ timeout: 10000 });
+    assert(st.pollToken === WROOM_TOKEN, 'polled with the browser token');
+    await payAsGuest(page, 'fan@example.com');
+    await page.waitForURL(/checkout\.stripe\.com/, { timeout: 8000 });
+    assert(co.body?.queue_token === WROOM_TOKEN, 'checkout body carries the token: ' + JSON.stringify(co.body));
+  }, { mock: { ...checkoutFn(co), rpcs: wroomMock(st).rpcs } });
+}
+await run('waiting room: no room, the buy box as before (asked once, never polled)', async (page, log) => {
+  await page.goto(BASE + '/event/' + EV);
+  await page.getByRole('button', { name: /Buy Tickets/i }).first().waitFor({ timeout: 8000 });
+  await page.waitForTimeout(500);
+  assert(log.filter((l) => l.startsWith('rpc exos_wroom_join')).length === 1, 'one join');
+  assert(!log.some((l) => l.startsWith('rpc exos_wroom_status')), 'no polling');
+  assert(await page.locator('[data-waiting-room]').count() === 0, 'no queue');
+});
+await run('waiting room: the queue page before the on-sale (no login)', async (page) => {
+  await page.goto(BASE + '/event/' + EV + '/queue');
+  await page.getByRole('heading', { name: 'Fall Party' }).waitFor({ timeout: 8000 });
+  await page.getByRole('heading', { name: "You're in the waiting room" }).waitFor({ timeout: 8000 });
+  await page.getByText(/random place in line/).waitFor({ timeout: 8000 });
+}, { mock: wroomMock({ lobby: true }) });
+{
+  const st = { off: true };
+  await run('event report: waiting room panel (turn on, live counts)', async (page) => {
+    await page.goto(BASE + '/dashboard/event/' + EV);
+    const panel = page.locator('[data-wroom-panel]');
+    await panel.getByRole('heading', { name: 'Waiting room' }).waitFor({ timeout: 8000 });
+    await panel.getByLabel('Let in per minute').fill('300');
+    await panel.getByRole('button', { name: 'Turn on' }).click();
+    await until(async () => !!st.configure, 'configure');
+    assert(st.configure.p_enabled === true && st.configure.p_admit_per_minute === 300 && st.configure.p_window_minutes === 15, 'configure ' + JSON.stringify(st.configure));
+    st.off = false;
+    await page.reload();
+    await panel.getByText('Live: letting people in').waitFor({ timeout: 8000 });
+    const text = (await panel.innerText()).replace(/\s+/g, ' ');
+    for (const want of ['4,210', '1,250', 'Checked out', 'Expired']) assert(text.includes(want), `panel shows "${want}": ` + text);
+    assert(!text.includes(WROOM_TOKEN) && !text.includes('@'), 'no tokens or addresses');
+  }, { signedIn: true, mock: ownerMock({ tables: reportMock.tables, rpcs: wroomMock(st).rpcs }) });
+}
+
 for (const r of results) console.log((r.ok ? 'PASS ' : 'FAIL ') + r.name + (r.errors.length ? '\n   ' + r.errors.join('\n   ') : '') + (r.calls ? '\n   calls: ' + r.calls.join(' | ') : ''));
 
 if (results.some((r) => !r.ok)) process.exit(1);

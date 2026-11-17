@@ -175,6 +175,9 @@ import {
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
 
+// exos: waiting room — ids are checked before they reach the queue check.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
 
@@ -222,6 +225,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // exos: group pay (mig 20261108120000): a seat link's token, or the group (host's cover).
     group_seat?: string;
     group_cover?: string;
+    // exos: waiting room (mig 20261118120000): the browser's queue token.
+    queue_token?: string;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -236,6 +241,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
   const buyerUid = user?.id ?? null;
   const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
+  // exos: waiting room (mig 20261118120000): while the event's room is open,
+  // only an admitted queue token of THIS event may start a checkout. Checked in
+  // SQL first, before any other read, hold or Stripe call; the hold functions
+  // check the same token again (x-exos-queue header). Before the migration
+  // (no function) nothing changes.
+  const queueToken = typeof p.queue_token === "string" && /^[0-9a-f]{64}$/.test(p.queue_token) ? p.queue_token : "";
+  if (typeof p.event_id === "string" && UUID_RE.test(p.event_id)) {
+    const sbq = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { error: wrErr } = await sbq.rpc("exos_wroom_require", {
+      p_event_id: p.event_id,
+      p_tier_id: typeof p.tier_id === "string" && UUID_RE.test(p.tier_id) ? p.tier_id : null,
+      p_token: queueToken || null,
+    });
+    if (wrErr && wrErr.code === "XWR01") {
+      return json({ error: "you're in the queue: wait for your turn", reason: "waiting_room" }, 409);
+    }
+    if (wrErr && !["PGRST202", "42883"].includes(String(wrErr.code))) {
+      console.error("exos-checkout: waiting room check failed", wrErr.message);
+      return json({ error: "could not check the queue, try again" }, 503);
+    }
+  }
   // exos: group pay — the seat (or the host's cover) decides the event, type and quantity
   // (after the sign-in / guest-email checks: no database read for a stranger).
   const groupIn = await groupCheckout(p, user?.id ?? null);
@@ -969,12 +995,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
         ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
-      })
+      }).setHeader("x-exos-queue", queueToken)
       : await sb.rpc("exos_create_guest_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
         p_ip_hash: ipHash,
         p_voucher_code: voucherUnlocksTier ? voucherCode : null,
-      });
+      }).setHeader("x-exos-queue", queueToken);
+    if (holdErr?.code === "XWR01") {
+      return json({ error: "you're in the queue: wait for your turn", reason: "waiting_room" }, 409);
+    }
     if (holdErr) {
       return json({
         error: holdErr.message || "not enough tickets available",

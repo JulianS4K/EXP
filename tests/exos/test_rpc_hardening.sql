@@ -190,7 +190,11 @@ BEGIN
        -- claude/exos-drop-list (mig 20261118100000): an event's list state (open, on-sale
        -- time; the caller's own row only when signed in), the rate-limited signup with a
        -- constant answer, the 64-hex confirm / leave tokens and the browser-bound code
-       'exos_drop_status', 'exos_drop_signup', 'exos_drop_confirm', 'exos_drop_confirm_code', 'exos_drop_leave');
+       'exos_drop_status', 'exos_drop_signup', 'exos_drop_confirm', 'exos_drop_confirm_code', 'exos_drop_leave',
+       -- claude/exos-waiting-room (mig 20261118120000): the on-sale queue, no login: join (a
+       -- 256-bit random token, only its hash stored, bound to the event; minting 60 a minute
+       -- per network) and status (the caller's own place only, by that token)
+       'exos_wroom_join', 'exos_wroom_status');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

@@ -390,6 +390,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
       'supabase/migrations/20261118100000_exos_drop_list.sql'],
     note: 'Branch claude/exos-drop-list: not on main, migration not applied. Nothing is sent until exos-mail-drain runs with Resend (docs/email.md) and the cron exos-drop-list-blast-5min, created inactive, is turned on; texts also need the org\'s Twilio / Telnyx and EXOS_SMS_LIVE=on.',
   },
+  {
+    id: 'waiting-room', audience: 'organizer', status: 'off',
+    claim: 'Organizers can turn on a waiting room for a big on-sale: buyers who arrive before the on-sale get a random place in line, later ones join at the back, and Exos lets people in at a set rate per minute so only admitted buyers can check out.',
+    code: ['src/components/WaitingRoomGate.tsx', 'src/components/WaitingRoomPanel.tsx', 'src/lib/waitingRoom.ts',
+      'supabase/migrations/20261118120000_exos_waiting_room.sql', 'supabase/functions/exos-checkout/index.ts'],
+    note: 'Branch claude/exos-waiting-room: not on main, migration not applied. Off for every event until an owner or manager turns it on; the load test so far is a local run only (docs/load-test.md).',
+  },
 ];
 
 const STATUS_LABEL: Record<FactStatus, string> = {
