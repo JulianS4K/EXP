@@ -19,7 +19,7 @@
 // card-looking field is refused before anything else; the reader handles the
 // card and Exos keeps only the PaymentIntent id.
 //
-// Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"): a self-serve
+// Kiosk mode (mig 20261113191000, docs/pos.md "Kiosk mode"): a self-serve
 // screen sells one event's public ticket types by card on its own reader.
 // kiosk_* actions carry no staff JWT: the body's kiosk_token (the credential
 // exos_pos_kiosk_enter showed once) is resolved in SQL first by every
@@ -113,7 +113,7 @@ const CARD_ACTIONS = new Set([
   "card_payment", "capture", "card_status", "card_cancel", "connection_token", "register_reader", "terminal_location",
 ]);
 const CARD_OFF_MESSAGE = "Card at the door is switched off (EXOS_POS_CARD). Walk-up sales take cash or a comp.";
-// Kiosk mode (mig 20261113100000): the kiosk's credential, never a staff JWT.
+// Kiosk mode (mig 20261113191000): the kiosk's credential, never a staff JWT.
 const KIOSK_ACTIONS = new Set([
   "kiosk_state", "kiosk_begin", "kiosk_charge", "kiosk_status", "kiosk_cancel", "kiosk_codes", "kiosk_email", "kiosk_exit",
 ]);
@@ -181,7 +181,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (hasCardField(p)) {
     return json({ error: "card_data_refused", message: "Card data is never accepted: the card reader handles the card." }, 400);
   }
-  // Kiosk mode (mig 20261113100000): no staff JWT, the kiosk's own credential.
+  // Kiosk mode (mig 20261113191000): no staff JWT, the kiosk's own credential.
   if (KIOSK_ACTIONS.has(p.action)) return await kioskAction(p, cardSwitch((k) => Deno.env.get(k)));
   if (PAYMENT_ACTIONS.has(p.action)) {
     return json({
@@ -626,7 +626,7 @@ async function shortHash(s: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Kiosk mode (mig 20261113100000). The credential is resolved in SQL by every
+// Kiosk mode (mig 20261113191000). The credential is resolved in SQL by every
 // core, before any Stripe call; the kiosk sees its own sale only, trimmed.
 // ---------------------------------------------------------------------------
 

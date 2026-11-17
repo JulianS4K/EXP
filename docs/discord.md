@@ -6,7 +6,7 @@ Exos may send to Discord, and what the operator sets up first. Operator ask,
 
 Code: `supabase/functions/exos-discord/` (routes, the cron), `supabase/functions/_shared/channels/discord.ts`
 (the allowlist, payloads, the scheduled-event pass, the bot install), migs
-`20261113130000_exos_discord.sql` and `20261114100000_exos_leftovers_15.sql` (the automatic reminder,
+`20261113194000_exos_discord.sql` and `20261114100000_exos_leftovers_15.sql` (the automatic reminder,
 delete on delete, Send a test), `src/components/DiscordPanel.tsx` (Org settings → Discord),
 `src/components/DiscordEventPanel.tsx` (Edit event → Promote on Discord), `src/lib/discord.ts`.
 Tests: `tests/exos/test_discord.sql`, `supabase/functions/_shared/channels/discord_test.ts`,
@@ -164,7 +164,7 @@ it made.
 
 ## What the operator sets up
 
-1. Apply `20261113130000_exos_discord` and `20261114100000_exos_leftovers_15` (`scripts/rollout-prod.sh`),
+1. Apply `20261113194000_exos_discord` and `20261114100000_exos_leftovers_15` (`scripts/rollout-prod.sh`),
    deploy `exos-discord` with `--no-verify-jwt`, ship the SPA.
 2. For level 2, create a Discord application (discord.com/developers/applications): add a bot; turn
    **Public Bot** on (organizers add it to their servers) and **Requires OAuth2 Code Grant** on (so

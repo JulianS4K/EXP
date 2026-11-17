@@ -143,7 +143,7 @@ nonce `ask:<id>` (Stripe, the ticket voided, the refund mail), and the ask close
 
 ## Attendance report
 
-Mig `20261113120000_exos_attendance_report.sql`, harness `tests/exos/test_attendance_report.sql`. Event report →
+Mig `20261113193000_exos_attendance_report.sql`, harness `tests/exos/test_attendance_report.sql`. Event report →
 **Attendees & refunds → Attendance report** (`src/components/AttendanceReportPanel.tsx`), `GET
 /v1/events/:id/attendance` (`docs/api/attendance.json`). Owner / manager / finance, checked in SQL; for an API key,
 its creator's role now, for a personal or OAuth token, its user's.

@@ -603,7 +603,7 @@ await run('event report: where buyers are (countries, cities, unknown; org-wide)
   exos_event_buyer_geo: () => GEO(4), exos_org_buyer_geo: () => GEO(10),
 } }) });
 
-// ── claude/exos-attendance-report (mig 20261113120000): postal rollup, pacing, XLSX ──
+// ── claude/exos-attendance-report (mig 20261113193000): postal rollup, pacing, XLSX ──
 const PREV_EV = '99999999-9999-4999-8999-99999999e0e0';
 const paceDay = (day, before, paid, gross, free, cum) => ({ day, days_before: before, paid_orders: paid ? 1 : 0, paid_tickets: paid,
   gross_cents: gross, free_orders: free ? 1 : 0, free_tickets: free, cum_paid_tickets: cum[0], cum_gross_cents: cum[1], cum_free_tickets: cum[2] });
@@ -1028,7 +1028,7 @@ await run('door: with card on, the Sell tab charges on a reader and shows the QR
   exos_server_time: () => new Date().toISOString(),
 }, fns: { 'exos-pos': cardPos } }) });
 
-// --- claude/exos-kiosk: kiosk mode (mig 20261113100000) ---------------------
+// --- claude/exos-kiosk: kiosk mode (mig 20261113191000) ---------------------
 const kioskSt = {};
 await run('kiosk: locked to /kiosk, a card sale with a required question, QR, email, reset, PIN exit', async (page, log) => {
   await page.addInitScript((cred) => {
@@ -1914,7 +1914,7 @@ await run('fans: Followers tab shows names, never an address; the CSV comes from
   ] }),
 } }) });
 
-// claude/exos-fair-day (mig 20261113110000): the editor's fair / multi-day
+// claude/exos-fair-day (mig 20261113192000): the editor's fair / multi-day
 // setup sends one plan (day passes, multi-day and any-day passes, a list per
 // day with its hours and fair day, parking and camping on a lot list).
 await run('edit event: fair / multi-day setup creates day passes, day lists and a lot list in one call', async (page, log) => {
@@ -1975,7 +1975,7 @@ await run('unfollow link: one click, signed out', async (page, log) => {
   await page.getByRole('heading', { name: "This unfollow link isn't valid." }).waitFor({ timeout: 8000 });
 });
 
-// ── claude/exos-discord (mig 20261113130000): Org settings → Discord, Edit event → Promote on Discord ──
+// ── claude/exos-discord (mig 20261113194000): Org settings → Discord, Edit event → Promote on Discord ──
 const DISCORD_HOOK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
 const discordMock = (st) => ownerMock({ rpcs: {
   exos_discord_status: () => ({ can_manage: true, is_owner: true, webhook: st.saved ? { set: true, hint: '…5679' } : { set: false },

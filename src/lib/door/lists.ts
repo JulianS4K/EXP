@@ -7,7 +7,7 @@
 // 2026-09-29, "Keep reentry optional"). On a re-entry list a ticket is inside
 // when its last scan on that list was an entry; an exit scan lets it back in.
 //
-// A list can be for one fair day (mig 20261113110000, entryDay): without
+// A list can be for one fair day (mig 20261113192000, entryDay): without
 // re-entry a ticket enters once that DAY (every list with the same day, so
 // several gates share it) instead of once per event, and a ticket type's
 // max_entry_days caps how many different days it enters (an any-day pass is
@@ -42,7 +42,7 @@ export interface DoorCheckinList {
   admits?: ListAdmits;
   /** The add-ons an add-on list takes; null = every add-on with its own code. */
   addonIds?: string[] | null;
-  /** YYYY-MM-DD: a list for one fair day (mig 20261113110000); null / absent = ordinary. */
+  /** YYYY-MM-DD: a list for one fair day (mig 20261113192000); null / absent = ordinary. */
   entryDay?: string | null;
 }
 
@@ -199,7 +199,7 @@ function stateDays(state: ListState | undefined, dayOf: Map<string, string>): Se
   return days;
 }
 
-/** Fair days (mig 20261113110000): why a day list refuses a ticket's ENTRY,
+/** Fair days (mig 20261113192000): why a day list refuses a ticket's ENTRY,
  *  or null. `state` is the ticket's per-list last direction (roster
  *  list_state, which covers day lists and has day keys for every other
  *  entry, plus this device's marks); a list with a state was entered, and

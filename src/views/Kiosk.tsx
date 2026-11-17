@@ -1,4 +1,4 @@
-// Kiosk mode (mig 20261113100000, docs/pos.md "Kiosk mode"): the self-serve
+// Kiosk mode (mig 20261113191000, docs/pos.md "Kiosk mode"): the self-serve
 // screen at a fair gate. One event's public ticket types, by card on the
 // kiosk's own Stripe Terminal reader, and nothing else: no navigation, no
 // sign-in, no dashboard. The browser holds only the kiosk's credential (the

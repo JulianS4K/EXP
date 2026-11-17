@@ -1,4 +1,4 @@
-// Discord promotion (mig 20261113130000; docs/discord.md): an organizer's own
+// Discord promotion (mig 20261113194000; docs/discord.md): an organizer's own
 // Discord server. Level 1: a channel webhook for announcements. Level 2: the
 // platform's bot keeps a Discord scheduled event per event shown there. The
 // whole feature is dark until the operator sets EXOS_DISCORD_ENABLED=on on

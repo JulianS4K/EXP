@@ -1,4 +1,4 @@
-// Static guard (mig 20261113130000, docs/discord.md): only
+// Static guard (mig 20261113194000, docs/discord.md): only
 // _shared/channels/discord.ts talks to Discord, and its install exchange
 // calls the token endpoint and nothing else.
 import { readdirSync, readFileSync, statSync } from 'node:fs';

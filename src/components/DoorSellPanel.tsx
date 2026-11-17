@@ -696,7 +696,7 @@ export default function DoorSellPanel({ eventId }: { eventId: string }) {
         </section>
       )}
 
-      {/* Kiosk mode (mig 20261113100000): owners and managers set up a self-serve card-only screen. */}
+      {/* Kiosk mode (mig 20261113191000): owners and managers set up a self-serve card-only screen. */}
       {(cat.role === 'owner' || cat.role === 'manager') && (
         <KioskSetupPanel eventId={eventId} readers={cat.card.readers ?? []} cardOn={cat.card.switched_on === true} />
       )}

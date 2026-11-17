@@ -22,7 +22,7 @@
 --           R: exos_events, exos_discord_posts, exos_discord_event_syncs,
 --              exos_rate_hit, exos_rate_windows, _exos_discord_blocked,
 --              _exos_discord_role, _exos_audit, vault.decrypted_secrets
--- Pre-reqs: 20261113130000 (Discord), 20261113100000 (kiosk),
+-- Pre-reqs: 20261113194000 (Discord), 20261113191000 (kiosk),
 --           20261105120000 (_exos_print_mint), 20261109100000 (_exos_audit).
 --
 -- Waves 13 and 14 follow-ups (docs/discord.md, docs/pos.md "Kiosk mode"):
@@ -485,6 +485,6 @@ SELECT pg_temp.exos_patch_n('public._exos_pos_kiosk_codes(text,uuid)',
 -- exos_discord_reminder_queue, exos_discord_delete_claim / _mark,
 -- exos_discord_test_begin, exos_discord_webhook_refused and the table
 -- exos_discord_deletes; drop exos_discord_links.reminder_hours (and its
--- check); re-run 20261113130000's definitions of exos_discord_status,
+-- check); re-run 20261113194000's definitions of exos_discord_status,
 -- exos_discord_event_status, exos_discord_sync_mark, and 20261105120000's
--- _exos_print_mint and 20261113100000's _exos_pos_kiosk_codes (markers go with them).
+-- _exos_print_mint and 20261113191000's _exos_pos_kiosk_codes (markers go with them).

@@ -1,4 +1,4 @@
-// The attendance report (claude/exos-attendance-report, mig 20261113120000):
+// The attendance report (claude/exos-attendance-report, mig 20261113193000):
 // where an event's attendees are by billing postal area, and how its sales
 // pace against a prior event of the org. The numbers come from
 // exos_event_attendance (owner / manager / finance; aggregated in SQL, a

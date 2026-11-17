@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { AttendanceError, handleAttendance, type AttendanceCtx } from '../../supabase/functions/exos-api/attendance.ts';
 import { matchRoute } from '../../supabase/functions/_shared/api/routes.ts';
 
-// exos-api/attendance.ts (mig 20261113120000): GET /v1/events/:id/attendance
+// exos-api/attendance.ts (mig 20261113193000): GET /v1/events/:id/attendance
 // sends the credential to SQL (_exos_api_attendance), which checks the key's
 // creator's (or the token user's) role; errors map to HTTP here.
 const ORG = '0a000000-0000-4000-8000-000000000001';
