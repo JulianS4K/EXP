@@ -95,6 +95,9 @@ export interface DropStatus {
   /** A number waiting for the code texted to it (nothing consented yet). */
   smsPending: boolean;
   pendingHint: string | null;
+  /** After a join with a number: the code was texted, or a limit held it back
+   *  (the same answer whichever limit). */
+  smsCode: 'sent' | 'try_again' | null;
   /** The exact words the signup stores (from SQL), while open. */
   emailConsentText: string | null;
   smsConsentText: string | null;
@@ -110,6 +113,7 @@ export function parseStatus(d: any): DropStatus {
     phoneHint: typeof d?.phone_hint === 'string' ? d.phone_hint : null,
     smsPending: d?.sms_pending === true,
     pendingHint: typeof d?.pending_hint === 'string' ? d.pending_hint : null,
+    smsCode: d?.sms_code === 'sent' || d?.sms_code === 'try_again' ? d.sms_code : null,
     emailConsentText: typeof d?.email_consent_text === 'string' ? d.email_consent_text : null,
     smsConsentText: typeof d?.sms_consent_text === 'string' ? d.sms_consent_text : null,
   };

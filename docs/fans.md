@@ -85,8 +85,13 @@ by hand). For an announced event that isn't on sale yet: the moment promoters se
 - **Signing up.** Signed in with a confirmed email: one click (`exos_drop_join`), with an optional text behind its own
   checkbox and consent words. The number counts only once it is proved: a one-time 6-digit code is texted to it
   (`exos_rsvp_sms_outbox`, the order-proof SMS path; a dry run until `EXOS_SMS_LIVE=on`) and typed back
-  (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes: 60 s apart, 5 per signup, 3 per number
-  per 10 minutes, 10 numbers a day per account; a number that replied STOP gets none. Everyone else: an email
+  (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes (against SMS pumping, logged in
+  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org, 3 per
+  number per 10 minutes, 60 s apart, at most 2 numbers per signup, and none to a number with 10 wrong codes typed in a
+  day; over any of them the page says try later (the same answer whichever). A number that replied STOP gets no
+  text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
+  exemption for user-requested one-time codes, as for the order-proof codes). Leaving and re-joining with the same
+  number sends a new code. Everyone else: an email
   (`exos_drop_signup`), then the mail's **Confirm** link (`/drop/confirm?t=`, a page that takes a click) or its
   6-digit code typed on the event page, which only works from the browser that signed up (the guest-proof pattern).
   The answer is always "check your email": it never says whether an address is already on the list. Limits: 10 a
@@ -116,7 +121,8 @@ by hand). For an announced event that isn't on sale yet: the moment promoters se
   `exos_drop_list_blast` runs from the cron `exos-drop-list-blast-5min`, **created inactive**: nothing goes out until
   it and `exos-mail-drain` are on (and `exos-sms-drain` with `EXOS_SMS_LIVE=on` for texts).
 - **Leaving.** Every mail has a leave link (`/drop/leave?t=`, also its List-Unsubscribe; only hashes stored); texts
-  end "Reply STOP to opt out." Any STOP on record for the number is a hard stop until START, checked at the blast and
+  end "Reply STOP to opt out." A confirm mail's leave link keeps working after its confirm row is swept (the leave
+  tokens live in `exos_drop_leave_tokens`, kept as long as the signup). Any STOP on record for the number is a hard stop until START, checked at the blast and
   again by `exos_sms_claim` at send time. Signed-in fans can leave from the event page. Leaving spends every open
   confirm link and code, so an old mail can't put the person back. An account opted
   out of follow-up mail gets no on-sale email.

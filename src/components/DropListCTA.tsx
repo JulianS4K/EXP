@@ -68,6 +68,7 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
       const s = await dropJoin(eventId, { sms: wantsSms, phone, source: dropSource(attribution) });
       setStatus(s);
       setStep('joined');
+      if (s.smsCode === 'try_again') setError('We couldn\'t text a code to that number right now. Try again later.');
     } catch (e) {
       setError((e as Error).message || 'That didn\'t work. Try again.');
     } finally {
@@ -129,7 +130,7 @@ export default function DropListCTA({ eventId, timezone, attribution }: Props) {
     setBusy(true); setError(null);
     try {
       await dropLeaveMine(eventId);
-      setStatus({ ...status, joined: false, sms: false, phoneHint: null, smsPending: false, pendingHint: null });
+      setStatus({ ...status, joined: false, sms: false, phoneHint: null, smsPending: false, pendingHint: null, smsCode: null });
       setStep('form');
       setNote('You left the list.');
     } catch (e) {

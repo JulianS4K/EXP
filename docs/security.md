@@ -940,8 +940,11 @@ to review:
   `org_id` on every row. No anon or fan read of the list.
 - **Signed in.** `exos_drop_join` (one click; needs a confirmed account email, which is the proof; 10 joins a
   minute). A number is never stored as consented on the form's word: join texts it a one-time code
-  (`exos_rsvp_sms_outbox`; 60 s apart, 5 per signup, 3 per number per 10 minutes, 10 numbers a day per account; none
-  to a stopped number, same answer) and `exos_drop_verify_sms` (the caller's own signup, 10 minutes, 5 tries, 10 a
+  (`exos_rsvp_sms_outbox`). Against SMS pumping, checked before the outbox under per-account, per-org and per-number
+  locks over the sends logged in `exos_drop_sms_codes`: 5 a day per account, 5 a day per number (all accounts and
+  orgs), 300 a day per org, 3 per number per 10 minutes, 60 s apart, 2 numbers per signup, none after 10 wrong codes
+  for the number in a day (across signups); one `try_again` answer
+  whichever cap (`race_drop_list.sh` race 5). None to a stopped number, same answer as sent. and `exos_drop_verify_sms` (the caller's own signup, 10 minutes, 5 tries, 10 a
   minute) stores the number and the consent words. `exos_drop_leave_mine`: the caller's own rows.
 - **Organizers.** `exos_drop_list_summary`: owner / manager / finance of the event's org (or admin), counts and
   sources only, never an address; the same 42501 for another org's event or an unknown id. `exos_drop_list_export`:
@@ -964,7 +967,8 @@ to review:
   hard stop, at the blast and in `exos_sms_claim` (marker `/* exos: drop list stop */`, `drop_list` campaigns only;
   also skips a text whose signup left). Each event runs in its own subtransaction, so one bad event can't stop the
   rest. The lock comes before the presale is read.
-- **Leaving.** Leave tokens are stored hashed (one per mail). Leaving spends the signup's open confirms first (the
+- **Leaving.** Leave tokens are stored hashed (one per mail, `exos_drop_leave_tokens` for confirm mails, kept as long
+  as the signup so an old link works after the 8-day confirm sweep). Leaving spends the signup's open confirms first (the
   confirm's lock order), and a confirm older than the leave never re-joins (`race_drop_list.sh` race 4).
 
 ### Search path
