@@ -273,9 +273,9 @@ finance can see the counts). Only published events have one.
   so refreshing or arriving at 9:59:59 doesn't beat arriving at 9:50. People who arrive after the
   on-sale join at the back, in order.
 - **Established accounts always get a place:** a signed-in buyer whose email is confirmed and whose
-  account is at least 7 days old, or who has paid for an order before (any organizer), gets one place
-  per account, which they can pick up on any device. Everyone else (guests, and accounts made this
-  week) gets a place too, up to "Most people in line" (blank = 5 times the public capacity, at least
+  account is at least 30 days old, or who paid at least $5 for an order a week or more ago with an
+  organizer they don't belong to (not fully refunded), gets one place per account, which they can
+  pick up on any device. Everyone else (guests, and newer accounts) gets a place too, up to "Most people in line" (blank = 5 times the public capacity, at least
   1,000) and a share per network so one network can't fill the line; past that the page says "The
   waiting room is full" and offers **Sign in to get a place** to signed-out buyers (a signed-in one
   sees "The line is full right now, we'll keep trying"). So nobody can jump a full line with freshly
@@ -287,7 +287,9 @@ finance can see the counts). Only published events have one.
 - **One turn, one order.** A turn belongs to the first buyer who uses it and buys one order; to buy
   again they join again, at the back. Passing the page to a friend doesn't let a second person in.
   A buyer who reloads or starts checkout again on their turn gets a fresh payment page (the old one
-  is cancelled), unless they were already paying on it.
+  is cancelled), unless they were already paying on it. If their turn runs out while a payment page
+  is still open, they can finish paying there, or cancel it from the queue page and join again.
+  An order paid on the old page always goes through.
 - **Stepping away:** a page that's closed or asleep for 3 minutes is skipped (others go ahead) and may
   come back within 30 minutes: always for a signed-in buyer, for a guest while the line has room.
   After 30 minutes, or a lapsed turn, the place is gone and they can join again at the back.

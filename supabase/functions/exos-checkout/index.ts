@@ -174,7 +174,8 @@ import {
 } from "../_shared/payouts/commissionMethods.ts";
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
-import { type StripeEnd, wroomAttach, wroomBindSession } from "../_shared/wroomCheckout.ts";
+import { wroomAttach, wroomBindSession } from "../_shared/wroomCheckout.ts";
+import { expireOwnStripeSession } from "../_shared/wroomStripe.ts";
 
 // exos: waiting room — ids are checked before they reach the queue check.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -1734,23 +1735,4 @@ async function wroomBind(sb: SupabaseClient<any, any, any>, wr: WroomAttempt, se
   return await wroomBindSession(async (fn, args) => await sb.rpc(fn, args), {
     p_event_id: wr.eventId, p_attempt: wr.attempt, p_session_id: sessionId, p_buyer_uid: wr.buyerUid, p_email: wr.email,
   }, (m) => console.error(m));
-}
-
-/** Expire one of our own Checkout sessions (the waiting room take-over).
- *  Expire fails on a session that isn't open: then read where it stands. */
-async function expireOwnStripeSession(stripeKey: string | undefined, id: string): Promise<StripeEnd> {
-  if (!stripeKey) return "unknown";
-  const st = new Stripe(stripeKey, { httpClient: Stripe.createFetchHttpClient(), apiVersion: "2024-06-20" });
-  try {
-    const s = await st.checkout.sessions.expire(id);
-    return s.status === "expired" ? "expired" : "unknown";
-  } catch (e) {
-    try {
-      const s = await st.checkout.sessions.retrieve(id);
-      return s.status === "expired" || s.status === "complete" || s.status === "open" ? s.status : "unknown";
-    } catch {
-      console.error("exos-checkout: take-over expire failed", e);
-      return "unknown";
-    }
-  }
 }

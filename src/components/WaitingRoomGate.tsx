@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Clock } from 'lucide-react';
 import {
-  TURNSTILE_SITE_KEY, blocksBuying, challengeMode, joinRoom, joinWithChallenge, nextPollMs, pollRoom, queueView,
+  TURNSTILE_SITE_KEY, blocksBuying, challengeMode, endCheckout, joinRoom, joinWithChallenge, nextPollMs, pollRoom, queueView,
   rejoinRoom, type RoomStatus,
 } from '../lib/waitingRoom';
 import TurnstileWidget from './TurnstileWidget';
@@ -24,9 +24,14 @@ function timeIn(d: Date, tz?: string | null): string {
   }
 }
 
-export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge, onSignIn }: {
+export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge, onSignIn,
+  onEndCheckout, note }: {
   status: RoomStatus; timezone?: string | null; onRejoin: () => void; busy?: boolean;
   siteKey?: string; onChallenge?: (token: string) => void;
+  /** 'checking_out' on a Stripe page: cancel it and join again. */
+  onEndCheckout?: () => void;
+  /** A one-line answer to the last action (e.g. the page is being paid). */
+  note?: string | null;
   /** Signed out: offered when the guest line is full (an established account gets a place). */
   onSignIn?: () => void;
 }) {
@@ -60,6 +65,13 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = T
           Sign in to get a place
         </button>
       )}
+      {status.state === 'checking_out' && status.stripe && onEndCheckout && (
+        <button type="button" onClick={onEndCheckout} disabled={busy}
+          className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide disabled:opacity-50">
+          Cancel that payment page and join again
+        </button>
+      )}
+      {note && <p role="alert" className="type text-[12px] text-white/80">{note}</p>}
       {v.rejoin && (
         <button type="button" onClick={onRejoin} disabled={busy}
           className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide disabled:opacity-50">
@@ -81,6 +93,7 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
   const uid = user?.uid ?? null;
   const [status, setStatus] = useState<RoomStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
   const last = useRef<RoomStatus | null>(null);
@@ -88,7 +101,8 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
   const schedule = useCallback((s: RoomStatus, run: (join: boolean) => void) => {
     if (timer.current) clearTimeout(timer.current);
     if (s.state === 'off' || s.state === 'challenge') return;   // no room / waiting on the check: nothing to poll
-    timer.current = setTimeout(() => run(s.state === 'before' || s.state === 'busy' || s.state === 'unknown' || s.state === 'full'),
+    timer.current = setTimeout(() => run(s.state === 'before' || s.state === 'busy' || s.state === 'unknown' || s.state === 'full'
+      || s.state === 'checking_out'),
       nextPollMs(s));
   }, []);
 
@@ -139,6 +153,26 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
     }
   };
 
+  const endOpenCheckout = async () => {
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await endCheckout(eventId);
+      if (r === 'in_use') {
+        setNote('That payment page is being paid right now. Check your email for your tickets.');
+        return;
+      }
+      const s = await joinRoom(eventId);
+      last.current = s;
+      setStatus(s);
+      schedule(s, (j) => void run(j));
+    } catch {
+      setNote("Couldn't cancel it just now. Try again in a moment.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const challenge = async (token: string) => {
     setBusy(true);
     try {
@@ -157,7 +191,8 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
   if (status && blocksBuying(status)) {
     return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy}
       siteKey={siteKey} onChallenge={(t) => void challenge(t)}
-      onSignIn={uid || status.signedIn ? undefined : openAuthModal} />;
+      onSignIn={uid || status.signedIn ? undefined : openAuthModal}
+      onEndCheckout={() => void endOpenCheckout()} note={note} />;
   }
   return (
     <>

@@ -111,21 +111,21 @@ random lobby keys, a tenth idle for 40 minutes, a twentieth with lapsed turns) a
 way PostgREST runs it (role, headers, `statement_timeout` 3 s for anon, 8 s for authenticated), with a
 due admission round where noted. Same machine; first call of each kind on a fresh connection (cold plan
 cache), so prod's warm pool is faster. The 1,000,000 column is the latest run (account seats, take-over,
-one turn per account).
+one turn per account, queue triggers that never raise).
 
 | Call | 200,000 | 1,000,000 |
 |---|---|---|
-| join: a new place, with an admission round of 2,000 due | 365 ms | 639 ms |
-| join: a new place, no round due | 137 ms | 342 ms |
+| join: a new place, with an admission round of 2,000 due | 365 ms | 539 ms |
+| join: a new place, no round due | 137 ms | 286 ms |
 | join: an existing place (its token; answered like a poll, 5 s cache) | | 5 ms |
-| status: the back of the line (counts to 10,001, shows "10,000+") | 246 ms | 270 ms |
+| status: the back of the line (counts to 10,001, shows "10,000+") | 246 ms | 309 ms |
 | status: the front | 7 ms | 9 ms |
-| status: again within 5 s (the cached view, no write) | 5 ms | 7 ms |
-| status: an idle place coming back (network shares + cap re-checked) | 149 ms | 360 ms |
-| recount: abandon a batch of 500 + count the live line (inside anon calls) | 128 ms | 299 ms |
-| admission round alone: 2,000 (inside anon calls) | 275 ms | 249 ms |
-| checkout check (`exos_wroom_require`, service role) | 6 ms | 10 ms |
-| organizer summary (authenticated) | 114 ms | 461 ms |
+| status: again within 5 s (the cached view, no write) | 5 ms | 5 ms |
+| status: an idle place coming back (network shares + cap re-checked) | 149 ms | 289 ms |
+| recount: abandon a batch of 500 + count the live line (inside anon calls) | 128 ms | 244 ms |
+| admission round alone: 2,000 (inside anon calls) | 275 ms | 241 ms |
+| checkout check (`exos_wroom_require`, service role) | 6 ms | 7 ms |
+| organizer summary (authenticated) | 114 ms | 363 ms |
 
 Nothing is O(line) per request any more: there is no draw (a place's key is fixed at mint), a round
 admits at most 2,000, abandonment and expiry go in batches of 500, positions stop counting at 10,001,

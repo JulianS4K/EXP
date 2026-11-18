@@ -102,6 +102,9 @@ describe('queue state', () => {
     expect(signedIn.detail).toContain("We'll keep trying");
     expect(signedIn.detail).not.toMatch(/sign in/i);
     expect(queueView(parseStatus({ state: 'full', reason: 'room' }), fmt).detail).toMatch(/Sign in to get a place/);
+    expect(blocksBuying(parseStatus({ state: 'checking_out' }))).toBe(true);
+    expect(queueView(parseStatus({ state: 'checking_out', stripe: true }), fmt).detail).toMatch(/cancel that page/);
+    expect(queueView(parseStatus({ state: 'checking_out' }), fmt).detail).toMatch(/up to 30 minutes/);
     expect(nextPollMs(parseStatus({ state: 'full', poll_after_ms: 60000 }), () => 0.5)).toBe(60000);
     expect(waitWords(90)).toBe('about 1.5 hours');
     expect(waitWords(12)).toBe('about 12 minutes');

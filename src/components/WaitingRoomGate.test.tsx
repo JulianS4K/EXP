@@ -2,13 +2,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const h = vi.hoisted(() => ({ join: vi.fn(), poll: vi.fn(), rejoin: vi.fn(), challenge: vi.fn() }));
+const h = vi.hoisted(() => ({ join: vi.fn(), poll: vi.fn(), rejoin: vi.fn(), challenge: vi.fn(), end: vi.fn() }));
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 const auth = vi.hoisted(() => ({ user: null as { uid: string } | null, openAuthModal: vi.fn() }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../lib/waitingRoom', async (orig) => ({
   ...(await orig<typeof import('../lib/waitingRoom')>()),
-  joinRoom: h.join, pollRoom: h.poll, rejoinRoom: h.rejoin, joinWithChallenge: h.challenge,
+  joinRoom: h.join, pollRoom: h.poll, rejoinRoom: h.rejoin, joinWithChallenge: h.challenge, endCheckout: h.end,
 }));
 
 import WaitingRoomGate from './WaitingRoomGate';
@@ -127,6 +127,23 @@ describe('WaitingRoomGate', () => {
     render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
     expect(await screen.findByRole('heading', { name: 'The line is full right now' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in to get a place' })).toBeNull();
+    auth.user = null;
+  });
+
+  it('a lapsed turn with its Stripe page still open: cancel it, then join again; a page being paid keeps the place', async () => {
+    auth.user = { uid: 'u1' };
+    h.join.mockResolvedValue(parseStatus({ state: 'checking_out', stripe: true, signed_in: true }));
+    h.end.mockResolvedValue('in_use');
+    render(<WaitingRoomGate eventId="e1" siteKey="">{BUY}</WaitingRoomGate>);
+    expect(await screen.findByRole('heading', { name: 'Your last checkout is still open' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Buy tickets' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel that payment page and join again' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/being paid/);
+    h.end.mockResolvedValue('ended');
+    h.join.mockResolvedValue(parseStatus({ state: 'waiting', position: 12, ahead: 11, kind: 'account', signed_in: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel that payment page and join again' }));
+    expect(await screen.findByRole('heading', { name: "You're number 12 in line" })).toBeTruthy();
+    expect(h.end).toHaveBeenCalledWith('e1');
     auth.user = null;
   });
 });

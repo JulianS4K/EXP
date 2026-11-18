@@ -27,8 +27,9 @@
 --     nothing O(line) in any request.
 --   * One place per account per run, keyed on SHA-256(event:account), so a
 --     second browser resumes it and only that account can use it. An
---     account with a confirmed email that is 7+ days old or has paid for an
---     order (any org) gets a seat: always, outside the cap, the network shares
+--     account with a confirmed email that is 30+ days old, or that paid 500+
+--     cents 7+ days ago to an org it isn't a member or owner of (not fully
+--     refunded), gets a seat: always, outside the cap, the network shares
 --     and Turnstile. Any other signed-in account queues under the guest rules
 --     below (its place still keyed on the account; it counts as a guest).
 --   * Anonymous places sit under per-network shares and the room's cap (5 x
@@ -48,6 +49,12 @@
 --     place only if its network share and the cap still have room, else it is
 --     released for good); after 30 minutes they are abandoned for good
 --     (marked in bounded batches). An admission lasts N minutes, then expires.
+--   * Fulfilment never depends on the queue: both queue triggers spend only
+--     an admitted / lapsed turn (admitted_at kept), and catch every error
+--     (a WARNING; the order or RSVP commits regardless). A place isn't
+--     re-placed while a checkout of its old turn is still open: the join
+--     answers 'checking_out' (exos-wroom-join end_checkout expires the Stripe
+--     page first, then the place is re-placed with its old sessions dropped).
 --   * One turn, one order: the first hold / claim binds the turn to its buyer;
 --     a completed order (fulfilment) or claim spends it (XWR03 after). Paths
 --     that skip the hold attach their checkout to the turn under the entry's
@@ -88,7 +95,8 @@
 --              manager / finance), exos_wroom_configure (owner / manager;
 --              audited event.waiting_room), exos_wroom_join_verified,
 --              exos_wroom_verify_gate, exos_wroom_require, exos_wroom_attach,
---              exos_wroom_bind, exos_wroom_release (service role), helpers
+--              exos_wroom_bind, exos_wroom_release, exos_wroom_open_checkout
+--              (service role), helpers
 --              _exos_wroom_*
 --           C: TRIGGER exos_checkout_sessions_wroom (spends the turn of a
 --              fulfilled order, frees it on a failed / expired one)
@@ -232,6 +240,10 @@ CREATE TABLE IF NOT EXISTS public.exos_wroom_sessions (
 CREATE INDEX IF NOT EXISTS exos_wroom_sessions_entry_idx ON public.exos_wroom_sessions (entry_id);
 CREATE INDEX IF NOT EXISTS exos_wroom_sessions_org_idx ON public.exos_wroom_sessions (org_id);
 CREATE INDEX IF NOT EXISTS exos_wroom_sessions_event_idx ON public.exos_wroom_sessions (event_id);
+-- Retention: a mapping only matters while its session can still be paid
+-- (Stripe: 30 minutes; PayPal: hours); the recount deletes rows older than
+-- 90 days, 500 at a time.
+CREATE INDEX IF NOT EXISTS exos_wroom_sessions_created_idx ON public.exos_wroom_sessions (created_at);
 ALTER TABLE public.exos_wroom_sessions ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_wroom_sessions FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_wroom_sessions TO service_role;
@@ -473,6 +485,11 @@ BEGIN
    WHERE event_id = p_event_id;
   DELETE FROM public.exos_wroom_counts c
    WHERE c.event_id = p_event_id AND (c.run_id <> s.run_id OR c.round < s.count_round);
+  -- Retention: checkout mappings older than 90 days (any event), 500 at a time.
+  DELETE FROM public.exos_wroom_sessions w
+   WHERE w.session_id IN (SELECT x.session_id FROM public.exos_wroom_sessions x
+                           WHERE x.created_at < now() - interval '90 days'
+                           ORDER BY x.created_at LIMIT 500);
 END $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_recount(uuid) FROM PUBLIC, anon, authenticated;
 
@@ -711,9 +728,11 @@ $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_account(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Does the signed-in caller get an always-a-place account seat? Only a
--- confirmed email AND either an account at least 7 days old or a fulfilled
--- paid order (any org). It doesn't rely on the project's auth settings
--- (email confirmation, signup CAPTCHA): new accounts queue as guests.
+-- confirmed email AND either an account at least 30 days old, or a fulfilled
+-- (or partly refunded) order of 500+ cents, at least 7 days old, with an org
+-- the user is not a member or owner of (a $0.50 self-order through one's own
+-- org doesn't count). It doesn't rely on the project's auth settings (email
+-- confirmation, signup CAPTCHA): new accounts queue as guests.
 CREATE OR REPLACE FUNCTION public._exos_wroom_seat_eligible()
 RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -721,13 +740,35 @@ SET search_path = public, pg_temp
 AS $$
   SELECT coalesce((
     SELECT u.email_confirmed_at IS NOT NULL
-       AND (u.created_at <= now() - interval '7 days'
+       AND (u.created_at <= now() - interval '30 days'
             OR EXISTS (SELECT 1 FROM public.exos_checkout_sessions cs
-                        WHERE cs.buyer_uid = u.id AND cs.amount_cents > 0
-                          AND cs.status IN ('fulfilled', 'partially_refunded')))
+                         JOIN public.exos_orgs o ON o.id = cs.org_id
+                        WHERE cs.buyer_uid = u.id AND cs.amount_cents >= 500
+                          AND cs.status IN ('fulfilled', 'partially_refunded')
+                          AND cs.created_at <= now() - interval '7 days'
+                          AND o.owner_uid IS DISTINCT FROM u.id
+                          AND NOT EXISTS (SELECT 1 FROM public.exos_org_memberships m
+                                           WHERE m.org_id = cs.org_id AND m.user_id = u.id)))
       FROM auth.users u WHERE u.id = auth.uid()), false)
 $$;
 REVOKE ALL ON FUNCTION public._exos_wroom_seat_eligible() FROM PUBLIC, anon, authenticated;
+
+-- A checkout of this place still open (pending, bound in the last 35 minutes:
+-- Stripe's 30 plus slack): its session id, else NULL. A place isn't re-placed
+-- while one is open (the buyer may still pay on that page).
+CREATE OR REPLACE FUNCTION public._exos_wroom_open_session(p_entry_id uuid)
+RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT cs.session_id
+    FROM public.exos_wroom_sessions ws
+    JOIN public.exos_checkout_sessions cs ON cs.session_id = ws.session_id
+   WHERE ws.entry_id = p_entry_id AND cs.status = 'pending' AND cs.created_at > now() - interval '35 minutes'
+   ORDER BY cs.created_at DESC
+   LIMIT 1
+$$;
+REVOKE ALL ON FUNCTION public._exos_wroom_open_session(uuid) FROM PUBLIC, anon, authenticated;
 
 -- Was one of this place's checkout sessions fulfilled? (the turn is spent,
 -- even if the fulfilment's trigger couldn't take the row's lock)
@@ -909,13 +950,20 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE v text := coalesce(current_setting('exos.wroom_rsvp', true), '');
 BEGIN
-  IF split_part(v, ':', 1) <> NEW.id::text THEN RETURN NULL; END IF;
-  UPDATE public.exos_wroom_entries e
-     SET state = 'spent', spent_at = now(), spent_ref = 'rsvp:' || NEW.id::text, used_at = coalesce(e.used_at, now()),
-         redeemer_hash = coalesce(e.redeemer_hash, public._exos_wroom_buyer_hash(NEW.event_id, 'phone:' || coalesce(NEW.phone, ''))),
-         last_seen_at = now(), view_at = NULL
-   WHERE e.id = split_part(v, ':', 2)::uuid AND e.state = 'admitted';
-  PERFORM set_config('exos.wroom_rsvp', '', true);
+  -- The RSVP never depends on the queue: nothing here may raise.
+  BEGIN
+    IF split_part(v, ':', 1) = NEW.id::text THEN
+      UPDATE public.exos_wroom_entries e
+         SET state = 'spent', spent_at = now(), spent_ref = 'rsvp:' || NEW.id::text, used_at = coalesce(e.used_at, now()),
+             admitted_at = coalesce(e.admitted_at, now()),
+             redeemer_hash = coalesce(e.redeemer_hash, public._exos_wroom_buyer_hash(NEW.event_id, 'phone:' || coalesce(NEW.phone, ''))),
+             last_seen_at = now(), view_at = NULL
+       WHERE e.id = split_part(v, ':', 2)::uuid AND e.state = 'admitted';
+      PERFORM set_config('exos.wroom_rsvp', '', true);
+    END IF;
+  EXCEPTION WHEN others THEN
+    RAISE WARNING 'exos waiting room: RSVP % not applied to the queue (%: %)', NEW.id, SQLSTATE, SQLERRM;
+  END;
   RETURN NULL;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_tg_wroom_rsvp() FROM PUBLIC, anon, authenticated;
@@ -1032,11 +1080,19 @@ BEGIN
       IF e.state IN ('spent', 'expired', 'abandoned') OR public._exos_wroom_paid(e.id)
          OR (e.state = 'admitted' AND e.admit_expires_at <= now())
          OR (e.state = 'waiting' AND e.last_seen_at <= now() - interval '30 minutes') THEN
+        -- Not while a checkout of the old turn is still open: the buyer may pay
+        -- there. exos-wroom-join (end_checkout) expires it at Stripe first.
+        IF NOT public._exos_wroom_paid(e.id) AND public._exos_wroom_open_session(e.id) IS NOT NULL THEN
+          RETURN jsonb_build_object('state', 'checking_out', 'signed_in', true, 'poll_after_ms', 30000,
+            'stripe', public._exos_wroom_open_session(e.id) LIKE 'cs\_%');
+        END IF;
         IF NOT v_seat THEN
           -- A guest place again: the same rules as a new one (below), on this row.
           v_id := e.id;
         ELSE
           v_token := encode(extensions.gen_random_bytes(32), 'hex');
+          -- A new turn: the old one's sessions no longer count against it.
+          DELETE FROM public.exos_wroom_sessions WHERE entry_id = e.id;
           UPDATE public.exos_wroom_entries
              SET token_hash = public._exos_wroom_hash(p_event_id, v_token), order_key = v_key, state = 'waiting', kind = 'account',
                  arrived_at = now(), admitted_at = NULL, admit_expires_at = NULL, used_at = NULL, spent_at = NULL, spent_ref = NULL,
@@ -1130,7 +1186,8 @@ BEGIN
     RETURN jsonb_build_object('state', 'full', 'reason', 'room', 'poll_after_ms', 60000, 'signed_in', v_acct IS NOT NULL);
   END IF;
   IF v_id IS NOT NULL THEN
-    -- The account's dead guest place, re-placed at the back.
+    -- The account's dead guest place, re-placed at the back (a new turn).
+    DELETE FROM public.exos_wroom_sessions WHERE entry_id = v_id;
     UPDATE public.exos_wroom_entries
        SET token_hash = public._exos_wroom_hash(p_event_id, v_token), order_key = v_key, state = 'waiting', kind = 'anon',
            arrived_at = now(), admitted_at = NULL, admit_expires_at = NULL, used_at = NULL, spent_at = NULL, spent_ref = NULL,
@@ -1325,6 +1382,33 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_wroom_attach(uuid, uuid, text, uuid, text, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_wroom_attach(uuid, uuid, text, uuid, text, uuid) TO service_role;
 
+-- exos-wroom-join's end_checkout (service role, the caller's verified user
+-- id): the open Stripe session still holding this account's lapsed place, so
+-- it can be expired at Stripe before the place is re-placed. NULL otherwise
+-- (no room, no place, a live turn, or no open Stripe session).
+CREATE OR REPLACE FUNCTION public.exos_wroom_open_checkout(p_event_id uuid, p_uid uuid)
+RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  s public.exos_wroom_settings%ROWTYPE;
+  e public.exos_wroom_entries%ROWTYPE;
+  v text;
+BEGIN
+  IF p_uid IS NULL THEN RETURN NULL; END IF;
+  SELECT * INTO s FROM public.exos_wroom_settings WHERE event_id = p_event_id;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  SELECT * INTO e FROM public.exos_wroom_entries x
+   WHERE x.event_id = p_event_id AND x.run_id = s.run_id
+     AND x.account_hash = encode(sha256(convert_to(p_event_id::text || ':uid:' || p_uid::text, 'UTF8')), 'hex');
+  IF NOT FOUND OR (e.state = 'admitted' AND e.admit_expires_at > now()) OR e.state = 'waiting' THEN RETURN NULL; END IF;
+  v := public._exos_wroom_open_session(e.id);
+  RETURN CASE WHEN v LIKE 'cs\_%' THEN v END;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_wroom_open_checkout(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_wroom_open_checkout(uuid, uuid) TO service_role;
+
 -- The attempt's order: its session id, before the session row is written
 -- (kept in exos_wroom_sessions too: a fulfilled session spends the turn,
 -- however late), and the buyer the turn binds to. False when the attempt
@@ -1378,20 +1462,27 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 BEGIN
-  IF NEW.status = 'fulfilled' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'fulfilled') THEN
-    UPDATE public.exos_wroom_entries e
-       SET state = 'spent', spent_at = now(), view_at = NULL
-     WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
-                      JOIN public.exos_wroom_sessions ws ON ws.entry_id = x.id
-                     WHERE ws.session_id = NEW.session_id AND x.state <> 'spent'
-                     FOR UPDATE OF x SKIP LOCKED);
-  ELSIF NEW.status IN ('failed', 'expired') AND TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
-    UPDATE public.exos_wroom_entries e
-       SET checkout_ref = NULL, checkout_at = NULL
-     WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
-                     WHERE x.session_id = NEW.session_id AND x.state <> 'spent'
-                     FOR UPDATE SKIP LOCKED);
-  END IF;
+  -- Fulfilment never depends on the queue: nothing here may raise.
+  BEGIN
+    IF NEW.status = 'fulfilled' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'fulfilled') THEN
+      -- Only the turn this order used (admitted, or lapsed while the buyer
+      -- paid); a place already re-placed (waiting) is a new turn.
+      UPDATE public.exos_wroom_entries e
+         SET state = 'spent', spent_at = now(), admitted_at = coalesce(e.admitted_at, now()), view_at = NULL
+       WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
+                        JOIN public.exos_wroom_sessions ws ON ws.entry_id = x.id
+                       WHERE ws.session_id = NEW.session_id AND x.state IN ('admitted', 'expired')
+                       FOR UPDATE OF x SKIP LOCKED);
+    ELSIF NEW.status IN ('failed', 'expired') AND TG_OP = 'UPDATE' AND OLD.status IS DISTINCT FROM NEW.status THEN
+      UPDATE public.exos_wroom_entries e
+         SET checkout_ref = NULL, checkout_at = NULL
+       WHERE e.id IN (SELECT x.id FROM public.exos_wroom_entries x
+                       WHERE x.session_id = NEW.session_id AND x.state <> 'spent'
+                       FOR UPDATE SKIP LOCKED);
+    END IF;
+  EXCEPTION WHEN others THEN
+    RAISE WARNING 'exos waiting room: session % not applied to the queue (%: %)', NEW.session_id, SQLSTATE, SQLERRM;
+  END;
   RETURN NULL;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_tg_wroom_session() FROM PUBLIC, anon, authenticated;

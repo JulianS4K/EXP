@@ -34,6 +34,8 @@
 --   WR16 a join on a place cached + rate-limited; one turn per account;
 --       a retried free claim
 --   WR17 the "live at once" warning
+--   WR18 B1: fulfilment never depends on the queue (lapsed turn with an open
+--       checkout, re-placed turn, forced trigger errors)
 -- Users: o owner A, m manager A, f finance A, c content A, s scanner A,
 --        b owner B, f1 / f2 fans, x outsider.
 -- ============================================================================
@@ -758,15 +760,38 @@ BEGIN
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b8'), '100.66.0.3');
   j := public.exos_wroom_join(pg_temp.u('e4'));
   ASSERT j->>'state' = 'full' AND j->>'signed_in' = 'true', 'WR10 a new account: guest rules: ' || j::text;
-  -- ... until it has paid for an order (any org): then a seat.
+  -- ... until it has paid for a real order: 500+ cents, 7+ days ago, with an
+  -- org it isn't a member or owner of, not fully refunded (or the account is 30+ days old).
   PERFORM pg_temp.as_('postgres');
   ALTER TABLE public.exos_checkout_sessions DISABLE TRIGGER USER;
-  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid)
-  VALUES ('cs_wr10_paid', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'fulfilled', pg_temp.u('b8'));
+  INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES (pg_temp.u('9'), 'D71 Own Org', 'd71-own-org', pg_temp.u('b8'));
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid, created_at)
+  VALUES ('cs_wr10_paid', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'fulfilled', pg_temp.u('b8'), now());
+  PERFORM pg_temp.as_('postgres', pg_temp.u('b8'));
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 an order from today: not yet';
+  UPDATE public.exos_checkout_sessions SET created_at = now() - interval '8 days' WHERE session_id = 'cs_wr10_paid';
+  ASSERT public._exos_wroom_seat_eligible(), 'WR10 an 8-day-old order of $20 with another org: a seat';
+  UPDATE public.exos_checkout_sessions SET amount_cents = 499 WHERE session_id = 'cs_wr10_paid';
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 under $5: no';
+  UPDATE public.exos_checkout_sessions SET amount_cents = 2000, status = 'refunded' WHERE session_id = 'cs_wr10_paid';
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 fully refunded: no';
+  UPDATE public.exos_checkout_sessions SET status = 'partially_refunded' WHERE session_id = 'cs_wr10_paid';
+  ASSERT public._exos_wroom_seat_eligible(), 'WR10 partially refunded: still a real order';
+  INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES (pg_temp.u('1'), pg_temp.u('b8'), 'scanner');
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 an order with an org it belongs to: no';
+  DELETE FROM public.exos_org_memberships WHERE org_id = pg_temp.u('1') AND user_id = pg_temp.u('b8');
+  UPDATE public.exos_checkout_sessions SET org_id = pg_temp.u('9') WHERE session_id = 'cs_wr10_paid';
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 a self-order through its own org: no';
+  UPDATE auth.users SET created_at = now() - interval '29 days' WHERE id = pg_temp.u('b8');
+  ASSERT NOT public._exos_wroom_seat_eligible(), 'WR10 29 days old, no real order: no';
+  UPDATE auth.users SET created_at = now() - interval '30 days' WHERE id = pg_temp.u('b8');
+  ASSERT public._exos_wroom_seat_eligible(), 'WR10 30 days old: a seat';
+  UPDATE auth.users SET created_at = now() WHERE id = pg_temp.u('b8');
+  UPDATE public.exos_checkout_sessions SET org_id = pg_temp.u('1'), status = 'fulfilled' WHERE session_id = 'cs_wr10_paid';
   ALTER TABLE public.exos_checkout_sessions ENABLE TRIGGER USER;
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b8'), '100.66.0.3');
   j := public.exos_wroom_join(pg_temp.u('e4'));
-  ASSERT j->>'state' = 'waiting' AND j->>'kind' = 'account', 'WR10 a paid order: a seat: ' || j::text;
+  ASSERT j->>'state' = 'waiting' AND j->>'kind' = 'account', 'WR10 a real paid order: a seat: ' || j::text;
   -- b1 (30 days old) signs in: a place anyway, at the back, outside the cap and the network shares.
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b1'), '100.65.0.1');
   j := public.exos_wroom_join(pg_temp.u('e4'));
@@ -806,7 +831,7 @@ BEGIN
   PERFORM pg_temp.as_('authenticated', pg_temp.u('b2'), '100.66.0.9');
   j := public.exos_wroom_join(pg_temp.u('e4'), v_tok);
   ASSERT j->>'kind' = 'account' AND j->>'token' = v_tok, 'WR10 the guest place is the account''s now: ' || j::text;
-  RAISE NOTICE 'OK  WR10 accounts (x1, A): guests full; unconfirmed and new unpaid accounts are guests (no sign-in offer); 7+ days or a paid order: one place outside the cap and shares, resumed by a second browser, usable only by that account (token or not); a guest place carries over on sign-in';
+  RAISE NOTICE 'OK  WR10 accounts (x1, A): guests full; unconfirmed and new accounts are guests (no sign-in offer); 30+ days, or a real order (500+ cents, 7+ days old, another org, not refunded): one place outside the cap and shares, resumed by a second browser, usable only by that account (token or not); a guest place carries over on sign-in';
 END $$;
 
 -- WR11 ----------------------------------------------------------------------
@@ -1111,6 +1136,109 @@ BEGIN
   j := public.exos_wroom_summary(pg_temp.u('e5'));
   ASSERT j->'warnings' = '[]'::jsonb, 'WR17 the drop has a sales start: no warning';
   RAISE NOTICE 'OK  WR17 configure / summary warn when a public type on sale now makes the line live at once; a pin clears it';
+END $$;
+
+-- WR18 ----------------------------------------------------------------------
+-- B1: nothing in the queue may break fulfilment. A signed-in buyer's turn
+-- lapses while their Stripe page is open: a join answers checking_out and
+-- keeps the place (no reset under an open checkout); paying then spends the
+-- lapsed turn and fulfilment commits; the next join is a new place at the
+-- back. Ended at Stripe first (end_checkout): the join re-places. A place
+-- already re-placed (waiting, admitted_at NULL, mapping kept) and a forced
+-- error in the queue triggers never stop a fulfilment or an RSVP.
+DO $$
+DECLARE j jsonb; a1 uuid := gen_random_uuid(); v_id uuid; e record; v_tok text; v_rsvp uuid := gen_random_uuid();
+BEGIN
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO auth.users (id, email, email_confirmed_at, created_at) VALUES (pg_temp.u('b7'), 'd71-b7@x.com', now(), now() - interval '40 days');
+  UPDATE public.exos_wroom_settings SET opens_at = NULL, on_sale_at = now() - interval '1 hour' WHERE event_id = pg_temp.u('e4');
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b7'), '100.72.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'kind' = 'account', 'WR18 a seat: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now() - interval '20 minutes', admit_expires_at = now() + interval '5 minutes'
+   WHERE event_id = pg_temp.u('e4') AND account_hash = encode(sha256(convert_to(pg_temp.u('e4')::text || ':uid:' || pg_temp.u('b7')::text, 'UTF8')), 'hex')
+  RETURNING id INTO v_id;
+  ALTER TABLE public.exos_checkout_sessions DISABLE TRIGGER USER;
+  ALTER TABLE public.exos_checkout_sessions ENABLE TRIGGER exos_checkout_sessions_wroom;
+  PERFORM pg_temp.as_('service_role');
+  ASSERT public.exos_wroom_attach(pg_temp.u('e4'), pg_temp.u('c41'), NULL, pg_temp.u('b7'), NULL, a1)->>'attached' = 'true', 'WR18 attach';
+  ASSERT public.exos_wroom_bind(pg_temp.u('e4'), a1, 'cs_wr18_a', pg_temp.u('b7'), NULL), 'WR18 bind';
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid)
+  VALUES ('cs_wr18_a', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'pending', pg_temp.u('b7'));
+  -- The turn lapses while the page is open.
+  UPDATE public.exos_wroom_entries SET admit_expires_at = now() - interval '1 second', view_at = NULL WHERE id = v_id;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b7'), '100.72.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'checking_out' AND (j->>'stripe')::boolean AND NOT j ? 'session_id', 'WR18 open checkout: kept: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id;
+  ASSERT e.state = 'admitted' AND e.admitted_at IS NOT NULL AND e.session_id = 'cs_wr18_a', 'WR18 the place is untouched';
+  PERFORM pg_temp.as_('service_role');
+  ASSERT public.exos_wroom_open_checkout(pg_temp.u('e4'), pg_temp.u('b7')) = 'cs_wr18_a', 'WR18 end_checkout finds it';
+  ASSERT public.exos_wroom_open_checkout(pg_temp.u('e4'), pg_temp.u('b2')) IS NULL, 'WR18 not another account''s';
+  -- The buyer pays on the old page: fulfilment commits, the lapsed turn is spent.
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = 'cs_wr18_a';
+  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id;
+  ASSERT e.state = 'spent' AND e.admitted_at IS NOT NULL, 'WR18 paid on the old page: spent';
+  ASSERT (SELECT status FROM public.exos_checkout_sessions WHERE session_id = 'cs_wr18_a') = 'fulfilled', 'WR18 fulfilment committed';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b7'), '100.72.0.1');
+  j := public.exos_wroom_join(pg_temp.u('e4'));
+  ASSERT j->>'state' = 'waiting' AND j->>'token' ~ '^[0-9a-f]{64}$', 'WR18 then a new place at the back: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_wroom_sessions WHERE entry_id = v_id), 'WR18 the new turn has no old sessions';
+  -- Ended first (end_checkout expired it at Stripe): the join re-places.
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '5 minutes' WHERE id = v_id;
+  PERFORM pg_temp.as_('service_role');
+  a1 := gen_random_uuid();
+  ASSERT public.exos_wroom_attach(pg_temp.u('e4'), pg_temp.u('c41'), NULL, pg_temp.u('b7'), NULL, a1)->>'attached' = 'true', 'WR18 attach 2';
+  ASSERT public.exos_wroom_bind(pg_temp.u('e4'), a1, 'cs_wr18_b', pg_temp.u('b7'), NULL), 'WR18 bind 2';
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid)
+  VALUES ('cs_wr18_b', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'pending', pg_temp.u('b7'));
+  UPDATE public.exos_wroom_entries SET admit_expires_at = now() - interval '1 second', view_at = NULL WHERE id = v_id;
+  UPDATE public.exos_checkout_sessions SET status = 'expired' WHERE session_id = 'cs_wr18_b';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('b7'), '100.72.0.1');
+  ASSERT public.exos_wroom_join(pg_temp.u('e4'))->>'state' = 'waiting', 'WR18 ended: re-placed';
+  -- The Applier's state: re-placed (waiting, admitted_at NULL) with the old
+  -- session still mapped, then paid. Fulfilment commits; the new turn stays.
+  PERFORM pg_temp.as_('postgres');
+  INSERT INTO public.exos_wroom_sessions (session_id, entry_id, org_id, event_id) VALUES ('cs_wr18_c', v_id, pg_temp.u('1'), pg_temp.u('e4'));
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid)
+  VALUES ('cs_wr18_c', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'pending', pg_temp.u('b7'));
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = 'cs_wr18_c';
+  SELECT * INTO e FROM public.exos_wroom_entries WHERE id = v_id;
+  ASSERT e.state = 'waiting' AND e.admitted_at IS NULL, 'WR18 a re-placed turn is left alone; fulfilment committed';
+  -- A forced error in the queue trigger: fulfilment still commits (a warning only).
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '5 minutes' WHERE id = v_id;
+  INSERT INTO public.exos_wroom_sessions (session_id, entry_id, org_id, event_id) VALUES ('cs_wr18_d', v_id, pg_temp.u('1'), pg_temp.u('e4'));
+  INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, quantity, amount_cents, status, buyer_uid)
+  VALUES ('cs_wr18_d', pg_temp.u('e4'), pg_temp.u('c41'), pg_temp.u('1'), 1, 2000, 'pending', pg_temp.u('b7'));
+  ALTER TABLE public.exos_wroom_entries ADD CONSTRAINT wr18_forced CHECK (state <> 'spent') NOT VALID;
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = 'cs_wr18_d';
+  ASSERT (SELECT status FROM public.exos_checkout_sessions WHERE session_id = 'cs_wr18_d') = 'fulfilled', 'WR18 forced error: fulfilment committed';
+  ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_id) = 'admitted', 'WR18 forced error: queue unchanged';
+  ALTER TABLE public.exos_checkout_sessions ENABLE TRIGGER USER;
+  -- ... and the phone RSVP still confirms.
+  INSERT INTO public.exos_phone_rsvps (id, org_id, event_id, tier_id, guest_name, phone, channel, code_hash, code_expires_at)
+  VALUES (v_rsvp, pg_temp.u('1'), pg_temp.u('e4'), pg_temp.u('c42'), 'Guest', '+15555550125', 'sms',
+          encode(extensions.digest(v_rsvp::text || ':135790', 'sha256'), 'hex'), now() + interval '10 minutes');
+  PERFORM pg_temp.as_('anon', NULL, '100.72.0.2');
+  v_tok := public.exos_wroom_join(pg_temp.u('e4'))->>'token';
+  PERFORM pg_temp.as_('postgres');
+  UPDATE public.exos_wroom_entries SET state = 'admitted', admitted_at = now(), admit_expires_at = now() + interval '10 minutes'
+   WHERE token_hash = public._exos_wroom_hash(pg_temp.u('e4'), v_tok);
+  PERFORM pg_temp.as_('service_role', NULL, '198.51.100.1', v_tok);
+  j := public.exos_phone_rsvp_verify(v_rsvp, '135790', 'https://x.test');
+  ASSERT (j->>'ok')::boolean, 'WR18 forced error: the RSVP still confirms: ' || j::text;
+  PERFORM pg_temp.as_('postgres');
+  ALTER TABLE public.exos_wroom_entries DROP CONSTRAINT wr18_forced;
+  ASSERT NOT has_function_privilege('anon', 'public.exos_wroom_open_checkout(uuid,uuid)', 'EXECUTE')
+     AND NOT has_function_privilege('authenticated', 'public.exos_wroom_open_checkout(uuid,uuid)', 'EXECUTE')
+     AND has_function_privilege('service_role', 'public.exos_wroom_open_checkout(uuid,uuid)', 'EXECUTE'), 'WR18 open_checkout: service only';
+  RAISE NOTICE 'OK  WR18 B1: a lapsed turn with its Stripe page open is kept (checking_out, end_checkout finds it); paying then spends it and fulfilment commits; ended first, the join re-places; a re-placed turn and a forced trigger error never stop a fulfilment or an RSVP';
 END $$;
 
 ROLLBACK;

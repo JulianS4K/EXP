@@ -19,6 +19,7 @@
 import { readCapped } from "./api/body.ts";
 import { captchaPassed, captchaVerifyRequest } from "./signup.ts";
 import { parseRedirectOrigins } from "./redirects.ts";
+import type { StripeEnd } from "./wroomCheckout.ts";
 
 export const WROOM_JOIN_MAX_BODY = 4 * 1024;
 export const WROOM_TURNSTILE_ACTION = "wroom";
@@ -40,6 +41,12 @@ export interface WroomJoinDeps {
   log?: (msg: string) => void;
   /** The verified custom domains (exos_public_org_domains) of the event's org. */
   orgDomains?: (eventId: string) => Promise<string[]>;
+  /** end_checkout: the signed-in user's id from their access token, or null. */
+  userId?: (jwt: string) => Promise<string | null>;
+  /** end_checkout: expire our own Stripe session (wroomStripe.ts). */
+  expireStripe?: (sessionId: string) => Promise<StripeEnd>;
+  /** end_checkout: mark our session row expired (pending only). */
+  markExpired?: (sessionId: string) => Promise<void>;
 }
 
 /** The app's hostnames, from EXOS_APP_BASE_URL, EXOS_APP_URL and EXOS_REDIRECT_ORIGINS. */
@@ -94,7 +101,7 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, { allow: "POST, OPTIONS" });
   const text = await readCapped(req, WROOM_JOIN_MAX_BODY);
   if (text === null) return json({ error: "request body is too large" }, 413);
-  let b: { event_id?: unknown; token?: unknown; turnstile_token?: unknown };
+  let b: { event_id?: unknown; token?: unknown; turnstile_token?: unknown; action?: unknown };
   try {
     b = JSON.parse(text || "{}");
   } catch {
@@ -103,6 +110,7 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   if (!b || typeof b !== "object") return json({ error: "invalid JSON" }, 400);
   const eventId = typeof b.event_id === "string" ? b.event_id : "";
   if (!UUID_RE.test(eventId)) return json({ error: "invalid event_id" }, 400);
+  if (b.action === "end_checkout") return await endCheckout(req, eventId, deps);
   const token = typeof b.token === "string" && TOKEN_RE.test(b.token) ? b.token : null;
   const challenge = typeof b.turnstile_token === "string" ? b.turnstile_token.trim() : "";
 
@@ -142,4 +150,38 @@ export async function handleWroomJoin(req: Request, deps: WroomJoinDeps): Promis
   const { data, error } = await deps.rpc("exos_wroom_join_verified", { p_event_id: eventId, p_token: token, p_headers: headers });
   if (error) return json({ error: "could not join the line, try again" }, 503);
   return json(data ?? { state: "off" });
+}
+
+/**
+ * end_checkout: a signed-in buyer whose turn lapsed while a payment page of
+ * theirs was still open (the join answered `checking_out`) ends that page so
+ * the place can be re-placed. The session is the one SQL finds for THIS
+ * account's lapsed place (exos_wroom_open_checkout), never one named by the
+ * client; it is expired on our own Stripe account and marked expired. Stripe
+ * refuses a session that isn't open (paid, or paying with an async method):
+ * then the place is kept (409).
+ */
+async function endCheckout(req: Request, eventId: string, deps: WroomJoinDeps): Promise<Response> {
+  if (!deps.userId || !deps.expireStripe || !deps.markExpired) return json({ error: "not available" }, 503);
+  const jwt = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  const uid = jwt ? await deps.userId(jwt).catch(() => null) : null;
+  if (!uid) return json({ error: "sign in first" }, 401);
+  const headers = {
+    "cf-connecting-ip": req.headers.get("cf-connecting-ip"),
+    "x-forwarded-for": req.headers.get("x-forwarded-for"),
+  };
+  const g = await deps.rpc("exos_wroom_verify_gate", { p_headers: headers });
+  const gate = (g.data ?? {}) as { ok?: boolean; reason?: string };
+  if (gate.reason === "busy") return json({ state: "busy", retry_after_ms: 10000 }, 429, { "retry-after": "10" });
+  if (g.error || !gate.ok) return json({ error: "temporarily unavailable" }, 503, { "retry-after": "10" });
+  const o = await deps.rpc("exos_wroom_open_checkout", { p_event_id: eventId, p_uid: uid });
+  if (o.error) return json({ error: "temporarily unavailable" }, 503);
+  const sid = typeof o.data === "string" ? o.data : null;
+  if (!sid) return json({ ended: false, reason: "none" });
+  const end = await deps.expireStripe(sid);
+  if (end !== "expired") {
+    return json({ error: "that payment page is still in use: finish paying there", reason: "checkout_in_progress" }, 409);
+  }
+  await deps.markExpired(sid);
+  return json({ ended: true });
 }

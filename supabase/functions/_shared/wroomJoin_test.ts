@@ -145,3 +145,47 @@ Deno.test("a missing token: 400, no siteverify, no join; no secret: 503 first; b
   assertEquals((await handleWroomJoin(new Request("https://x.test/", { method: "GET" }), d)).status, 405);
   assertEquals((await handleWroomJoin(new Request("https://x.test/", { method: "OPTIONS" }), d)).status, 204);
 });
+
+Deno.test("end_checkout: signed in only; the account's own open session (from SQL) is expired, then marked; a paid / paying one keeps the place", async () => {
+  const mk = (opts: { uid?: string | null; open?: string | null; end?: "expired" | "complete" | "open" | "unknown"; env?: Record<string, string> }) => {
+    const { d, calls } = deps({ env: opts.env ?? {} });
+    const done: string[] = [];
+    d.userId = (jwt) => Promise.resolve(jwt === "user-jwt" ? (opts.uid === undefined ? "u-1" : opts.uid) : null);
+    d.expireStripe = (id) => { done.push(`expire ${id}`); return Promise.resolve(opts.end ?? "expired"); };
+    d.markExpired = (id) => { done.push(`mark ${id}`); return Promise.resolve(); };
+    const rpc = d.rpc;
+    d.rpc = (fn, args) => fn === "exos_wroom_open_checkout"
+      ? (calls.rpc.push({ fn, args }), Promise.resolve({ data: opts.open === undefined ? "cs_test_old" : opts.open, error: null }))
+      : rpc(fn, args);
+    return { d, calls, done };
+  };
+  const req = (auth?: string) => post({ event_id: EV, action: "end_checkout", session_id: "cs_test_someone_else" },
+    auth ? { authorization: `Bearer ${auth}` } : {});
+  {
+    // No Turnstile secret needed; the session id in the body is ignored.
+    const { d, calls, done } = mk({});
+    const res = await handleWroomJoin(req("user-jwt"), d);
+    assertEquals(res.status, 200);
+    assertEquals(await res.json(), { ended: true });
+    assertEquals(calls.rpc.find((c) => c.fn === "exos_wroom_open_checkout")?.args, { p_event_id: EV, p_uid: "u-1" });
+    assertEquals(done, ["expire cs_test_old", "mark cs_test_old"]);
+    assertEquals(calls.fetch.length, 0);
+  }
+  for (const auth of [undefined, "anon-key"]) {
+    const { d, calls, done } = mk({});
+    assertEquals((await handleWroomJoin(req(auth), d)).status, 401);
+    assertEquals(calls.rpc.length + done.length, 0);
+  }
+  for (const end of ["complete", "open", "unknown"] as const) {
+    const { d, done } = mk({ end });
+    const res = await handleWroomJoin(req("user-jwt"), d);
+    assertEquals(res.status, 409, end);
+    assertEquals((await res.json()).reason, "checkout_in_progress");
+    assertEquals(done, ["expire cs_test_old"], end);
+  }
+  {
+    const { d, done } = mk({ open: null });
+    assertEquals(await (await handleWroomJoin(req("user-jwt"), d)).json(), { ended: false, reason: "none" });
+    assertEquals(done.length, 0);
+  }
+});

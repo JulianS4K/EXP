@@ -85,7 +85,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_drop_signup` (mig 20261118100000) | OK (anon + authenticated; rate limited) | A guest's "Notify me". Always `{ ok, status: 'check_email' }` for a well-formed request to an open list: new, pending, already listed or held by a per-address limit (no enumeration). 10 a minute per network (`_exos_request_ip_bucket`) and 5 per address (lower case, `+tag` folded), before any write; 120 a minute per event answers `{ ok: false, status: 'try_again' }` (per event, nothing about an address); 3 confirm mails a day per address and event, 10 across lists; none when already listed. Stores the address, the consent words and the sanitized first-touch promoter / UTM tags; no IP. The browser token (64 hex) is stored hashed |
 | `exos_drop_confirm`, `exos_drop_leave` (mig 20261118100000) | OK (anon + authenticated; 64-hex token) | The confirm link (two UUIDv4s, only its SHA-256 stored, 7 days) and the leave token (one per mail, only its SHA-256 stored). A link made before the person left, or spent by the leave, answers `{ ok: false }`. Answer ok and the event (and org) name only. The pages take a click, so a mail scanner changes nothing |
 | `exos_drop_confirm_code` (mig 20261118100000) | OK (anon + authenticated; 256-bit browser token) | The 6-digit code from the confirm mail, only with the hashed browser token of the signup that asked for it (the guest-proof pattern, mig 20261105100000): 5 wrong tries spend the code, 20 tries a minute per network, 24 hours. Answers `{ ok }` only, the same false for a wrong code, a spent one or no signup |
-| `exos_wroom_join`, `exos_wroom_status` (mig 20261118120000) | OK (anon + authenticated; rate limited) | The on-sale waiting room, no login needed. One place per account per run (SHA-256 of event + account; resumed from any browser). An account with a confirmed email that is 7+ days old or has a paid order gets a seat (outside the cap, the network shares and Turnstile); any other signed-in account queues under the guest rules. An anonymous place: a token of 32 bytes from `gen_random_bytes` (only SHA-256(event:token) stored), minted only while the room is open, after Turnstile when the room has it on (else `challenge`), 60 a minute per IPv4 / IPv6 /64 and 120 per /48 (`busy`, nothing stored), then the live network shares and the anonymous cap (`full`, with a sign-in offer only when signed out: `signed_in`). A join that finds an existing place answers like a poll (5 s cache, 30 a minute per place). Status answers only the caller's own state and place (positions capped at "10,000+"); an unknown token answers `unknown`, no room or an unpublished event `off`. Both run the admission round on read (bounded: at most 2,000 a round, every 5 s, try-lock). Never another buyer's place, a count of the line, org data, or a token back from status. In the H3 allowlist |
+| `exos_wroom_join`, `exos_wroom_status` (mig 20261118120000) | OK (anon + authenticated; rate limited) | The on-sale waiting room, no login needed. One place per account per run (SHA-256 of event + account; resumed from any browser). An account with a confirmed email that is 30+ days old, or with a 500+ cent order at least 7 days old with an org it doesn't belong to, gets a seat (outside the cap, the network shares and Turnstile); any other signed-in account queues under the guest rules. An anonymous place: a token of 32 bytes from `gen_random_bytes` (only SHA-256(event:token) stored), minted only while the room is open, after Turnstile when the room has it on (else `challenge`), 60 a minute per IPv4 / IPv6 /64 and 120 per /48 (`busy`, nothing stored), then the live network shares and the anonymous cap (`full`, with a sign-in offer only when signed out: `signed_in`). A join that finds an existing place answers like a poll (5 s cache, 30 a minute per place). Status answers only the caller's own state and place (positions capped at "10,000+"); an unknown token answers `unknown`, no room or an unpublished event `off`. Both run the admission round on read (bounded: at most 2,000 a round, every 5 s, try-lock). Never another buyer's place, a count of the line, org data, or a token back from status. In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -1017,6 +1017,19 @@ to review:
   browser's token never stands in for it, and is never keyed on the account (one place per account per run, a
   unique index); an account with no place that uses an admitted guest token makes it the account's place. Two
   parallel conversions of one account: the loser re-reads the winner's place (23505 handled; race 9).
+- **Fulfilment never depends on the queue** (`exos_checkout_sessions` carries a dozen triggers in prod). The queue's
+  session trigger spends only an `admitted` or `expired` (lapsed) turn, keeping `admitted_at` (so
+  `exos_wroom_entries_admit_chk` holds), and the session and phone RSVP triggers wrap their bodies in
+  `EXCEPTION WHEN others THEN RAISE WARNING`: a queue error never rolls back a fulfilment, a webhook retry, a
+  reconcile or an RSVP (WR18 forces one). A place is never re-placed while a checkout of its old turn is open
+  (a pending session bound in the last 35 minutes): the join answers `checking_out`, and the page offers
+  "Cancel that payment page and join again": `exos-wroom-join` `{ action: 'end_checkout' }` (signed in; the session
+  is the one SQL finds for the caller's own lapsed place, `exos_wroom_open_checkout`, never one the client names)
+  expires it on our own Stripe account and marks it expired; Stripe only expires an `open` session (stripe-node
+  16 docs: "A Session can be expired when it is in one of these statuses: open"), so a `complete` one, including
+  one paid with an async method still processing, keeps the place (409). Paid on the old page instead: that lapsed
+  turn is spent and the next join is a new place. On a re-place the place's old session mappings are dropped (a
+  new turn); mappings older than 90 days are deleted by the recount, 500 at a time.
 - **Lock order.** Holds and the RSVP gate lock the place, then the inventory. Fulfilment (inventory first) takes
   the place with `SKIP LOCKED`, so the two never deadlock; if it skips, the gate still sees the paid session
   (`_exos_wroom_paid`) and the turn reads as used.
@@ -1025,12 +1038,13 @@ to review:
   organizer's number). Behind the room's Turnstile the shares scale with the cap under a hard ceiling:
   least(greatest(20, cap / 50), 200), least(greatest(200, cap / 10), 1,000), least(greatest(100, cap / 4), 2,000), so a
   solver farm's cost grows with the room and stays bounded. Full is never a lockout for an established buyer: an
-  account with a confirmed email that is 7+ days old, or that has paid for an order with any org, always gets a
-  seat (`_exos_wroom_seat_eligible`). A newer or unconfirmed account queues as a guest (its place still keyed on
+  account with a confirmed email that is either 30+ days old, or has a fulfilled order of 500+ cents, at least 7 days
+  old, not fully refunded, with an org it is not a member or owner of, always gets a seat
+  (`_exos_wroom_seat_eligible`; a $0.50 self-order through one's own org doesn't count). A newer or unconfirmed account queues as a guest (its place still keyed on
   the account, so a second browser resumes it): fresh accounts can't jump a full line, so mass signups buy nothing
   on the day. The full page offers "Sign in to get a place" only when signed out; signed in it says the line is full
   and keeps trying. Prod appears to have email confirmation off: **turn on Confirm email and the signup CAPTCHA**
-  (Operator settings below) so the 7 days start from a real, confirmed address.
+  (Operator settings below) so the 30 days start from a real, confirmed address.
 - **Idle places.** Not polled for 3 minutes: skipped by admission and not counted. Back within 30 minutes: an
   account's place always, an anonymous one only if its network shares and the cap still have room (re-checked under
   the entry's row lock and the network locks), else it is released for good. Idle 30 minutes: `abandoned` (marked in

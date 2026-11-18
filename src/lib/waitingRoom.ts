@@ -7,7 +7,8 @@
 import { supabase } from './supabase';
 
 /** What the server answers for this browser (exos_wroom_join / _status). */
-export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy' | 'full' | 'challenge';
+export type RoomState = 'off' | 'before' | 'lobby' | 'waiting' | 'admitted' | 'expired' | 'unknown' | 'busy' | 'full' | 'challenge'
+  | 'checking_out';
 
 export interface RoomStatus {
   state: RoomState;
@@ -31,9 +32,12 @@ export interface RoomStatus {
   kind?: 'anon' | 'account';
   /** The server saw a signed-in account ('full': signing in again won't help). */
   signedIn?: boolean;
+  /** 'checking_out': the open checkout is a Stripe page (it can be ended here). */
+  stripe?: boolean;
 }
 
-const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full', 'challenge'];
+const STATES: RoomState[] = ['off', 'before', 'lobby', 'waiting', 'admitted', 'expired', 'unknown', 'busy', 'full', 'challenge',
+  'checking_out'];
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
 function date(v: unknown): Date | null {
@@ -67,6 +71,7 @@ export function parseStatus(raw: unknown): RoomStatus {
     positionCapped: r.position_capped === true,
     kind: r.kind === 'account' || r.kind === 'anon' ? r.kind : undefined,
     signedIn: r.signed_in === true,
+    stripe: r.stripe === true,
   };
 }
 
@@ -132,7 +137,7 @@ export function nextPollMs(s: RoomStatus, rand: () => number = Math.random): num
 /** Does this state hold the buy box back (show the queue instead)? */
 export function blocksBuying(s: RoomStatus | null): boolean {
   return !!s && (s.state === 'lobby' || s.state === 'waiting' || s.state === 'expired' || s.state === 'busy'
-    || s.state === 'unknown' || s.state === 'full' || s.state === 'challenge');
+    || s.state === 'unknown' || s.state === 'full' || s.state === 'challenge' || s.state === 'checking_out');
 }
 
 /** "about 3 minutes" / "less than a minute". */
@@ -217,6 +222,14 @@ export function queueView(s: RoomStatus, fmt: (d: Date) => string = (d) => d.toL
           + ' Sign in to get a place, or wait here: this page tries again every minute.',
         rejoin: false,
       };
+    case 'checking_out':
+      return {
+        heading: 'Your last checkout is still open',
+        detail: s.stripe
+          ? 'Your turn ran out while a payment page was open. Finish paying there, or cancel that page to join the line again, at the back.'
+          : 'Your turn ran out while a payment was open. Finish it there, or wait until it times out (up to 30 minutes) to join the line again.',
+        rejoin: false,
+      };
     case 'unknown':
       return { heading: 'Joining the line', detail: 'One moment.', rejoin: false };
     case 'challenge':
@@ -261,6 +274,24 @@ export async function joinWithChallenge(eventId: string, turnstileToken: string)
   const s = parseStatus(data);
   if (s.token) saveToken(eventId, s.token);
   return s;
+}
+
+/**
+ * End the open Stripe page of this account's lapsed turn (exos-wroom-join
+ * end_checkout), so the place can be re-placed. 'ended' (or 'none': nothing
+ * open any more): join again. 'in_use': it is paid or being paid; keep it.
+ */
+export async function endCheckout(eventId: string): Promise<'ended' | 'none' | 'in_use'> {
+  const { data, error } = await supabase.functions.invoke('exos-wroom-join', {
+    body: { event_id: eventId, action: 'end_checkout' },
+  });
+  if (error) {
+    let reason = '';
+    try { reason = ((await (error as { context?: Response }).context?.json()) as { reason?: string })?.reason ?? ''; } catch { /* not JSON */ }
+    if (reason === 'checkout_in_progress') return 'in_use';
+    throw new Error(error.message);
+  }
+  return (data as { ended?: boolean } | null)?.ended ? 'ended' : 'none';
 }
 
 // --- RPCs -------------------------------------------------------------------
