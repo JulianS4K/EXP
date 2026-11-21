@@ -40,7 +40,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
 public feeds): `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
-`exos-commerce`, `exos-conversions-drain`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
+`exos-commerce`, `exos-conversions-drain`, `exos-discord`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
 `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
 `exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,
 `exos-payouts`, `exos-paypal`, `exos-posh-webhook`, `exos-promoter-payouts`, `exos-reconcile-checkouts`,
@@ -67,6 +67,8 @@ everything else with `--no-verify-jwt`.
 | `EXOS_OAUTH_ISSUER`, `EXOS_OAUTH_DCR` | `exos-oauth`, `exos-mcp` (docs/developer-platform.md) | issuer defaults to `<SUPABASE_URL>/functions/v1/exos-oauth`; dynamic client registration stays off unless `EXOS_OAUTH_DCR=on` |
 | `EXOS_LUMA_ENABLED` | Luma at all | `on` to let Exos call Luma's API (needs the organizer's Luma Plus). Off: Luma is plugged in but never called |
 | `EXOS_LUMA_WRITES` | Luma event mirroring + capacity + comps | `on` to allow; each org also switches it on |
+| `EXOS_DISCORD_ENABLED`, `EXOS_DISCORD_WRITES` | Discord promotion (`docs/discord.md`) | `ENABLED=on` shows it at all (off: hidden, `exos-discord` answers 503); `WRITES=on` lets it post / make Discord events, and each org's owner also switches it on. Otherwise a dry run |
+| `DISCORD_APPLICATION_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` | "Add Exos bot to your server" | your Discord application (`docs/discord.md`). Unset: only the channel webhook is offered. Optional `DISCORD_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-discord/callback`) |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 
@@ -121,6 +123,7 @@ An org can serve its storefront on its own domain (Org settings → Website → 
 | `exos-eventbrite-sync-2min` | 2 min (odd) | `exos-eventbrite-sync/cron` |
 | `exos-integrations-sync-2min` | 2 min (even) | `exos-integrations/cron` (pretix, hi.events, Luma door sync) |
 | `exos-channel-sync-2min` | 2 min (odd) | `exos-channel-sync/cron` (Eventbrite / Luma mirrors, Luma's count) |
+| `exos-discord-2min` | 2 min | `exos-discord/cron` (queued Discord posts, Discord events). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-discord-2min';` |
 | `exos-sms-drain-1min` | 1 min | `exos-sms-drain/cron` (queued SMS; dry run unless `EXOS_SMS_LIVE=on`) |
 | `exos-event-import-check-15min` | 15 min (:07) | `exos-event-import/cron` (re-reads imported Eventbrite events: sold out, moved, cancelled). Created **inactive**: `SELECT cron.alter_job(jobid, active := true) FROM cron.job WHERE jobname = 'exos-event-import-check-15min';` |
 | mail, webhooks, conversions drains; reconcile; geocode refresh; feeds | see each migration's cron section | |
@@ -151,5 +154,6 @@ legitimate requests being limited together, never as no limit.
 
 Ticketing platforms and marketplaces are **read**. pretix, hi.events, Luma and the marketplaces are only read;
 Eventbrite and Luma are written only for the organizer's own events mirrored from Exos, behind the org's switch and
-the `EXOS_*_WRITES` flags. Don't add order, hold, price or inventory writes to a third
+the `EXOS_*_WRITES` flags. Discord is written only in the organizer's own server (its scheduled events and its
+channel webhook), behind the org's switch and `EXOS_DISCORD_WRITES`. Don't add order, hold, price or inventory writes to a third
 party (CLAUDE.md).

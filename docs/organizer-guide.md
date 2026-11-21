@@ -591,6 +591,14 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   with a link to buy there. The event dashboard says **Last call: selling only on …** while it is on.
   Eventbrite can't set a ticket class to 0: one with no sales shows an error asking you to hide or end it there.
 
+### Promoting on Discord (your own server)
+
+When your Exos server has Discord switched on, **Org settings → Discord** takes a channel webhook (Discord: the
+channel's settings → Integrations → Webhooks → Copy Webhook URL) for announcements, and **Add Exos bot to your
+server** for Discord events. On an event, **Promote on Discord** posts the announcement or a reminder (once each,
+never with a mention) and **Show on Discord** keeps the event on your server's Events tab in step with Exos. Until
+an owner turns on sending, everything is a dry run. Details: `docs/discord.md`.
+
 ### Selling on Posh too (webhooks + a capped Posh tier)
 
 Posh has no API for organizers, so Exos can't read or change a Posh event. What Posh does have is webhooks, so Posh

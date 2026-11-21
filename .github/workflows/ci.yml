@@ -85,10 +85,10 @@ jobs:
           done
           exit $fail
 
-      - name: Deno tests (ssrf, ticket backends, sms, posh, group pages)
+      - name: Deno tests (ssrf, ticket backends, channels, discord, sms, posh, group pages)
         # --allow-read: groupGate_test.ts reads exos-checkout's source to check the
         # group-pay-off gate comes before any DB claim or Stripe call.
-        run: deno test --node-modules-dir=none --allow-read=supabase/functions/exos-checkout supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts
+        run: deno test --node-modules-dir=none --allow-read=supabase/functions/exos-checkout supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/channels/discord_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)
