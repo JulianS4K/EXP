@@ -13,7 +13,7 @@ export default function S4kRoutePanel({ eventId, route, onChanged, maxCapacity, 
   eventId: string;
   route: DistributionRoute;
   onChanged: (route: DistributionRoute) => void;
-  /** The event's max capacity (lib/marketplace/resaleGate): S4K needs more than the free tier's 150. */
+  /** The event's max capacity (lib/marketplace/resaleGate): S4K needs 150 or more (the free tier is under 150). */
   maxCapacity?: number;
   /** Big enough, but not opted in to resale yet (ResaleConsentPanel). */
   optInNeeded?: boolean;

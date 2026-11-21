@@ -294,7 +294,8 @@ for m in \
   20261118110000_exos_own_cron_helpers \
   20261118120000_exos_waiting_room \
   20261119130000_exos_mcp_writes \
-  20261121100000_exos_channel_risks; do
+  20261121100000_exos_channel_risks \
+  20261121133000_exos_free_tier_149; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -548,7 +549,8 @@ for m in \
          20261118110000_exos_own_cron_helpers \
          20261118120000_exos_waiting_room \
          20261119130000_exos_mcp_writes \
-         20261121100000_exos_channel_risks; do
+         20261121100000_exos_channel_risks \
+         20261121133000_exos_free_tier_149; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"

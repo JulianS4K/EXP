@@ -18,8 +18,9 @@
 // org's exos_org_billing.fee_free_until (signup + 6 months). Card processing
 // still passes through at checkout.
 //
-// The free tier (operator, 2026-10-29): events with a max capacity of 150 or
-// less pay no Exos fee at all (exosFeeBpsForEvent below). No commission.
+// The free tier (operator, 2026-10-29; under 150 since 2026-11-21): events
+// with a max capacity under 150 pay no Exos fee at all (exosFeeBpsForEvent
+// below). No commission.
 //
 // Buyers never pay an Exos fee. Rounded to the cent, half up. The SQL side reads the same rate from
 // exos_platform_fee_bps(); change both together.
@@ -39,14 +40,16 @@ export function exosFeeBpsAt(feeFreeUntil: string | null | undefined, now: Date,
 }
 
 /**
- * The free tier (operator, 2026-10-29): an event whose max capacity is 150 or
- * less pays no Exos fee (and is never resold). The SQL side is
+ * The free tier (operator, 2026-10-29): an event whose max capacity is under
+ * 150 pays no Exos fee (and is never resold); 150 or more is paid (operator
+ * 2026-11-21, "150 venue cap or more is paid": the inclusive maximum is 149,
+ * mig 20261121133000). The SQL side is
  * exos_event_is_free_tier / exos_event_fee_bps (mig 20261029090000); the
  * operator can change both numbers there (exos_platform_settings
  * free_tier_max_capacity / free_tier_fee_bps), and exos_event_fee_terms hands
  * them to the checkout with the event's max capacity.
  */
-export const FREE_TIER_MAX_CAPACITY = 150;
+export const FREE_TIER_MAX_CAPACITY = 149;
 export const FREE_TIER_FEE_BPS = 0;
 
 export interface FreeTierTerms {
@@ -69,7 +72,7 @@ export function isFreeTier(maxCapacity: number | null | undefined, cutoff: numbe
 /**
  * The size the free tier is judged on for one order: the larger of the
  * event's max capacity and what it will have sold with this order (tickets
- * already sold + this order's admissions). An event capped at 150 that sells
+ * already sold + this order's admissions). An event capped at 149 that sells
  * past it (bypass vouchers, comps, box office) leaves the free tier with the
  * order that crosses. `null` (no max) stays `null`: never the free tier.
  */

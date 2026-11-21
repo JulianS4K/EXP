@@ -89,7 +89,7 @@ What follows for us:
 
 | Pain today | What Exos does |
 |---|---|
-| Getting people in the room (venues' #1 challenge) | One listing to the storefront, Instagram checkout, Google, AI assistants, the discovery listings queue, and opt-in channels over 150 capacity |
+| Getting people in the room (venues' #1 challenge) | One listing to the storefront, Instagram checkout, Google, AI assistants, the discovery listings queue, and opt-in channels at 150 capacity or more |
 | Fans balk at buyer fees at checkout | All-in price; the platform fee comes out of the payout |
 | Checkout breaks inside Instagram | Checkout built for the Instagram and Facebook in-app browsers (item 7a) |
 | Screenshot and forwarded-ticket fraud | Barcodes that rotate every 30 s and are signed per ticket |
@@ -103,9 +103,9 @@ What follows for us:
 - **No buyer fees.** The Exos fee is **3%**, net to Exos, paid by the organizer out of the payout. Card processing
   (Stripe's 2.9% + 30¢) passes through to the organizer, as with any card sale. A $40 ticket pays out $37.34.
 - **First 6 months free** for every new org: no Exos fee, only card processing.
-- **Free tier:** events with a max capacity of 150 or less never pay an Exos fee (and are never listed on resale
-  channels). This is the DIY and small-room wedge.
-- **Marketplace sales** (events over 150 that opt in): 3% of what the marketplace pays; a $40 ticket pays out
+- **Free tier:** events with a max capacity under 150 never pay an Exos fee (and are never listed on resale
+  channels); 150 or more is paid. This is the DIY and small-room wedge.
+- **Marketplace sales** (events of 150 or more that opt in): 3% of what the marketplace pays; a $40 ticket pays out
   $38.80.
 - Exos staff at the door for the first event.
 

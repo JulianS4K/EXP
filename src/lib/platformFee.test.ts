@@ -99,15 +99,16 @@ describe('checkoutFeeSplit: the application fee, broken down for the order recor
   });
 });
 
-describe('the free tier: max capacity 150 or less pays no Exos fee (operator, 2026-10-29)', () => {
+describe('the free tier: max capacity under 150 pays no Exos fee (operator, 2026-10-29; 150 or more paid, 2026-11-21)', () => {
   const now = new Date('2027-06-01T00:00:00Z');
   const past = '2027-01-01T00:00:00Z'; // the free months are over
   const future = '2027-09-01T00:00:00Z';
 
-  it('is 150 or less, and an event with no max is never the free tier', () => {
-    expect(FREE_TIER_MAX_CAPACITY).toBe(150);
+  it('is under 150 (149 or less), and an event with no max is never the free tier', () => {
+    expect(FREE_TIER_MAX_CAPACITY).toBe(149);
     expect(FREE_TIER_FEE_BPS).toBe(0);
-    expect(isFreeTier(150)).toBe(true);
+    expect(isFreeTier(149)).toBe(true);
+    expect(isFreeTier(150)).toBe(false);
     expect(isFreeTier(151)).toBe(false);
     expect(isFreeTier(0)).toBe(true); // a bounded event with nothing in it
     expect(isFreeTier(null)).toBe(false);
@@ -117,36 +118,42 @@ describe('the free tier: max capacity 150 or less pays no Exos fee (operator, 20
     expect(isFreeTier(0, -1)).toBe(false); // -1: no free tier
   });
 
+  it('150 is paid and 149 is free (operator 2026-11-21: "150 venue cap or more is paid")', () => {
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(300);
+  });
+
   it('charges 0 on the free tier and 3% over it, after the free months', () => {
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(0);
-    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(300);
     expect(exosFeeBpsForEvent({ maxCapacity: null, feeFreeUntil: past, now })).toBe(300);
-    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: future, now })).toBe(0);
-    expect(exosFeeBpsForEvent({ maxCapacity: 151, feeFreeUntil: past, now, bps: 250 })).toBe(250);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: future, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, bps: 250 })).toBe(250);
   });
 
   it('takes the operator\'s numbers', () => {
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierMaxCapacity: 100 })).toBe(300);
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: 50 })).toBe(50);
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: future, now, freeTierFeeBps: 50 })).toBe(0);
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierFeeBps: -5 })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierMaxCapacity: 100 })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierMaxCapacity: 150 })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierFeeBps: 50 })).toBe(50);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: future, now, freeTierFeeBps: 50 })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierFeeBps: -5 })).toBe(0);
   });
 
-  it('ends with the order that sells past 150, and stays ended (bypass vouchers, comps, box office)', () => {
-    expect(freeTierSize(150, 0, 0)).toBe(150);
-    expect(freeTierSize(150, 148, 4)).toBe(152);
+  it('ends with the order that sells past 149, and stays ended (bypass vouchers, comps, box office)', () => {
+    expect(freeTierSize(149, 0, 0)).toBe(149);
+    expect(freeTierSize(149, 147, 4)).toBe(151);
     expect(freeTierSize(null, 10, 2)).toBeNull();
     const at = (sold: number, qty: number) =>
-      exosFeeBpsForEvent({ maxCapacity: 150, soldCount: sold, orderAdmissions: qty, feeFreeUntil: past, now });
-    expect(at(146, 4)).toBe(0); // 150: still free
-    expect(at(147, 4)).toBe(300); // 151: this order pays
-    expect(at(151, 1)).toBe(300); // already past: every later order pays
-    expect(at(149, 1)).toBe(0);
-    expect(at(150, 1)).toBe(300);
+      exosFeeBpsForEvent({ maxCapacity: 149, soldCount: sold, orderAdmissions: qty, feeFreeUntil: past, now });
+    expect(at(145, 4)).toBe(0); // 149: still free
+    expect(at(146, 4)).toBe(300); // 150: this order pays
+    expect(at(150, 1)).toBe(300); // already past: every later order pays
+    expect(at(148, 1)).toBe(0);
+    expect(at(149, 1)).toBe(300);
     // A table order counts its party size (the server sends admissions).
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, soldCount: 140, orderAdmissions: 2 * 6, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, soldCount: 139, orderAdmissions: 2 * 6, feeFreeUntil: past, now })).toBe(300);
     // Free months still win.
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, soldCount: 400, orderAdmissions: 1, feeFreeUntil: future, now })).toBe(0);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, soldCount: 400, orderAdmissions: 1, feeFreeUntil: future, now })).toBe(0);
   });
 
   it('leaves only the card fee on a free-tier checkout', () => {

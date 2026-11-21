@@ -2,10 +2,11 @@
 // rule is exos_event_max_capacity / exos_event_is_free_tier /
 // exos_resale_unlocked, and the operator can change the number there):
 //
-//   * max capacity 150 or less (with a bounded capacity) is the FREE TIER: no
+//   * max capacity under 150 (with a bounded capacity) is the FREE TIER: no
 //     Exos fee, and never listed on resale marketplaces or S4K;
-//   * over 150, resale needs the organizer's opt-in for the event
-//     (ResaleConsentPanel, exos_set_resale_consent).
+//   * 150 or more, resale needs the organizer's opt-in for the event
+//     (ResaleConsentPanel, exos_set_resale_consent). Operator 2026-11-21:
+//     "150 venue cap or more is paid" (FREE_TIER_MAX_CAPACITY = 149).
 //
 // This mirrors the capacity part so the editors can say why marketplaces and
 // S4K are off before a save is refused. The opt-in is the server's to know
@@ -50,7 +51,7 @@ export function resaleUnlocked(maxCapacity: number, cutoff = FREE_TIER_MAX_CAPAC
 /** Why resale is off for a capacity this small (`bounded` false: no max, so not the free tier). */
 export function resaleLockedText(maxCapacity: number, cutoff = FREE_TIER_MAX_CAPACITY, bounded = true): string {
   if (!bounded) {
-    return `Resale marketplaces and S4K need a max capacity over ${cutoff}. This event's capped ticket types add up to ${maxCapacity}.`;
+    return `Resale marketplaces and S4K need a max capacity of ${cutoff + 1} or more. This event's capped ticket types add up to ${maxCapacity}.`;
   }
-  return `Free tier: events with a max capacity of ${cutoff} or less pay no Exos fee and are never listed on resale marketplaces or S4K. This event's is ${maxCapacity}.`;
+  return `Free tier: events with a max capacity under ${cutoff + 1} pay no Exos fee and are never listed on resale marketplaces or S4K. This event's is ${maxCapacity}.`;
 }

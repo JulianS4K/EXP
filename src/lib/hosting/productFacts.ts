@@ -70,8 +70,9 @@ export const PRODUCT_FACTS: ProductFact[] = [
   },
   {
     id: 'free-tier', audience: 'organizer', status: 'at_launch',
-    claim: `Events with a capacity of ${FREE_TIER_MAX_CAPACITY} or less never pay an Exos fee, only card processing.`,
-    code: ['supabase/functions/_shared/platformFee.ts', 'supabase/migrations/20261029090000_exos_free_tier_resale_consent.sql'],
+    claim: `Events with a capacity under ${FREE_TIER_MAX_CAPACITY + 1} never pay an Exos fee, only card processing.`,
+    code: ['supabase/functions/_shared/platformFee.ts', 'supabase/migrations/20261029090000_exos_free_tier_resale_consent.sql',
+      'supabase/migrations/20261121133000_exos_free_tier_149.sql'],
   },
 
   // ---- Selling ------------------------------------------------------------

@@ -1,9 +1,10 @@
 // The organizer's resale opt-in (mig 20261029090000): events over the free
-// tier (max capacity over 150) are resold only after an owner or manager opts
+// tier (max capacity 150 or more) are resold only after an owner or manager opts
 // in for that event, having read the text below. The server records who,
 // when, this text's version and the event's max capacity, and revokes it if
-// the max capacity drops to 150 or less.
+// the max capacity drops under 150.
 
+import { FREE_TIER_MAX_CAPACITY } from '../../../supabase/functions/_shared/platformFee.ts';
 import { supabase } from '../supabase';
 import { isMissingRpc } from '../door/net';
 
@@ -43,7 +44,7 @@ export function parseSalesRules(raw: unknown): SalesRules | null {
   return {
     maxCapacity: num(r.max_capacity),
     capacityBounded: r.capacity_bounded === true,
-    freeTierMaxCapacity: num(r.free_tier_max_capacity, 150),
+    freeTierMaxCapacity: num(r.free_tier_max_capacity, FREE_TIER_MAX_CAPACITY),
     freeTier: r.free_tier === true,
     consentRequired: r.consent_required !== false,
     consentVersion: typeof r.consent_version === 'string' ? r.consent_version : '',
@@ -66,10 +67,10 @@ export function parseSalesRules(raw: unknown): SalesRules | null {
 /** What the panel shows: one line on where the event stands. */
 export function salesRulesLine(r: SalesRules): string {
   if (r.freeTier) {
-    return `Free tier: a max capacity of ${r.maxCapacity} (${r.freeTierMaxCapacity} or less). No Exos fee, and it is never listed on resale marketplaces or S4K.`;
+    return `Free tier: a max capacity of ${r.maxCapacity} (under ${r.freeTierMaxCapacity + 1}). No Exos fee, and it is never listed on resale marketplaces or S4K.`;
   }
   if (r.maxCapacity <= r.freeTierMaxCapacity) {
-    return `Resale needs a max capacity over ${r.freeTierMaxCapacity}. This event's capped ticket types add up to ${r.maxCapacity}; give every ticket type a cap or set an overall cap.`;
+    return `Resale needs a max capacity of ${r.freeTierMaxCapacity + 1} or more. This event's capped ticket types add up to ${r.maxCapacity}; give every ticket type a cap or set an overall cap.`;
   }
   if (r.resaleUnlocked && r.consent) return 'Resale is on for this event.';
   if (r.resaleUnlocked) return 'Resale is available for this event.';

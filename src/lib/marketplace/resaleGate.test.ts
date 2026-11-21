@@ -26,20 +26,21 @@ describe('resale gate (migs 20261014140000, 20261029090000)', () => {
     expect(eventCapacityBounded(120, [100, 0])).toBe(true);
     expect(eventCapacityBounded(0, [])).toBe(false);
   });
-  it('the line is 150: free tier at or under, resale (with the opt-in) over', () => {
-    expect(FREE_TIER_MAX_CAPACITY).toBe(150);
-    expect(RESALE_MIN_CAPACITY).toBe(151);
-    expect(resaleUnlocked(150)).toBe(false);
-    expect(resaleUnlocked(151)).toBe(true);
-    expect(eventIsFreeTier(150, true)).toBe(true);
+  it('the line is 150: free tier under it, resale (with the opt-in) at 150 or more', () => {
+    expect(FREE_TIER_MAX_CAPACITY).toBe(149);
+    expect(RESALE_MIN_CAPACITY).toBe(150);
+    expect(resaleUnlocked(149)).toBe(false);
+    expect(resaleUnlocked(150)).toBe(true);
+    expect(eventIsFreeTier(149, true)).toBe(true);
+    expect(eventIsFreeTier(150, true)).toBe(false);
     expect(eventIsFreeTier(151, true)).toBe(false);
     expect(eventIsFreeTier(100, false)).toBe(false); // no max: not the free tier
     expect(eventIsFreeTier(120, true, 99)).toBe(false);
-    expect(resaleLockedText(100, 150, false)).toBe(
-      "Resale marketplaces and S4K need a max capacity over 150. This event's capped ticket types add up to 100.",
+    expect(resaleLockedText(100, 149, false)).toBe(
+      "Resale marketplaces and S4K need a max capacity of 150 or more. This event's capped ticket types add up to 100.",
     );
     expect(resaleLockedText(120)).toBe(
-      "Free tier: events with a max capacity of 150 or less pay no Exos fee and are never listed on resale marketplaces or S4K. This event's is 120.",
+      "Free tier: events with a max capacity under 150 pay no Exos fee and are never listed on resale marketplaces or S4K. This event's is 120.",
     );
   });
 });

@@ -24,7 +24,7 @@
 //
 // Fee: 3% of every transaction net after Stripe, from the organizer
 // (operator, 2026-09-28): the application fee is 3% + Stripe's card fee.
-// Free tier (max capacity 150 or less, operator 2026-10-29): no Exos fee,
+// Free tier (max capacity under 150, operator 2026-10-29 / 2026-11-21): no Exos fee,
 // only the card fee (exos_event_fee_terms + exosFeeBpsForEvent).
 // TODO(operator) before go-live: confirm the charge model (destination vs
 // direct) and that 'standard' Connect accounts are the right type.
@@ -781,7 +781,7 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   const feeFreeUntil = (billing as { fee_free_until?: string } | null)?.fee_free_until;
   const feeNow = new Date();
   // The free tier (mig 20261029090000): no Exos fee on an event with a max
-  // capacity of 150 or less. Before that migration (no RPC) the event is
+  // capacity under 150. Before that migration (no RPC) the event is
   // charged as before.
   // Judged on max(max capacity, sold + this order): selling past the cap
   // (e.g. a bypass voucher) ends the free tier with the order that crosses.
