@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientIp, hashIp, normalizeGuestEmail } from '../../supabase/functions/_shared/guest.ts';
+import { clientIp, hashIp, networkOf, normalizeGuestEmail } from '../../supabase/functions/_shared/guest.ts';
 import { guestCheckoutAllowed, isGuestEmail } from './guestCheckout';
 
 describe('normalizeGuestEmail', () => {
@@ -35,6 +35,36 @@ describe('hashIp', () => {
     expect(a).not.toBe(await hashIp('203.0.113.7', 's2'));
     expect(a).not.toContain('203');
     expect(await hashIp(null, 's1')).toBeNull();
+  });
+});
+
+// S2 (review of #132): a guest's limits are per network; an IPv6 client holds a
+// whole /64, so its /64 is the unit (IPv4 stays the full address).
+describe('networkOf / hashIp per network', () => {
+  it('keeps IPv4 (and IPv4-mapped IPv6) as the address', () => {
+    expect(networkOf('203.0.113.7')).toBe('203.0.113.7');
+    expect(networkOf('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    expect(networkOf('unknown')).toBe('unknown');
+  });
+  it('reduces IPv6 to its /64, however it is written', () => {
+    const n = 'v6:2001:db8:85a3:42';
+    expect(networkOf('2001:db8:85a3:42::1')).toBe(n);
+    expect(networkOf('2001:0db8:85a3:0042:ffff:ffff:ffff:fffe')).toBe(n);
+    expect(networkOf('[2001:DB8:85A3:42::abcd]')).toBe(n);
+    expect(networkOf('2001:db8:85a3:42:1:2:3:4%eth0')).toBe(n);
+    expect(networkOf('2001:db8::1')).toBe('v6:2001:db8:0:0');
+    expect(networkOf('::1')).toBe('v6:0:0:0:0');
+    expect(networkOf('64:ff9b::192.0.2.33')).toBe('v6:64:ff9b:0:0');
+    expect(networkOf('2001:db8:85a3:43::1')).not.toBe(n);
+    // Not an address: unchanged (still hashed, still one bucket).
+    expect(networkOf('1:2:3')).toBe('1:2:3');
+    expect(networkOf('1::2::3')).toBe('1::2::3');
+  });
+  it('two /128s in one /64 share a bucket; another /64 does not', async () => {
+    const a = await hashIp('2001:db8:85a3:42::1', 's');
+    expect(a).toBe(await hashIp('2001:db8:85a3:42:dead:beef:0:7', 's'));
+    expect(a).not.toBe(await hashIp('2001:db8:85a3:43::1', 's'));
+    expect(await hashIp('198.51.100.1', 's')).not.toBe(await hashIp('198.51.100.2', 's'));
   });
 });
 

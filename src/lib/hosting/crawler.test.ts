@@ -25,4 +25,17 @@ describe('isLinkCrawler', () => {
     expect(isLinkCrawler('')).toBe(false);
     expect(isLinkCrawler(null)).toBe(false);
   });
+
+  // Google Ads checks every ad destination with AdsBot (no "Googlebot" in its name).
+  it('spots Google Ads\' AdsBot, desktop and mobile', () => {
+    expect(isLinkCrawler('AdsBot-Google (+http://www.google.com/adsbot.html)')).toBe(true);
+    expect(isLinkCrawler('Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Mobile Safari/537.36 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)')).toBe(true);
+    expect(isLinkCrawler('Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Mobile/15E148 Safari/604.1 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)')).toBe(true);
+  });
+
+  it('AI fetchers count only with ai (EXOS_AI_DISCOVERY); search and ad crawlers always', () => {
+    expect(isLinkCrawler('Mozilla/5.0 (compatible; ChatGPT-User/1.0; +https://openai.com/bot)')).toBe(false);
+    expect(isLinkCrawler('Mozilla/5.0 (compatible; ChatGPT-User/1.0; +https://openai.com/bot)', { ai: true })).toBe(true);
+    expect(isLinkCrawler('AdsBot-Google (+http://www.google.com/adsbot.html)', { ai: false })).toBe(true);
+  });
 });

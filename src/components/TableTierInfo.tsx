@@ -52,11 +52,11 @@ export default function TableTierInfo({
   const each = price && price > 0 ? depositPerPerson(price, info.partySize) : 0;
   return (
     <span className="flex flex-col gap-1 mb-3">
-      <span className="inline-flex items-center gap-2 type text-[10px] uppercase tracking-widest text-brand-primary">
+      <span className="inline-flex items-center gap-2 type text-xs uppercase tracking-widest text-brand-primary">
         <Users className="w-3 h-3" aria-hidden="true" />
         {tableSummary(info, currency)}
       </span>
-      <span className="type text-[9px] text-white/40 uppercase tracking-widest">
+      <span className="type text-xs text-white/40 uppercase tracking-widest">
         {info.partySize} tickets per table, all to you. Send them to your group.
         {each > 0 ? ` Deposit ${formatCurrency(each, currency)} per person.` : ''}
         {info.minSpendCents ? ' Minimum spend is paid at the venue.' : ''}

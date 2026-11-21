@@ -17,6 +17,9 @@ const CRAWLER_UA_TOKENS = [
   'pinterest',
   'redditbot',
   'googlebot',
+  // Google Ads' landing-page checks (AdsBot-Google, AdsBot-Google-Mobile):
+  // an ad's destination must be crawlable by it; no "googlebot" in its name.
+  'adsbot-google',
   'google-inspectiontool',
   'bingbot',
   'applebot', // Apple / Siri / Spotlight + iMessage
@@ -30,7 +33,8 @@ const CRAWLER_UA_TOKENS = [
 /**
  * `ai`: also treat AI crawlers and fetchers (ChatGPT, Claude, Perplexity…)
  * as crawlers. Off until launch (server.ts EXOS_AI_DISCOVERY), so until then
- * they keep getting the plain shell.
+ * they keep getting the plain shell. The crawlers above always get the tags
+ * and the plain-HTML event page (seo.ts eventBody).
  */
 export function isLinkCrawler(userAgent: string | null | undefined, opts: { ai?: boolean } = {}): boolean {
   if (!userAgent) return false;

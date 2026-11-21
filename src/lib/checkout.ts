@@ -31,15 +31,31 @@ export function recordBody(input: CheckoutRecordInput): { ad_ids?: AdIds; consen
   };
 }
 
-/** The function's own error message ("sold out", "purchase limit…"), if any. */
+/** An exos-checkout refusal: its own message ("sold out", "purchase limit…"), and its reason code if any. */
+export class CheckoutError extends Error {
+  /** e.g. 'sign_in': a guest's code needs an account (EventDetails opens sign-in). */
+  readonly reason: string | null;
+  constructor(message: string, reason: string | null) {
+    super(message);
+    this.name = 'CheckoutError';
+    this.reason = reason;
+  }
+}
+
+/** True when checkout refused because the buyer must sign in first (a guest's code). */
+export function needsSignIn(err: unknown): boolean {
+  return err instanceof CheckoutError && err.reason === 'sign_in';
+}
+
 async function functionError(error: unknown, fallback: string): Promise<Error> {
-  let payload: { error?: string } | null = null;
+  let payload: { error?: string; reason?: string } | null = null;
   try {
     payload = await (error as { context?: Response }).context?.json();
   } catch {
     /* not JSON */
   }
-  return new Error(payload?.error || (error as { message?: string })?.message || fallback);
+  const reason = typeof payload?.reason === 'string' ? payload.reason : null;
+  return new CheckoutError(payload?.error || (error as { message?: string })?.message || fallback, reason);
 }
 
 /** Create a Checkout Session for an event/tier; returns the Stripe-hosted URL. */

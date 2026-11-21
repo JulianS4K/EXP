@@ -12,6 +12,8 @@ import { MapPin, Calendar, CheckCircle2, UserPlus } from 'lucide-react';
 import { formatCurrency } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
 import { formatInTz } from '../lib/datetime';
+import { eventImageOr } from '../lib/fallbackImage';
+import { followerLabel } from '../lib/socialProof';
 
 export default function OrganizerProfile() {
   const { id } = useParams();
@@ -110,7 +112,9 @@ export default function OrganizerProfile() {
                </div>
                <div className="mb-2">
                  <h1 className="disp text-5xl tracking-tight leading-none uppercase" style={{ transform: 'skewX(-4deg)' }}>{organizer?.displayName}</h1>
-                 <p className="type text-brand-primary text-[11px] uppercase tracking-widest mt-2">{followersCount} Followers</p>
+                 {followerLabel(followersCount) && (
+                   <p className="type text-brand-primary text-xs uppercase tracking-widest mt-2">{followerLabel(followersCount)}</p>
+                 )}
                </div>
              </div>
              <div>
@@ -160,7 +164,7 @@ export default function OrganizerProfile() {
                    {events.map(event => (
                        <Link key={event.id} to={`/event/${event.id}`} className="bg-[#111] border border-white/10 overflow-hidden group hover:border-brand-primary/60 transition-colors">
                            <div className="aspect-video relative overflow-hidden">
-                              <img src={event.image || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30'} alt={event.title} className="xerox w-full h-full object-cover transition-all duration-700" />
+                              <img src={eventImageOr(event.image)} alt={event.title} className="xerox w-full h-full object-cover transition-all duration-700" />
                               <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent opacity-80"></div>
                               <div className="absolute bottom-4 left-4 right-4">
                                  <h3 className="disp text-2xl text-white uppercase tracking-tight leading-none mb-1">{event.title}</h3>

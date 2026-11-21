@@ -37,6 +37,7 @@ import { listMyInvoices, type MyInvoice } from '../lib/invoicesApi';
 import { formatDocNumber, invoicePath } from '../lib/invoices';
 import OrderProofPanel from '../components/OrderProofPanel';
 import { takeProofTokenFromUrl } from '../lib/orderProof';
+import { eventImageOr } from '../lib/fallbackImage';
 
 export default function MyTickets() {
   const { user, openAuth } = useAuth();
@@ -441,7 +442,7 @@ export default function MyTickets() {
                 >
                   <Link to={`/ticket/${mainTicket.id}`} className="block h-56 relative overflow-hidden">
                     <img
-                      src={event?.image || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600'}
+                      src={eventImageOr(event?.image)}
                       alt=""
                       className="xerox w-full h-full object-cover duration-700"
                     />
@@ -526,7 +527,7 @@ export default function MyTickets() {
                 <div key={ev.id} className="bg-[#111] group relative">
                   <Link to={`/event/${ev.id}`} className="block h-44 relative overflow-hidden">
                     <img
-                      src={ev.image || 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=600'}
+                      src={eventImageOr(ev.image)}
                       alt=""
                       className="xerox w-full h-full object-cover duration-700"
                     />

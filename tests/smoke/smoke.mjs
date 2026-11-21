@@ -103,21 +103,57 @@ await run('checkout link pre-fills tier, quantity and add-on; survives reload', 
   await check('after reload');
 });
 
+// UX quick wins (2026-11-21): the org storefront fits a 390px phone (iPhone 13,
+// the default device here): no sideways scroll, Follow fully on screen, no
+// "0 followers", no hot-linked stock photos.
+await run('org storefront fits a 390px screen', async (page) => {
+  await page.goto(BASE + '/o/bk-nights');
+  await page.getByRole('button', { name: /^follow$/i }).waitFor({ timeout: 8000 });
+  const m = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => /^follow$/i.test(x.textContent.trim()));
+    const r = b.getBoundingClientRect();
+    return { vw: window.innerWidth, sw: document.documentElement.scrollWidth, left: r.left, right: r.right,
+      imgs: [...document.images].map((i) => i.getAttribute('src') || '') };
+  });
+  assert(m.vw === 390, 'viewport is 390px: ' + m.vw);
+  assert(m.sw <= m.vw, 'no sideways overflow: page is ' + m.sw + 'px wide at ' + m.vw);
+  assert(m.left >= 0 && m.right <= m.vw, 'Follow fully on screen: ' + m.left + '..' + m.right);
+  assert(!(await page.getByText(/\b0 followers/i).count()), 'no "0 followers"');
+  assert(!m.imgs.some((src) => /unsplash\.com/.test(src)), 'no hot-linked stock photos: ' + m.imgs.join(' '));
+});
+
 await run('bad checkout link explains itself', async (page) => {
   await page.goto(BASE + '/checkout?products=junk');
   await expectText(page, 'no tickets in it');
 });
 
-await run('signed-out code entry asks for sign-in first', async (page, log) => {
+// Guest promo codes (mig 20261121143700): a signed-out buyer's code goes to
+// exos-checkout (action check_voucher), never to exos_check_voucher; a code the
+// server keeps for accounts (401) opens sign-in.
+const guestCodeFn = { fns: { 'exos-checkout': (b) => (b.action !== 'check_voucher' ? { body: {} }
+  : b.voucher_code === 'EARLY20' ? { body: { is_valid: true, restrict_tier_id: null, override_price: null, discount_percent: 20, discount_amount: null, reason: null } }
+  : { status: 401, body: { error: 'sign in to use this code', reason: 'sign_in' } }) } };
+await run('signed-out promo code applies as a guest', async (page, log) => {
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'Fall Party');
+  const voucher = page.getByPlaceholder(/voucher|code/i).first();
+  await voucher.fill('EARLY20');
+  await page.getByRole('button', { name: /^apply$/i }).click();
+  await expectText(page, 'Code EARLY20 applied');
+  assert(log.some((l) => l.startsWith('fn exos-checkout') && l.includes('"check_voucher"')), 'checked on the guest path');
+  assert(!log.some((l) => l.includes('exos_check_voucher')), 'no direct code check while signed out');
+  assert(!(await page.getByRole('dialog').count()), 'no sign-in for a promo code');
+}, { mock: guestCodeFn });
+
+await run('signed-out account-only code asks for sign-in', async (page, log) => {
   await page.goto(BASE + '/event/' + EV);
   await expectText(page, 'Fall Party');
   const voucher = page.getByPlaceholder(/voucher|code/i).first();
   await voucher.fill('PRESALE');
-  await page.getByRole('button', { name: /sign in to apply/i }).click();
-  await expectText(page, 'code');
+  await page.getByRole('button', { name: /^apply$/i }).click();
   await page.getByRole('dialog').first().waitFor({ timeout: 8000 });
-  assert(!log.some((l) => l.includes('exos_check_voucher')), 'no code check while signed out');
-});
+  assert(!log.some((l) => l.includes('exos_check_voucher')), 'no direct code check while signed out');
+}, { mock: guestCodeFn });
 
 await run('voucher reveals the hidden tier', async (page, log) => {
   await page.goto(BASE + '/event/' + EV);

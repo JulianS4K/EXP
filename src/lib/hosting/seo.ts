@@ -17,6 +17,9 @@ import {
 import { allInCents } from '../../../supabase/functions/_shared/pricing.ts';
 import { parseFeeRules, parseUnitFees, tierPassedOnFees } from '../../../supabase/functions/_shared/fees.ts';
 import { isSoldOut } from '../../../supabase/functions/_shared/capacity.ts';
+import {
+  dateLabel, eventFrom, eventLine, eventTitle, money, schemaAvailability, type FromAvailability, type FromTier,
+} from '../../../supabase/functions/_shared/eventStrings.ts';
 import { assistantFacts } from './productFacts';
 import { APP_LANDINGS, appLandingAt } from '../apps/landing';
 
@@ -92,6 +95,11 @@ interface TierRow {
   exclusive_tax_percent?: unknown;
   /** The tier's passed-on fees (fee rules, mig 20261027100000), attached from exos_public_fee_rules. */
   passed_on_fees?: unknown;
+  /** Seats and sales window: which types are on sale for the "from" price (eventStrings.eventFrom). */
+  capacity?: number | null;
+  sold?: number | null;
+  sales_start?: string | null;
+  sales_end?: string | null;
 }
 
 /** Lowest all-in (price + passed-on fees + exclusive tax) tier price in cents, as the storefront shows it. */
@@ -108,37 +116,9 @@ export function fromPriceCents(tiers: TierRow[], now: Date = new Date()): number
   return best;
 }
 
-const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$' };
-
-export function money(cents: number, currency: string): string {
-  if (cents === 0) return 'Free';
-  const code = (currency || 'USD').toUpperCase();
-  const amount = (cents / 100)
-    .toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    .replace('.00', '');
-  const sym = CURRENCY_SYMBOLS[code];
-  return sym ? `${sym}${amount}` : `${amount} ${code}`;
-}
-
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/**
- * "Fri Oct 2 · 10 PM", from the wall-clock time exactly as written (the
- * organizer's local time when present), never shifted into another zone.
- */
-export function dateLabel(startsAt: string | null | undefined, local: string | null | undefined): string | null {
-  const raw = local || startsAt;
-  if (!raw) return null;
-  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(raw);
-  if (!m) return null;
-  const [y, mo, d, h, mi] = m.slice(1).map((x) => Number(x ?? 0));
-  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return null;
-  const weekday = DAYS[new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  const time = mi === 0 ? `${hour12} ${h < 12 ? 'AM' : 'PM'}` : `${hour12}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
-  return `${weekday} ${MONTHS[mo - 1]} ${d} · ${time}`;
-}
+// The money format and the date line live in _shared/eventStrings.ts (one
+// source for the page, this card and the ad catalog feed); re-exported here.
+export { dateLabel, money };
 
 // ── Tags ─────────────────────────────────────────────────────────────
 
@@ -155,7 +135,14 @@ export interface EventSummary {
   description: string;
   from: string | null;
   fromCents: number | null;
+  /** The "from" price's availability (eventStrings.eventFrom), null without ticket types. */
+  availability?: FromAvailability | null;
   currency: string;
+  /** The image's real size when the row knows it (image_width / image_height); never guessed. */
+  imageWidth?: number;
+  imageHeight?: number;
+  /** Crops of the image by aspect ratio (image_variants: {"1x1","16x9","4x3"} https URLs), when they exist. */
+  imageVariants?: Partial<Record<ImageRatio, string>>;
   orgName?: string;
   // In person / online / hybrid (mig 20261005090000); in person when absent.
   format: AttendanceFormat;
@@ -166,15 +153,44 @@ export interface EventSummary {
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' && v ? v : undefined);
 
-export function eventSummary(event: Row | null | undefined, tiers: TierRow[], org?: Row | null): EventSummary | null {
+export type ImageRatio = '1x1' | '16x9' | '4x3';
+const IMAGE_RATIOS: readonly ImageRatio[] = ['16x9', '4x3', '1x1'];
+
+/** A whole pixel size from 1 to 10000, else undefined. */
+function px(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 1 && n <= 10_000 ? n : undefined;
+}
+
+/** image_variants {"1x1": url, ...}: the https crops present, by ratio. */
+function imageVariants(v: unknown): Partial<Record<ImageRatio, string>> | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const out: Partial<Record<ImageRatio, string>> = {};
+  for (const r of IMAGE_RATIOS) {
+    const u = (v as Row)[r];
+    if (typeof u === 'string' && /^https:\/\//.test(u)) out[r] = u;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function eventSummary(event: Row | null | undefined, tiers: TierRow[], org?: Row | null, now: Date = new Date()): EventSummary | null {
   const name = event?.name;
   if (!event || !name) return null;
   const addr = event.venue_address && typeof event.venue_address === 'object' ? (event.venue_address as Row) : {};
-  const cents = fromPriceCents(tiers);
+  const from = eventFrom(tiers as FromTier[], now, event as { total_tickets?: number; tickets_sold?: number });
+  const cents = from?.cents ?? null;
   const currency = (str(event.currency) ?? 'USD').toUpperCase();
+  const w = px(event.image_width);
+  const h = px(event.image_height);
+  const variants = imageVariants(event.image_variants);
   return {
     id: event.id,
-    name: String(name).slice(0, 200),
+    name: eventTitle(name),
+    // Without seat counts (an older view) the price is the lowest of all and
+    // no availability is claimed.
+    availability: tiers.some((t) => (t as Row).capacity !== undefined) ? from?.availability ?? null : null,
+    ...(w && h ? { imageWidth: w, imageHeight: h } : {}),
+    ...(variants ? { imageVariants: variants } : {}),
     date: dateLabel(str(event.starts_at), str(event.occurs_at_local)),
     startsAt: str(event.starts_at) ?? null,
     venue: (str(event.venue_name) ?? str(event.venue_location) ?? '').slice(0, 200) || null,
@@ -223,13 +239,20 @@ export function absoluteImage(image: string, pageUrl: string, fallback: string):
 // described by the JSON-LD below; the card is a website card.
 const OG_TYPES = new Set(['website', 'article', 'profile']);
 
-function tags(title: string, desc: string, url: string, image: string, ogType: string, noindex: boolean, extra = ''): string {
+function tags(
+  title: string, desc: string, url: string, image: string, ogType: string, noindex: boolean, extra = '',
+  size?: { width: number; height: number },
+): string {
   const fallback = new URL('/bridge/icon-512.png', url).toString();
   const abs = absoluteImage(image, url, fallback);
   const [t, d, u, img] = [esc(title), esc(desc), esc(url), esc(abs)];
   // The fallback is the square app icon: a big card would crop it.
   const isIcon = abs.endsWith('/bridge/icon-512.png');
   const card = isIcon ? 'summary' : 'summary_large_image';
+  // og:image:width / height: the icon's known 512 x 512, or the image's real
+  // size when the record has it; never a guessed size (a wrong one makes
+  // Facebook crop or drop the card).
+  const dims = isIcon ? { width: 512, height: 512 } : size ?? null;
   const lines = [
     `<title>${t}</title>`,
     `<meta name="description" content="${d}" />`,
@@ -241,9 +264,9 @@ function tags(title: string, desc: string, url: string, image: string, ogType: s
     `<meta property="og:url" content="${u}" />`,
     `<meta property="og:image" content="${img}" />`,
     `<meta property="og:image:alt" content="${t}" />`,
-    // Known size for the icon, so the first share already shows it (Facebook
-    // otherwise fetches the image after the first unfurl).
-    ...(isIcon ? ['<meta property="og:image:width" content="512" />', '<meta property="og:image:height" content="512" />'] : []),
+    // A known size, so the first share already shows it (Facebook otherwise
+    // fetches the image after the first unfurl).
+    ...(dims ? [`<meta property="og:image:width" content="${dims.width}" />`, `<meta property="og:image:height" content="${dims.height}" />`] : []),
     '<meta property="og:locale" content="en_US" />',
     `<meta name="twitter:card" content="${card}" />`,
     `<meta name="twitter:title" content="${t}" />`,
@@ -257,15 +280,18 @@ function tags(title: string, desc: string, url: string, image: string, ogType: s
 
 /** Per-event preview: '<name>' / 'Fri Oct 3 · 10 PM · Elsewhere · from $25 all-in'. */
 export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: string, noindex = false): string {
-  const price = s.from === 'Free' ? 'Free' : s.from ? `from ${s.from} all-in` : null;
-  const desc = [s.date, s.venue, price].filter(Boolean).join(' · ') || s.description || 'Tickets on Exos';
+  // The same line the page and the ad feed use (_shared/eventStrings.ts).
+  const desc = eventLine({ date: s.date, venue: s.venue, fromCents: s.fromCents, currency: s.currency })
+    || s.description || 'Tickets on Exos';
   const image = s.image || defaultImage;
+  // Google's event images: 16x9, 4x3 and 1x1 crops when they exist, else the one image.
+  const crops = s.image ? IMAGE_RATIOS.map((r) => s.imageVariants?.[r]).filter((u): u is string => !!u) : [];
   const ld: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'Event',
     name: s.name,
     url: canonicalUrl,
-    image: [image],
+    image: crops.length ? [...new Set(crops)] : [image],
     eventStatus: 'https://schema.org/EventScheduled',
     eventAttendanceMode: attendanceModeUrl(s.format),
   };
@@ -287,14 +313,16 @@ export function eventTags(s: EventSummary, canonicalUrl: string, defaultImage: s
     ld.offers = {
       '@type': 'Offer',
       url: canonicalUrl,
-      price: (s.fromCents / 100).toFixed(2),
+      // A free event is an Offer at price 0 (Google supports it).
+      price: s.fromCents === 0 ? 0 : (s.fromCents / 100).toFixed(2),
       priceCurrency: s.currency || 'USD',
-      availability: 'https://schema.org/InStock',
+      availability: schemaAvailability(s.availability ?? 'in stock'),
     };
   }
   const raw = JSON.stringify(ld).replace(/</g, '\\u003c');
   const extra = noindex ? '' : `<script type="application/ld+json">${raw}</script>`;
-  return tags(s.name, desc, canonicalUrl, image, 'event', noindex, extra);
+  const size = s.image && s.imageWidth && s.imageHeight ? { width: s.imageWidth, height: s.imageHeight } : undefined;
+  return tags(s.name, desc, canonicalUrl, image, 'event', noindex, extra, size);
 }
 
 export function orgTags(org: Row, canonicalUrl: string, defaultImage: string): string | null {
@@ -412,20 +440,24 @@ export interface PreviewPage {
 const CONTENT_COLS = ',summary,lineup,faq,min_age,refund_policy,policy_notes,what_to_bring';
 const FEE_RULE_COLS = 'id,name,kind,per,calc,percent,amount_cents,cap_cents,taxable,applies_to_addons,tier_ids,rank';
 const CONTENT_TIER_COLS = 'id,name,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end,sort_order';
+const TAG_TIER_COLS = 'id,price,price_schedule,exclusive_tax_percent,capacity,sold,sales_start,sales_end';
 
 /**
- * Head tags, plus with `opts.content` (server.ts EXOS_AI_DISCOVERY, off until
- * launch) a plain-HTML copy of the event page for crawlers and AI fetchers,
- * and FAQPage JSON-LD. Hidden (noindex) events never get the content.
+ * Head tags, plus with `opts.content` a plain-HTML copy of the event page for
+ * crawlers (server.ts: every known crawler, AdsBot included, since 2026-11-21)
+ * and, unless `opts.faq` is false, FAQPage JSON-LD (server.ts: only with
+ * EXOS_AI_DISCOVERY, off until launch). Hidden (noindex) events never get the content.
  */
 export async function buildPreviewPage(
-  read: PublicReader, target: PreviewTarget, baseUrl: string, opts: { content?: boolean; promoter?: PromoterReader } = {},
+  read: PublicReader, target: PreviewTarget, baseUrl: string,
+  opts: { content?: boolean; faq?: boolean; promoter?: PromoterReader } = {},
 ): Promise<PreviewPage | null> {
-  return previewParts(read, target, baseUrl, opts.content === true, opts.promoter);
+  const content = opts.content === true;
+  return previewParts(read, target, baseUrl, content, content && (opts.faq ?? true), opts.promoter);
 }
 
 async function previewParts(
-  read: PublicReader, target: PreviewTarget, baseUrl: string, content: boolean, promoter?: PromoterReader,
+  read: PublicReader, target: PreviewTarget, baseUrl: string, content: boolean, withFaq: boolean, promoter?: PromoterReader,
 ): Promise<PreviewPage | null> {
   let [kind, key] = target;
   const defaultImage = `${baseUrl}/bridge/icon-512.png`;
@@ -480,6 +512,11 @@ async function previewParts(
   if (content) {
     try { tiers = await read('exos_public_tiers', CONTENT_TIER_COLS, byEvent, 50); } catch { tiers = []; }
   }
+  // Seats and sales windows too, so the "from" price is the one on sale
+  // (_shared/eventStrings.ts); a database without them prices from all types.
+  if (!tiers.length) {
+    try { tiers = await read('exos_public_tiers', TAG_TIER_COLS, byEvent, 50); } catch { tiers = []; }
+  }
   if (!tiers.length) tiers = await read('exos_public_tiers', 'id,price,price_schedule,exclusive_tax_percent', byEvent, 50);
   // The passed-on fee rules (mig 20261027100000) are inside every price shown;
   // a database without them (or a failed read) prices without fees.
@@ -497,12 +534,12 @@ async function previewParts(
   const hidden = target[0] === 'promoter' || ev.noindex === true;
   let tags = eventTags(s, url, defaultImage, hidden);
   if (!content || ev.noindex === true) return { tags, body: null };
-  const faq = faqJsonLd(ev.faq);
+  const faq = withFaq ? faqJsonLd(ev.faq) : null;
   if (faq && !hidden) tags += `\n    ${faq}`;
   return { tags, body: eventBody(ev, tiers, s, url) };
 }
 
-// ── Full crawler page (EXOS_AI_DISCOVERY) ───────────────────────────────
+// ── Full crawler page (every known crawler; AI ones only with EXOS_AI_DISCOVERY) ──
 
 const REFUND_TEXT: Record<string, string> = {
   none: 'All sales are final. No refunds.',

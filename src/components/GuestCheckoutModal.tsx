@@ -63,7 +63,7 @@ export default function GuestCheckoutModal({ open, busy, onClose, onContinue, on
               <EscapeHatch url={escapeUrl} state={inApp} lead="Card works right here."
                 className="mb-4 border border-white/10 bg-white/5 p-3 text-xs text-white/70" />
             )}
-            <label htmlFor="guest-email" className="type text-[11px] text-white/60 uppercase tracking-widest">Email</label>
+            <label htmlFor="guest-email" className="type text-xs text-white/60 uppercase tracking-widest">Email</label>
             <div className="mt-1 mb-2 flex items-center gap-2 bg-white/5 border border-white/20 focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/40 px-3">
               <Mail className="w-4 h-4 text-white/60" aria-hidden="true" />
               <input

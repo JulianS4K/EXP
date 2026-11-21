@@ -9,7 +9,7 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
-import { claimFreeAsGuest, startCheckout } from '../lib/checkout';
+import { claimFreeAsGuest, needsSignIn, startCheckout } from '../lib/checkout';
 import { guestCheckoutAllowed } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
@@ -80,6 +80,9 @@ import { getPublicTimedEntry, listPublicSeriesDates, type PublicTimedEntry } fro
 import { getPublicMatchedTiers, saveIntake, type PublicMatchedTier } from '../lib/matchedSeatsApi';
 import { answersBody, EMPTY_ANSWERS, type QuizAnswers } from '../lib/matchedSeats';
 import { socialEnabled } from '../lib/socialFlag';
+import { tierUrgency } from '../lib/urgency';
+import { eventImageOr } from '../lib/fallbackImage';
+import { pageFrom, pageMoney } from '../lib/eventFrom';
 
 // Shown only for some events or after a tap, and the heaviest pieces of the
 // page: split out so the first load (often a slow Instagram webview) skips them.
@@ -257,7 +260,10 @@ export default function EventDetails() {
           try {
             const startIso = data.date?.toDate ? data.date.toDate().toISOString() : undefined;
             const endIso = data.timing?.endTime?.toDate?.()?.toISOString();
-            const remaining = Math.max(0, (data.totalTickets || 0) - (data.ticketsSold || 0));
+            // The all-in "from" price by the shared rule (lib/eventFrom.ts), as
+            // the crawler card and the ad feed quote it (was the lowest price
+            // before fees and tax).
+            const from = pageFrom(data.ticketTiers, data);
             applyMeta({
               title: data.title,
               // The organizer's one-line summary when set (mig 20260929120000).
@@ -287,12 +293,12 @@ export default function EventDetails() {
                     format: data.format,
                     pageUrl: publicUrl(`event/${data.id}`),
                     performers,
-                    offers: {
-                      price: data.price,
+                    offers: from ? {
+                      price: from.amount,
                       currency: data.currency || 'USD',
-                      availability: remaining > 0 ? 'InStock' : 'SoldOut',
+                      availability: from.availability === 'in stock' ? 'InStock' : from.availability === 'preorder' ? 'PreOrder' : 'SoldOut',
                       url: publicUrl(`event/${data.id}`),
-                    },
+                    } : undefined,
                   }
                 : undefined,
             });
@@ -475,7 +481,7 @@ export default function EventDetails() {
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
   // Sign in, then pick up the purchase where the buyer left it.
-  const signInToBuy = async () => {
+  const signInToBuy = async (message = 'Sign in to grab your ticket.') => {
     if (!event) return;
     // Pick up where they left off once signed in (survives the OAuth
     // round trip, which reloads the page).
@@ -485,7 +491,7 @@ export default function EventDetails() {
     try {
       sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
     } catch { /* storage blocked */ }
-    toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
+    toast({ kind: 'info', message });
     await signIn();
   };
 
@@ -608,6 +614,14 @@ export default function EventDetails() {
       }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
+      // A guest's code that needs an account (review of #132, I5): sign in,
+      // then the purchase resumes with the code on the account's budget.
+      if (guestEmail && needsSignIn(err)) {
+        setPurchasing(false);
+        setGuestOpen(false);
+        void signInToBuy('Sign in to use this code.');
+        return;
+      }
       console.error('Checkout failed:', err);
       seatTaken(err);
       priceMoved(err);
@@ -1027,7 +1041,7 @@ export default function EventDetails() {
             </p>
             {event.cancelReason && (
               <p className="text-sm text-red-100/80 mb-2">
-                <span className="type uppercase tracking-widest text-brand-accent/60 text-[11px]">Reason: </span>
+                <span className="type uppercase tracking-widest text-brand-accent/60 text-xs">Reason: </span>
                 {event.cancelReason}
               </p>
             )}
@@ -1042,12 +1056,12 @@ export default function EventDetails() {
 
         {eventStatus === 'draft' && isOrganizer && (
           <div className="mb-8 p-4 border border-amber-300/30 bg-amber-300/10 flex items-center justify-between">
-            <p className="type text-[11px] uppercase tracking-widest text-amber-200">
+            <p className="type text-xs uppercase tracking-widest text-amber-200">
               DRAFT — only you can see this. Publish from the Edit screen to list it.
             </p>
             <Link
               to={`/edit-event/${event.id}`}
-              className="type text-[11px] uppercase tracking-widest text-amber-200 hover:text-white"
+              className="type text-xs uppercase tracking-widest text-amber-200 hover:text-white"
             >
               Edit →
             </Link>
@@ -1055,7 +1069,7 @@ export default function EventDetails() {
         )}
         {eventStatus === 'cancelled' && (
           <div className="mb-8 p-4 border border-brand-accent/40 bg-brand-accent/10">
-            <p className="type text-[11px] uppercase tracking-widest text-brand-accent">
+            <p className="type text-xs uppercase tracking-widest text-brand-accent">
               CANCELLED — sales are closed.
             </p>
           </div>
@@ -1066,7 +1080,7 @@ export default function EventDetails() {
           <div className="lg:col-span-2">
             <div className="group aspect-video relative mb-12 border border-white/10 overflow-hidden">
               <img
-                src={event.image || 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200'}
+                src={eventImageOr(event.image)}
                 alt={event.title}
                 className="xerox w-full h-full object-cover transition-all duration-700"
               />
@@ -1098,10 +1112,10 @@ export default function EventDetails() {
                    <Calendar className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">date &amp; time</p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mb-1">date &amp; time</p>
                    <p className="disp text-xl tracking-tight">{formatInTz(event.date.toDate(), event.timezone, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
                    {event.date && eventStatus !== 'cancelled' && (
-                     <p className="type text-[11px] text-brand-primary uppercase tracking-widest mt-1">
+                     <p className="type text-xs text-brand-primary uppercase tracking-widest mt-1">
                        <EventCountdown
                          startsAt={event.date.toDate()}
                          doorsOpen={
@@ -1115,7 +1129,7 @@ export default function EventDetails() {
                      </p>
                    )}
                    {event.timing && (
-                     <div className="flex gap-3 mt-1 type text-[11px] text-white/60 uppercase tracking-widest">
+                     <div className="flex gap-3 mt-1 type text-xs text-white/60 uppercase tracking-widest">
                         {event.timing.doorsOpen && (
                           <span>
                             DOORS {formatInTz(
@@ -1150,7 +1164,7 @@ export default function EventDetails() {
                    <MapPin className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">location</p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mb-1">location</p>
                    <p className="disp text-xl tracking-tight">{privateLoc ? pubLoc.title : event.location}</p>
                    {privateLoc && pubLoc.detail && <p className="type text-xs text-white/70 mt-1">{pubLoc.detail}</p>}
                    {pubLoc.note && <p className="type text-xs text-white/60 mt-1">{pubLoc.note}</p>}
@@ -1175,7 +1189,7 @@ export default function EventDetails() {
                 <EventArtistLineup lineup={lineup} timezone={event.timezone} />
               ) : event.performers && event.performers.length > 0 ? (
                 <div className="p-7 bg-[#111] sm:col-span-2">
-                  <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">performers</p>
+                  <p className="type text-xs text-white/60 uppercase tracking-widest mb-3">performers</p>
                   <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
                     {event.performers.map((name, i) => {
                       const links = linksForArtist(name, event.artistLinks);
@@ -1202,7 +1216,7 @@ export default function EventDetails() {
                    <Tag className="text-brand-primary w-6 h-6" />
                 </div>
                 <div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">genres</p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mb-1">genres</p>
                    <p className="disp text-xl tracking-tight">
                       {event.genres?.join(', ') || event.category}
                       {event.subgenres && event.subgenres.length > 0 && <span className="text-white/60 ml-2">({event.subgenres.join(', ')})</span>}
@@ -1235,14 +1249,14 @@ export default function EventDetails() {
                     {(org?.name || 'O').charAt(0).toUpperCase()}
                   </div>
                   <div>
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-1">presented by</p>
+                    <p className="type text-xs text-white/60 uppercase tracking-widest mb-1">presented by</p>
                     <h3 className="disp text-2xl tracking-tight">{org?.name || 'Event Organizer'}</h3>
                     {org?.marketing?.socials && Object.values(org.marketing.socials).some(Boolean) ? (
                       <SocialLinks socials={org.marketing.socials} className="flex items-center gap-3 mt-2" />
                     ) : null}
                   </div>
                </div>
-               <Link to={`/organizer/${event.orgId ?? ''}`} className="type px-5 py-2.5 bg-white/5 border border-white/10 text-[11px] uppercase tracking-widest group-hover:bg-brand-primary group-hover:text-black transition-colors">
+               <Link to={`/organizer/${event.orgId ?? ''}`} className="type px-5 py-2.5 bg-white/5 border border-white/10 text-xs uppercase tracking-widest group-hover:bg-brand-primary group-hover:text-black transition-colors">
                   view profile
                </Link>
             </div>
@@ -1260,7 +1274,7 @@ export default function EventDetails() {
                   <p role="status" className="type text-sm text-white/80">Tickets go on sale once the location is announced.</p>
                 ) : (<>
                 <div className="mb-8">
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-2">price</p>
+                    <p className="type text-xs text-white/60 uppercase tracking-widest mb-2">price</p>
                     {/* The order total: tickets plus add-ons (what Stripe will charge). */}
                     <p className="disp text-6xl neon tracking-tight">
                       {priceToDisplay * quantity + addonSel.totalCents / 100 === 0
@@ -1268,17 +1282,17 @@ export default function EventDetails() {
                         : formatCurrency(priceToDisplay * quantity + addonSel.totalCents / 100, event.currency)}
                     </p>
                     {addonSel.totalCents > 0 && (
-                      <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
+                      <p className="type mt-1 text-xs uppercase tracking-widest text-white/60">
                         {t('event.withAddons', { amount: formatCurrency(addonSel.totalCents / 100, event.currency) })}
                       </p>
                     )}
-                    <p className="type mt-1 text-[11px] uppercase tracking-widest text-white/60">
+                    <p className="type mt-1 text-xs uppercase tracking-widest text-white/60">
                       {feesIncluded.length > 0
                         ? `all-in · incl. fees${selectedTier?.exclusiveTaxPercent ? ' & tax' : ''} · nothing added at checkout`
                         : selectedTier?.exclusiveTaxPercent ? 'all-in · incl. tax · no fees at checkout' : 'all-in · no fees at checkout'}
                     </p>
                     {feesIncluded.length > 0 && (
-                      <p className="type mt-1 text-[11px] text-white/50">
+                      <p className="type mt-1 text-xs text-white/50">
                         Each ticket includes {feesIncluded.map((f) => `${formatCurrency(f.amount, event.currency)} ${f.name.toLowerCase()}`).join(', ')}.
                       </p>
                     )}
@@ -1292,7 +1306,7 @@ export default function EventDetails() {
                           (iso) => formatInTz(new Date(iso), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
                           step.nextPriceCents == null ? null : Math.round(tierAllInPrice(selectedTier, step.nextPriceCents / 100) * 100));
                         return line ? (
-                          <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent" data-testid="price-step-nudge">⏱ {line}</p>
+                          <p className="type mt-2 text-xs uppercase tracking-widest text-brand-accent" data-testid="price-step-nudge">⏱ {line}</p>
                         ) : null;
                       }
                       // Scheduled-pricing urgency nudge: surface the next upward
@@ -1302,7 +1316,7 @@ export default function EventDetails() {
                       if (!next || next.price <= cur) return null;
                       const nextAllIn = tierAllInPrice(selectedTier, next.price);
                       return (
-                        <p className="type mt-2 text-[11px] uppercase tracking-widest text-brand-accent">
+                        <p className="type mt-2 text-xs uppercase tracking-widest text-brand-accent">
                           ⏱ price rises to {formatCurrency(nextAllIn, event.currency)} on{' '}
                           {formatInTz(new Date(next.startsAt), event.timezone, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                         </p>
@@ -1313,10 +1327,17 @@ export default function EventDetails() {
                 {/* Tier Selection */}
                 {event.ticketTiers && event.ticketTiers.length > 0 && (
                   <div className="mb-8 space-y-2">
-                     <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.pickTicket')}</p>
+                     <p className="type text-xs text-white/60 uppercase tracking-widest mb-3">{t('event.pickTicket')}</p>
                      {visibleTiers.map((tier) => {
                        const tierLive = liveTier(tier.id, tier.capacity);
-                       const tierLeft = Math.max(0, tierLive.capacity - tierLive.sold);
+                       // Urgency rules (lib/urgency.ts): "N left" only when low,
+                       // sold-out / ended types stay listed and struck through.
+                       const urg = tierUrgency({
+                         capacity: tierLive.capacity, sold: tierLive.sold, nowMs: Date.now(),
+                         salesStartMs: tier.salesStart?.toMillis?.() ?? null,
+                         salesEndMs: tier.salesEnd?.toMillis?.() ?? null,
+                       });
+                       const tierLeft = urg.left;
                        return (
                        <button
                          key={tier.id}
@@ -1326,7 +1347,7 @@ export default function EventDetails() {
                            selectedTierId === tier.id
                              ? 'border-brand-primary bg-brand-primary/5'
                              : 'border-white/10 hover:border-white/30 hover:bg-white/5'
-                         } ${tierLeft === 0 ? 'opacity-60' : ''}`}
+                         } ${urg.struck ? 'opacity-60' : ''}`}
                        >
                          {selectedTierId === tier.id && (
                             <div className="absolute top-0 right-0 w-7 h-7 bg-brand-primary flex items-center justify-center">
@@ -1335,7 +1356,7 @@ export default function EventDetails() {
                          )}
 
                          <div className="flex justify-between items-center w-full mb-1 gap-3">
-                            <p className="disp text-xl tracking-tight text-white">{tier.name}</p>
+                            <p className={`disp text-xl tracking-tight text-white ${urg.struck ? 'line-through decoration-2' : ''}`}>{tier.name}</p>
                             {(() => {
                               const eff = buyerTierPrice(tier);
                               const opening = tierAllInPrice(tier, tier.price);
@@ -1351,24 +1372,33 @@ export default function EventDetails() {
                             })()}
                          </div>
 
-                         <p className="type text-[11px] text-white/50 mb-3">{tier.description}</p>
+                         <p className="type text-xs text-white/50 mb-3">{tier.description}</p>
                          {tier.accessible && (
-                           <p className="type text-[11px] text-sky-200 mb-3 flex items-start gap-1.5">
+                           <p className="type text-xs text-sky-200 mb-3 flex items-start gap-1.5">
                              <AccessIcon className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
                              <span><span className="font-bold">Accessible</span>{tier.accessibleNote ? ` · ${tier.accessibleNote}` : ''}</span>
                            </p>
                          )}
                          <TableTierInfo eventId={event.id} tierId={tier.id} price={buyerTierPrice(tier)} currency={event.currency} />
 
-                         <div className="flex items-center gap-2">
-                           <span className={`w-1.5 h-1.5 ${tierLeft < 10 ? 'bg-brand-accent' : 'bg-brand-primary'}`}></span>
-                           <span className={`type text-[11px] uppercase tracking-widest leading-none ${tierLeft === 0 ? 'text-brand-accent' : 'text-white/60'}`}>
+                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                           <span className={`w-1.5 h-1.5 ${tierLeft === 0 || urg.lowStockLeft != null ? 'bg-brand-accent' : 'bg-brand-primary'}`}></span>
+                           <span data-testid="tier-availability" className={`type text-xs uppercase tracking-widest leading-none ${tierLeft === 0 || urg.lowStockLeft != null ? 'text-brand-accent' : 'text-white/60'}`}>
                              {tierLeft === 0
                                ? t('event.tierSoldOut')
-                               : !stripeEnabled && tier.price > 0
-                                 ? t('event.onSaleSoon')
-                                 : t('event.left', { n: tierLeft })}
+                               : urg.salesEnded
+                                 ? t('event.salesEnded')
+                                 : (!stripeEnabled && tier.price > 0) || urg.notYetOnSale
+                                   ? t('event.onSaleSoon')
+                                   : urg.lowStockLeft != null
+                                     ? t('event.left', { n: urg.lowStockLeft })
+                                     : t('event.available')}
                            </span>
+                           {urg.salesEndSoon && (
+                             <span data-testid="tier-sales-end-soon" className="type text-xs uppercase tracking-widest leading-none text-brand-accent">
+                               · {t('event.salesEndSoon')}
+                             </span>
+                           )}
                          </div>
                        </button>
                        );
@@ -1394,7 +1424,7 @@ export default function EventDetails() {
                       </p>
                       {socialEnabled() && m.quizEnabled && m.status === 'open' && (user
                         ? <Suspense fallback={null}><MatchedQuiz value={quiz} onChange={setQuiz} tags={m.quizTags} languages={m.quizLanguages} disabled={purchasing} /></Suspense>
-                        : <p className="type text-[11px] text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
+                        : <p className="type text-xs text-white/50">You can answer a short, optional quiz on your ticket after you buy.</p>)}
                     </div>
                   );
                 })()}
@@ -1411,7 +1441,7 @@ export default function EventDetails() {
                 {/* Series: the other dates of this show. */}
                 {moreDates.length > 0 && (
                   <div className="mb-8">
-                    <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">More dates</p>
+                    <p className="type text-xs text-white/60 uppercase tracking-widest mb-3">More dates</p>
                     <div className="flex flex-wrap gap-2">
                       {moreDates.slice(0, 8).map((d) => (
                         <button key={d.id} type="button" onClick={() => navigate(`/event/${d.id}`)}
@@ -1425,7 +1455,7 @@ export default function EventDetails() {
 
                 {seatedSelected && (
                 <div className="mb-8">
-                  <Suspense fallback={<p className="type text-[11px] text-white/50 uppercase tracking-widest">Loading the seat map…</p>}>
+                  <Suspense fallback={<p className="type text-xs text-white/50 uppercase tracking-widest">Loading the seat map…</p>}>
                   <SeatPicker
                     eventId={event.id}
                     tiers={visibleTiers.filter((x) => seatedTierIds.includes(x.id)).map((x) => ({ id: x.id, name: x.name, price: buyerTierPrice(x) }))}
@@ -1443,7 +1473,7 @@ export default function EventDetails() {
 
                 {(!soldOut || canBypass) && !seatedSelected && (
                 <div className="mb-8">
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">quantity</p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mb-3">quantity</p>
                    <div className="flex items-center gap-5 bg-black p-3 border border-white/10">
                       <button
                         type="button"
@@ -1463,7 +1493,7 @@ export default function EventDetails() {
                         <Plus className="w-4 h-4 text-white" />
                       </button>
                    </div>
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mt-2">max per order: {maxPerOrder} · total limit: {maxPerAccount}</p>
                 </div>
                 )}
 
@@ -1472,7 +1502,7 @@ export default function EventDetails() {
                     checkout metadata route is a later add). */}
                 {priceToDisplay === 0 && addonSel.totalCents === 0 && (
                 <div className="mb-8">
-                   <p className="type text-[11px] text-white/60 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/60">{t('event.optional')}</span></p>
+                   <p className="type text-xs text-white/60 uppercase tracking-widest mb-3">{t('event.whosGoing')} <span className="text-white/60">{t('event.optional')}</span></p>
                    <div className="space-y-2">
                      {Array.from({ length: quantity }).map((_, i) => (
                        <input
@@ -1506,26 +1536,28 @@ export default function EventDetails() {
 
                 <div className="space-y-6 mb-6">
                   <div className="divide-y divide-white/5 border-t border-white/5">
-                    <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
+                    <div className="flex justify-between type text-xs py-3.5 uppercase tracking-widest">
                       <span className="text-white/60">status</span>
                       <span className={soldOut ? 'text-brand-accent' : paidNotOnSale ? 'text-white/60' : 'neon'}>
                         {soldOut ? t('event.soldOut') : paidNotOnSale ? t('event.onSaleSoon') : t('event.available')}
                       </span>
                     </div>
-                    {/* Paid tickets that can't be bought yet: no "N available" next to "On sale soon". */}
-                    {!paidNotOnSale && (
-                    <div className="flex justify-between type text-[11px] py-3.5 uppercase tracking-widest">
-                      <span className="text-white/60">tickets available</span>
-                      <span className="text-white">
-                        {selectedTier
-                          ? (() => {
-                              const t = liveTier(selectedTier.id, selectedTier.capacity);
-                              return `${Math.max(0, t.capacity - t.sold)}`;
-                            })()
-                          : `${event.totalTickets - event.ticketsSold}`}
-                      </span>
-                    </div>
-                    )}
+                    {/* Paid tickets that can't be bought yet: no "N available" next to "On sale soon".
+                        The count shows only when it is low (lib/urgency.ts), as on the ticket list. */}
+                    {!paidNotOnSale && !soldOut && (() => {
+                      const live = selectedTier ? liveTier(selectedTier.id, selectedTier.capacity) : null;
+                      const low = tierUrgency({
+                        capacity: live ? live.capacity : event.totalTickets,
+                        sold: live ? live.sold : event.ticketsSold,
+                        nowMs: Date.now(),
+                      }).lowStockLeft;
+                      return low == null ? null : (
+                        <div className="flex justify-between type text-xs py-3.5 uppercase tracking-widest">
+                          <span className="text-white/60">tickets left</span>
+                          <span className="text-brand-accent">{low}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1537,7 +1569,7 @@ export default function EventDetails() {
                       <Ticket className="w-5 h-5" />
                       <span className="tracking-wide">{t('event.getTickets')}</span>
                     </a>
-                    <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">
+                    <p className="type mt-3 text-xs text-white/50 leading-relaxed">
                       Tickets are sold by the organizer on {externalShop.name}. You'll check out there.
                     </p>
                   </>
@@ -1621,19 +1653,19 @@ export default function EventDetails() {
                 </WaitingRoomGate>)}
 
                 {paidNotOnSale && !soldOut && (
-                  <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">
+                  <p className="type mt-3 text-xs text-white/50 leading-relaxed">
                     {t('event.onSaleSoonHint')}
                   </p>
                 )}
 
                 {elsewhere && (
                   <div role="status" className="mt-3 space-y-2">
-                    <p className="type text-[11px] text-white/70 leading-relaxed">
+                    <p className="type text-xs text-white/70 leading-relaxed">
                       {t('event.lastCallElsewhere', { platform: PLATFORM_LABEL[sale.sellsOn] })}
                     </p>
                     {sale.sellsOnUrl && (
                       <a href={sale.sellsOnUrl} target="_blank" rel="noopener noreferrer"
-                        className="inline-block border border-white/30 px-4 py-2 text-[11px] uppercase tracking-widest text-white hover:border-brand-primary hover:text-brand-primary">
+                        className="inline-block border border-white/30 px-4 py-2 text-xs uppercase tracking-widest text-white hover:border-brand-primary hover:text-brand-primary">
                         {t('event.buyOn', { platform: PLATFORM_LABEL[sale.sellsOn] })}
                       </a>
                     )}
@@ -1676,14 +1708,14 @@ export default function EventDetails() {
                     type="button"
                     disabled={purchasing}
                     onClick={handleTestBuy}
-                    className="type mt-3 w-full bg-amber-500/10 border-2 border-amber-500/40 hover:bg-amber-500/20 text-amber-200 py-3 uppercase tracking-widest text-[11px] transition-all disabled:opacity-50"
+                    className="type mt-3 w-full bg-amber-500/10 border-2 border-amber-500/40 hover:bg-amber-500/20 text-amber-200 py-3 uppercase tracking-widest text-xs transition-all disabled:opacity-50"
                   >
                     🧪 test mint (admin · bypasses stripe)
                   </button>
                 )}
                 </>)}
 
-                <div className="mt-7 flex flex-col gap-3.5 type text-[11px] uppercase tracking-widest text-white/60">
+                <div className="mt-7 flex flex-col gap-3.5 type text-xs uppercase tracking-widest text-white/60">
                   <div className="flex items-center gap-3">
                     <ShieldCheck className="w-4 h-4 text-brand-primary" />
                     secure digital entry
@@ -1717,16 +1749,15 @@ export default function EventDetails() {
       </div>
 
       {!buyInView && eventStatus !== 'cancelled' && (() => {
-        const open = visibleTiers.filter((tier) => {
-          const l = liveTier(tier.id, tier.capacity);
-          return l.capacity - l.sold > 0;
-        });
-        const from = open.length ? Math.min(...open.map((tier) => buyerTierPrice(tier))) : null;
+        // The shared "from" rule (lib/eventFrom.ts): what the ad and the card
+        // quote, on the same live sold / capacity as the ticket list (liveTier).
+        const pf = pageFrom(visibleTiers.map((tier) => ({ ...tier, ...liveTier(tier.id, tier.capacity) })), event);
+        const from = pf && pf.availability !== 'out of stock' ? pf.cents : null;
         return (
           <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-black/95 border-t border-white/10 backdrop-blur px-4 py-3 flex items-center gap-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
             <div className="min-w-0 flex-1">
-              <p className="type text-[11px] uppercase tracking-widest text-white/60">{from == null ? t('event.soldOut') : t('event.from')}</p>
-              {from != null && <p className="disp text-2xl neon leading-none">{from === 0 ? t('event.free') : formatCurrency(from, event.currency)}</p>}
+              <p className="type text-xs uppercase tracking-widest text-white/60">{from == null ? t('event.soldOut') : t('event.from')}</p>
+              {from != null && <p className="disp text-2xl neon leading-none">{from === 0 ? t('event.free') : pageMoney(from, event.currency)}</p>}
             </div>
             <button
               type="button"
