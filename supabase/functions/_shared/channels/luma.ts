@@ -14,7 +14,7 @@
 // next pass finds the first one by it (GET entities/lookup) before it creates
 // again.
 import {
-  beginRefused, firstCapacity, type Io, type MirrorEvent, type MirrorTicket, type MirrorTier, pendingCreate, type StepRecord,
+  beginRefused, firstCapacity, type Io, notOnAccount, type MirrorEvent, type MirrorTicket, type MirrorTier, pendingCreate, type StepRecord,
   type SyncHooks, type SyncResult,
 } from "./model.ts";
 
@@ -86,6 +86,13 @@ export async function syncLuma(io: Io, ev: MirrorEvent, payload: any, steps: Ste
   const names = lumaTicketNames(todo);
   const maps = new Map<string, string>((payload?.maps ?? []).map((m: any) => [String(m.tier_id), String(m.external_ticket_id)]));
 
+  // A linked event not yet synced: this calendar must manage it (same answer
+  // as another org's event, mig 20261121100000).
+  if (id && mirror.status !== "synced") {
+    const r = await io.req("GET", `/v1/events/get?${new URLSearchParams({ event_id: id })}`);
+    if (!r.ok || r.body?.access !== "manage") return { state: "error", error: notOnAccount("luma"), plan: { steps } };
+  }
+
   if (ev.status === "cancelled") {
     if (id && !meta.closed) {
       const r = await io.req("POST", "/v1/events/update", { event_id: id, registration_open: false });
@@ -103,6 +110,12 @@ export async function syncLuma(io: Io, ev: MirrorEvent, payload: any, steps: Ste
     if (pending?.slug && io.live) {
       const found = await lumaFindBySlug(io, pending.slug);
       if (found.error) return fail(steps, "couldn't check for the event an earlier pass created", found.error);
+      if (found.id && hooks?.taken) {
+        // The slug is Exos's own, but never adopt another Exos event's (mig 20261121100000).
+        const used = await hooks.taken([found.id]);
+        if (used === null) return fail(steps, "couldn't check which events are in use");
+        if (used.includes(found.id)) return fail(steps, "the event an earlier pass created belongs to another Exos event: link the right one");
+      }
       if (found.id) id = found.id;
     }
   }

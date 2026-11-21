@@ -1200,7 +1200,29 @@ Exos adopted.
   can't be pinned in the edge runtime, so the last milliseconds of DNS rebinding remain). exos-posh-webhook buckets
   unknown tokens per caller network instead of per token hash. The partner key prefers `X-Shared-Key` / Bearer over
   `?shared_key=`.
-- Tests: `tests/exos/test_channel_risks.sql` (R1-R5), `tests/exos/race_channel_promise.sh` (by hand),
+- **After the Applier's review.** A door link found before the create stops it (`exos_channel_create_begin`
+  refuses and records the conflict); `exos_eventbrite_link` / `_unlink` and `exos_backend_link` / `_unlink` refuse
+  under a mirror on another external event (or while it is creating one), and `exos_channel_set` takes one advisory
+  lock per event (so do those four and `exos_channel_remove`). An external id another Exos event uses, in any org
+  (`exos_channel_external_taken`), is never adopted: the Eventbrite lookup excludes it (and takes only events created
+  up to 2 minutes after the last try), mark records it as a conflict without keeping it (no 23505 loop), and set
+  refuses it. The house keeps one pack back like the ticket type. A live write renews the lease first
+  (`exos_channel_lease_renew`); the venue is made after the create is begun, kept with it and reused.
+- **Second review.** Every patch marker is text its own replacement writes, so the migration re-runs as a no-op
+  (`tests/exos/reapply_check.sh`, in run_p0: every patch "already patched", no body changes). Another org's id counts
+  as taken only when **verified** (`external_verified_at` on the mirror: a live pass of that org recorded it;
+  `verified_at` on a door / backend link: a read with that org's credentials proved it is theirs, via
+  `exos_channel_link_verified`, or mark wrote it), so linking someone's public event id blocks no one. A verified one
+  is refused in the same words as an event not on the account (the pass's `notOnAccount`, exos-eventbrite-sync's
+  404 text, checkRef's Luma text, same status) and never at `exos_channel_set`, so no org learns about another's
+  events. `exos_channel_set` and the link functions take the event lock, then the `exos_channel_ext:` id lock (mark:
+  the mirror row, then the id). `exos_channel_remove` waits for a pass that holds the lease.
+- **Notes, by design.** The first capacity of a class Exos creates is floored at 1 (Eventbrite refuses 0) and is
+  computed outside the promise lock: the next apply corrects it. `exos_created` starts false on existing rows
+  (fail-safe: they get no price update). The Posh network bucket trusts the platform's address headers
+  (cf-connecting-ip, else x-real-ip, else the last X-Forwarded-For hop: `_shared/guest.ts clientIp`); with none,
+  unknown tokens share one bucket.
+- Tests: `tests/exos/test_channel_risks.sql` (R1-R10), `tests/exos/race_channel_promise.sh` (CI, 4 races), `tests/exos/reapply_check.sh`,
   `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
   `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
 
