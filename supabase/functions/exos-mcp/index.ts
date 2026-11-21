@@ -11,14 +11,28 @@
 //                                 exos-api), a personal access token
 //                                 (exos_pat_…) or an OAuth access token
 //                                 (exos_oat_…, docs/developer-platform.md):
-//                                 adds read-only tools for that org, held to the
+//                                 adds the organizer tools for that org, held to the
 //                                 same scopes exos-api applies (user tokens:
 //                                 narrowed to the user's live role).
 //                                 A key that doesn't check out is refused (401,
 //                                 with the protected-resource metadata URL),
 //                                 never silently downgraded.
-//   GET /.well-known/oauth-protected-resource  RFC 9728: where to get a token.
-// Everything is read-only; nothing is bought, held or changed.
+//   POST …/exos-mcp/organizer      the same server, but sign-in is required:
+//                                 no token answers 401 with the metadata URL,
+//                                 which is what starts the OAuth sign-in in
+//                                 claude.ai / ChatGPT connectors (docs/mcp.md).
+//                                 It is the canonical resource: GET
+//                                 …/organizer/.well-known/oauth-protected-resource
+//                                 (RFC 9728), and an OAuth token is ours only
+//                                 if its resource (RFC 8707) is exactly that
+//                                 URL. One that named no resource reads only;
+//                                 any other resource is refused.
+// Writes (mig 20261119130000): create_event_draft and add_ticket_type take two
+// calls (a preview, then a server-issued confirm_token), capped per org and
+// per credential, audited with source mcp; they run exos_api_write, the REST
+// API's own SQL. publish_event never publishes by itself: it answers a review
+// link where the person, signed in to Exos, clicks Publish. Nothing is bought
+// or held.
 //
 // Limits: 60 calls a minute per network without a key, 120 per key
 // (exos_rate_hit / exos_api_rate_hit). If the limiter errors, calls are refused.
@@ -28,7 +42,7 @@
 // (public app base, e.g. https://…/bridge), optional EXOS_GUEST_IP_SALT.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { handleBody, type ToolContext } from "../_shared/mcp/protocol.ts";
+import { handleBody, ToolError, type ToolContext } from "../_shared/mcp/protocol.ts";
 import {
   exosMcpServer,
   type AttentionOrder,
@@ -44,6 +58,12 @@ import { clientIp, hashIp } from "../_shared/guest.ts";
 import { redactError } from "../_shared/log.ts";
 import { withPublicTierFees } from "../_shared/feeRulesRead.ts";
 import { bearerKind } from "../_shared/api/credentials.ts";
+import { actorHeaders } from "../_shared/api/audit.ts";
+import { challenge, isOrganizerPath, mcpResource, newConfirmToken, protectedResource, tokenAudience } from "../_shared/mcp/discovery.ts";
+import {
+  CONFIRM_TOKEN_RE, type ConfirmToolName, type EventState, type FeeOutcome, type McpWriteData, type OrgVenue,
+  type PublishAnswer, type PublishStatus, type WriteExec, type WriteOutcome,
+} from "../_shared/mcp/exosWriteTools.ts";
 
 const VERSION = "1.0.0";
 const MAX_BODY = 64 * 1024;
@@ -68,8 +88,14 @@ const CORS: Record<string, string> = {
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-  if (req.method === "GET" && /\/\.well-known\/oauth-protected-resource$/.test(new URL(req.url).pathname)) {
-    return json(protectedResource(), 200);
+  const pathname = new URL(req.url).pathname;
+  // …/exos-mcp/organizer: sign-in required (the OAuth connector URL).
+  const organizer = isOrganizerPath(pathname);
+  const sbUrl = Deno.env.get("SUPABASE_URL") ?? "";
+  // RFC 9728 metadata at the canonical resource (the organizer URL) only.
+  if (req.method === "GET" && /\/\.well-known\/oauth-protected-resource$/.test(pathname)) {
+    if (!organizer) return json({ error: "see …/exos-mcp/organizer/.well-known/oauth-protected-resource" }, 404);
+    return json(protectedResource(sbUrl, Deno.env.get("EXOS_OAUTH_ISSUER")), 200);
   }
   // No server-to-client stream: GET (and DELETE of a session) aren't offered.
   if (req.method !== "POST") return json({ error: "use POST (MCP Streamable HTTP, stateless)" }, 405, { Allow: "POST, OPTIONS" });
@@ -83,22 +109,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const ctx: ToolContext = { orgId: null };
   const auth = req.headers.get("Authorization") ?? "";
   const key = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
+  if (!key && organizer) {
+    return json({ error: "sign in to Exos to use the organizer tools" }, 401, { "WWW-Authenticate": challenge(sbUrl) });
+  }
   let bucket: { keyId?: string; net?: string; token?: string };
   const kind = key ? bearerKind(key) : null;
+  let userId: string | null = null;
+  let clientId: string | null = null;
   if (key && (kind === "pat" || kind === "oauth")) {
     // A user token: the same check exos-api makes (live role, scopes narrowed to it).
-    const { data: t, error: tErr } = await sb.rpc("exos_api_token_auth", { p_hash: await sha256Hex(key), p_kind: kind });
+    const hash = await sha256Hex(key);
+    const { data: t, error: tErr } = await sb.rpc("exos_api_token_auth", { p_hash: hash, p_kind: kind });
     if (tErr) {
       console.error("exos-mcp: token lookup failed", tErr.message);
       return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
     }
-    if (!t) return json({ error: "invalid, expired or revoked token" }, 401, { "WWW-Authenticate": challenge() });
+    if (!t) return json({ error: "invalid, expired or revoked token" }, 401, { "WWW-Authenticate": challenge(sbUrl) });
     if ((t as { error?: string }).error === "membership") {
       return json({ error: "this token's user is no longer a member of the organization" }, 403);
     }
-    const tok = t as { org_id: string; scopes: string[]; credential_id: string };
+    const tok = t as {
+      org_id: string; scopes: string[]; credential_id: string; user_id: string; client_id?: string | null; resource?: string | null;
+    };
+    // RFC 8707 / the MCP auth spec: a token made for another resource isn't
+    // ours; one that named no resource may read but never write.
+    const audience = kind === "oauth" ? tokenAudience(tok.resource, sbUrl) : "ok";
+    if (audience === "other") {
+      return json({ error: "this token was issued for another resource" }, 401, {
+        "WWW-Authenticate": challenge(sbUrl, "invalid_token"),
+      });
+    }
     ctx.orgId = tok.org_id;
-    ctx.scopes = tok.scopes ?? [];
+    ctx.scopes = (tok.scopes ?? []).filter((sc) => audience === "ok" || !/:write$|^org:admin$/.test(sc));
+    ctx.credKind = kind;
+    ctx.credId = tok.credential_id;
+    ctx.bearerHash = hash;
+    userId = tok.user_id ?? null;
+    clientId = tok.client_id ?? null;
     bucket = { token: `${kind}:${tok.credential_id}` };
   } else if (key) {
     // Scopes as of now: narrowed to the key creator's role's set (mig 20261104180000).
@@ -108,10 +155,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
     }
     if (!row) {
-      return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": challenge() });
+      return json({ error: "invalid or revoked Exos API key" }, 401, { "WWW-Authenticate": challenge(sbUrl) });
     }
     ctx.orgId = row.org_id as string;
     ctx.scopes = (row.scopes ?? []) as string[];
+    ctx.credKind = "api_key";
+    ctx.credId = row.id as string;
+    ctx.bearerHash = null;
     bucket = { keyId: row.id as string };
   } else {
     const salt = Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -132,7 +182,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const appBase = (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, "");
-  const server = exosMcpServer(supabaseData(sb), { appBase, version: VERSION });
+  // Writes carry the credential and source mcp to the database's audit log
+  // (believed on service-role requests only; _exos_audit_actor).
+  const writes = ctx.credKind && ctx.credId
+    ? writeData(mcpResource(sbUrl), createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+      global: {
+        headers: {
+          ...actorHeaders({ kind: ctx.credKind, id: ctx.credId, userId, clientId }, crypto.randomUUID()),
+          "x-exos-source": "mcp",
+        },
+      },
+    }))
+    : undefined;
+  const server = exosMcpServer(supabaseData(sb), { appBase, version: VERSION, writes });
   const out = await handleBody(server, body, ctx, (e) => console.error("exos-mcp: tool failed", redactError(e)));
   if (out === null) return new Response(null, { status: 202, headers: CORS });
   return json(out, 200);
@@ -216,21 +278,62 @@ function supabaseData(sb: SupabaseClient): ExosData {
   };
 }
 
-/** This server's URL and its authorization server (RFC 9728). */
-function protectedResource() {
-  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
-  const issuer = Deno.env.get("EXOS_OAUTH_ISSUER") || `${base}/functions/v1/exos-oauth`;
+/** The write tools' database calls (all service-role SQL held to ctx's org; mig 20261119130000). */
+function writeData(resource: string, sb: SupabaseClient): McpWriteData {
+  // p_resource: the audience SQL holds an OAuth token to (exos-mcp's canonical URL).
+  const cred = (ctx: ToolContext) => ({
+    p_org: ctx.orgId, p_cred_kind: ctx.credKind, p_cred: ctx.credId, p_bearer_hash: ctx.bearerHash ?? null,
+    p_resource: ctx.credKind === "oauth" ? resource : null,
+  });
   return {
-    resource: `${base}/functions/v1/exos-mcp`,
-    authorization_servers: [issuer],
-    bearer_methods_supported: ["header"],
-    scopes_supported: ["events:read", "orders:read", "tickets:read"],
+    async issueConfirm(ctx: ToolContext, tool: ConfirmToolName, exec: WriteExec) {
+      const token = newConfirmToken();
+      const { data, error } = await sb.rpc("exos_mcp_confirm_issue", {
+        ...cred(ctx), p_tool: tool, p_action: exec.action, p_target: exec.target, p_args: exec.args,
+        p_confirm_hash: await sha256Hex(token),
+      });
+      if (error) {
+        if (error.code === "54000" || error.code === "42501") throw new ToolError(String(error.message).replace(/^exos_mcp_confirm_issue: /, ""));
+        throw new Error(`confirm issue: ${error.message}`);
+      }
+      return { token, expires_at: String((data as { expires_at?: string })?.expires_at ?? "") };
+    },
+    async runWrite(ctx: ToolContext, tool: ConfirmToolName, confirmToken: string, exec: WriteExec): Promise<WriteOutcome> {
+      if (!CONFIRM_TOKEN_RE.test(confirmToken)) throw new ToolError("confirm_token is not one this server issued");
+      const { data, error } = await sb.rpc("exos_mcp_write", {
+        p_confirm_hash: await sha256Hex(confirmToken), ...cred(ctx), p_tool: tool, p_action: exec.action,
+        p_target: exec.target, p_args: exec.args,
+      });
+      if (error) throw new Error(`mcp write: ${error.message}`);
+      return data as WriteOutcome;
+    },
+    async publishRequest(ctx: ToolContext, eventId: string, digest: string): Promise<PublishAnswer> {
+      const { data, error } = await sb.rpc("exos_mcp_publish_request", { ...cred(ctx), p_event: eventId, p_digest: digest });
+      if (error) throw new Error(`publish request: ${error.message}`);
+      return data as PublishAnswer;
+    },
+    async publishStatus(ctx: ToolContext, requestId: string): Promise<PublishStatus | null> {
+      const { data, error } = await sb.rpc("exos_mcp_publish_status", { ...cred(ctx), p_request: requestId });
+      if (error) throw new Error(`publish status: ${error.message}`);
+      return (data as PublishStatus | null) ?? null;
+    },
+    async orgVenue(orgId: string, venueId: string): Promise<OrgVenue | null> {
+      const { data, error } = await sb.from("exos_venues").select("id, name, address, timezone")
+        .eq("org_id", orgId).eq("id", venueId).maybeSingle();
+      if (error) throw new Error(`venue: ${error.message}`);
+      return (data as OrgVenue | null) ?? null;
+    },
+    async eventState(orgId: string, eventId: string): Promise<EventState | null> {
+      const { data, error } = await sb.rpc("exos_mcp_event_state", { p_org: orgId, p_event: eventId });
+      if (error) throw new Error(`event state: ${error.message}`);
+      return (data as EventState | null) ?? null;
+    },
+    async feeOutcome(orgId: string, eventId: string): Promise<FeeOutcome | null> {
+      const { data, error } = await sb.rpc("exos_mcp_fee_outcome", { p_org: orgId, p_event: eventId });
+      if (error) throw new Error(`fee outcome: ${error.message}`);
+      return (data as FeeOutcome | null) ?? null;
+    },
   };
-}
-
-function challenge(): string {
-  const base = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
-  return `Bearer realm="exos", resource_metadata="${base}/functions/v1/exos-mcp/.well-known/oauth-protected-resource"`;
 }
 
 /** Search words safe inside a PostgREST filter (no , ( ) " * \ and friends). */

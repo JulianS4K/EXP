@@ -62,7 +62,9 @@ scope and returns the key's stored and effective scopes. The vocabulary is `SCOP
 Every write route calls one SQL function, `exos_api_write(key, action, target, args, idempotency_key)`, and
 `core.ts` only shapes the request and the answer. The SQL function:
 
-- runs as the **member who created the key**: it sets the transaction's JWT claims to them, so the dashboard's
+- runs as the **member who created the key** (or, for a personal or OAuth token on the three writes it may make,
+  as the token's own user, re-resolved in SQL: docs/developer-platform.md "Writes as yourself"): it sets the
+  transaction's JWT claims to them, so the dashboard's
   RPCs (`exos_issue_voucher`, `exos_issue_comp_batch`, `exos_refund_claim`, `exos_check_in_ticket`, the guest-list
   functions, …) see that member and check their role *now*. A key whose creator left the org can't write.
   Where the dashboard writes a table under RLS (events, ticket types, add-ons, POS items) it checks the policy's
@@ -128,8 +130,13 @@ The listing feed (`/v1/public/events`, alias `/v1/public/confirms`) is the one r
 Credentials: an org API key (`sk_live_…`), a personal access token (`exos_pat_…`) or an OAuth access token
 (`exos_oat_…`), resolved by `resolveCredential()` (mig 20261031130500). User tokens act as their user at the
 user's live role; they may call every GET and the platform routes (distribution partners, organizer
-reservations, the team, tokens: `PLATFORM_ROUTES` in `exos-api/index.ts`). Every other write records or
-checks an org API key id (`exos_api_write`, booking, offers, listing keys) and answers 403 to a user token.
+reservations, the team, tokens: `PLATFORM_ROUTES` in `_shared/api/request.ts`), and three core writes as
+their own user: `create-event`, `create-ticket-type`, `publish-event` (`USER_TOKEN_CORE_WRITES`, mig 20261119130000;
+`exos_api_write` re-resolves the token in SQL; an OAuth token only if it was issued for exos-api's URL,
+docs/developer-platform.md "Writes as yourself"). An OAuth token issued for another resource (RFC 8707), such as
+exos-mcp, is refused here with 401. Every other write
+records or checks an org API key id (`exos_api_write`, booking, offers, listing keys) and answers 403 to a user
+token.
 
 `/v1/public/…` carries two families: the listing feed (`auth: 'shared_key'`) and the partner contract
 (`auth: 'partner_key'`, `partnerApi()`, docs/partner-sales.md). exos-api picks one by the auth of the route

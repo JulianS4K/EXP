@@ -1,8 +1,10 @@
 // /oauth/authorize — the OAuth consent screen (mig 20261031130500,
 // docs/developer-platform.md). exos-oauth's GET /authorize sends the browser
 // here with the app's query. The user signs in, sees the app, where it will
-// send them back, the scopes, and their organizations with what their role
-// there can grant; picks one and allows or denies.
+// send them back, the scopes (what it could see, and apart from that what it
+// could change, each write scope with a box to untick), and their
+// organizations with what their role there can grant; picks one and allows or
+// denies.
 //
 // A bad client_id or an unregistered redirect URI is shown here and never
 // redirected to. Other problems, and Deny, go back to the app as error=….
@@ -14,19 +16,25 @@ import { useLocation } from 'react-router-dom';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { authorizeApprove, authorizeInfo, sqlMessage, type AuthorizeInfo } from '../lib/developerPlatform';
-import { parseAuthorizeQuery, withParams } from '../../supabase/functions/_shared/api/credentials.ts';
+import { exosResources, parseAuthorizeQuery, withParams } from '../../supabase/functions/_shared/api/credentials.ts';
 import { isScope, SCOPE_INFO } from '../../supabase/functions/_shared/api/scopes.ts';
+import { approvedScope, splitConsentScopes } from '../lib/oauthConsent';
 
 const BTN = 'px-5 py-2 text-xs font-black uppercase tracking-widest border disabled:opacity-40';
+const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+// The resources a token may be for (exos_oauth_authorize_approve enforces the same list).
+const RESOURCES = env.VITE_SUPABASE_URL ? Object.values(exosResources(env.VITE_SUPABASE_URL)) : undefined;
 
 export default function OAuthAuthorize() {
   const { user, openAuthModal } = useAuth();
   const location = useLocation();
-  const parsed = useMemo(() => parseAuthorizeQuery(new URLSearchParams(location.search)), [location.search]);
+  const parsed = useMemo(() => parseAuthorizeQuery(new URLSearchParams(location.search), RESOURCES), [location.search]);
   const [info, setInfo] = useState<AuthorizeInfo | null>(null);
   const [orgId, setOrgId] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // Write scopes the person unticked (claude/exos-mcp-writes): approved without them.
+  const [unticked, setUnticked] = useState<Set<string>>(new Set());
 
   // A shape problem the app should hear about goes straight back.
   useEffect(() => {
@@ -71,6 +79,8 @@ export default function OAuthAuthorize() {
 
   const org = info.orgs?.find((o) => o.org_id === orgId);
   const req = parsed.req;
+  const { reads, writes } = splitConsentScopes(info.scopes ?? []);
+  const scope = approvedScope(info.scopes ?? [], unticked);
   const back = (params: Record<string, string | undefined>) => window.location.assign(withParams(req.redirectUri, { ...params, state: req.state }));
 
   return (
@@ -99,29 +109,59 @@ export default function OAuthAuthorize() {
         </select>
       </label>
 
-      <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-widest text-white/50">It will be able to</p>
-        <ul className="space-y-1">
-          {(info.scopes ?? []).map((s) => {
+      {reads.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[10px] uppercase tracking-widest text-white/50">It will be able to see</p>
+          <ul className="space-y-1">
+            {reads.map((s) => {
+              const granted = org?.grantable.includes(s) ?? false;
+              return (
+                <li key={s} className={`text-xs flex items-start gap-2 ${granted ? 'text-white' : 'text-white/30 line-through'}`}>
+                  <ShieldCheck className="w-3 h-3 mt-0.5 shrink-0" aria-hidden="true" />
+                  {isScope(s) ? SCOPE_INFO[s].label : s}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {writes.length > 0 && (
+        <fieldset className="space-y-2 border border-amber-400/40 p-3">
+          <legend className="px-1 text-[10px] uppercase tracking-widest text-amber-400">It will be able to change, as you</legend>
+          {writes.map((s) => {
             const granted = org?.grantable.includes(s) ?? false;
+            const id = `scope-${s.replace(/[^a-z]/g, '-')}`;
             return (
-              <li key={s} className={`text-xs flex items-start gap-2 ${granted ? 'text-white' : 'text-white/30 line-through'}`}>
-                <ShieldCheck className="w-3 h-3 mt-0.5 shrink-0" />
-                {isScope(s) ? SCOPE_INFO[s].label : s}
-              </li>
+              <div key={s} className={`text-xs flex items-start gap-2 ${granted ? 'text-white' : 'text-white/30 line-through'}`}>
+                <input id={id} type="checkbox" className="mt-0.5" disabled={!granted} checked={granted && !unticked.has(s)}
+                  onChange={(e) => setUnticked((prev) => {
+                    const next = new Set(prev);
+                    if (e.target.checked) next.delete(s); else next.add(s);
+                    return next;
+                  })} />
+                <label htmlFor={id}>
+                  <span className="font-bold">{isScope(s) ? SCOPE_INFO[s].label : s}</span>
+                  {isScope(s) && <span className="block text-white/50">{SCOPE_INFO[s].description}</span>}
+                </label>
+              </div>
             );
           })}
-        </ul>
-        <p className="text-[11px] text-white/40">Never more than your role allows; if your role changes, so does the app's access. Disconnect it any time in your profile.</p>
-      </div>
+          <p className="text-[11px] text-white/40">
+            Untick anything you don't want it to change. Once allowed, the app can make these changes without asking you
+            each time. Through Exos's AI assistant connection, drafts and ticket types are made after the assistant shows a
+            preview, and nothing is published until you click Publish in Exos yourself.
+          </p>
+        </fieldset>
+      )}
+      <p className="text-[11px] text-white/40">Never more than your role allows; if your role changes, so does the app's access. Disconnect it any time in your profile.</p>
 
       <div className="flex gap-3">
-        <button type="button" className={`${BTN} border-brand-primary bg-brand-primary text-black`} disabled={busy || !org || org.grantable.length === 0}
+        <button type="button" className={`${BTN} border-brand-primary bg-brand-primary text-black`} disabled={busy || !org || org.grantable.length === 0 || scope === ''}
           onClick={async () => {
             setBusy(true);
             try {
               const code = await authorizeApprove({
-                clientId: req.clientId, redirectUri: req.redirectUri, scope: req.scope, orgId,
+                clientId: req.clientId, redirectUri: req.redirectUri, scope, orgId,
                 codeChallenge: req.codeChallenge, codeChallengeMethod: req.codeChallengeMethod, resource: req.resource,
               });
               back({ code });

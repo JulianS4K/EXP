@@ -44,6 +44,38 @@ A `:write` the role has lost still gives its `:read` if the role has that. So:
 - Some routes check the role on top of the scope: partner-key management and the team routes need an owner
   (a user token's user, or an API key's creator), and the per-tier partner switch an owner or manager.
 
+## Writes as yourself (mig 20261119130000)
+
+A personal access token or an OAuth token makes **three** core writes as its own user, over the API and through
+the MCP server (docs/mcp.md): create an event (`POST /v1/events`, action `event.create`), add a ticket type
+(`POST /v1/events/:id/ticket-types`, `ticket_type.create`) and publish (`POST /v1/events/:id/publish`,
+`event.publish`). Every other core write still needs an org API key and answers 403 to a user token.
+
+- **One resolution.** `exos_api_write` takes the token's SHA-256 (`p_token_hash`, `p_token_kind`, `p_token_org` for
+  `X-Exos-Org`, and `p_token_resource`) instead of a key id and re-resolves it with `exos_api_token_auth_org`, in
+  the same transaction as the write: a revoked or expired token, a revoked grant, a deleted app, a user who left or
+  was disabled are refused (42501) on the next call; the token's scopes are what the person consented to (capped by
+  the grant's current scopes), narrowed to their role in the org **now**.
+- **OAuth tokens and their resource.** An OAuth token makes these writes over the API only if it was issued for the
+  API: authorize with `resource=https://<project>.supabase.co/functions/v1/exos-api` (exactly). A token issued for
+  exos-mcp (`…/functions/v1/exos-mcp/organizer`) is refused by exos-api (401), and one that named no resource can
+  read but not make these writes (403). Authorization refuses any other resource (`invalid_target`). Personal
+  access tokens have no resource. It then runs as that user (the transaction's JWT claims, as for a key's creator), so the
+  dashboard's role checks decide: owners and managers create and publish, a content member's `events:write` still
+  can't. The key path is unchanged.
+- **The list.** `USER_TOKEN_CORE_WRITES` (`_shared/api/request.ts`) in exos-api and
+  `_exos_api_user_token_actions()` in SQL; `src/lib/mcp/mcpWrites.test.ts` keeps them equal, and
+  `src/lib/sim/partner.test.ts` T9 checks that every other write route still refuses a user token.
+- **The record.** `exos_api_writes` names the credential (`credential_kind` `api_key` / `pat` / `oauth`,
+  `credential_id`: the key's id, the personal token's id, the OAuth grant's id), the user (`actor`) and the source
+  (`api` / `mcp`). Idempotency-Keys are per credential. The org audit names a personal token as `pat:<id>` and an
+  OAuth token by its app's client id.
+- **Consent.** The consent screen lists what an app could change apart from what it could see, and each write scope
+  can be unticked before allowing. Re-consenting with fewer scopes revokes the grant's live tokens, and every token
+  is capped by its grant's current scopes, so unticking a write takes effect at once.
+- **Through MCP** the writes are different: drafts and ticket types after a preview and a confirm token, and a
+  publish only when the person clicks Publish on a review page in Exos (docs/mcp.md "Writes").
+
 ## Personal access tokens
 
 Profile → Developer: name, organization (a token is pinned to one, as Opendate's are), scopes your role allows,
@@ -111,7 +143,8 @@ Register at `/developers/apps`: name, homepage, redirect URIs, the scopes the ap
    (optionally `resource=`). The function hands the browser to the app's consent page
    (`<EXOS_APP_BASE_URL>/oauth/authorize`) with the same query.
 2. The consent page (signed in) shows the app (marked unverified if it registered itself), where it will send
-   the user back, the scopes, and the user's organizations with what their role there can grant. A bad
+   the user back, the scopes (what it could see, and apart from that what it could change, each write scope with a
+   box the user can untick), and the user's organizations with what their role there can grant. A bad
    `client_id` or an unregistered redirect URI is shown on the page, never redirected to; other problems, and
    Deny, go back to the app as `error=…`.
 3. Allow (`exos_oauth_authorize_approve`, the user's session): creates or updates the grant (one per app ×
@@ -126,14 +159,17 @@ Register at `/developers/apps`: name, homepage, redirect URIs, the scopes the ap
    authorizes again. A refresh may narrow the scopes, never widen them.
 
 Also: `POST /revoke` (RFC 7009; a refresh token takes its family), `POST /introspect` (RFC 7662, the app's own
-tokens, with the user's current role), `GET /.well-known/oauth-authorization-server` (RFC 8414), and
+tokens, with the user's current role), `GET /.well-known/oauth-authorization-server` (RFC 8414; the same document at
+`/.well-known/openid-configuration`, where MCP clients look for an issuer with a path), and
 `POST /register` (RFC 7591 dynamic registration, for MCP clients): **off unless `EXOS_OAUTH_DCR=on`**; such apps
 are marked unverified. Bodies are form-encoded or JSON, errors are `{ error, error_description }`, every answer
 is `no-store`, and the endpoints share 30 requests a minute per network.
 
 `exos-mcp` accepts personal and OAuth tokens with the same check as the API, answers
-`GET /.well-known/oauth-protected-resource` (RFC 9728), and on a bad token says where to get one
-(`WWW-Authenticate: Bearer resource_metadata=…`).
+`GET …/exos-mcp/organizer/.well-known/oauth-protected-resource` (RFC 9728; the organizer URL is its one canonical
+resource), and on a bad token says where to get one (`WWW-Authenticate: Bearer resource_metadata=…`). Its `/organizer`
+URL answers 401 without a token, which starts a connector's sign-in; it refuses an OAuth token issued for another
+resource, and one issued for none reads only (docs/mcp.md "Sign in with OAuth").
 
 The finish-token pattern of the Eventbrite / Google sign-ins (`_shared/oauthFinish.ts`) solves a different
 problem (Exos as an OAuth *client*, parking the provider's code until the starting user finishes); here Exos is

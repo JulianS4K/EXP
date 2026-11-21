@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_BODY_BYTES, readCapped } from '../../../supabase/functions/_shared/api/body.ts';
 import {
-  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, userTokenMayCall,
+  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, USER_TOKEN_CORE_WRITES, userTokenMayCall,
 } from '../../../supabase/functions/_shared/api/request.ts';
 import { PagingError, pageEnvelope, parsePage, PER_PAGE_MAX } from '../../../supabase/functions/_shared/api/paging.ts';
 import { allowedMethods, matchRoute, ROUTES } from '../../../supabase/functions/_shared/api/routes.ts';
@@ -141,7 +141,8 @@ describe('credentials and scopes', () => {
 
   it('SIM-PARTNER-T9 a personal or OAuth token on a write that needs an org key is refused', () => {
     const writes = ROUTES.filter((r) => r.auth === 'api_key' && r.method !== 'GET');
-    const orgKeyOnly = writes.filter((r) => !PLATFORM_ROUTES.has(r.id));
+    // USER_TOKEN_CORE_WRITES (mig 20261119130000): three core writes a user token makes as its user.
+    const orgKeyOnly = writes.filter((r) => !PLATFORM_ROUTES.has(r.id) && !USER_TOKEN_CORE_WRITES.has(r.id));
     expect(orgKeyOnly.length).toBeGreaterThan(50);
     for (const r of orgKeyOnly) {
       expect(userTokenMayCall('pat', r.method, r.id), r.id).toBe(false);

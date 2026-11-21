@@ -169,7 +169,7 @@ BEGIN
                            '/* exos: partner presale mode */'] LOOP
     ASSERT position(f IN d) > 0, 'LO0 _exos_partner_reserve keeps ' || f;
   END LOOP;
-  d := pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text)'::regprocedure);
+  d := pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)'::regprocedure);
   FOREACH f IN ARRAY ARRAY['/* exos: addon undo api */', '/* exos: addon undo api route */', '/* exos: addon pass api */',
                            '/* exos: addon access barcode */', '/* exos: idem hash set */'] LOOP
     ASSERT position(f IN d) > 0, 'LO0 exos_api_write keeps ' || f;

@@ -51,6 +51,7 @@ const Status = lazy(() => import('./views/Status'));
 const Developers = lazy(() => import('./views/Developers'));
 const DeveloperApps = lazy(() => import('./views/DeveloperApps'));
 const OAuthAuthorize = lazy(() => import('./views/OAuthAuthorize'));
+const McpPublishReview = lazy(() => import('./views/McpPublishReview'));
 const LiveTicketLink = lazy(() => import('./views/LiveTicketLink'));
 const Profile = lazy(() => import('./views/Profile'));
 const OrganizerProfile = lazy(() => import('./views/OrganizerProfile'));
@@ -282,6 +283,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/flags" element={<OrgLimitFlags />} />
                     <Route path="/admin/listings" element={<ListingQueue />} />
                     <Route path="/orgs/:orgId/payouts" element={<OrgPayouts />} />
+                    <Route path="/orgs/:orgId/events/:eventId/publish-review" element={<McpPublishReview />} />
                     <Route path="/orgs/:orgId/channels" element={<OrgChannelReport />} />
                     <Route path="/orgs/:orgId/seat-maps" element={<OrgSeatMaps />} />
                     <Route path="/orgs/:orgId/promote" element={<OrgPromote />} />

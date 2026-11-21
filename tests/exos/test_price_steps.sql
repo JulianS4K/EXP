@@ -530,7 +530,7 @@ SELECT set_config('app.uid', '', true);
 DO $$
 DECLARE s text; j jsonb; v numeric;
 BEGIN
-  ASSERT position('/* exos: door price */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text)'::regprocedure)) > 0,
+  ASSERT position('/* exos: door price */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)'::regprocedure)) > 0,
     'PS13 the door price patch is in exos_api_write';
   j := public.exos_api_write('b5700000-0000-0000-0000-0000000000f1', 'ticket_type.update', 'b5700000-0000-0000-0000-0000000000d1',
         '{"ticket_type":{"door_price_cents":4000}}');

@@ -184,9 +184,25 @@ export const PLATFORM_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Core writes a personal or OAuth token may make as its own user (mig
+ * 20261119130000, docs/developer-platform.md "Writes as yourself"): exos-api
+ * passes the token's hash to exos_api_write, which re-resolves it in SQL and
+ * narrows its scopes to the user's live role. Must match
+ * _exos_api_user_token_actions() (event.create, ticket_type.create,
+ * event.publish; src/lib/mcp/mcpWrites.test.ts). Every other core write still
+ * needs an org API key.
+ */
+export const USER_TOKEN_CORE_WRITES: ReadonlyMap<string, string> = new Map([
+  ['create-event', 'event.create'],
+  ['create-ticket-type', 'ticket_type.create'],
+  ['publish-event', 'event.publish'],
+]);
+
+/**
  * May this credential call this route? An org API key: anything its scopes
- * allow. A personal or OAuth token: every GET and the platform routes only.
+ * allow. A personal or OAuth token: every GET, the platform routes and
+ * USER_TOKEN_CORE_WRITES only.
  */
 export function userTokenMayCall(kind: 'api_key' | 'pat' | 'oauth', method: string, routeId: string): boolean {
-  return kind === 'api_key' || method === 'GET' || PLATFORM_ROUTES.has(routeId);
+  return kind === 'api_key' || method === 'GET' || PLATFORM_ROUTES.has(routeId) || USER_TOKEN_CORE_WRITES.has(routeId);
 }
