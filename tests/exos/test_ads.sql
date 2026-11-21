@@ -697,6 +697,8 @@ INSERT INTO auth.users(id,email,email_confirmed_at,confirmation_sent_at) VALUES
   ('ad100000-0000-0000-0000-0000000000d5','t1-emailprov@x.com',now(),NULL),         -- an 'email' identity says verified: not enough
   ('ad100000-0000-0000-0000-0000000000d6','t1-mailed@x.com',now(),now() - interval '1 hour'), -- confirmation mail sent and answered
   ('ad100000-0000-0000-0000-0000000000d7','t1-otheraddr@x.com',now(),NULL),         -- Google verified a different address
+  ('ad100000-0000-0000-0000-0000000000d9','u3-azure@x.com',now(),NULL),             -- Azure claims verified: not trusted (U3)
+  ('ad100000-0000-0000-0000-0000000000da','u3-sso@x.com',now(),NULL),               -- an SSO IdP claims verified: not trusted (U3)
   ('ad100000-0000-0000-0000-0000000000f1','t2-needs@x.com',now(),now() - interval '1 hour'),
   ('ad100000-0000-0000-0000-0000000000f2','t2-review@x.com',now(),now() - interval '1 hour'),
   ('ad100000-0000-0000-0000-0000000000f3','t2-won@x.com',now(),now() - interval '1 hour'),
@@ -706,7 +708,9 @@ INSERT INTO auth.identities(user_id,provider,identity_data) VALUES
   ('ad100000-0000-0000-0000-0000000000d3','apple','{"email":"T1-Apple@x.com","email_verified":"true"}'),
   ('ad100000-0000-0000-0000-0000000000d4','google','{"email":"t1-unverified@x.com","email_verified":false}'),
   ('ad100000-0000-0000-0000-0000000000d5','email','{"email":"t1-emailprov@x.com","email_verified":true}'),
-  ('ad100000-0000-0000-0000-0000000000d7','google','{"email":"someone-else@x.com","email_verified":true}');
+  ('ad100000-0000-0000-0000-0000000000d7','google','{"email":"someone-else@x.com","email_verified":true}'),
+  ('ad100000-0000-0000-0000-0000000000d9','azure','{"email":"u3-azure@x.com","email_verified":true}'),
+  ('ad100000-0000-0000-0000-0000000000da','sso:7f1c0a2e-0000-0000-0000-000000000001','{"email":"u3-sso@x.com","email_verified":true}');
 CREATE FUNCTION pg_temp.acct(p_id text, p_uid uuid, p_email text, p_dispute text DEFAULT NULL) RETURNS void LANGUAGE sql AS $$
   INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at)
   VALUES (p_id, pg_temp.ev('e1'), pg_temp.org(), p_uid, false, p_email, 1, 2500, 'usd', 'pending', 'granted', now() - interval '1 hour');
@@ -719,6 +723,8 @@ SELECT pg_temp.acct('cs_test_ad1_t1u', 'ad100000-0000-0000-0000-0000000000d4', '
 SELECT pg_temp.acct('cs_test_ad1_t1e', 'ad100000-0000-0000-0000-0000000000d5', 't1-emailprov@x.com');
 SELECT pg_temp.acct('cs_test_ad1_t1m', 'ad100000-0000-0000-0000-0000000000d6', 't1-mailed@x.com');
 SELECT pg_temp.acct('cs_test_ad1_t1o', 'ad100000-0000-0000-0000-0000000000d7', 't1-otheraddr@x.com');
+SELECT pg_temp.acct('cs_test_ad1_u3a', 'ad100000-0000-0000-0000-0000000000d9', 'u3-azure@x.com');
+SELECT pg_temp.acct('cs_test_ad1_u3s', 'ad100000-0000-0000-0000-0000000000da', 'u3-sso@x.com');
 SELECT pg_temp.acct('cs_test_ad1_t2n', 'ad100000-0000-0000-0000-0000000000f1', 't2-needs@x.com', 'needs_response');
 SELECT pg_temp.acct('cs_test_ad1_t2r', 'ad100000-0000-0000-0000-0000000000f2', 't2-review@x.com', 'under_review');
 SELECT pg_temp.acct('cs_test_ad1_t2w', 'ad100000-0000-0000-0000-0000000000f3', 't2-won@x.com', 'won');
@@ -733,7 +739,8 @@ BEGIN
   x := pg_temp.xemails(pg_temp.xp());
   ASSERT NOT ('t1-victim@x.com' = ANY (e)) AND NOT ('t1-victim@x.com' = ANY (x)),
     'AD11 T1: an instantly-confirmed account (no confirmation mail) made a "yes" (source ' || e::text || ', export ' || x::text || ')';
-  FOREACH v IN ARRAY ARRAY['t1-unverified@x.com', 't1-emailprov@x.com', 't1-otheraddr@x.com', 't2-needs@x.com', 't2-review@x.com'] LOOP
+  FOREACH v IN ARRAY ARRAY['t1-unverified@x.com', 't1-emailprov@x.com', 't1-otheraddr@x.com', 't2-needs@x.com', 't2-review@x.com',
+                           'u3-azure@x.com', 'u3-sso@x.com'] LOOP
     ASSERT NOT (v = ANY (e)) AND NOT (v = ANY (x)), 'AD11: ' || v || ' counted';
   END LOOP;
   FOREACH v IN ARRAY ARRAY['t1-google@x.com', 't1-apple@x.com', 't1-mailed@x.com', 't2-won@x.com', 't2-wclosed@x.com'] LOOP
