@@ -72,6 +72,15 @@ export interface TestResult { ok: boolean | null; name?: string; error?: string 
 export interface Page<T> { rows: T[]; next: string | null }
 export interface AttendeeRow { ref: string; code: string | null; name: string | null; email: string | null; ticket: string | null; void: boolean }
 
+/** A post as every publishing channel takes it (the post kit builds one per platform). */
+export interface SocialPost {
+  text: string;
+  url?: string | null;
+  title?: string;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+}
+
 /** Exos's view of an event, as the planners take it (model.ts MirrorEvent and friends). */
 export type ExosEvent = Record<string, unknown> & { id: string };
 
@@ -98,7 +107,8 @@ export interface ChannelAdapter {
   deliver?(ctx: ChannelCtx, sale: CanonicalSale, kind: DeliveryKind, tickets: unknown[]): Promise<unknown>;
   readAttendees?(ctx: ChannelCtx, extEventId: string, cursor: string | null): Promise<Page<AttendeeRow>>;
   checkin?(ctx: ChannelCtx, extAttendeeId: string): Promise<unknown>;
-  publishPost?(ctx: ChannelCtx, ev: ExosEvent, post: { text: string; url?: string }): Promise<unknown>;
+  /** post: from the one post kit (_shared/social/postKit.ts); media URLs are public https. */
+  publishPost?(ctx: ChannelCtx, ev: ExosEvent, post: SocialPost): Promise<unknown>;
   /** members: hashed and consent-filtered by the one builder (_shared/ads/audience.ts); externalId: the platform's audience, when it exists. */
   syncAudience?(ctx: ChannelCtx, audience: { id: string; name?: string; members: HashedIdentifiers[]; externalId?: string | null }): Promise<unknown>;
   createCampaign?(ctx: ChannelCtx, ev: ExosEvent, campaign: Record<string, unknown>): Promise<unknown>;

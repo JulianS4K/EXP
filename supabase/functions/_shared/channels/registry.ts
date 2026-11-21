@@ -8,6 +8,11 @@ import { metaAdsAdapter } from "./adapters/metaAds.ts";
 import { redditAdsAdapter } from "./adapters/redditAds.ts";
 import { googleCustomerMatchAdapter } from "./adapters/googleCustomerMatch.ts";
 import { xAdsAdapter } from "./adapters/xAds.ts";
+import { instagramAdapter } from "./adapters/instagram.ts";
+import { tiktokAdapter } from "./adapters/tiktok.ts";
+import { meetupAdapter } from "./adapters/meetup.ts";
+import { linkedinAdapter } from "./adapters/linkedin.ts";
+import { googleBusinessAdapter } from "./adapters/googleBusiness.ts";
 
 const legacy = (id: string, label: string, home: string, c: Parameters<typeof caps>[0]): ChannelAdapter =>
   ({ id, label, status: "legacy", home, caps: caps(c) });
@@ -19,6 +24,12 @@ export const ADAPTERS: readonly ChannelAdapter[] = [
   redditAdsAdapter,
   googleCustomerMatchAdapter,
   xAdsAdapter,
+  // The social posting / listing phase (mig 20261121203000): dry run only, every write on an explicit allowlist.
+  instagramAdapter,
+  tiktokAdapter,
+  meetupAdapter,
+  linkedinAdapter,
+  googleBusinessAdapter,
   legacy("eventbrite", "Eventbrite", "exos-channel-sync + _shared/channels/eventbrite.ts", {
     role: "primary", createEvent: true, ticketTypes: true, setCapacity: true, readAttendees: true }),
   legacy("luma", "Luma", "exos-channel-sync + _shared/channels/luma.ts", {

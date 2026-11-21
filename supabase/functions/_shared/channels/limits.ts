@@ -18,9 +18,12 @@
 //   free_must_be_public  free AND hidden / invite-only            (Google)
 //   attendees_per_event  allocation over `threshold`              (Meetup)
 //   active_events        upcoming events already at `threshold`   (AllEvents)
+//   min_profile_age_days the account / profile is younger than   (Google Business
+//                        `threshold` days (unknown = too young)   Profile posts)
 //   usage                a counted metric over a rolling window   (Luma, LinkedIn,
 //                        pretix, Ticket Tailor, Eventbrite, the Reddit Ads
-//                        API's per-minute rates) read from
+//                        API's per-minute rates, Instagram's posts a
+//                        day, Meetup's GraphQL points) read from
 //                        exos_channel_usage (usage.ts)
 // Actions: block refuses with the reason; cap trims (maxUnits) or makes the
 // caller chunk (chunkToBudget); warn lets it through and records the warning.
@@ -31,7 +34,7 @@ export type LimitAction = "block" | "warn" | "cap";
 export type LimitWindow = "minute" | "quarter_hour" | "day" | "week" | "year";
 export type LimitScope = "event" | "tier" | "org" | "account" | "calendar";
 export type LimitKind =
-  | "free_event" | "zero_price" | "free_must_be_public" | "attendees_per_event" | "active_events" | "usage";
+  | "free_event" | "zero_price" | "free_must_be_public" | "attendees_per_event" | "active_events" | "min_profile_age_days" | "usage";
 
 export interface LimitSource {
   url: string | null;
@@ -89,6 +92,11 @@ const redditRate = (id: string, rule: string, threshold: number, window: LimitWi
   source: BRIEF("operator brief 2026-11-21 (ads phase): Reddit Ads API v3 rate limits; the unit of the audience limit (requests) unverified"),
 });
 
+// The social posting / listing phase (mig 20261121203000, docs/social.md
+// "Posting and listing APIs"): numbers from the operator's brief, each
+// still to check against the platform's docs before anything goes live.
+const SOCIAL = (note: string): LimitSource => BRIEF(`operator brief 2026-11-21 (social phase): ${note}`);
+
 /** One data table per platform. */
 export const PLATFORM_LIMITS: Readonly<Record<string, readonly LimitRule[]>> = {
   shotgun: [{
@@ -115,6 +123,18 @@ export const PLATFORM_LIMITS: Readonly<Record<string, readonly LimitRule[]>> = {
     plans: ["starter"],
     reason: "Meetup's Starter plan takes 10 attendees per event: the allocation is capped at 10. A Standard or Pro plan is needed for more.",
     source: BRIEF(),
+  }, {
+    id: "meetup_graphql_points",
+    platform: "meetup",
+    rule: "500 GraphQL points per 60 seconds",
+    scope: "account",
+    threshold: 500,
+    window: "minute",
+    action: "cap",
+    kind: "usage",
+    metric: "points",
+    reason: "Meetup's API allows 500 points of GraphQL work per 60 seconds: the rest waits for the next minute.",
+    source: SOCIAL("Meetup GraphQL rate limit; what each mutation costs in points is unverified (Exos counts an estimate)"),
   }],
   pretix: [{
     id: "pretix_hosted_free_tickets",
@@ -223,6 +243,59 @@ export const PLATFORM_LIMITS: Readonly<Record<string, readonly LimitRule[]>> = {
     redditRate("reddit_audience_uploads", "3,000 audience uploads per 15 minutes", 3000, "quarter_hour", "audience_uploads",
       "Reddit takes 3,000 custom-audience uploads per 15 minutes per account: the rest of the list waits for the next window."),
   ],
+  instagram: [{
+    id: "instagram_daily_posts",
+    platform: "instagram",
+    rule: "100 API-published posts per 24 hours",
+    scope: "account",
+    threshold: 100,
+    window: "day",
+    action: "cap",
+    kind: "usage",
+    metric: "posts",
+    reason: "Instagram publishes at most 100 posts through the API per account in 24 hours: more wait for the next day.",
+    source: SOCIAL("Instagram content publishing limit (GET /<ig-user>/content_publishing_limit reads the live number)"),
+  }],
+  tiktok: [{
+    id: "tiktok_init_rate",
+    platform: "tiktok",
+    rule: "6 post-initialize requests a minute per user token",
+    scope: "account",
+    threshold: 6,
+    window: "minute",
+    action: "cap",
+    kind: "usage",
+    metric: "inits",
+    verified: false,
+    reason: "TikTok takes about 6 post requests a minute per connected account (unverified): the rest wait for the next minute.",
+    source: SOCIAL("TikTok Content Posting API rate limit, from search only, unverified"),
+  }, {
+    id: "tiktok_daily_posts",
+    platform: "tiktok",
+    rule: "a daily cap on posts per creator",
+    scope: "account",
+    threshold: 15,
+    window: "day",
+    action: "warn",
+    kind: "usage",
+    metric: "posts",
+    warnAt: 0.8,
+    verified: false,
+    reason: "TikTok caps how many posts a creator can make through the API each day (about 15; the creator_info answer says when it is reached; unverified).",
+    source: SOCIAL("TikTok daily creator post cap, from search only, unverified"),
+  }],
+  google_business: [{
+    id: "gbp_profile_age",
+    platform: "google_business",
+    rule: "a verified Business Profile at least 60 days old",
+    scope: "account",
+    threshold: 60,
+    window: null,
+    action: "block",
+    kind: "min_profile_age_days",
+    reason: "Google Business Profile event posts need a verified profile that has been verified for at least 60 days: until then, nothing is posted.",
+    source: SOCIAL("GBP API access needs a verified profile 60+ days old (Google's access request form)"),
+  }],
   google_events: [{
     id: "google_free_public",
     platform: "google_events",
@@ -270,6 +343,8 @@ export interface LimitFacts {
   activeUpcomingEvents?: number | null;
   /** The allocation being set for the event. */
   attendees?: number | null;
+  /** Days since the profile / account was verified (Google Business Profile); unknown = too young. */
+  profileAgeDays?: number | null;
 }
 
 export interface UsageReading { live: number; planned: number }
@@ -353,10 +428,17 @@ export function evaluateLimits(
         break;
       case "attendees_per_event": {
         const t = r.threshold ?? 0;
-        lower(t);
+        // Only an attendee count (or no request: a view) is trimmed by it.
+        if (!request || request.metric === "attendees") lower(t);
         if (facts.attendees === undefined || facts.attendees === null || facts.attendees > t) {
           push(hit(r, { remaining: t, would: facts.attendees ?? undefined }));
         }
+        break;
+      }
+      case "min_profile_age_days": {
+        const t = r.threshold ?? 0;
+        const age = facts.profileAgeDays;
+        if (age === undefined || age === null || !Number.isFinite(age) || age < t) push(hit(r, { used: age ?? undefined, remaining: t }));
         break;
       }
       case "active_events": {
@@ -374,7 +456,8 @@ export function evaluateLimits(
         v.meters.push({ ruleId: r.id, platform: r.platform, metric: r.metric, window: r.window, threshold: t, live: u.live, planned: u.planned, would: n });
         const extra = { threshold: t, used: u.live, planned: u.planned, remaining, would: n };
         if (r.action === "cap") {
-          lower(remaining);
+          // A budget trims only a request in its own metric (or a view with none).
+          if (!request || request.metric === r.metric) lower(remaining);
           if (n > remaining || (n === 0 && remaining === 0)) push(hit(r, extra));
         } else if (r.action === "block") {
           if (u.live + n > t) push(hit(r, extra));
