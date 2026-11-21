@@ -299,7 +299,8 @@ for m in \
   20261121153000_exos_static_codes \
   20261121162400_exos_channel_core \
   20261121190500_exos_ads \
-  20261121203000_exos_social_listings; do
+  20261121203000_exos_social_listings \
+  20261121214500_exos_byo_marketplaces; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -558,7 +559,8 @@ for m in \
          20261121153000_exos_static_codes \
          20261121162400_exos_channel_core \
          20261121190500_exos_ads \
-         20261121203000_exos_social_listings; do
+         20261121203000_exos_social_listings \
+         20261121214500_exos_byo_marketplaces; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -571,6 +573,8 @@ PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 202611211
 # replaces _exos_cred_managed / _exos_cred_providers in full after it, so it is
 # re-applied in the same check (reapply_check.sh: later migrations).
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads 20261121203000_exos_social_listings
+# The own-account marketplaces (mig 20261121214500): 11 counted patches, re-run safe.
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121214500_exos_byo_marketplaces
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_passes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
@@ -734,5 +738,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_c
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ads.sql"
 # claude/exos-social-listings (mig 20261121203000): social posting and listing APIs, dry run only: the new managed providers (ig_publish, tiktok_publish, meetup, linkedin, google_business; refused by the generic save / remove, read only by the service role, not listed in Integrations), the post kit's context (owner / manager only; a secret / TBA location without its venue; venue org; booleans and non-secret facts only; the Google connection counts for Business Profile)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_social_listings.sql"
+# claude/exos-byo-marketplaces (mig 20261121214500): selling on the organizer's OWN marketplace accounts, dry run only: % allocations per marketplace (floor, at least 1, never below sold, audited), one account per marketplace per event (the Exos network's gates skipped, $0 blocked), no Exos fee and off Exos's books on an own-account sale while an Exos checkout on the same 150+ event pays, static codes for its tickets, the auto split leaves it alone (race: race_byo_allocations.sh)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_byo_marketplaces.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"
