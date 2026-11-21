@@ -145,9 +145,9 @@ at or under `exos_free_tier_max_capacity()`), counting the ticket being issued, 
 BEFORE INSERT trigger `exos_tickets_code_mode` (`_exos_ticket_code_mode`). It never
 changes after (`exos_tickets_code_mode_lock`). **Growth:** when an event grows past the
 cutoff (a bigger cap, or sales past it), tickets issued from then on rotate and the earlier
-ones keep their static code; the door takes both, per ticket. The rule takes a per-event
-advisory lock before it counts, so two orders at the boundary can't both get the last static
-place. An insert that asks for `static` keeps it only on the static-code path, the generic
+ones keep their static code; the door takes both, per ticket. The rule locks the event
+row before it counts (the lock every issuing path already takes), so two orders at the boundary
+can't both get the last static place. An insert that asks for `static` keeps it only on the static-code path, the generic
 door mode for marketplace-allocated PDF tickets: its transaction sets
 `exos.static_code_ok = 'on'` (nothing does yet); elsewhere `static` is refused where the rule
 says rotating. An insert that skips triggers gets the column default, `rotating`.
@@ -165,7 +165,7 @@ it never parses as a four-part `T-` / `A-` code, nor they as it (`src/lib/static
 | Single use | `exos_check_in_ticket` (both overloads) takes an `S-` code through the same atomic `active → used` flip as every code: the first scan wins, a second gets the usual "already checked in" (`used`) answer |
 | Static tickets only | A rotating ticket's `S-` code is refused (`barcode-rejected`), so the paid tier keeps its anti-screenshot property. A static ticket still takes its `T-` code (an app that hasn't reloaded) |
 | Voided on transfer and refund | A transfer changes the owner and every change of holder rotates the secret (the claim, the phone-RSVP claim, the box office's email hand-over): the old code is refused and the new holder has a new one. A started transfer refuses it (`in-transfer`), a refund voids the ticket (`voided`) |
-| A leaked code | The holder's **Code shared or lost? Get a new one** (`exos_ticket_static_reissue`, 3 a minute) and the wallet's reissue (`exos_wallet_reissue`) give the ticket a new secret: the old code, its PDF and any printout stop working |
+| A leaked code | The holder's **Code shared or lost? Get a new one** (`exos_ticket_static_reissue`, 3 a minute) and the wallet's reissue (`exos_wallet_reissue`, also 3 a minute per holder: `{ ok: false, reason: 'rate-limited' }`) give the ticket a new secret, only while it is active and not being transferred (`reason: 'not-active'`): the old code, its PDF and any printout stop working |
 | Printed tickets | A live `P-` paper refuses the static code too (`printed`) |
 | Typed at the door | The printed string typed in counts as a verified scan, not an override |
 

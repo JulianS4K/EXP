@@ -26,8 +26,10 @@
 --    max(max capacity, sold) at or under exos_free_tier_max_capacity()),
 --    counting this ticket (the event's live tickets + 1 must also be at or
 --    under the cutoff, so a path that counts the sale after inserting still
---    crosses on the ticket that crosses), under a per-event advisory lock so
---    two orders at the boundary can't both take the last static place. The mode never changes after
+--    crosses on the ticket that crosses), under the event row lock (FOR NO KEY
+--    UPDATE, the lock every issuing path's UPDATE exos_events takes, so no
+--    path can deadlock on it) so two orders at the boundary can't both take
+--    the last static place. The mode never changes after
 --    (exos_tickets_code_mode_lock). So when an event grows past the cutoff,
 --    tickets issued after that rotate and the earlier ones stay static.
 -- 2. The code: S-{ticket}:{32 base32 chars}, the first 160 bits of
@@ -63,7 +65,8 @@
 --    partner reservation) say the right thing for static tickets.
 -- 6. A leaked code: exos_ticket_static_reissue (the holder) and
 --    exos_wallet_reissue (patched) give a static ticket a new secret, so a
---    new code. And the box office's email hand-over to an account now
+--    new code: both 3 a minute per holder, both only while it is active and
+--    not being transferred. And the box office's email hand-over to an account now
 --    rotates the secret like every other change of holder: it didn't, so the
 --    selling scanner could still make the buyer's T- codes (live in prod).
 --
@@ -84,7 +87,7 @@
 --                exos_ticket_link_view(uuid, text)                    (2 patches)
 --                exos_phone_rsvp_verify(uuid, text, text)
 --                _exos_partner_reservation_complete(uuid, uuid, text, jsonb, text)
---                exos_wallet_reissue(uuid)
+--                exos_wallet_reissue(uuid)                            (2 patches)
 --                _exos_pos_deliver_email(uuid, uuid, text, boolean)    (a fix live in prod: see 6)
 --              Anchors (the text each patch searches for, once):
 --                check-in x2: "ELSIF v_signed AND upper(left(btrim(p_barcode_payload), 2)) = 'W-' THEN"
@@ -93,7 +96,8 @@
 --                exos_ticket_link_view: its SELECT ... attendee_name line; "'code', CASE WHEN v_state = 'valid'"
 --                exos_phone_rsvp_verify / _exos_partner_reservation_complete: the
 --                  "Its QR code changes every 30 seconds" sentence of the mail
---                exos_wallet_reissue: "IF v_epoch IS NULL THEN ... 'no-pass' ... END IF;"
+--                exos_wallet_reissue: "IF v_epoch IS NULL THEN ... 'no-pass' ... END IF;";
+--                  its "RAISE ... 'exos_wallet_reissue: not the ticket owner' ... END IF;"
 --                _exos_pos_deliver_email: "UPDATE public.exos_tickets SET owner_id = v_rcpt,
 --                  buyer_id = v_rcpt, buyer_email = v_email / WHERE id = ANY (v_ids) AND owner_id = o.rung_by;"
 -- Pre-reqs: every exos migration before this one.
@@ -150,10 +154,10 @@ CREATE INDEX IF NOT EXISTS exos_tickets_static_touched_idx ON public.exos_ticket
 
 -- The mode a ticket of this event gets if issued now: the fee's free-tier
 -- rule (exos_event_is_free_tier), with this ticket counted. VOLATILE, so each
--- statement sees what committed before it. A free-tier event's issues take a
--- per-event advisory lock (held to commit) before counting, so two orders at
--- the boundary can't both see room for one more static ticket; events over
--- the cutoff never take it.
+-- statement sees what committed before it. A free-tier event's issues lock
+-- the event row (FOR NO KEY UPDATE, held to commit) before counting, so two
+-- orders at the boundary can't both see room for one more static ticket;
+-- events over the cutoff never take it here (their paths' UPDATE does).
 CREATE OR REPLACE FUNCTION public._exos_ticket_code_mode(p_event_id uuid)
 RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
@@ -163,7 +167,11 @@ BEGIN
   IF p_event_id IS NULL OR NOT coalesce(public.exos_event_is_free_tier(p_event_id), false) THEN
     RETURN 'rotating';
   END IF;
-  PERFORM pg_advisory_xact_lock(hashtextextended('exos_code_mode:' || p_event_id::text, 0));
+  -- The event row lock every issuing path takes (UPDATE exos_events), not a
+  -- lock of its own: a path that inserts before that UPDATE (the partner /
+  -- API reservation complete) would otherwise wait for another path's event
+  -- row while holding what that path's insert waits for (a deadlock).
+  PERFORM 1 FROM public.exos_events WHERE id = p_event_id FOR NO KEY UPDATE;
   -- Again under the lock: another order may have crossed while we waited.
   IF NOT coalesce(public.exos_event_is_free_tier(p_event_id), false) THEN
     RETURN 'rotating';
@@ -370,6 +378,29 @@ $n$  IF v_epoch IS NULL THEN
   /* exos: static codes */ -- mig 20261121153000: a new S- code too.
   UPDATE public.exos_tickets SET barcode_secret = gen_random_uuid()::text, last_reissue_at = now()
    WHERE id = p_ticket_id AND owner_id = v_uid AND code_mode = 'static';$n$, 1);
+
+-- The same guards as exos_ticket_static_reissue, before the pass epoch moves:
+-- 3 a minute per holder (every ticket: each reissue pushes the pass), and a
+-- static ticket gets a new secret only while active and not being
+-- transferred (its row locked, so a check-in or a transfer can't start in
+-- between). Answers, not errors, so exos-wallet's reissue keeps its shape
+-- ({ ok: false, reason } with 409, as 'no-pass').
+SELECT pg_temp.exos_patch_n(
+  'public.exos_wallet_reissue(uuid)',
+  '/* exos: static reissue guards */',
+$o$    RAISE EXCEPTION 'exos_wallet_reissue: not the ticket owner' USING ERRCODE = '42501';
+  END IF;$o$,
+$n$    RAISE EXCEPTION 'exos_wallet_reissue: not the ticket owner' USING ERRCODE = '42501';
+  END IF;
+  /* exos: static reissue guards */ -- mig 20261121153000
+  IF NOT public.exos_rate_hit('wallet_reissue:' || v_uid::text, 3) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'rate-limited');
+  END IF;
+  PERFORM 1 FROM public.exos_tickets WHERE id = p_ticket_id FOR UPDATE;
+  IF EXISTS (SELECT 1 FROM public.exos_tickets WHERE id = p_ticket_id AND code_mode = 'static'
+              AND (status <> 'active' OR pending_transfer_id IS NOT NULL)) THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'not-active');
+  END IF;$n$, 1);
 
 -- The box office's email hand-over to a confirmed account moved the ticket
 -- to the buyer without a new secret, so the seller, who could read it while

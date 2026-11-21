@@ -37,6 +37,9 @@
 --   ST10 a leaked code: the holder's exos_ticket_static_reissue and
 --        exos_wallet_reissue give a new secret (the old S- code refused, the
 --        new one works); only the holder, only static, rate-limited
+--   ST11 the wallet's reissue: a used or in-transfer static ticket gets no
+--        new secret (and no new epoch), 3 a minute per holder, a rotating
+--        ticket's reissue as before
 -- Self-contained (BEGIN / ROLLBACK), prefix b5c. The free-tier setting is
 -- removed inside the transaction, so the cutoff is the shipped default.
 -- Two scans of one static code at once: tests/exos/race_static_codes.sh (CI).
@@ -481,6 +484,45 @@ BEGIN
   ASSERT NOT has_function_privilege('anon', 'public.exos_ticket_static_reissue(uuid)', 'EXECUTE')
      AND has_function_privilege('authenticated', 'public.exos_ticket_static_reissue(uuid)', 'EXECUTE'), 'ST10: grants';
   RAISE NOTICE 'OK ST10 a leaked code: holder reissue and wallet reissue give a new code; holder only, static only, rate-limited';
+END $$;
+
+-- ── ST11 ────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  v_e uuid := pg_temp.mkevent('13', 20);
+  used_t uuid := pg_temp.issue(v_e); xfer_t uuid := pg_temp.issue(v_e); late_t uuid := pg_temp.issue(v_e);
+  rot uuid := pg_temp.issue(pg_temp.ev('02'), pg_temp.u('c2'));
+  v_sec text; v_ep int; r jsonb;
+BEGIN
+  INSERT INTO public.exos_wallet_passes (serial_number, ticket_id, owner_id)
+  SELECT 'exw' || md5(t.id::text || 'st11'), t.id, t.owner_id FROM public.exos_tickets t WHERE t.id IN (used_t, xfer_t, late_t, rot);
+  -- Used: no new secret, no new pass epoch (ST10 spent 1 of c1's 3 this minute).
+  ASSERT pg_temp.scan(used_t, pg_temp.scode(used_t)) ->> 'reason' = 'checked-in', 'ST11: checked in';
+  v_sec := (SELECT barcode_secret FROM public.exos_tickets WHERE id = used_t);
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  r := public.exos_wallet_reissue(used_t);
+  ASSERT r ->> 'reason' = 'not-active', 'ST11: used refused ' || r;
+  ASSERT (SELECT barcode_secret FROM public.exos_tickets WHERE id = used_t) = v_sec, 'ST11: used keeps its secret';
+  ASSERT (SELECT code_epoch FROM public.exos_wallet_passes WHERE ticket_id = used_t) = 1, 'ST11: used keeps its epoch';
+  -- Being transferred: the same.
+  PERFORM public.exos_create_transfer(xfer_t, 'b5c-friend11@x.com', 'Friend');
+  v_sec := (SELECT barcode_secret FROM public.exos_tickets WHERE id = xfer_t);
+  r := public.exos_wallet_reissue(xfer_t);
+  ASSERT r ->> 'reason' = 'not-active', 'ST11: in transfer refused ' || r;
+  ASSERT (SELECT barcode_secret FROM public.exos_tickets WHERE id = xfer_t) = v_sec, 'ST11: in transfer keeps its secret';
+  -- The fourth this minute: rate-limited, nothing changes.
+  v_sec := (SELECT barcode_secret FROM public.exos_tickets WHERE id = late_t);
+  r := public.exos_wallet_reissue(late_t);
+  ASSERT r ->> 'reason' = 'rate-limited', 'ST11: rate limit ' || r;
+  ASSERT (SELECT barcode_secret FROM public.exos_tickets WHERE id = late_t) = v_sec, 'ST11: rate-limited keeps its secret';
+  ASSERT (SELECT code_epoch FROM public.exos_wallet_passes WHERE ticket_id = late_t) = 1, 'ST11: rate-limited keeps its epoch';
+  -- A rotating ticket: the status guard is for static codes only (its pass
+  -- epoch still moves once it is used); its holder has their own 3.
+  UPDATE public.exos_tickets SET status = 'used' WHERE id = rot;
+  PERFORM pg_temp.act(pg_temp.u('c2'));
+  r := public.exos_wallet_reissue(rot);
+  ASSERT (r ->> 'ok')::boolean AND (r ->> 'code_epoch')::int = 2, 'ST11: rotating reissue ' || r;
+  RAISE NOTICE 'OK ST11 wallet reissue: a used or in-transfer static ticket keeps its secret, 3 a minute per holder, rotating unchanged';
 END $$;
 
 ROLLBACK;

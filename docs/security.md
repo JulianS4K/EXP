@@ -1264,9 +1264,10 @@ service role only; the two trigger functions have no client EXECUTE. `exos_ticke
 - **Paid tier keeps its property.** `_exos_static_code_check` refuses an `S-` code unless the ticket's `code_mode` is
   `static`, the code names this ticket, and it is the current holder's (ST4). A static ticket still accepts `T-`.
   An insert can ask for `static` only on the static-code path (`exos.static_code_ok = 'on'` for its transaction;
-  nothing sets it yet): elsewhere it is refused (`42501`) where the rule says rotating (ST2). The rule takes a
-  per-event advisory lock before counting, so two orders can't both take the last static place
-  (`race_static_codes.sh` race 2).
+  nothing sets it yet): elsewhere it is refused (`42501`) where the rule says rotating (ST2). The rule locks the
+  event row (`FOR NO KEY UPDATE`, the lock every issuing path's `UPDATE exos_events` takes, so no path
+  deadlocks on it) before counting, so two orders can't both take the last static place
+  (`race_static_codes.sh` race 2; race 3: an API reservation and a free claim on one event at once).
 - **Single use** is the existing atomic status flip (ST4, `race_static_codes.sh` race 1, CI); offline duplicates
   resolve on upload (ST7). Transfer (new owner + rotated secret) and refund (voided) kill the code (ST5).
 - **Email.** A mail carries only the static tickets its own transaction issued or handed over to that address
