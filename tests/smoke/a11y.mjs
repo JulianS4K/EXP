@@ -416,10 +416,12 @@ await check('org settings: Discord', async (page, run) => {
 await check('org settings: Discord connected', async (page, run) => {
   await page.goto(BASE + '/orgs/' + ORG + '/settings');
   await page.getByTestId('discord-panel').getByText(/Linked to Blue Room/).waitFor({ timeout: 8000 });
+  // mig 20261114100000: Send a test + the automatic reminder are in this scan.
+  await page.getByTestId('discord-panel').getByRole('button', { name: 'Send a test' }).waitFor({ timeout: 5000 });
   await run();
 }, { signedIn: true, include: '[data-testid="discord-panel"]', mock: ownerMock({ rpcs: {
   exos_discord_status: () => ({ ...DISCORD_ST, is_owner: true, webhook: { set: true, hint: '…5679' }, guild: { linked: true, name: 'Blue Room' },
-    writes_enabled: true, auto_post: true, shown_events: 2 }),
+    writes_enabled: true, auto_post: true, reminder_hours: 24, shown_events: 2 }),
 }, fns: { 'exos-discord/config': () => ({ body: { enabled: true, bot: true, writes: true } }) } }) });
 await check('edit event: Promote on Discord', async (page, run) => {
   await page.goto(BASE + '/edit-event/' + EV);
@@ -427,7 +429,7 @@ await check('edit event: Promote on Discord', async (page, run) => {
   await run();
 }, { signedIn: true, include: '[data-testid="discord-event-panel"]', device: 'Desktop Chrome', mock: ownerMock({ rpcs: {
   exos_discord_event_status: () => ({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true, guild_name: 'Blue Room',
-    show: true, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] }),
+    show: true, reminder_hours: 48, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] }),
   exos_event_follower_notice: () => ({ state: 'after', followers: 0, eligible: true, reason: null, notified: 0, waiting: 0, not_notified: 0 }),
   exos_event_quotas: () => [],
 }, fns: discordFns }) });

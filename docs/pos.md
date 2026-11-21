@@ -395,7 +395,10 @@ answer with `EXOS_POS_CARD` off. Each goes through a service-role core that reso
 (`_exos_pos_kiosk_resolve`), then applies its limits before any Stripe call, all keyed on the kiosk session:
 state 60, begin 6, charge 10, poll 90, codes 10, email 6 a minute; the card begin's own 20 a minute is counted
 on the kiosk session too (`pos:card:kiosk:<session>`, marker `/* exos: pos kiosk card limit */`), so kiosks never use
-up the starting member's door app charges. Print codes (`_exos_print_mint`, 60 a minute) still count on that member.
+up the starting member's door app charges. Print codes (`_exos_print_mint`, 60 a minute) count on the kiosk session
+the same way (`print:kiosk:<session>`; `_exos_pos_kiosk_codes` sets the session for that one call, markers
+`/* exos: pos kiosk print limit */` and `/* exos: print kiosk limit */`, mig `20261114100000`), so a kiosk can't use up
+its starter's door-app prints either.
 
 **Limits on the credential** (a 24-hour bearer in the kiosk browser's storage, so a copied one must not be able to
 tie up places or take another buyer's tickets):
@@ -412,7 +415,7 @@ tie up places or take another buyer's tickets):
   would sit in the same local storage, so whoever can copy one copies the other. The protection is the tablet's
   single-app mode, the 24-hour lifetime and ending the session from the dashboard.
 
-Tests: `tests/exos/test_pos_kiosk.sql` (K1-K13), `tests/exos/race_pos_kiosk.sh` (by hand: two kiosks and the last
+Tests: `tests/exos/test_pos_kiosk.sql` (K1-K18; K18 the per-session print limit), `tests/exos/race_pos_kiosk.sh` (by hand: two kiosks and the last
 ticket, a kiosk against a door sale, a double tap, ten wrong PINs at once), `src/lib/kiosk.test.ts`, the smoke tests
 "kiosk: …" and the blocking a11y scan "kiosk screen" (`tests/smoke/a11y.mjs`: axe, plus visible focus and 48 px
 targets).

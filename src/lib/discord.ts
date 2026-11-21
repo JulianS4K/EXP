@@ -36,6 +36,9 @@ export function isDiscordAuthorizeUrl(u: unknown): u is string {
 }
 
 export type PostKind = 'publish' | 'reminder';
+/** The hours an org may pick for the automatic reminder (exos_discord_links.reminder_hours). */
+export const REMINDER_HOURS = [24, 48] as const;
+export type ReminderHours = (typeof REMINDER_HOURS)[number];
 export interface DiscordConfig { enabled: boolean; bot: boolean; writes: boolean }
 export interface DiscordStatus {
   canManage: boolean;
@@ -48,6 +51,8 @@ export interface DiscordStatus {
   orgPausedUntil: string | null;
   writesEnabled: boolean;
   autoPost: boolean;
+  /** The automatic reminder: 24 or 48 hours before each event, or null (off). mig 20261114100000. */
+  reminderHours: ReminderHours | null;
   shownEvents: number;
 }
 export interface DiscordPost { kind: PostKind; status: string; sentAt: string | null; lastError: string | null }
@@ -61,12 +66,14 @@ export interface DiscordEventStatus {
   webhookBroken: boolean;
   orgPausedUntil: string | null;
   writesEnabled: boolean;
+  reminderHours: ReminderHours | null;
   show: boolean;
   sync: { status: string; onDiscord: boolean; pending: boolean; lastError: string | null } | null;
   posts: DiscordPost[];
 }
 
 const bool = (v: unknown) => v === true;
+const hoursOrNull = (v: unknown): ReminderHours | null => (v === 24 || v === 48 ? v : null);
 const strOrNull = (v: unknown) => (typeof v === 'string' && v ? v : null);
 
 export function parseDiscordStatus(d: any): DiscordStatus {
@@ -79,6 +86,7 @@ export function parseDiscordStatus(d: any): DiscordStatus {
     orgPausedUntil: strOrNull(d?.org_paused_until),
     writesEnabled: bool(d?.writes_enabled),
     autoPost: bool(d?.auto_post),
+    reminderHours: hoursOrNull(d?.reminder_hours),
     shownEvents: Number(d?.shown_events) || 0,
   };
 }
@@ -95,6 +103,7 @@ export function parseDiscordEventStatus(d: any): DiscordEventStatus {
     webhookBroken: bool(d?.webhook_broken),
     orgPausedUntil: strOrNull(d?.org_paused_until),
     writesEnabled: bool(d?.writes_enabled),
+    reminderHours: hoursOrNull(d?.reminder_hours),
     show: bool(d?.show),
     sync: s && typeof s === 'object'
       ? { status: String(s.status ?? 'pending'), onDiscord: bool(s.on_discord), pending: bool(s.pending), lastError: strOrNull(s.last_error) }
@@ -120,6 +129,26 @@ export function postLine(p: DiscordPost | undefined): string {
     case 'dry_run': return 'Dry run: Exos recorded the post but didn’t send it (Discord writes are off).';
     case 'error': return `Not posted: ${p.lastError ?? 'Discord refused it'}.`;
     default: return '';
+  }
+}
+
+/**
+ * The event panel's line under "Post a reminder" when the org turned the
+ * automatic reminder on: when it goes out, or nothing when it already did
+ * (or was asked for) or the event isn't published.
+ */
+export function autoReminderLine(s: Pick<DiscordEventStatus, 'reminderHours' | 'eventStatus' | 'posts'>): string | null {
+  if (!s.reminderHours || s.eventStatus !== 'published' || s.posts.some((p) => p.kind === 'reminder')) return null;
+  return `Exos posts it by itself ${s.reminderHours} hours before the start.`;
+}
+
+/** The toast after "Send a test". */
+export function testResultLine(r: { status: string; error?: string | null }): string {
+  switch (r.status) {
+    case 'sent': return 'Test message sent. Check the channel.';
+    case 'dry_run': return 'Dry run: Exos recorded the test message but didn’t send it (Discord writes are off).';
+    case 'retry': return 'Discord is busy; try the test again in a minute.';
+    default: return `The test didn’t go through: ${r.error ?? 'Discord refused it'}.`;
   }
 }
 
@@ -209,6 +238,18 @@ export async function setDiscordOptions(orgId: string, o: { writes?: boolean; au
     p_org_id: orgId, p_writes: o.writes ?? null, p_auto_post: o.autoPost ?? null,
   });
   if (error) throw new Error(rpcMessage(error));
+}
+
+/** The automatic reminder: 24 or 48 hours before each event, or null (off). Owner / manager. */
+export async function setDiscordReminder(orgId: string, hours: ReminderHours | null): Promise<void> {
+  const { error } = await supabase.rpc('exos_discord_set_reminder', { p_org_id: orgId, p_hours: hours });
+  if (error) throw new Error(rpcMessage(error));
+}
+
+/** "Send a test": one message through the org's webhook (a dry run unless writes are on). 3 an hour per org. */
+export async function sendDiscordTest(orgId: string): Promise<{ status: string; error: string | null }> {
+  const r = await call<{ status?: string; error?: unknown }>('/test', { method: 'POST', body: JSON.stringify({ org: orgId }) });
+  return { status: String(r.status ?? 'error'), error: strOrNull(r.error) };
 }
 
 export async function unlinkDiscordServer(orgId: string): Promise<void> {

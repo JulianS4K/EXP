@@ -11,6 +11,9 @@ const h = vi.hoisted(() => ({
   status: null as any,
   save: vi.fn(),
   options: vi.fn(),
+  test: vi.fn(),
+  reminder: vi.fn(),
+  event: null as any,
 }));
 vi.mock('../context/ToastContext', () => ({ useToast: () => ({ toast: h.toast }) }));
 vi.mock('../lib/supabase', () => ({ supabase: {}, initialAuthUrl: '' }));
@@ -22,6 +25,9 @@ vi.mock('../lib/discord', async (orig) => {
     fetchDiscordStatus: async () => h.status,
     saveDiscordWebhook: (...a: unknown[]) => h.save(...a),
     setDiscordOptions: (...a: unknown[]) => h.options(...a),
+    sendDiscordTest: (...a: unknown[]) => h.test(...a),
+    setDiscordReminder: (...a: unknown[]) => h.reminder(...a),
+    fetchDiscordEventStatus: async () => h.event,
     removeDiscordWebhook: async () => undefined,
     unlinkDiscordServer: async () => undefined,
     startDiscordInstall: async () => 'https://discord.com/oauth2/authorize?scope=bot',
@@ -29,7 +35,8 @@ vi.mock('../lib/discord', async (orig) => {
 });
 
 import DiscordPanel from './DiscordPanel';
-import { parseDiscordStatus } from '../lib/discord';
+import DiscordEventPanel from './DiscordEventPanel';
+import { parseDiscordEventStatus, parseDiscordStatus } from '../lib/discord';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const URL_OK = 'https://discord.com/api/webhooks/223456789012345679/' + 'T3' + 'aB9_-x'.repeat(11) + 'Zq';
@@ -38,6 +45,8 @@ beforeEach(() => {
   h.toast.mockReset();
   h.save.mockReset().mockResolvedValue('…5679');
   h.options.mockReset().mockResolvedValue(undefined);
+  h.test.mockReset().mockResolvedValue({ status: 'dry_run', error: null });
+  h.reminder.mockReset().mockResolvedValue(undefined);
   h.cfg = { enabled: true, bot: true, writes: false };
   h.status = parseDiscordStatus({ can_manage: true, is_owner: false, webhook: { set: false }, guild: { linked: false }, writes_enabled: false });
 });
@@ -104,5 +113,73 @@ describe('DiscordPanel', () => {
       org_paused_until: '2026-11-12T14:30:00Z' });
     render(<DiscordPanel orgId={ORG} />);
     expect(await screen.findByText(/paused Discord for it until/)).toBeTruthy();
+  });
+});
+
+// mig 20261114100000: Send a test, the automatic reminder, delete on delete.
+describe('DiscordPanel: Send a test and the automatic reminder', () => {
+  const saved = () => parseDiscordStatus({ can_manage: true, is_owner: true, webhook: { set: true, hint: '…5679' }, guild: { linked: false },
+    writes_enabled: false });
+
+  it('no test and no reminder before a webhook is saved', async () => {
+    render(<DiscordPanel orgId={ORG} />);
+    await screen.findByLabelText('Channel webhook URL');
+    expect(screen.queryByRole('button', { name: 'Send a test' })).toBeNull();
+    expect((screen.getByLabelText('Automatic reminder') as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it('sends a test, says it is a dry run, and the toast says so too', async () => {
+    h.status = saved();
+    render(<DiscordPanel orgId={ORG} />);
+    const btn = await screen.findByRole('button', { name: 'Send a test' });
+    expect(btn.getAttribute('aria-describedby')).toBe('discord-test-note');
+    expect(screen.getByText(/Send a test is a dry run too/)).toBeTruthy();
+    fireEvent.click(btn);
+    await waitFor(() => expect(h.test).toHaveBeenCalledWith(ORG));
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ kind: 'success', message: expect.stringMatching(/^Dry run/) }));
+  });
+
+  it('live: says it posts one message; a refusal is an error toast', async () => {
+    h.cfg = { enabled: true, bot: true, writes: true };
+    h.status = { ...saved(), writesEnabled: true };
+    h.test.mockResolvedValue({ status: 'error', error: 'Discord: the webhook was deleted or its URL is wrong; paste a new one' });
+    render(<DiscordPanel orgId={ORG} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send a test' }));
+    expect(screen.getByText(/posts one message in the channel/)).toBeTruthy();
+    await waitFor(() => expect(h.toast).toHaveBeenCalledWith({ kind: 'error', message: expect.stringMatching(/paste a new one/) }));
+  });
+
+  it('no test for a webhook Discord refused', async () => {
+    h.status = parseDiscordStatus({ can_manage: true, is_owner: true, webhook: { set: true, hint: '…5679', broken: true }, guild: { linked: false } });
+    render(<DiscordPanel orgId={ORG} />);
+    await screen.findByText(/Discord refused this webhook/);
+    expect(screen.queryByRole('button', { name: 'Send a test' })).toBeNull();
+  });
+
+  it('sets the reminder to 24 or 48 hours, or off', async () => {
+    h.status = saved();
+    render(<DiscordPanel orgId={ORG} />);
+    const sel = (await screen.findByLabelText('Automatic reminder')) as HTMLSelectElement;
+    expect(sel.value).toBe('');
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['Off', '24 hours before the start', '48 hours before the start']);
+    fireEvent.change(sel, { target: { value: '48' } });
+    await waitFor(() => expect(h.reminder).toHaveBeenCalledWith(ORG, 48));
+    cleanup();
+    h.status = { ...saved(), reminderHours: 24 };
+    render(<DiscordPanel orgId={ORG} />);
+    const sel2 = (await screen.findByLabelText('Automatic reminder')) as HTMLSelectElement;
+    expect(sel2.value).toBe('24');
+    fireEvent.change(sel2, { target: { value: '' } });
+    await waitFor(() => expect(h.reminder).toHaveBeenCalledWith(ORG, null));
+  });
+});
+
+describe('DiscordEventPanel', () => {
+  it('says deleting the event takes it off Discord, and when the automatic reminder goes', async () => {
+    h.event = parseDiscordEventStatus({ can_manage: true, event_status: 'published', has_webhook: true, guild_linked: true, guild_name: 'Blue Room',
+      show: true, reminder_hours: 48, sync: { status: 'synced', on_discord: true, pending: false }, posts: [{ kind: 'publish', status: 'sent' }] });
+    render(<DiscordEventPanel eventId={ORG} />);
+    expect(await screen.findByText(/cancelling or deleting the event here takes it off there/)).toBeTruthy();
+    expect(screen.getByText('Exos posts it by itself 48 hours before the start.')).toBeTruthy();
   });
 });
