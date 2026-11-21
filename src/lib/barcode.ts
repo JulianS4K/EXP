@@ -26,7 +26,7 @@
 //
 //   3. OrganizerCheckIn parses the barcode, recomputes the HMAC with the
 //      day key it holds, and refuses if either the
-//      bucket is out of window (more than one bucket old) or the HMAC
+//      bucket is out of window (more than BUCKET_TOLERANCE = 2 buckets either way) or the HMAC
 //      mismatches. The check-in RPC re-runs the SAME HMAC/owner/bucket
 //      check server-side (migration 20260702120000), so the browser check
 //      is a fast-fail UX layer, not the security boundary.

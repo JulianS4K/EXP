@@ -41,7 +41,7 @@ an owner or manager). Opendate's kiosk endpoints (a shared tablet with its own t
 
 | Piece | Status | Where |
 |---|---|---|
-| Data model, RLS, grants | ✅ authored, not applied | `supabase/migrations/20260929074000_exos_pos_scaffold.sql` |
+| Data model, RLS, grants | ✅ applied (prod history, checked 2026-11-17) | `supabase/migrations/20260929074000_exos_pos_scaffold.sql` |
 | 86 an item, open / close a tab, close a drawer | ✅ SQL functions | `exos_pos_set_86`, `exos_pos_open_tab`, `exos_pos_close_tab`, `exos_pos_close_drawer` |
 | Recount a closed drawer (owner / manager, a reason, 7 days, 3 times; the replaced count kept in `exos_pos_drawer_recounts`) and the drawer report on the event report | ✅ SQL function + UI | `exos_pos_recount_drawer` (mig 20261104200000), `components/PosDrawersPanel` |
 | Settlement summary and records | ✅ SQL functions | `exos_pos_settlement_summary`, `exos_pos_record_settlement` |

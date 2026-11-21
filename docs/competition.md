@@ -108,7 +108,7 @@ vendor's own pricing page before quoting a number publicly. Exos facts come from
   built (mig `20260926070000`, `PriceDisclosureExport` on the event report); it starts filling
   when payments go live.
 - **Fast payouts without the 5% tax.** Posh charges 5% for instant payout, and DICE holds 5% for 6
-  months. Stripe Connect Express already pays out on a rolling basis, so fast payouts are ours to
+  months. Stripe Connect (Standard accounts by default) already pays out on a rolling basis, so fast payouts are ours to
   lose.
 - **One tool for GA, tables and cabaret seating.** Comedy rooms need front-table pricing and clubs
   need tables. No indie tool does both alongside Kickback-style promoters.

@@ -132,7 +132,7 @@ How the count works:
 - **Cancel** (`exos_posh_cancel_order`, after a refund on Posh): seats back to the cap, door
   entries voided.
 - **Not the resale allocation**: `exos_distribution_listings` rows are read by the resale rules
-  (the 250 minimum, the pool planners, the auto split, the distribute worker), so Posh has its
+  (the over-150-plus-opt-in rule, the pool planners, the auto split, the distribute worker), so Posh has its
   own table and none of them apply.
 
 ## RPCs

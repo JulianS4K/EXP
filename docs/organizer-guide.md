@@ -32,8 +32,11 @@ invite keeps their current role until it's approved (mig `20261104200000`).
 
 ## 2. Get paid (`/orgs/:orgId/settings`)
 
-**Connect Stripe** opens Stripe's Express onboarding. Payouts go straight to the organizer's
-account; the platform keeps its fee (5% by default). The button appears only once payments are
+**Connect Stripe** opens Stripe's onboarding for a **Standard** connected account (Express only if the
+server sets `EXOS_CONNECT_ACCOUNT_TYPE=express`). Payouts go straight to the organizer's account; the
+platform keeps its fee: 3% of each sale, nothing in your first 6 months, and nothing at all on free-tier
+events (max capacity 150 or less). Details under **All-in pricing** below; your own fees on top
+(facility fees and the like) are in `docs/fees.md`. The button appears only once payments are
 switched on platform-wide (`docs/payments-go-live.md`). Until then, **free events work fully and
 paid events can't be sold.**
 
@@ -621,7 +624,7 @@ Posh tells Exos about every sale.
   same capacity on Posh by hand**. Those seats come off what Exos, Eventbrite and Luma can sell. The cap can only
   grow by seats that are free right now, and can't go below what Posh has already sold. Table ticket types and
   ones in a shared capacity group can't be capped for Posh. Posh is primary ticketing, not resale: the resale
-  rules (the 250-capacity minimum, the pools) don't apply.
+  rules (over 150 capacity plus the per-event opt-in, the pools) don't apply.
 - **Sales**: a completed Posh order takes its tickets out of the Posh cap and shows in the event's counts and on
   Edit event → Posh. A **pending** order (one waiting for your approval on Posh) is listed but takes no seat and
   isn't on the door list; when you approve it on Posh, Posh's Order Created for it confirms it.
