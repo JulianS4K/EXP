@@ -13,6 +13,8 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { fetchSeasonPassApple, fetchSeasonPassGoogleUrl, WalletUnavailableError } from '../lib/walletApi';
 import { formatCurrency, publicUrl } from '../lib/utils';
+// Stripe pages: a same-tab redirect on the web, the browser sheet in the app.
+import { platform } from '../lib/platform/adapters';
 
 export default function MyMemberships() {
   const { user } = useAuth();
@@ -58,7 +60,7 @@ export default function MyMemberships() {
                 )}
                 {m.can_manage_billing && (
                   <button className="underline" onClick={async () => {
-                    try { window.location.href = await openBillingPortal(m.id, publicUrl('me/memberships')); }
+                    try { await platform().openCheckout(await openBillingPortal(m.id, publicUrl('me/memberships')), { returnTo: '/me/memberships' }); }
                     catch (x: any) { setErr(x?.message || 'Could not open billing.'); }
                   }}>Manage billing</button>
                 )}

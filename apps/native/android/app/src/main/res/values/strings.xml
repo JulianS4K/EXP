@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Exos Door</string>
+    <string name="title_activity_main">Exos Door</string>
+    <string name="package_name">com.exos.door</string>
+    <string name="custom_url_scheme">com.exos.door</string>
+</resources>

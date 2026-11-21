@@ -14,6 +14,8 @@
 // running stale code through the entire show. The banner nudges
 // without forcing a reload mid-scan.
 
+import { nativeBuildFlags } from './platform/native';
+
 export const SW_UPDATE_EVENT = 'vibepass:sw-update';
 
 export interface SwUpdatePayload {
@@ -22,6 +24,8 @@ export interface SwUpdatePayload {
 }
 
 export function registerServiceWorker(): void {
+  // The native app's bundle is already on the device: no service worker.
+  if (!nativeBuildFlags().serviceWorker) return;
   if (!('serviceWorker' in navigator)) return;
 
   // Hold registration off the critical path. Doing it on `load`

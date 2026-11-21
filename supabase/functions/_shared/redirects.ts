@@ -4,8 +4,11 @@
 //
 // Allowed: an exact origin from EXOS_REDIRECT_ORIGINS (comma-separated, e.g.
 // "https://vibepass-storefront-test.onrender.com,https://exos.example"), over
-// https (http only for localhost), with no embedded credentials. No imports,
-// so Deno and EXP's vitest can both load it.
+// https, with no embedded credentials. A loopback host (localhost,
+// *.localhost, 127.x, ::1, 0.0.0.0) is never a target, even when configured:
+// on a phone, another app can listen there (the native app's web view origins
+// are CORS-only, _shared/corsOrigins.ts). Local development returns through an
+// https tunnel. No imports, so Deno and EXP's vitest can both load it.
 
 export function parseRedirectOrigins(raw: string | undefined | null): string[] {
   return (raw ?? "")
@@ -14,13 +17,25 @@ export function parseRedirectOrigins(raw: string | undefined | null): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * localhost, *.localhost, 127.0.0.0/8, ::1, ::, 0.0.0.0, and 127.0.0.0/8 as an
+ * IPv6 address (::ffff:127.x.x.x, ::127.x.x.x; URL writes them as ::ffff:7fxx:x
+ * and ::7fxx:x). IPv6 forms bracketed or not.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.trim().toLowerCase().replace(/\.$/, "");
+  const v6 = h.replace(/^\[(.*)\]$/, "$1");
+  return h === "localhost" || h.endsWith(".localhost") || /^127\.\d+\.\d+\.\d+$/.test(h)
+    || h === "0.0.0.0" || v6 === "::1" || v6 === "::"
+    || /^::(ffff:)?(7f[0-9a-f]{2}:[0-9a-f]{1,4}|127\.\d+\.\d+\.\d+)$/.test(v6);
+}
+
 export function isAllowedRedirect(url: unknown, allowedOrigins: string[]): boolean {
   if (typeof url !== "string" || url.length > 2048) return false;
   let u: URL;
   try { u = new URL(url); } catch { return false; }
   if (u.username || u.password) return false;
-  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
-  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) return false;
+  if (u.protocol !== "https:" || isLoopbackHost(u.hostname)) return false;
   return allowedOrigins.includes(u.origin);
 }
 

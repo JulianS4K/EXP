@@ -17,6 +17,8 @@ import { getPublicEvent } from '../lib/events';
 import { startCheckout } from '../lib/checkout';
 import { buyerTierPrice } from '../lib/pricing';
 import { formatCurrency, publicUrl } from '../lib/utils';
+// Stripe pages: a same-tab redirect on the web, the browser sheet in the app.
+import { platform } from '../lib/platform/adapters';
 import { slotIdLabel } from '../lib/slots';
 import {
   cancelGroup, coverableSeats, formatCountdown, friendsPayingNow, getGroup, groupSeatPrice, normalizeSeatLabel, seatLabel, seatMessage,
@@ -93,7 +95,7 @@ export default function GroupPayHost() {
         successUrl: publicUrl('my-tickets?checkout=success&session_id={CHECKOUT_SESSION_ID}'),
         cancelUrl: publicUrl(`group-pay/${g.id}`),
       });
-      window.location.href = url;
+      await platform().openCheckout(url, { returnTo: `/group-pay/${g.id}` });
     } catch (e) {
       toast({ kind: 'error', message: (e as Error).message });
       setBusy(false);

@@ -8,6 +8,8 @@ import { campaignProgress, coverFeesCents, donate, majorToCents, publicCampaign,
 import { useAuth } from '../context/AuthContext';
 import { openDonationPortal } from '../lib/givingApi';
 import { formatCurrency, publicUrl } from '../lib/utils';
+// Stripe pages: a same-tab redirect on the web, the browser sheet in the app.
+import { platform } from '../lib/platform/adapters';
 
 export default function Give() {
   const { orgSlug = '', campaignSlug = '' } = useParams();
@@ -29,7 +31,7 @@ export default function Give() {
     if (!validUpdate) return;
     setBusy(true); setErr(null);
     try {
-      window.location.href = await openDonationPortal(updateCard!, publicUrl(`give/${orgSlug}/${campaignSlug}`));
+      await platform().openCheckout(await openDonationPortal(updateCard!, publicUrl(`give/${orgSlug}/${campaignSlug}`)), { returnTo: `/give/${orgSlug}/${campaignSlug}` });
     } catch (x: any) { setErr(x?.message || 'Could not open billing.'); setBusy(false); }
   };
 
@@ -43,11 +45,12 @@ export default function Give() {
     if (!amount || amount < 100) { setErr('Pick an amount.'); return; }
     setBusy(true); setErr(null);
     try {
-      window.location.href = await donate({
+      const url = await donate({
         campaignId: c.id, amountCents: amount, coverFees: cover && c.cover_fees, anonymous: anon, donorName: name,
         email: user ? undefined : email, successUrl: publicUrl(`give/${orgSlug}/${campaignSlug}?thanks=1`),
         cancelUrl: publicUrl(`give/${orgSlug}/${campaignSlug}`),
       });
+      await platform().openCheckout(url, { returnTo: `/give/${orgSlug}/${campaignSlug}` });
     } catch (x: any) { setErr(x?.message || 'Could not start checkout.'); setBusy(false); }
   };
 

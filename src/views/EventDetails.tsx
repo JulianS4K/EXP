@@ -30,6 +30,8 @@ import { initiateCheckoutParams, newPixelEventId, rememberPendingCheckout } from
 import { captureClickIds, checkoutAdIds, checkoutConsent } from '../lib/adIds';
 import InAppBrowserBanner from '../components/InAppBrowserBanner';
 import { copyText, currentInAppBrowser } from '../lib/inAppBrowser';
+import { platform } from '../lib/platform/adapters';
+import { isNativeApp } from '../lib/platform/native';
 import { maskEmail } from '../lib/doorSearch';
 import { withAttribution } from '../lib/attribution';
 import VenueMap from '../components/VenueMap';
@@ -556,7 +558,10 @@ export default function EventDetails() {
     stashPayPalCart(cart);
     // A full page load: the PayPal page has its own CSP (PayPal in, Stripe out).
     // The cart rides in the fragment too, for browsers that block storage.
-    window.location.assign(publicUrl('pay/paypal') + payPalCartFragment(cart));
+    // In the native app: the public web page in the browser sheet (PayPal's
+    // SDK never loads in the app's web view; lib/platform/adapters).
+    if (isNativeApp()) void platform().openExternal(publicUrl('pay/paypal') + payPalCartFragment(cart));
+    else window.location.assign(publicUrl('pay/paypal') + payPalCartFragment(cart));
   };
 
   // Paid checkout (signed in, or as a guest with just an email).
@@ -606,7 +611,9 @@ export default function EventDetails() {
         // Give a live pixel a moment to send before the page unloads.
         if (pixelsLive()) await new Promise((r) => setTimeout(r, 300));
       }
-      window.location.href = url; // leave the SPA for Stripe-hosted checkout
+      // Leave the SPA for Stripe-hosted checkout (the native app opens it in
+      // the browser sheet and comes back to My Tickets, lib/platform/adapters).
+      await platform().openCheckout(url, { returnTo: '/my-tickets' });
     } catch (err: any) {
       console.error('Checkout failed:', err);
       seatTaken(err);

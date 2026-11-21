@@ -42,6 +42,11 @@ cp .env.example .env.local   # set VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (t
 npm run dev                  # http://localhost:5173/bridge/ — talks to the Supabase project in .env.local
 ```
 
+`http://localhost` is never a return address: Stripe returns, OAuth returns and embeds only go to
+https origins that aren't loopback (`isAllowedRedirect`, `docs/security.md` "Allowed origins"). To
+finish a checkout from a local dev server, serve it on an https tunnel (for example `cloudflared` or
+`ngrok`) and add the tunnel's origin to `EXOS_REDIRECT_ORIGINS` on a test project, never production.
+
 The `VITE_FIREBASE_*` lines in `.env.example` are left over from before the move to Supabase. Ignore them.
 
 **Be careful with `npm run dev` against production.** Anything you do in the UI is real. For

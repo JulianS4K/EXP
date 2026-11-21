@@ -52,6 +52,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { readCapped } from "../_shared/api/body.ts";
 import { redactError } from "../_shared/log.ts";
 import { isAllowedRedirect, parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsAllowedOrigins } from "../_shared/corsOrigins.ts";
 import {
   claimAction, durably, findReturnTransfer, mayCallStripe, reconcileDecision, reversalKey, sendPlan, STRIPE_MAX_RETRIES,
   STRIPE_TIMEOUT_MS, stripeErrorText, timedFetch, transferKey, transfersMode,
@@ -543,7 +544,8 @@ async function mark(
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
+  // CORS only: the native app's origins may call, never be redirected to (_shared/corsOrigins.ts).
+  const allowed = corsAllowedOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"), Deno.env.get("EXOS_CORS_EXTRA_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
   return {
     "access-control-allow-origin": origin,

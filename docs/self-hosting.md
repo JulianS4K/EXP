@@ -56,6 +56,7 @@ everything else with `--no-verify-jwt`.
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | everything | set by Supabase |
 | `CRON_SECRET` | every `/cron` route | the same value in Vault for `_cron_invoke_edge_fn` |
 | `EXOS_REDIRECT_ORIGINS` | checkout, CORS | comma list of your app origins, e.g. `https://tickets.example.com` |
+| `EXOS_CORS_EXTRA_ORIGINS` | CORS only (the native app) | only `capacitor://localhost` and `https://localhost`, exactly (no trailing slash); anything else is ignored. Never redirected to (`docs/security.md` "Allowed origins") |
 | `EXOS_APP_URL`, `EXOS_APP_BASE_URL` | links in mail, feeds | your public app URL (with `/bridge` if you keep that base) |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_CONNECT_WEBHOOK_SECRET` | payments | `docs/payments-go-live.md`; `docs/pci.md` |
 | `EXOS_PLATFORM_FEE_BPS`, `EXOS_STRIPE_FEE_BPS`, `EXOS_STRIPE_FEE_FIXED_CENTS`, `EXOS_CONNECT_ACCOUNT_TYPE` | payments | defaults in `_shared/platformFee.ts` |

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Exos Door's iOS entitlements, for when the App ID exists (docs/native-apps.md
+  "Operator steps"). Xcode writes this file itself when you add the
+  capabilities in Signing & Capabilities; this is what it should end up as.
+  Replace door.exos.example with the custom domain that serves
+  /.well-known/apple-app-site-association.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:door.exos.example</string>
+		<string>webcredentials:door.exos.example</string>
+	</array>
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>

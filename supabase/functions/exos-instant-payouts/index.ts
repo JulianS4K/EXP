@@ -24,7 +24,7 @@ import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { readCapped } from "../_shared/api/body.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsAllowedOrigins } from "../_shared/corsOrigins.ts";
 import {
   checkInstantRequest, instantAvailable, instantEnabled, instantFeeCents, instantFeeConfig, maxInstantPayout,
 } from "../_shared/payouts/instant.ts";
@@ -117,7 +117,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
 });
 
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
+  // CORS only: the native app's origins may call, never be redirected to (_shared/corsOrigins.ts).
+  const allowed = corsAllowedOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"), Deno.env.get("EXOS_CORS_EXTRA_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
   return {
     "access-control-allow-origin": origin,

@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { SOCIAL_OFF_TITLE, socialEnabled, type SocialFeature } from '../lib/socialFlag';
+import { nativeBuildFlags } from '../lib/platform/native';
 
 const BODY: Record<SocialFeature, string> = {
   split: 'Splitting an order with friends isn\'t offered right now. You can still send any ticket to a friend from My Tickets.',
@@ -26,5 +27,7 @@ export function SocialUnavailable({ feature }: { feature: SocialFeature }) {
 }
 
 export default function SocialGate({ feature, children }: { feature: SocialFeature; children: ReactNode }) {
-  return socialEnabled() ? <>{children}</> : <SocialUnavailable feature={feature} />;
+  // The native app never has group chat (App Store 1.2: user-generated content).
+  const on = socialEnabled() && (feature !== 'chat' || nativeBuildFlags().groupChat);
+  return on ? <>{children}</> : <SocialUnavailable feature={feature} />;
 }

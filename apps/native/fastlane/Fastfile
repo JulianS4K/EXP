@@ -1,0 +1,75 @@
+# Exos Door store builds (docs/native-apps.md "Store builds").
+#
+#   bundle exec fastlane ios beta          TestFlight (internal testers)
+#   bundle exec fastlane android internal  Play Console internal testing track
+#
+# Both first build the SPA in native mode and copy it into the native
+# projects (npm run sync), so the store build ships exactly this checkout.
+# Credentials come from the environment only, never from the repo:
+#   iOS:     APP_STORE_CONNECT_API_KEY_PATH (App Store Connect API key, JSON),
+#            EXOS_IOS_TEAM_ID; signing via Xcode automatic signing or match.
+#   Android: PLAY_JSON_KEY_PATH (Play service account), EXOS_UPLOAD_KEYSTORE,
+#            EXOS_UPLOAD_KEYSTORE_PASSWORD, EXOS_UPLOAD_KEY_ALIAS,
+#            EXOS_UPLOAD_KEY_PASSWORD.
+#   Both:    VITE_EXOS_WEB_URL, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (and
+#            the optional VITE_EXOS_GOOGLE_* / VITE_EXOS_APPLE_SIGN_IN).
+# Uploads only: nothing here submits a build for review or releases it.
+
+# No fastlane usage analytics.
+opt_out_usage
+
+default_platform(:ios)
+
+# apps/native (this lane's parent): install the repo's and the shell's
+# locked dependencies, build the SPA in native mode, cap sync.
+def sync_web!
+  Dir.chdir("..") do
+    sh("npm", "ci", "--prefix", "../..")
+    sh("npm", "ci")
+    sh("npm", "run", "sync")
+  end
+end
+
+platform :ios do
+  desc "Build the iOS app and upload it to TestFlight"
+  lane :beta do
+    UI.user_error!("Set APP_STORE_CONNECT_API_KEY_PATH") unless ENV["APP_STORE_CONNECT_API_KEY_PATH"]
+    sync_web!
+    api_key = app_store_connect_api_key(key_filepath: ENV["APP_STORE_CONNECT_API_KEY_PATH"])
+    cocoapods(podfile: "ios/App/Podfile")
+    build = latest_testflight_build_number(api_key: api_key, initial_build_number: 0) + 1
+    increment_build_number(xcodeproj: "ios/App/App.xcodeproj", build_number: build)
+    build_app(
+      workspace: "ios/App/App.xcworkspace",
+      scheme: "App",
+      export_method: "app-store",
+      output_directory: "build/ios",
+    )
+    upload_to_testflight(api_key: api_key, skip_waiting_for_build_processing: true)
+  end
+end
+
+platform :android do
+  desc "Build the Android App Bundle and upload it to the internal testing track"
+  lane :internal do
+    UI.user_error!("Set PLAY_JSON_KEY_PATH") unless ENV["PLAY_JSON_KEY_PATH"]
+    UI.user_error!("Set EXOS_UPLOAD_KEYSTORE (the upload key)") unless ENV["EXOS_UPLOAD_KEYSTORE"]
+    sync_web!
+    codes = google_play_track_version_codes(track: "internal") rescue []
+    version_code = (codes.map(&:to_i).max || 0) + 1
+    gradle(
+      project_dir: "android",
+      task: "bundle",
+      build_type: "Release",
+      properties: { "exosVersionCode" => version_code.to_s },
+    )
+    upload_to_play_store(
+      track: "internal",
+      release_status: "draft",
+      aab: lane_context[SharedValues::GRADLE_AAB_OUTPUT_PATH],
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+  end
+end

@@ -29,7 +29,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsAllowedOrigins } from "../_shared/corsOrigins.ts";
 import { guardedFetch, urlIsBlocked } from "../_shared/ssrf.ts";
 import { retryingGetFetch } from "../_shared/retry.ts";
 import { baseUrl, SLUG } from "../_shared/backends/rows.ts";
@@ -318,7 +318,8 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
+  // CORS only: the native app's origins may call, never be redirected to (_shared/corsOrigins.ts).
+  const allowed = corsAllowedOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"), Deno.env.get("EXOS_CORS_EXTRA_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
   return {
     "Access-Control-Allow-Origin": origin,

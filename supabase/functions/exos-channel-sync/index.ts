@@ -36,7 +36,7 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsAllowedOrigins } from "../_shared/corsOrigins.ts";
 import { contentHash, leasedIo, lumaEnabled, makeIo, mirrorEvent, notOnAccount, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
 import { EB_API, EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
 import { compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, syncLuma } from "../_shared/channels/luma.ts";
@@ -219,7 +219,8 @@ async function lumaComps(sb: SupabaseClient, io: ReturnType<typeof makeIo>, even
 }
 
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
+  // CORS only: the native app's origins may call, never be redirected to (_shared/corsOrigins.ts).
+  const allowed = corsAllowedOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"), Deno.env.get("EXOS_CORS_EXTRA_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
   return {
     "Access-Control-Allow-Origin": origin,

@@ -18,7 +18,7 @@
 
 import { readCapped } from "./api/body.ts";
 import { captchaPassed, captchaVerifyRequest } from "./signup.ts";
-import { parseRedirectOrigins } from "./redirects.ts";
+import { isLoopbackHost, parseRedirectOrigins } from "./redirects.ts";
 import type { StripeEnd } from "./wroomCheckout.ts";
 
 export const WROOM_JOIN_MAX_BODY = 4 * 1024;
@@ -49,12 +49,18 @@ export interface WroomJoinDeps {
   markExpired?: (sessionId: string) => Promise<void>;
 }
 
-/** The app's hostnames, from EXOS_APP_BASE_URL, EXOS_APP_URL and EXOS_REDIRECT_ORIGINS. */
+/** The app's hostnames, from EXOS_APP_BASE_URL, EXOS_APP_URL and
+ *  EXOS_REDIRECT_ORIGINS: https entries only, never a loopback host (an app
+ *  web view reports "localhost" to Turnstile, so allowing it would pass any
+ *  phone app's token). */
 export function allowedHosts(env: (name: string) => string | undefined): string[] {
   const out = new Set<string>();
   for (const raw of [env("EXOS_APP_BASE_URL"), env("EXOS_APP_URL"), ...parseRedirectOrigins(env("EXOS_REDIRECT_ORIGINS"))]) {
     if (!raw) continue;
-    try { out.add(new URL(raw.trim()).hostname.toLowerCase()); } catch { /* not a URL */ }
+    try {
+      const u = new URL(raw.trim());
+      if (u.protocol === "https:" && !isLoopbackHost(u.hostname)) out.add(u.hostname.toLowerCase());
+    } catch { /* not a URL */ }
   }
   return [...out];
 }
@@ -75,7 +81,8 @@ export function verifyAnswer(answer: unknown, hosts: string[], log: (m: string) 
     }
     return false;
   }
-  return typeof a.hostname === "string" && hosts.includes(a.hostname.toLowerCase());
+  // A loopback answer never passes, whatever the host list (an org domain row included).
+  return typeof a.hostname === "string" && !isLoopbackHost(a.hostname) && hosts.includes(a.hostname.toLowerCase());
 }
 
 /** The org's verified domains, as hostnames (bad rows and errors: none). */

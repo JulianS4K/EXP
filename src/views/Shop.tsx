@@ -9,6 +9,8 @@ import { Gift } from 'lucide-react';
 import { buyGiftCard, majorToCents, publicGiftCardProducts, type GiftCardProduct } from '../lib/commerce';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, publicUrl } from '../lib/utils';
+// Stripe pages: a same-tab redirect on the web, the browser sheet in the app.
+import { platform } from '../lib/platform/adapters';
 import ShopPassesMemberships from '../components/ShopPassesMemberships';
 
 function GiftCardForm({ p, orgSlug, signedIn }: { p: GiftCardProduct; orgSlug: string; signedIn: boolean }) {
@@ -23,10 +25,11 @@ function GiftCardForm({ p, orgSlug, signedIn }: { p: GiftCardProduct; orgSlug: s
     if (!amount) { setErr('Pick an amount.'); return; }
     setBusy(true); setErr(null);
     try {
-      window.location.href = await buyGiftCard({
+      const url = await buyGiftCard({
         productId: p.id, amountCents: amount, recipientEmail: toEmail, recipientName: toName, message,
         email: signedIn ? undefined : email, successUrl: publicUrl(`shop/${orgSlug}?bought=gift_card`), cancelUrl: publicUrl(`shop/${orgSlug}`),
       });
+      await platform().openCheckout(url, { returnTo: `/shop/${orgSlug}` });
     } catch (x: any) { setErr(x?.message || 'Could not start checkout.'); setBusy(false); }
   };
   return (

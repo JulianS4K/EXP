@@ -3,6 +3,9 @@ import { Link } from 'react-router-dom';
 import { Mail, KeyRound, ShieldCheck, Ticket, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { currentInAppBrowser, IN_APP_LABEL } from '../lib/inAppBrowser';
+import { platform } from '../lib/platform/adapters';
+import { currentNativeApp } from '../lib/platform/native';
+import { providerPlan, signInWithNativeIdToken } from '../lib/platform/nativeAuth';
 import { authUrl, callbackUrl, rememberReturnPath } from '../lib/authUrls';
 import { checkPassword, cleanEmail, isValidEmail, mapAuthError, type FriendlyAuthError } from '../lib/authRules';
 import { useCooldown, RESEND_COOLDOWN_S } from '../hooks/useCooldown';
@@ -52,6 +55,12 @@ export default function AuthModal({
   // Google blocks OAuth inside in-app webviews and Microsoft is unreliable
   // there; email and Apple sign-in work, so those stay.
   const [inApp] = useState(currentInAppBrowser);
+  // Per provider: the web redirect, the native app's own sheet, or hidden
+  // (lib/platform/nativeAuth). In a browser this is the redirect for all
+  // three, and only Apple's inside an in-app browser, as before.
+  const [providers] = useState(() =>
+    providerPlan({ inApp, native: currentNativeApp(), nativeProviders: platform().nativeAuth?.providers() }),
+  );
   const titleId = useId();
   const errorId = `${titleId}-error`;
   // Screens without an input to autofocus move focus to their message.
@@ -103,6 +112,19 @@ export default function AuthModal({
   const handleProviderSignIn = async (providerName: 'google' | 'apple' | 'microsoft') => {
     setLoading(true);
     setError(null);
+    const nativeAuth = platform().nativeAuth;
+    if (providers[providerName] === 'native' && nativeAuth && providerName !== 'microsoft') {
+      try {
+        // The OS sheet, then signInWithIdToken: no redirect. AuthContext
+        // picks the session up; a cancel just re-enables the buttons.
+        if (await signInWithNativeIdToken(supabase.auth, nativeAuth, providerName)) onClose();
+        else setLoading(false);
+      } catch (err) {
+        console.error(err);
+        fail(err);
+      }
+      return;
+    }
     // Supabase names the Microsoft provider 'azure'.
     const provider = providerName === 'microsoft' ? 'azure' : providerName;
 
@@ -304,7 +326,7 @@ export default function AuthModal({
                     Google sign-in doesn't work inside {IN_APP_LABEL[inApp]}. Use email or Apple, or open this page in your browser.
                   </p>
                 )}
-                {!inApp && (
+                {providers.google !== 'hidden' && (
                 <button
                   type="button"
                   onClick={() => handleProviderSignIn('google')}
@@ -321,6 +343,7 @@ export default function AuthModal({
                 </button>
                 )}
 
+                {providers.apple !== 'hidden' && (
                 <button
                   type="button"
                   onClick={() => handleProviderSignIn('apple')}
@@ -332,8 +355,9 @@ export default function AuthModal({
                   </svg>
                   <span>Continue with Apple</span>
                 </button>
+                )}
 
-                {!inApp && (
+                {providers.microsoft !== 'hidden' && (
                 <button
                   type="button"
                   onClick={() => handleProviderSignIn('microsoft')}
@@ -347,6 +371,7 @@ export default function AuthModal({
                 </button>
                 )}
 
+                {Object.values(providers).some((m) => m !== 'hidden') && (
                 <div className="relative py-4">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-white/10"></div>
@@ -355,6 +380,7 @@ export default function AuthModal({
                     <span className="bg-[#0e0e0e] px-4 type text-[11px] text-white/60 uppercase tracking-widest">or</span>
                   </div>
                 </div>
+                )}
 
                 <div className="grid grid-cols-3 gap-3">
                   <button
