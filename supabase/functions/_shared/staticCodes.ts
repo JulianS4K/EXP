@@ -26,8 +26,8 @@
 // local check and the tests (staticCodes.test.ts pins both to one vector).
 // Pure TypeScript: Deno and vitest both load it.
 
-import { hmac, sha256, toHex, utf8 } from "./wallet/bytes.ts";
 import { constantTimeEqual } from "./constantTime.ts";
+import { hmac, sha256, toHex, utf8 } from "./wallet/bytes.ts";
 
 /** The two ways a ticket's door code can work, fixed per ticket at issuance. */
 export type CodeMode = "static" | "rotating";
