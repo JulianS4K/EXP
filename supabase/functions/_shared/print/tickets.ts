@@ -36,6 +36,9 @@ export interface PrintTicket {
   org_name?: string | null;
   order_ref?: string | null;
   printed_at?: string | null;
+  /** The small print under the code (default: the one-time print code's).
+   *  A static-code ticket (staticTicketsPdf) says what applies to it. */
+  footer?: string[];
 }
 
 export const PRINT_FORMATS = ['json', 'html', 'pdf'] as const;
@@ -86,7 +89,10 @@ export function ticketLines(t: PrintTicket): string[] {
   ].filter((s) => !!s);
 }
 
-const FOOTER = 'One entry. Reprinting, transferring or refunding this ticket cancels this paper.';
+const FOOTER_LINES = ['One entry. Reprinting, transferring or refunding', 'this ticket cancels this paper.'];
+
+/** A static-code ticket's small print (mig 20261121153000, ../staticCodes.ts). */
+export const STATIC_FOOTER_LINES = ['One entry: the first scan wins, so keep this to yourself.', 'Transferring or refunding the ticket cancels this code.'];
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -100,7 +106,7 @@ export function printHtml(tickets: PrintTicket[], title = 'Tickets'): string {
   ${ticketLines(t).map((l) => `<p>${esc(l)}</p>`).join('\n  ')}
   <div class="qr">${qrSvg(t.print_code, 240)}</div>
   <p class="code">${esc(t.print_code)}</p>
-  <p class="small">${esc(FOOTER)}</p>
+  <p class="small">${esc((t.footer ?? FOOTER_LINES).join(' '))}</p>
 </section>`).join('\n');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -182,8 +188,7 @@ function ticketPage(t: PrintTicket): string {
     ops.push(`0 g BT /F1 7 Tf ${((W - piece.length * 7 * 0.55) / 2).toFixed(2)} ${fy.toFixed(2)} Td ${pdfText(piece)} Tj ET`);
     fy -= 10;
   }
-  ops.push(centered('One entry. Reprinting, transferring or refunding', fy - 8, 7));
-  ops.push(centered('this ticket cancels this paper.', fy - 17, 7));
+  (t.footer ?? FOOTER_LINES).slice(0, 3).forEach((line, i) => ops.push(centered(line, fy - 8 - 9 * i, 7)));
   return ops.join('\n');
 }
 
@@ -234,4 +239,12 @@ export function printPdf(tickets: PrintTicket[], title = 'Tickets'): Uint8Array 
   const bytes = new Uint8Array(out.length);
   for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff;
   return bytes;
+}
+
+/** Static-code tickets (code_mode 'static', mig 20261121153000) as a PDF: the
+ *  same 4 × 8 in page, the S- code as the QR and the text under it, and the
+ *  static code's small print. `print_code` carries the S- code. Used by the
+ *  confirmation email (exos-mail-drain) and the holder's own download. */
+export function staticTicketsPdf(tickets: PrintTicket[], title = 'Tickets'): Uint8Array {
+  return printPdf(tickets.map((t) => ({ ...t, footer: STATIC_FOOTER_LINES })), title);
 }

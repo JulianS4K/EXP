@@ -89,6 +89,7 @@ const SLUG_MAX = 80;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
+import { doorCodeTierText } from '../lib/staticTickets';
 import { gametimeStatus, goTicketsStatus, seatGeekStatus, stubHubStatus, tevoStatus, vividStatus, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
 import { getMarketplaceRows, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { ChannelLinks, LABEL as CHANNEL_LABEL, MarketplaceGrid, MarketplaceOrders } from '../components/ChannelLinks';
@@ -1944,10 +1945,17 @@ export default function EditEvent() {
              // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
              const caps = (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id]));
              const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, caps);
-             return resaleUnlocked(cap) ? null : (
-               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
-                 {resaleLockedText(cap, undefined, eventCapacityBounded(Number(eventData.totalTickets) || 0, caps))}
-               </p>
+             const bounded = eventCapacityBounded(Number(eventData.totalTickets) || 0, caps);
+             return (
+               <>
+                 {resaleUnlocked(cap) ? null : (
+                   <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
+                     {resaleLockedText(cap, undefined, bounded)}
+                   </p>
+                 )}
+                 {/* Static vs rotating door codes (mig 20261121153000). */}
+                 <p className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">{doorCodeTierText(cap, bounded)}</p>
+               </>
              );
            })()}
            {eventId && <ResaleConsentPanel eventId={eventId} onRules={setResaleRules} />}

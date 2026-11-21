@@ -23,6 +23,7 @@ import Dialog from '../components/Dialog';
 import MyCalendarFeed from '../components/MyCalendarFeed';
 import MyRefundAsks from '../components/MyRefundAsks';
 import WalletButtons, { useAvailableWallets } from '../components/WalletButtons';
+import StaticTicketPdfButton from '../components/StaticTicketPdfButton';
 import { walletEligible } from '../lib/walletButtons';
 import { trackCheckoutReturn } from '../lib/purchasePixel';
 import {
@@ -505,6 +506,11 @@ export default function MyTickets() {
                       ) : null;
                     })()}
                     <TicketWallets tickets={eventTickets} viewerId={user.uid} />
+                    {/* Static-code tickets (mig 20261121153000): the PDF, as emailed. */}
+                    {event && (
+                      <StaticTicketPdfButton tickets={eventTickets} event={event} viewerId={user.uid}
+                        holder={user.displayName || null} className="mt-4" />
+                    )}
                   </div>
 
                 </motion.div>
