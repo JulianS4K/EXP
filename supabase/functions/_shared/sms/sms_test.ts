@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { safeEqual, sendSms, telnyxInbound, telnyxVerified, twilioSignature } from "./providers.ts";
+import { sendSms, telnyxInbound, telnyxVerified, twilioSignature } from "./providers.ts";
+import { constantTimeEqual } from "../constantTime.ts";
 
 Deno.test("Twilio signature matches Twilio's documented example", async () => {
   // https://www.twilio.com/docs/usage/security#validating-requests
@@ -7,8 +8,8 @@ Deno.test("Twilio signature matches Twilio's documented example", async () => {
     CallSid: "CA1234567890ABCDE", Caller: "+12349013030", Digits: "1234", From: "+12349013030", To: "+18005551212",
   }, "12345");
   assertEquals(sig, "0/KCTR6DLpKmkAf8muzZqo1nDgQ=");
-  assertEquals(safeEqual(sig, "0/KCTR6DLpKmkAf8muzZqo1nDgQ="), true);
-  assertEquals(safeEqual(sig, "x"), false);
+  assertEquals(constantTimeEqual(sig, "0/KCTR6DLpKmkAf8muzZqo1nDgQ="), true);
+  assertEquals(constantTimeEqual(sig, "x"), false);
 });
 
 Deno.test("Telnyx Ed25519 verification", async () => {

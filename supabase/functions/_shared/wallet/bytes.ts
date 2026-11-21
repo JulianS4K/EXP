@@ -69,14 +69,6 @@ export async function hmac(hash: "SHA-1" | "SHA-256", key: Uint8Array, msg: Uint
   return new Uint8Array(await crypto.subtle.sign("HMAC", k, ab(msg)));
 }
 
-/** Compare without an early exit on the first differing byte. */
-export function timingSafeEqual(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  const n = Math.max(a.length, b.length);
-  for (let i = 0; i < n; i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
-}
-
 export function randomBytes(n: number): Uint8Array {
   const out = new Uint8Array(n);
   crypto.getRandomValues(out);

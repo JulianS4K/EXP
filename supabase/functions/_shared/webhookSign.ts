@@ -10,6 +10,8 @@
 //
 // Pure TypeScript (WebCrypto only), imported by vitest.
 
+import { constantTimeEqual } from './constantTime.ts';
+
 export const WEBHOOK_TOLERANCE_SECONDS = 300;
 
 export async function hmacSha256Hex(secret: string, message: string): Promise<string> {
@@ -25,13 +27,6 @@ export async function signWebhook(secret: string, timestamp: string, rawBody: st
   return `sha256=${await hmacSha256Hex(secret, `${timestamp}.${rawBody}`)}`;
 }
 
-function sameText(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let d = 0;
-  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return d === 0;
-}
-
 export type WebhookCheck = 'ok' | 'missing' | 'bad_signature' | 'stale';
 
 /** A receiver's check of one delivery (nowSeconds: the receiver's clock). */
@@ -42,7 +37,7 @@ export async function verifyWebhook(
   const { timestamp, signature } = headers;
   if (!timestamp || !signature || !/^\d{1,12}$/.test(timestamp)) return 'missing';
   const expected = await signWebhook(secret, timestamp, rawBody);
-  if (!sameText(expected, signature.trim().toLowerCase())) return 'bad_signature';
+  if (!constantTimeEqual(expected, signature.trim().toLowerCase())) return 'bad_signature';
   if (Math.abs(nowSeconds - Number(timestamp)) > tolerance) return 'stale';
   return 'ok';
 }

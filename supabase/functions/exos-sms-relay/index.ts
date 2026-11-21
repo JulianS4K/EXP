@@ -35,7 +35,8 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import { redactError } from "../_shared/log.ts";
-import { safeEqual, sendSms, type SmsConfig, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
+import { sendSms, type SmsConfig, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
+import { constantTimeEqual } from "../_shared/constantTime.ts";
 import {
   parseTelnyxRelay, parseTwilioRelay, type RelayInbound, relayKeyword, relayLive, relayRoute, relaySenderConfig,
 } from "../_shared/sms/relay.ts";
@@ -67,7 +68,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const base = (env("EXOS_SMS_RELAY_PUBLIC_URL") ?? `${env("SUPABASE_URL")!.replace(/\/+$/, "")}/functions/v1/exos-sms-relay`)
         .replace(/\/+$/, "");
       const want = await twilioSignature(`${base}/inbound/twilio${url.search}`, params, token);
-      if (!safeEqual(want, req.headers.get("x-twilio-signature") ?? "")) return new Response("bad signature", { status: 403 });
+      if (!constantTimeEqual(want, req.headers.get("x-twilio-signature") ?? "")) return new Response("bad signature", { status: 403 });
       msg = parseTwilioRelay(params);
     } else {
       const pub = env("EXOS_RELAY_TELNYX_PUBLIC_KEY") ?? "";

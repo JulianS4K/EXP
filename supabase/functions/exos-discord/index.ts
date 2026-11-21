@@ -42,7 +42,6 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import { finishRefusal, withFinishFragment } from "../_shared/oauthFinish.ts";
 import { integrationsReturnUrl, isStateShaped, newState, returnAppUrl, stateHash } from "../_shared/eventbrite/oauth.ts";
 import { writesLive } from "../_shared/channels/model.ts";
@@ -51,6 +50,7 @@ import {
   type CallHooks, type CallKind, coverDataUri, type CoverLoader, type DiscordResult,
   deleteScheduledEvent, makeDiscordIo, postAnnouncement, type PostKind, redactDiscord, sendTestMessage, syncScheduledEvent,
 } from "../_shared/channels/discord.ts";
+import { corsHeaders, json, signedInUser, userClient } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 90_000;
@@ -408,19 +408,6 @@ function safePlan(plan: { steps: DiscordStep[] }, secrets: (string | null)[]) {
 }
 
 // ---- plumbing -------------------------------------------------------------------------
-function userClient(req: Request): SupabaseClient | null {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (!/^Bearer\s+\S+/.test(auth)) return null;
-  return createClient(env("SUPABASE_URL")!, env("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
-}
-
-async function signedInUser(req: Request): Promise<string | null> {
-  const c = userClient(req);
-  if (!c) return null;
-  const { data } = await c.auth.getUser();
-  return data.user?.id ?? null;
-}
-
 /** An RPC refusal as the SPA shows it: the SQL's own words (they never carry a URL or token). */
 function rpcError(error: { code?: string; message?: string }, cors: Record<string, string>): Response {
   const msg = String(error.message ?? "").replace(/^exos_discord_[a-z_]+: /, "").slice(0, 200);
@@ -431,22 +418,7 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
   return json({ error: "Something went wrong.", reason: "server" }, 500, cors);
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(env("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
 function redirect(to: string): Response {
   return new Response(null, { status: 302, headers: { location: to, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
 }
 
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra } });
-}

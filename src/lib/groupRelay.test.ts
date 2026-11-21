@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { safeEqual, sendSms, telnyxVerified, twilioSignature } from '../../supabase/functions/_shared/sms/providers.ts';
+import { sendSms, telnyxVerified, twilioSignature } from '../../supabase/functions/_shared/sms/providers.ts';
+import { constantTimeEqual } from '../../supabase/functions/_shared/constantTime.ts';
 import {
   e164, formatRelayBody, parseTelnyxRelay, parseTwilioRelay, relayConsentText, relayFirstName, relayKeyword, relayLive,
   relayRoute, relaySenderConfig,
@@ -67,12 +68,12 @@ describe('signatures (fixtures)', () => {
     const params = { CallSid: 'CA1234567890ABCDE', Caller: '+12349013030', Digits: '1234', From: '+12349013030', To: '+18005551212' };
     const sig = await twilioSignature('https://mycompany.com/myapp.php?foo=1&bar=2', params, '12345');
     expect(sig).toBe('0/KCTR6DLpKmkAf8muzZqo1nDgQ=');
-    expect(safeEqual(sig, '0/KCTR6DLpKmkAf8muzZqo1nDgQ=')).toBe(true);
+    expect(constantTimeEqual(sig, '0/KCTR6DLpKmkAf8muzZqo1nDgQ=')).toBe(true);
     const tampered = await twilioSignature('https://mycompany.com/myapp.php?foo=1&bar=2', { ...params, Digits: '1235' }, '12345');
-    expect(safeEqual(sig, tampered)).toBe(false);
+    expect(constantTimeEqual(sig, tampered)).toBe(false);
     const otherUrl = await twilioSignature('https://mycompany.com/myapp.php?foo=1&bar=3', params, '12345');
-    expect(safeEqual(sig, otherUrl)).toBe(false);
-    expect(safeEqual(sig, '')).toBe(false);
+    expect(constantTimeEqual(sig, otherUrl)).toBe(false);
+    expect(constantTimeEqual(sig, '')).toBe(false);
   });
 
   // A message.received event signed once with a throwaway Ed25519 key.

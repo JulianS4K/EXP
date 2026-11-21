@@ -44,12 +44,12 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import { finishRefusal, withFinishFragment } from "../_shared/oauthFinish.ts";
 import {
   buildCodeExchangeRequest, buildConsentUrl, googleOAuthConfig, hasDataManagerScope, isStateShaped,
   newState, postTokenRequest, returnAppUrl, settingsReturnUrl, stateHash, STATE_TTL_MINUTES,
 } from "../_shared/conversions/googleOAuth.ts";
+import { corsHeaders, json, signedInUser } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -164,30 +164,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   return json({ error: "not found" }, 404, cors);
 });
 
-/** The verified user id from the request's Supabase JWT, or null. */
-async function signedInUser(req: Request): Promise<string | null> {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (!/^Bearer\s+\S+/.test(auth)) return null;
-  const sbUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: auth } },
-  });
-  const { data } = await sbUser.auth.getUser();
-  return data.user?.id ?? null;
-}
-
-/** CORS for the SPA's fetch calls: only allow-listed origins are echoed. */
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
 function redirect(to: string): Response {
   return new Response(null, {
     status: 302,
@@ -195,8 +171,3 @@ function redirect(to: string): Response {
   });
 }
 
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra },
-  });
-}

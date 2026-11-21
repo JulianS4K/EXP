@@ -64,6 +64,7 @@ import {
 } from '../../supabase/functions/_shared/doorKeys.ts';
 import { printCodeTicketId } from '../../supabase/functions/_shared/print/tickets.ts';
 import { appleAddonWalletCode, verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
+import { constantTimeEqual } from '../../supabase/functions/_shared/constantTime.ts';
 
 const BUCKET_MS = 30_000;
 // Accept barcodes from the current bucket or up to N buckets in either
@@ -100,27 +101,6 @@ function ensureCryptoSubtleAvailable(): void {
         'in production, the build will fail at scan time.',
     );
   }
-}
-
-/**
- * Constant-time string compare. Standard `===` short-circuits on the
- * first mismatched byte, which leaks timing information that — over
- * many requests against a stable secret — could be used to recover the
- * expected HMAC byte by byte. The 30-second rotation makes this hard
- * to exploit in practice, but using a constant-time compare is the
- * correct primitive and costs nothing.
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  // Length difference itself is a timing leak — but if our inputs are
-  // both base64url-encoded HMAC-SHA256 outputs they'll always be the
-  // same length. We early-exit only on length mismatch (safe) and
-  // otherwise XOR every byte.
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 /**
@@ -245,7 +225,7 @@ export async function verifyBarcode(
       const parts = payload.slice(2).split(':');
       if (parts[2].startsWith('a')) {
         const expected = keys ? await appleAddonWalletCode(parts[0], parts[1], keys, Number(parts[2].slice(1))) : '';
-        w = { ok: !!keys && timingSafeEqual(expected, payload), code: { ticketId: parts[0], ownerId: parts[1] } };
+        w = { ok: !!keys && constantTimeEqual(expected, payload), code: { ticketId: parts[0], ownerId: parts[1] } };
       } else {
         const g = await verifyWalletCode('W-' + payload.slice(2), keys, options);
         w = { ok: g.ok, code: g.code ? { ticketId: g.code.ticketId, ownerId: g.code.ownerId } : null };
@@ -306,13 +286,13 @@ export async function verifyBarcode(
       ticketId,
       ownerId,
       bucket,
-      signatureValid: expected != null && timingSafeEqual(expected, hmac),
+      signatureValid: expected != null && constantTimeEqual(expected, hmac),
     };
   }
   if (expected == null) {
     return { ok: false, reason: 'no-key', legacy: false, ticketId, ownerId, bucket };
   }
-  if (!timingSafeEqual(expected, hmac)) {
+  if (!constantTimeEqual(expected, hmac)) {
     return {
       ok: false,
       reason: 'signature-mismatch',

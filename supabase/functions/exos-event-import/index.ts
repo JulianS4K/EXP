@@ -8,10 +8,11 @@
 // _shared/eventbrite/client.ts ebGet (GET only). Luma and Posh are not
 // contacted at all: a pasted Luma / Posh link becomes a draft from the link
 // and the organizer's own details (reading their public pages waits for the
-// operator: _shared/eventImport/publicPage.ts, not called). No page is
+// operator and a check of each platform's terms; spec §7.2). No page is
 // scraped and no organizer-supplied URL is fetched, so there is nothing for
 // the SSRF guard to check; any future page read must go through
-// _shared/ssrf.ts first.
+// _shared/ssrf.ts first (GET only, redirect "manual", a timeout and a size
+// cap, schema.org Event JSON-LD only, returning eventbrite.ts's ImportData).
 //
 // Routes (under /functions/v1/exos-event-import), JSON in and out:
 //   GET  /eventbrite/events?org=<org>   owner / manager. The connected
@@ -49,10 +50,10 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import { ebErrorMessage, isEbId } from "../_shared/eventbrite/client.ts";
 import { listImportChoices, readImportEvent, toCheckResult } from "../_shared/eventImport/eventbrite.ts";
 import { parseEventUrl } from "../_shared/eventImport/urls.ts";
+import { corsHeaders, json, signedInUser } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Wall-clock budget for one cron run (two Eventbrite reads per event). */
@@ -239,31 +240,3 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
   return json({ error: "something went wrong" }, 500, cors);
 }
 
-async function signedInUser(req: Request): Promise<string | null> {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (!/^Bearer\s+\S+/.test(auth)) return null;
-  const sbUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: auth } },
-  });
-  const { data } = await sbUser.auth.getUser();
-  return data.user?.id ?? null;
-}
-
-/** CORS for the SPA's fetch calls: only allow-listed origins are echoed. */
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra },
-  });
-}

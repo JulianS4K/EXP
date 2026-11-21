@@ -22,8 +22,6 @@ import {
   type StepRecord, type SyncHooks, type SyncResult, textToHtml, utc,
 } from "./model.ts";
 
-export const EB_API = "https://www.eventbriteapi.com/v3";
-
 export const EB_WRITES: RegExp[] = [
   /^\/organizations\/[0-9]{1,24}\/venues\/$/,
   /^\/organizations\/[0-9]{1,24}\/events\/$/,

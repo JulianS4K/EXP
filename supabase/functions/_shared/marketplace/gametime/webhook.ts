@@ -5,15 +5,13 @@
 // status and no buyer email, so exos-marketplace-sales reads the purchase
 // (GET /purchases?order_number=) before acting, as Gametime's guide asks.
 
+import { constantTimeEqual } from '../../constantTime.ts';
 import type { GametimeSaleNotification } from './types.ts';
 
 /** Constant-time check of the whole Authorization header against the configured value. */
 export function verifyGametimeWebhook(header: string | null, expected: string): boolean {
   if (!expected) return false;
-  const got = header ?? '';
-  let diff = got.length ^ expected.length;
-  for (let i = 0; i < Math.max(got.length, expected.length); i++) diff |= (got.charCodeAt(i) || 0) ^ (expected.charCodeAt(i) || 0);
-  return diff === 0;
+  return constantTimeEqual(header ?? '', expected);
 }
 
 export class GametimeWebhookError extends Error {

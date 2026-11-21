@@ -10,11 +10,9 @@ const viteEnv = (import.meta as { env?: Record<string, string | undefined> }).en
 /** Luma is plugged in but hidden until the operator sets VITE_EXOS_LUMA=on (and EXOS_LUMA_ENABLED=on on the edge functions). */
 export const LUMA_ENABLED = viteEnv.VITE_EXOS_LUMA === 'on';
 
-export type ProviderId =
-  | 'pretix' | 'hievents' | 'luma' | 'twilio' | 'telnyx'
-  | 'stubhub' | 'seatgeek' | 'vivid' | 'tickpick' | 'gametime' | 'tevo';
+export type ProviderId = 'pretix' | 'hievents' | 'luma' | 'twilio' | 'telnyx';
 
-export type ProviderGroup = 'backend' | 'sms' | 'marketplace';
+export type ProviderGroup = 'backend' | 'sms';
 
 export interface ProviderField {
   key: string;
@@ -94,13 +92,6 @@ export const ALL_PROVIDERS: ProviderInfo[] = [
     secretLabel: 'API key',
     docsUrl: 'https://developers.telnyx.com/docs/messaging',
   },
-  ...(['stubhub', 'seatgeek', 'vivid', 'tickpick', 'gametime', 'tevo'] as const).map((id): ProviderInfo => ({
-    id, group: 'marketplace',
-    label: { stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', tickpick: 'TickPick', gametime: 'Gametime', tevo: 'Ticket Evolution' }[id],
-    blurb: 'Your own seller / API account, for reading listings and sales. Exos never changes prices or inventory there.',
-    fields: [{ key: 'account_id', label: 'Account or client id', kind: 'text' }],
-    secretLabel: 'API key or token',
-  })),
 ];
 
 /** What Integrations offers: Luma only while it is switched on. */

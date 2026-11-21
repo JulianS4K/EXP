@@ -1,6 +1,6 @@
 // Org settings → Integrations (mig 20261016090000): the org's own accounts
-// for ticket backends (pretix, hi.events, Luma), SMS (Twilio, Telnyx) and resale
-// marketplaces. Secrets are pasted once and never shown again.
+// for ticket backends (pretix, hi.events, Luma) and SMS (Twilio, Telnyx).
+// Secrets are pasted once and never shown again.
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, AlertTriangle, Plug } from 'lucide-react';
@@ -15,7 +15,6 @@ import {
 const GROUPS: { id: ProviderGroup; label: string; note: string }[] = [
   { id: 'backend', label: 'Ticket backends', note: 'Sell on another platform; Exos runs the page, marketing and the door. Each event links to its Eventbrite event on its door tab.' },
   { id: 'sms', label: 'SMS', note: 'Text fans who opted in, from your own number.' },
-  { id: 'marketplace', label: 'Resale marketplaces', note: 'Your own seller accounts, for reads. Exos never changes prices or inventory there.' },
 ];
 
 const LBL = 'block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1';

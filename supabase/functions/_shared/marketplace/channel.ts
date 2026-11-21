@@ -8,8 +8,9 @@
 //   1. link    Exos event -> the channel's event id. findEvents() (read-only
 //              catalog search) + scoreMatch(); a confident match is linked,
 //              a close call is left for a human (exos_channel_event_links).
-//   2. create  when nothing matches and the channel allows it,
-//              planCreateEvent() (StubHub: PUT /sellerevents).
+//   2. create  when nothing matches and the channel allows it
+//              (StubHub: PUT /sellerevents, planned by exos-distribute's
+//              event-row pass with stubhub/eventRequest.ts).
 //   3. sell    sales come back as MarketplaceSale via normalizeSale().
 //   4. fulfil  Exos mints the tickets and a claim link per ticket; the
 //              channel's planFulfilByUrls() is the call(s) that hand those
@@ -23,7 +24,7 @@
 
 import { marketTitle } from './eventStandard.ts';
 
-export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'tickpick', 'evo', 'automatiq'] as const;
+export const CHANNEL_IDS = ['stubhub', 'seatgeek', 'gametime', 'gotickets', 'vivid', 'evo', 'automatiq'] as const;
 export type ChannelId = (typeof CHANNEL_IDS)[number];
 
 export function isChannelId(v: unknown): v is ChannelId {
@@ -126,7 +127,6 @@ export interface MarketplaceChannel {
   /** Catalog searches per exos-distribute run, when the marketplace rate-limits them harder than the default. */
   readonly searchesPerRun?: number;
   findEvents?(ev: ExosEventRef): Promise<EventCandidate[]>;
-  planCreateEvent?(ev: ExosEventRef): PlannedRequest;
   normalizeSale?(raw: unknown): MarketplaceSale;
   /**
    * Delivery, in order (e.g. Gametime: confirm, then confirm_transfer). One

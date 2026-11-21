@@ -13,7 +13,7 @@
 //
 // Dry run unless BOTH the org's switch (exos_eventbrite_accounts.writes_enabled,
 // owner only) and the operator's EXOS_EVENTBRITE_WRITES=on are set
-// (writesLive). A dry run only records the plan.
+// (writesLive, _shared/channels/model.ts). A dry run only records the plan.
 //
 // Pure apart from the injected fetch, so vitest imports it.
 
@@ -48,11 +48,6 @@ export function planCapacity(ebEventId: string, classId: string, from: number | 
     from,
     to,
   };
-}
-
-/** Sending is live only with the org's switch on AND the operator's flag. */
-export function writesLive(orgEnabled: boolean, envFlag: string | undefined | null): boolean {
-  return orgEnabled === true && envFlag === "on";
 }
 
 /** Throws unless the request is exactly the capacity update. */

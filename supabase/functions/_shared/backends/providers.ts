@@ -52,8 +52,9 @@ export async function testProvider(
       return { ok: true, name: "Telnyx account" };
     }
     default:
-      // Resale marketplaces: stored for the marketplace readers; Exos doesn't
-      // call them from here (and never writes to them).
+      // Any other provider the SQL still accepts (exos_integration_providers():
+      // the resale marketplaces, which Integrations no longer offers and
+      // nothing reads): no test.
       return { ok: null };
   }
 }

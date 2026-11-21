@@ -6,7 +6,6 @@ import {
   listImportChoices, readImportEvent, sourceStatus, toCheckResult, toImportData,
 } from '../../supabase/functions/_shared/eventImport/eventbrite.ts';
 import { isLinkOut, priceRange, sellsElsewhere, type WhereToBuy } from '../../supabase/functions/_shared/eventImport/linkOut.ts';
-import { fetchPublicEventPage } from '../../supabase/functions/_shared/eventImport/publicPage.ts';
 import { buildGoogleFeed, type FeedEventRow, type FeedTierRow } from '../../supabase/functions/_shared/googleEvents/feed.ts';
 import { buildCatalog, type CatalogEventRow } from '../../supabase/functions/_shared/catalog/feed.ts';
 import { calendarEvent } from '../../supabase/functions/_shared/calendar/feed.ts';
@@ -143,9 +142,6 @@ describe('Eventbrite import', () => {
     const r = await listImportChoices(fetch, 'TOKEN123456', NOW);
     expect(r.body).toEqual([expect.objectContaining({ id: '1234567890', name: 'Rooftop Party', venue: 'Roof', price_min: 25, status: 'on_sale' })]);
     expect(new URL(calls[1].url).searchParams.get('status')).toBe('live,started');
-  });
-  it('never reads a Luma / Posh public page (pending the operator)', async () => {
-    await expect(fetchPublicEventPage(ok(parseEventUrl('https://lu.ma/x-party')))).rejects.toThrow(/not enabled/);
   });
 });
 
