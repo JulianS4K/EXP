@@ -18,14 +18,20 @@ const EXTERNAL_RE = /^[A-Za-z0-9_.:#/-]{1,128}$/;
 
 export class ParamError extends Error {}
 
-/** The partner key from ?shared_key=, X-Shared-Key or a bearer header ('' when none). */
+/**
+ * The partner key ('' when none): the X-Shared-Key header first, then a
+ * bearer header, and only then Opendate's ?shared_key= (kept for partners
+ * built to Opendate's contract). A header stays out of proxy and platform
+ * access logs, which a query string doesn't; Exos never logs the request URL
+ * and its log scrubbing strips query strings (_shared/scrub.ts).
+ */
 export function presentedPartnerKey(q: URLSearchParams, header: (name: string) => string | null): string {
-  const fromQuery = q.get('shared_key');
-  if (fromQuery) return fromQuery.trim();
-  const fromHeader = header('x-shared-key');
-  if (fromHeader) return fromHeader.trim();
+  const fromHeader = header('x-shared-key')?.trim();
+  if (fromHeader) return fromHeader;
   const auth = header('authorization') ?? '';
-  return auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+  if (bearer) return bearer;
+  return (q.get('shared_key') ?? '').trim();
 }
 
 /**

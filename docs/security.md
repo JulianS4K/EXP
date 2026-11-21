@@ -1174,6 +1174,66 @@ new for authenticated (the review page, below). Points to review:
   `src/lib/mcp/mcpWrites.test.ts`, `supabase/functions/_shared/mcp/discovery_test.ts`,
   `supabase/functions/exos-api/tokenWrite_test.ts`.
 
+### Channel risks before Eventbrite / Luma writes (mig 20261121100000)
+
+Nothing new is callable by anon or authenticated (H3 unchanged): `_exos_channel_outstanding`,
+`_exos_channel_share_cap` and `exos_channel_create_begin` are service role only. Every write to Eventbrite and Luma
+stays a dry run unless the org's switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`; no write path was added
+(`EB_WRITES`, `LUMA_WRITES` unchanged), and the details pass now sends less: no update at all for an Eventbrite class
+Exos adopted.
+
+- **One promise across platforms.** Both inventory applies take `pg_advisory_xact_lock` on the event before any row
+  lock, and cap each class's share by what the OTHER platform can still sell (its capacity there, or its target if
+  higher, less sold), splitting the shared pool evenly between the platforms that sell the ticket type (house cap
+  too). With one platform the cap equals the old share.
+- **Conflicts.** `exos_channel_set` refuses an event linked to another Eventbrite event, another Luma event or another
+  ticket backend (23505); `exos_channel_mark` records a link that turns up meanwhile as a conflict (the new external
+  id is kept so it is never created twice; no link or mapping is written) and exos-channel-sync sends nothing for that
+  mirror until the next save.
+- **Creates.** A live create is recorded (`exos_channel_create_begin`: the lease, refused under 2 minutes after the
+  last try) and looked up on the next pass (Eventbrite: name + start + creation time; Luma: Exos's own slug, which
+  Luma refuses to reuse) before it is sent again. Reads retry 429 / 5xx with backoff (`_shared/retry.ts`); a POST is
+  never re-sent.
+- **Edge functions in the same change.** exos-integrations `/link` checks the caller's role (`exos_backend_status`,
+  owner / manager) before it reads the org's credentials or asks the provider, and every request to an
+  organizer-supplied host is re-checked by the SSRF guard just before it is sent (`guardedFetch`; the connection
+  can't be pinned in the edge runtime, so the last milliseconds of DNS rebinding remain). exos-posh-webhook buckets
+  unknown tokens per caller network instead of per token hash. The partner key prefers `X-Shared-Key` / Bearer over
+  `?shared_key=`.
+- **After the Applier's review.** A door link found before the create stops it (`exos_channel_create_begin`
+  refuses and records the conflict); `exos_eventbrite_link` / `_unlink` and `exos_backend_link` / `_unlink` refuse
+  under a mirror on another external event (or while it is creating one), and `exos_channel_set` takes one advisory
+  lock per event (so do those four and `exos_channel_remove`). An external id another Exos event uses, in any org
+  (`exos_channel_external_taken`), is never adopted: the Eventbrite lookup excludes it (and takes only events created
+  up to 2 minutes after the last try), mark records it as a conflict without keeping it (no 23505 loop), and set
+  refuses it. The house keeps one pack back like the ticket type. A live write renews the lease first
+  (`exos_channel_lease_renew`); the venue is made after the create is begun, kept with it and reused.
+- **Second review.** Every patch marker is text its own replacement writes, so the migration re-runs as a no-op
+  (`tests/exos/reapply_check.sh`, in run_p0: every patch "already patched", no body changes). Another org's id counts
+  as taken only when **verified** (`external_verified_at` on the mirror: a live pass of that org recorded it;
+  `verified_at` on a door / backend link: a read with that org's credentials proved it is theirs, via
+  `exos_channel_link_verified`, or mark wrote it), so linking someone's public event id blocks no one. A verified one
+  is refused in the same words as an event not on the account (the pass's `notOnAccount`, exos-eventbrite-sync's
+  404 text, checkRef's Luma text, same status) and never at `exos_channel_set`, so no org learns about another's
+  events. `exos_channel_set` and the link functions take the event lock, then the `exos_channel_ext:` id lock (mark:
+  the mirror row, then the id). `exos_channel_remove` waits for a pass that holds the lease.
+- **Third review.** A verification belongs to its id: a BEFORE UPDATE trigger on the mirrors, door links and backend
+  links clears it whenever the external id (or provider) changes in an update that doesn't set it, so re-pointing a
+  verified link at someone's public event doesn't carry it over. Only Eventbrite events of one of the token's
+  organizations (`ebOwnsEvent`, the token's organizations paged up to 5) and Luma events the key's calendar manages
+  are verified; never pretix / hi.events. exos-eventbrite-sync /link and a linked mirror's first pass require that
+  ownership before anything else (another organizer's public event gets the not-found answer and no write, dry run
+  or live). mark's cross-org conflict uses the same not-on-account words. The backfill takes only mirrors in step
+  (`status = 'synced'` with a hash).
+- **Notes, by design.** The first capacity of a class Exos creates is floored at 1 (Eventbrite refuses 0) and is
+  computed outside the promise lock: the next apply corrects it. `exos_created` starts false on existing rows
+  (fail-safe: they get no price update). The Posh network bucket trusts the platform's address headers
+  (cf-connecting-ip, else x-real-ip, else the last X-Forwarded-For hop: `_shared/guest.ts clientIp`); with none,
+  unknown tokens share one bucket.
+- Tests: `tests/exos/test_channel_risks.sql` (R1-R11), `tests/exos/race_channel_promise.sh` (CI, 4 races), `tests/exos/reapply_check.sh`,
+  `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
+  `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

@@ -1,5 +1,5 @@
 // deno test supabase/functions/_shared/ssrf_test.ts
-import { isPrivateIp, urlIsBlocked } from "./ssrf.ts";
+import { guardedFetch, isPrivateIp, SsrfBlocked, urlIsBlocked } from "./ssrf.ts";
 
 function check(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
@@ -52,4 +52,24 @@ Deno.test("urlIsBlocked: scheme, hosts, literals, DNS", async () => {
   const mixed = dns({ "evil.example.com": ["93.184.216.34", "fd00::1"] });
   check(await urlIsBlocked("https://evil.example.com/", mixed) !== null, "mixed A/AAAA blocked");
   check(await urlIsBlocked("https://nxdomain.example.com/", dns({})) === "dns resolution failed", "nxdomain");
+});
+
+Deno.test("guardedFetch re-checks every request, right before it is sent, and never follows a redirect", async () => {
+  // A host that resolves public for the first check, then rebinds to the metadata address.
+  const answers = [["93.184.216.34"], ["93.184.216.34"], ["169.254.169.254"]];
+  let lookups = 0;
+  const resolve = (_h: string) => Promise.resolve(answers[Math.min(lookups++, answers.length - 1)]);
+  const sent: { url: string; redirect?: RequestRedirect }[] = [];
+  const f = ((u: string, init?: RequestInit) => { sent.push({ url: u, redirect: init?.redirect }); return Promise.resolve(new Response("{}")); }) as typeof fetch;
+  const g = guardedFetch(f, resolve);
+  await g("https://pretix.example.org/api/v1/a", { method: "GET" });
+  await g("https://pretix.example.org/api/v1/b", { method: "GET", redirect: "follow" });
+  let refused: unknown = null;
+  try { await g("https://pretix.example.org/api/v1/c", { method: "GET" }); } catch (e) { refused = e; }
+  check(refused instanceof SsrfBlocked, "the rebound request is refused");
+  check(sent.length === 2 && lookups === 3, `each request is checked (${lookups} lookups, ${sent.length} sent)`);
+  check(sent.every((s) => s.redirect === "manual"), "redirects never followed");
+  let http: unknown = null;
+  try { await g("http://pretix.example.org/x"); } catch (e) { http = e; }
+  check(http instanceof SsrfBlocked && sent.length === 2, "non-https refused before sending");
 });

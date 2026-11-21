@@ -170,8 +170,9 @@ in an order comes with `delivery.url`:
   `/api/v2/public/…`, change the base URL and key; paths (`/confirms/:id/ticket_reservations…`, `/orders…`),
   parameters (`ticket_reservation[...]`, `q[...]`) and shapes match. JSON (nested or flat) and Rails-style form
   bodies both work.
-- Authenticate with `?shared_key=dk_live_…`, the `X-Shared-Key` header or `Authorization: Bearer`. 401 for a
-  missing, wrong, paused or revoked key; 404 for anything outside your organizer or your own reservations.
+- Authenticate with the `X-Shared-Key` header (preferred), `Authorization: Bearer`, or Opendate's
+  `?shared_key=dk_live_…` (kept for compatibility: a query string can end up in proxy logs; a header wins when
+  both are sent). 401 for a missing, wrong, paused or revoked key; 404 for anything outside your organizer or your own reservations.
   120 requests a minute per key.
 - Orders: `GET /orders` lists your completed orders, newest first, in Opendate's envelope
   (`current_page, per_page, total_entries, total_pages, collection`; `per_page` up to 250), filterable by

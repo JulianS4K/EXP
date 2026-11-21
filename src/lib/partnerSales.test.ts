@@ -95,4 +95,11 @@ describe('the partner key', () => {
     expect(presentedPartnerKey(new URLSearchParams(), headers({ authorization: 'Bearer dk_live_c' }))).toBe('dk_live_c');
     expect(presentedPartnerKey(new URLSearchParams(), headers({}))).toBe('');
   });
+  it('prefers a header over the query string (headers stay out of access logs)', () => {
+    const q = new URLSearchParams('shared_key=dk_live_q');
+    expect(presentedPartnerKey(q, headers({ 'x-shared-key': 'dk_live_h' }))).toBe('dk_live_h');
+    expect(presentedPartnerKey(q, headers({ authorization: 'Bearer dk_live_b' }))).toBe('dk_live_b');
+    expect(presentedPartnerKey(q, headers({ 'x-shared-key': '  ' }))).toBe('dk_live_q');
+    expect(presentedPartnerKey(q, headers({}))).toBe('dk_live_q');
+  });
 });

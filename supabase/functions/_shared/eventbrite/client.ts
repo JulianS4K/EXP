@@ -13,6 +13,8 @@
 // header (never in a URL, never logged). Error text is Eventbrite's error
 // code, never a response body.
 
+import { CHANNEL_RETRY, nextWait, realSleep, type RetryPolicy } from "../retry.ts";
+
 export const EB_API = "https://www.eventbriteapi.com/v3";
 export const ALLOWED_HTTP_METHODS: ReadonlySet<string> = new Set(["GET"]);
 const TIMEOUT_MS = 15_000;
@@ -44,9 +46,15 @@ export function isEbId(v: unknown): v is string {
   return typeof v === "string" && /^[0-9]{1,24}$/.test(v);
 }
 
-/** GET {EB_API}{path}?{params}. Never throws: network errors come back as status 0. */
+/**
+ * GET {EB_API}{path}?{params}. Never throws: network errors come back as
+ * status 0. A 429, a 5xx or a network failure is tried again (at most twice,
+ * backing off; Retry-After honoured up to 5 s, longer stops: the next sync
+ * retries). Only GET goes through here, so a retry can't repeat a write.
+ */
 export async function ebGet<T>(
   fetchImpl: Fetch, token: string, path: string, params: Record<string, string | undefined> = {},
+  policy: RetryPolicy = CHANNEL_RETRY,
 ): Promise<EbResult<T>> {
   assertReadonlyMethod("GET");
   if (!path.startsWith("/") || path.includes("..") || path.includes("//")) {
@@ -54,23 +62,34 @@ export async function ebGet<T>(
   }
   const url = new URL(EB_API + path);
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== "") url.searchParams.set(k, v);
+  const sleep = policy.sleep ?? realSleep;
+  for (let attempt = 1; ; attempt++) {
+    const { result, retryAfter } = await ebGetOnce<T>(fetchImpl, token, url.toString());
+    const wait = result.ok ? null : nextWait(attempt, result.status, result.error, retryAfter, policy);
+    if (wait === null) return result;
+    await sleep(wait);
+  }
+}
+
+async function ebGetOnce<T>(fetchImpl: Fetch, token: string, url: string): Promise<{ result: EbResult<T>; retryAfter: string | null }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url.toString(), {
+    const res = await fetchImpl(url, {
       method: "GET",
       headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
       signal: ctrl.signal,
       redirect: "error",
     });
+    const retryAfter = res.headers?.get?.("retry-after") ?? null;
     const body = await res.json().catch(() => null);
     if (!res.ok) {
       const code = typeof body?.error === "string" && /^[A-Z_]{2,64}$/.test(body.error) ? body.error : `HTTP_${res.status}`;
-      return { ok: false, status: res.status, body: null, error: code };
+      return { result: { ok: false, status: res.status, body: null, error: code }, retryAfter };
     }
-    return { ok: true, status: res.status, body: body as T };
+    return { result: { ok: true, status: res.status, body: body as T }, retryAfter: null };
   } catch (err) {
-    return { ok: false, status: 0, body: null, error: (err as Error)?.name === "AbortError" ? "TIMEOUT" : "NETWORK" };
+    return { result: { ok: false, status: 0, body: null, error: (err as Error)?.name === "AbortError" ? "TIMEOUT" : "NETWORK" }, retryAfter: null };
   } finally {
     clearTimeout(timer);
   }
@@ -226,6 +245,42 @@ export async function readEvent(fetchImpl: Fetch, token: string, id: string): Pr
   if (!r.ok || !r.body) return { ...r, body: null };
   const c = toChoice(r.body);
   return c ? { ok: true, status: r.status, body: c } : { ok: false, status: 502, body: null, error: "bad event" };
+}
+
+/**
+ * Whether the event belongs to one of the token's organizations (a public
+ * event reads with any token, so a read alone proves nothing). GET only.
+ * Marks a door link verified (exos_channel_link_verified, mig 20261121100000).
+ */
+export async function ebOwnsEvent(fetchImpl: Fetch, token: string, id: string): Promise<boolean> {
+  return ebOwns((path, params) => ebGet(fetchImpl, token, path, params), id);
+}
+
+/** At most this many pages of the token's organizations are read. */
+export const EB_ORG_PAGES = 5;
+
+/**
+ * ebOwnsEvent over any GET (the channel sync's Io too): the event's
+ * organization_id, then the token's organizations page by page (continuation,
+ * at most EB_ORG_PAGES).
+ */
+export async function ebOwns(
+  get: (path: string, params?: Record<string, string | undefined>) => Promise<{ ok: boolean; body: any }>, id: string,
+): Promise<boolean> {
+  if (!isEbId(id)) return false;
+  const ev = await get(`/events/${id}/`);
+  const org = ev.ok ? ev.body?.organization_id : null;
+  if (!isEbId(org)) return false;
+  let continuation: string | undefined;
+  for (let page = 0; page < EB_ORG_PAGES; page++) {
+    const r = await get("/users/me/organizations/", continuation ? { continuation } : {});
+    if (!r.ok) return false;
+    if ((r.body?.organizations ?? []).some((o: { id?: string }) => o?.id === org)) return true;
+    const p = r.body?.pagination;
+    if (!p?.has_more_items || typeof p.continuation !== "string" || !p.continuation) return false;
+    continuation = p.continuation;
+  }
+  return false;
 }
 
 export interface EventChoice { id: string; name: string; start: string | null; status: string | null }

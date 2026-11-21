@@ -238,8 +238,13 @@ DECLARE s public.exos_public_event_sales;
 BEGIN
   UPDATE public.exos_events SET primary_source = 'luma' WHERE id = pg_temp.u('e1');
   ASSERT public.exos_tier_available(pg_temp.u('d2')) = 0, 'L5: Exos closed';
-  ASSERT pg_temp.luma_target(0) = 10, 'L5: Luma gets every free seat';
+  -- Eventbrite was given those 10 in L4 and can still sell them until it is
+  -- set to what it sold: one promise across platforms (mig 20261121100000),
+  -- so Luma gets them once Eventbrite's capacity is down to 3.
+  ASSERT pg_temp.luma_target(0) = 0, 'L5: not while Eventbrite still has them';
   ASSERT pg_temp.eb_target(3) = 3, 'L5: Eventbrite sold out';
+  PERFORM public.exos_eventbrite_inventory_ack(pg_temp.u('e1'), '9102', '{"sent":true}', true, 3);
+  ASSERT pg_temp.luma_target(0) = 10, 'L5: Luma gets every free seat';
   s := pg_temp.sales();
   ASSERT s.sells_on = 'luma' AND s.sells_on_url = 'https://luma.com/d7-show', 'L5: storefront ' || s::text;
 END $$;

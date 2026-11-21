@@ -44,8 +44,20 @@ Eventbrite and Luma mapped 1-1").** For an event the organizer creates in Exos
 and chooses to also sell on Eventbrite, `exos-channel-sync`
 (`_shared/channels/eventbrite.ts`) creates and keeps in step, on the
 organizer's own account: the venue, the event (name, dates, description,
-currency), its ticket classes (name, price, hidden; the first capacity), publish
-and cancel. Only the paths in `EB_WRITES` (marked **M** below), under the same
+currency), its ticket classes (name, price, hidden; the first capacity, sent as
+`capacity`: the spec's Ticket Class Create marks `quantity_total` deprecated), publish
+and cancel. Only classes Exos created get those updates (every class of an event
+Exos created; on a linked event, the ones Exos added: `exos_eventbrite_ticket_links.exos_created`,
+mig 20261121100000); a class Exos adopted by name or the organizer mapped keeps its
+price and details, and only the inventory sync's capacity is sent for it. A live
+create is recorded first (`exos_channel_create_begin`); a pass that finds one
+recorded looks the event up (`GET /organizations/{id}/events/?name_filter=…`: same
+name, same start, created between the first try and 2 minutes after the last, and not
+an event another Exos event uses) before creating again, and doesn't repeat a create
+younger than 2 minutes. The venue is made only once the create is begun, kept with
+it, and reused (or one of the org's with the same name and address, from
+`GET /organizations/{id}/venues/`). Reads (`ebGet`, the mirror's GETs) are retried on 429 / 5xx
+with backoff, Retry-After honoured up to 5 s; a POST is never re-sent. Only the paths in `EB_WRITES` (marked **M** below), under the same
 gate (org switch + `EXOS_EVENTBRITE_WRITES=on`, dry run otherwise). Capacity
 afterwards stays the inventory sync's job. The list above ("Exos never") holds
 for every event Exos did not create there, and for orders, discounts, holds,
@@ -219,7 +231,7 @@ Access:
 | `POST /organizations/{organization_id}/events/` | **M** | channel sync: create the mirrored event | Create an Event |
 | `POST /events/{event_id}/` | **M** | channel sync: update the mirrored event | Update an Event |
 | `GET /venues/{venue_id}/events/` | R |  | List Events by Venue |
-| `GET /organizations/{organization_id}/events/` | R | event picker (`status=live,started,draft`, `time_filter=current_future`) | List Events by Organization |
+| `GET /organizations/{organization_id}/events/` | R | event picker (`status=live,started,draft`, `time_filter=current_future`); the mirror's pending-create lookup (`name_filter`, `status=all`, `order_by=created_desc`) | List Events by Organization |
 | `GET /series/{event_series_id}/events/` | R |  | List Events by Series |
 | `POST /events/{event_id}/publish/` | **M** | channel sync: publish when Exos publishes | Publish an Event |
 | `POST /events/{event_id}/unpublish/` | ✖ |  | Unpublish an Event |
@@ -286,7 +298,7 @@ Access:
 | `GET /venues/{venue_id}/` | R |  | Retrieve a Venue |
 | `POST /organizations/{organization_id}/venues/` | **M** | channel sync: the mirrored event's venue | Create a Venue |
 | `POST /venues/{venue_id}/` | ✖ |  | Update a Venue |
-| `GET /organizations/{organization_id}/venues/` | R |  | List Venues by Organization |
+| `GET /organizations/{organization_id}/venues/` | R | channel sync: reuse a venue of the same name and address | List Venues by Organization |
 | `POST /organizations/{organization_id}/webhooks/` | ✖ |  | Create Webhooks by Organization ID |
 | `POST /webhooks/` | ✖ |  | Create Webhooks - deprecated |
 | `GET /organizations/{organization_id}/webhooks/` | R |  | List Webhook by Organization ID |
