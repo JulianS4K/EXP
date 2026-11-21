@@ -17,10 +17,19 @@
 --              manager: the event facts the planner needs, which ad
 --              credentials are connected; never a secret)
 --           C: FUNCTION exos_ads_audience_source (service role: the
---              consenting fans and buyers' email / phone for the audience
---              builder, which hashes them at once; logged in
---              exos_audience_exports, 20 a day per org)
---           R: exos_checkout_sessions, exos_fans, exos_mail_prefs, auth.users,
+--              consenting fans and buyers, as SHA-256 hashes only; logged in
+--              exos_audience_exports, 3 a minute and 20 a day per org)
+--           C: FUNCTION exos_ads_credential_meta (service role: a provider's
+--              row without decrypting its secret, for the pinned dry run)
+--           C: FUNCTION _exos_consent_grant_ok, _exos_audience_daily_gate,
+--              _exos_email_trim (no client EXECUTE)
+--           W: FUNCTION exos_org_audience_export (1 counted text patch: the
+--              same consent rules, the atomic daily cap)
+--           W: FUNCTION exos_delete_my_account (1 counted marker patch: the
+--              person's fan profiles go, their earlier finished guest
+--              orders get the tombstone address)
+--           R: exos_checkout_sessions, exos_order_proofs, exos_fans,
+--              exos_mail_prefs, auth.users, exos_rate_windows,
 --              exos_events, exos_event_geo, exos_ticket_tiers,
 --              exos_org_integrations, exos_org_ad_credentials,
 --              exos_audience_exports, exos_has_org_role
@@ -40,7 +49,10 @@
 -- 1. REDDIT'S EMAIL. Reddit normalizes an email before hashing: lower case,
 --    trimmed, and in the local part everything from the first "+" on dropped
 --    and every dot removed (every domain). _exos_email_sha256_reddit is that
---    hash (TS twin: normalizeEmailReddit in _shared/hashedIds.ts); a Reddit
+--    hash (TS twin: normalizeEmailReddit in _shared/hashedIds.ts; both trim
+--    ASCII whitespace only, and both refuse an address with ASCII whitespace
+--    left inside or with other than exactly one "@", so the two agree:
+--    tests/exos/test_ads.sql AD2 and ads_test.ts share the vectors); a Reddit
 --    outbox row gets it as payload.em_reddit from a BEFORE INSERT trigger on
 --    the outbox (the existing checkout trigger is not patched). It never
 --    fails the insert.
@@ -64,40 +76,78 @@
 --    the public can see), cheapest public price and which ad credentials
 --    are connected. exos_ads_audience_source: service role only, the people
 --    an audience may hold: buyers with a fulfilled (or partly refunded)
---    order who granted ADVERTISING consent at checkout (the latest choice
---    for that email wins, as in exos_org_audience_export), plus the org's
---    fans whose latest advertising choice here (by email or account) is
---    granted; never anyone unsubscribed from marketing mail, off the org's
---    email list, discarded or deleted. Following the org or joining its
---    email list is NOT advertising consent (operator 2026-09-30). The raw
---    email goes only to the service role (exos-ads hashes it at once with
---    hashedIds.ts and drops it); every call is logged in
---    exos_audience_exports and counts toward its 20 a day.
+--    order who granted ADVERTISING consent at checkout, plus the org's fans
+--    whose latest advertising choice here (by email or account) is granted
+--    on an order that wasn't fully refunded; never anyone unsubscribed from
+--    marketing mail, off the org's email list, discarded, deleted or
+--    banned. Following the org or joining its email list is NOT advertising
+--    consent (operator 2026-09-30). Nothing raw leaves Postgres: each row is
+--    the SHA-256 hashes the platforms take (em, em_google, em_reddit, ph,
+--    ph_digits; the same helpers as the outbox and exos_org_audience_export).
+--    More than 100,000 people: the first 100,000 by email, and the answer
+--    says truncated with the total. Every call is logged in
+--    exos_audience_exports and counts toward the org's 3 a minute and 20 a
+--    day, shared with the hashed CSV export. exos_ads_credential_meta: a
+--    provider's row with has_secret instead of the secret, so the pinned
+--    dry run decrypts nothing.
+-- 5. WHOSE CHOICE COUNTS (review of #138, B2; the same in
+--    exos_org_audience_export, live on prod). Anyone can start a guest
+--    checkout with anyone's email and tick the box, so a "yes" counts only
+--    from an order that was paid or issued (fulfilled, partly or fully
+--    refunded) whose email was proven, or that never needed proof
+--    (_exos_consent_grant_ok: no exos_order_proofs row that isn't
+--    'proven'). A "no" counts from any checkout: it can only take someone
+--    out. The latest counted choice per email (and per account) wins; at
+--    the same moment a "no" wins (S2). The buyer rows themselves need the
+--    same proof. The daily cap is taken under a per-org advisory lock held
+--    to commit, so 20 means 20 under any concurrency (S5).
+-- 6. ACCOUNT DELETION (B1). exos_delete_my_account now deletes the person's
+--    fan profiles (by account, and by their confirmed email) and gives
+--    their earlier finished guest checkouts under that confirmed email the
+--    tombstone address, so neither an export nor an audience finds them
+--    again. A
+--    tombstoned or banned account is never exported.
 --
--- Nothing in an existing function body is text-patched (README rule 4 does
--- not arise): two small provider functions from 20261121162400 are replaced
--- whole, the rest is new. Re-run safe (CREATE OR REPLACE, DROP ... IF
--- EXISTS). Prod apply needs operator OK.
+-- Two existing bodies are text-patched (README rule 4: check each patch's
+-- search text on prod's bodies first): exos_org_audience_export (one
+-- counted patch, its throttle-to-consent block as written in
+-- 20260930101000; the org-audit patch of 20261109100000 is elsewhere in the
+-- body) and exos_delete_my_account (one counted marker patch before its
+-- "Close the login" line, as written in 20260926010000). Two small provider
+-- functions from 20261121162400 are replaced whole, the rest is new.
+-- Re-run safe (CREATE OR REPLACE, DROP ... IF EXISTS, marker-skipped
+-- patches). Prod apply needs operator OK.
 -- ============================================================================
 
 -- ===========================================================================
 -- 1. Reddit's email hash, on Reddit outbox rows
 -- ===========================================================================
+-- ASCII whitespace off both ends, lower case: the one trim the Reddit hash
+-- and its TS twin share (JS trim() also strips Unicode spaces; this doesn't,
+-- and neither does normalizeEmailReddit).
+CREATE OR REPLACE FUNCTION public._exos_email_trim(p_email text)
+RETURNS text LANGUAGE sql IMMUTABLE
+SET search_path TO 'public', 'pg_temp'
+AS $$
+  SELECT lower(btrim(p_email, E' \t\n\r\x0b\x0c'))
+$$;
+REVOKE ALL ON FUNCTION public._exos_email_trim(text) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public._exos_email_sha256_reddit(p_email text)
 RETURNS text LANGUAGE sql IMMUTABLE
 SET search_path TO 'public', 'pg_temp'
 AS $$
   SELECT CASE
-    WHEN nullif(btrim(p_email), '') IS NULL OR position('@' in p_email) = 0 THEN NULL
-    WHEN replace(split_part(split_part(lower(btrim(p_email)), '@', 1), '+', 1), '.', '') = ''
-      OR split_part(lower(btrim(p_email)), '@', 2) = '' THEN NULL
+    WHEN e IS NULL OR e = '' OR e ~ E'[ \t\n\r\x0b\x0c]' OR length(e) - length(replace(e, '@', '')) <> 1 THEN NULL
+    WHEN replace(split_part(split_part(e, '@', 1), '+', 1), '.', '') = '' OR split_part(e, '@', 2) = '' THEN NULL
     ELSE encode(extensions.digest(convert_to(
-           replace(split_part(split_part(lower(btrim(p_email)), '@', 1), '+', 1), '.', '')
-           || '@' || split_part(lower(btrim(p_email)), '@', 2), 'UTF8'), 'sha256'), 'hex') END
+           replace(split_part(split_part(e, '@', 1), '+', 1), '.', '') || '@' || split_part(e, '@', 2),
+           'UTF8'), 'sha256'), 'hex') END
+    FROM (SELECT public._exos_email_trim(p_email) AS e) t
 $$;
 REVOKE ALL ON FUNCTION public._exos_email_sha256_reddit(text) FROM PUBLIC, anon, authenticated;
 COMMENT ON FUNCTION public._exos_email_sha256_reddit(text) IS
-  'SHA-256 hex of an email as Reddit normalizes it (lower case, trimmed, local part without its +tag and dots). TS twin: normalizeEmailReddit (_shared/hashedIds.ts). mig 20261121190500.';
+  'SHA-256 hex of an email as Reddit normalizes it (lower case, ASCII whitespace trimmed, local part without its +tag and dots; NULL with whitespace inside or not exactly one @). TS twin: normalizeEmailReddit (_shared/hashedIds.ts). mig 20261121190500.';
 
 CREATE OR REPLACE FUNCTION public._exos_tg_conversions_reddit_email()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
@@ -291,8 +341,40 @@ GRANT EXECUTE ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) TO authen
 COMMENT ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) IS
   'Owner / manager: the event facts the "Boost this event" planner needs and which ad credentials are connected (booleans). No secret, no buyer. mig 20261121190500.';
 
--- Service role: the people an ad audience may hold, raw email / phone for
--- the audience builder to hash at once. Consenting buyers and fans only.
+-- ===========================================================================
+-- 5. Whose advertising choice counts, the shared daily cap
+-- ===========================================================================
+-- May a checkout's "yes" count? Only from an order that was paid or issued
+-- (fulfilled, partly or fully refunded) whose email was proven or never
+-- needed proof: a guest can start a checkout with anyone's email.
+CREATE OR REPLACE FUNCTION public._exos_consent_grant_ok(p_status text, p_session_id text)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce(p_status, '') IN ('fulfilled', 'partially_refunded', 'refunded')
+     AND NOT EXISTS (SELECT 1 FROM public.exos_order_proofs p
+                      WHERE p.session_id = p_session_id AND p.status <> 'proven')
+$$;
+REVOKE ALL ON FUNCTION public._exos_consent_grant_ok(text, text) FROM PUBLIC, anon, authenticated;
+
+-- 20 audience pulls a day per org (ads and the hashed CSV export together),
+-- counted under a per-org advisory lock held to commit: a second caller
+-- waits for the first to commit its log row, then counts it.
+CREATE OR REPLACE FUNCTION public._exos_audience_daily_gate(p_org_id uuid, p_message text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_audience_exports:' || p_org_id::text, 0));
+  IF (SELECT count(*) FROM public.exos_audience_exports x
+       WHERE x.org_id = p_org_id AND x.created_at > now() - interval '1 day') >= 20 THEN
+    RAISE EXCEPTION '%', p_message USING ERRCODE = 'P0001';
+  END IF;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_audience_daily_gate(uuid, text) FROM PUBLIC, anon, authenticated;
+
+-- Service role: the people an ad audience may hold, as hashes only.
+-- Consenting buyers and fans (section 4 / 5 of the header).
 CREATE OR REPLACE FUNCTION public.exos_ads_audience_source(p_org_id uuid, p_event_id uuid DEFAULT NULL, p_actor uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -301,6 +383,8 @@ AS $$
 DECLARE
   v_rows  jsonb;
   v_n     integer;
+  v_total integer;
+  v_cap   constant integer := 100000;
   v_actor uuid;
 BEGIN
   IF p_org_id IS NULL OR NOT EXISTS (SELECT 1 FROM public.exos_orgs o WHERE o.id = p_org_id) THEN
@@ -310,33 +394,47 @@ BEGIN
      AND NOT EXISTS (SELECT 1 FROM public.exos_events e WHERE e.id = p_event_id AND e.org_id = p_org_id) THEN
     RAISE EXCEPTION 'exos_ads_audience_source: not one of this organization''s events' USING ERRCODE = '22023';
   END IF;
-  IF (SELECT count(*) FROM public.exos_audience_exports x
-       WHERE x.org_id = p_org_id AND x.created_at > now() - interval '1 day') >= 20 THEN
-    RAISE EXCEPTION 'exos_ads_audience_source: daily audience limit reached (20 per organization)' USING ERRCODE = 'P0001';
+  -- 3 a minute per org (the export's bucket), then 20 a day (shared, atomic).
+  IF NOT public.exos_rate_hit('audience:' || p_org_id::text, 3) THEN
+    RAISE EXCEPTION 'exos_ads_audience_source: too many audience pulls, try again in a minute' USING ERRCODE = 'P0001';
   END IF;
+  PERFORM public._exos_audience_daily_gate(p_org_id, 'exos_ads_audience_source: daily audience limit reached (20 per organization)');
   SELECT u.id INTO v_actor FROM auth.users u WHERE u.id = p_actor;
 
   WITH sess AS (
     SELECT s.session_id, s.event_id, s.buyer_uid, s.status, s.consent_marketing, s.created_at,
            lower(btrim(coalesce(nullif(btrim(s.buyer_email), ''), u.email))) AS email,
            regexp_replace(regexp_replace(coalesce(to_jsonb(u) ->> 'phone', ''), '\D', '', 'g'), '^0+', '') AS phone_digits,
-           (s.buyer_uid IS NOT NULL AND u.id IS NULL) AS account_gone
+           -- Gone, tombstoned (exos_delete_my_account) or banned.
+           (s.buyer_uid IS NOT NULL AND (u.id IS NULL OR u.email LIKE 'deleted+%'
+              OR coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false))) AS account_gone,
+           public._exos_consent_grant_ok(s.status, s.session_id) AS trusted
       FROM public.exos_checkout_sessions s
       LEFT JOIN auth.users u ON u.id = s.buyer_uid
      WHERE s.org_id = p_org_id
   ),
-  -- The latest advertising choice at this org's checkouts, by email and by account.
-  by_email AS (
-    SELECT DISTINCT ON (x.email) x.email, x.consent_marketing AS choice
+  -- The choices that count: a "no" from any checkout, a "yes" only from a
+  -- trusted one. live: that "yes" came with an order not fully refunded.
+  counted AS (
+    SELECT x.*, (x.consent_marketing = 'granted' AND x.status <> 'refunded') AS live
       FROM sess x
-     WHERE x.email IS NOT NULL AND x.consent_marketing IN ('granted', 'denied')
-     ORDER BY x.email, x.created_at DESC, x.session_id DESC
+     WHERE x.consent_marketing = 'denied' OR (x.consent_marketing = 'granted' AND x.trusted)
+  ),
+  -- The latest counted choice at this org's checkouts, by email and by
+  -- account; at the same moment a "no" wins.
+  by_email AS (
+    SELECT DISTINCT ON (x.email) x.email, x.consent_marketing AS choice,
+           bool_or(x.live) OVER (PARTITION BY x.email) AS any_live
+      FROM counted x
+     WHERE x.email IS NOT NULL
+     ORDER BY x.email, x.created_at DESC, (x.consent_marketing = 'denied') DESC, x.session_id DESC
   ),
   by_uid AS (
-    SELECT DISTINCT ON (x.buyer_uid) x.buyer_uid, x.consent_marketing AS choice
-      FROM sess x
-     WHERE x.buyer_uid IS NOT NULL AND x.consent_marketing IN ('granted', 'denied')
-     ORDER BY x.buyer_uid, x.created_at DESC, x.session_id DESC
+    SELECT DISTINCT ON (x.buyer_uid) x.buyer_uid, x.consent_marketing AS choice,
+           bool_or(x.live) OVER (PARTITION BY x.buyer_uid) AS any_live
+      FROM counted x
+     WHERE x.buyer_uid IS NOT NULL
+     ORDER BY x.buyer_uid, x.created_at DESC, (x.consent_marketing = 'denied') DESC, x.session_id DESC
   ),
   buyers AS (
     SELECT b.email, b.buyer_uid AS uid, b.phone_digits, 'buyer'::text AS source
@@ -344,6 +442,7 @@ BEGIN
       LEFT JOIN by_email l ON l.email = b.email
       LEFT JOIN by_uid lu ON lu.buyer_uid = b.buyer_uid
      WHERE b.status IN ('fulfilled', 'partially_refunded')
+       AND b.trusted
        AND (p_event_id IS NULL OR b.event_id = p_event_id)
        AND NOT b.account_gone
        AND b.consent_marketing = 'granted'
@@ -361,8 +460,12 @@ BEGIN
      WHERE p_event_id IS NULL
        AND f.org_id = p_org_id
        AND f.discarded_at IS NULL
-       AND (f.user_id IS NULL OR u.id IS NOT NULL)
-       AND (l.choice = 'granted' OR lu.choice = 'granted')
+       AND (f.user_id IS NULL
+            OR (u.id IS NOT NULL AND u.email NOT LIKE 'deleted+%'
+                AND NOT coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false)))
+       -- A "yes" that came with an order still standing (S1: a fully
+       -- refunded buyer's automatic fan row doesn't bring them back).
+       AND ((l.choice = 'granted' AND l.any_live) OR (lu.choice = 'granted' AND lu.any_live))
        AND coalesce(l.choice, '') <> 'denied'
        AND coalesce(lu.choice, '') <> 'denied'
   ),
@@ -388,28 +491,207 @@ BEGIN
     SELECT g.email, max(g.phone_digits) AS phone_digits, min(g.source) AS source
       FROM eligible g
      GROUP BY g.email
-     ORDER BY g.email
-     LIMIT 100000
   )
-  SELECT coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
-           'email', p.email,
-           'phone', CASE WHEN p.phone_digits IS NOT NULL THEN '+' || p.phone_digits END,
+  -- Only hashes leave: the platforms' forms (hashedIds.ts names them), from
+  -- the same SQL helpers as the outbox and exos_org_audience_export.
+  SELECT (SELECT count(*) FROM per_email),
+         (SELECT coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+           'em', public._exos_email_sha256(p.email),
+           'em_google', public._exos_email_sha256_google(p.email),
+           'em_reddit', public._exos_email_sha256_reddit(p.email),
+           'ph', CASE WHEN p.phone_digits IS NOT NULL THEN encode(extensions.digest(convert_to('+' || p.phone_digits, 'UTF8'), 'sha256'), 'hex') END,
+           'ph_digits', CASE WHEN p.phone_digits IS NOT NULL THEN encode(extensions.digest(convert_to(p.phone_digits, 'UTF8'), 'sha256'), 'hex') END,
            'source', p.source,
            'ad_consent', 'granted')) ORDER BY p.email), '[]'::jsonb)
-    INTO v_rows
-    FROM per_email p;
+            FROM (SELECT * FROM per_email ORDER BY email LIMIT v_cap) p)
+    INTO v_total, v_rows;
   v_n := jsonb_array_length(v_rows);
 
   INSERT INTO public.exos_audience_exports (org_id, event_id, exported_by, row_count)
   VALUES (p_org_id, p_event_id, v_actor, v_n);
-  RETURN jsonb_build_object('count', v_n, 'generated_at', now(), 'rows', v_rows);
+  -- truncated: more people than one pull carries (v_cap); total says how many.
+  RETURN jsonb_build_object('count', v_n, 'total', v_total, 'truncated', v_total > v_n,
+                            'generated_at', now(), 'rows', v_rows);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_ads_audience_source(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_ads_audience_source(uuid, uuid, uuid) TO service_role;
 COMMENT ON FUNCTION public.exos_ads_audience_source(uuid, uuid, uuid) IS
-  'Service role (exos-ads): email / phone of the org''s buyers and fans who granted advertising consent (latest choice wins; mail opt-outs, the org list''s opt-outs, discarded and deleted left out), for hashing at once by the audience builder. Logged in exos_audience_exports, 20 a day per org. mig 20261121190500.';
+  'Service role (exos-ads): SHA-256 hashes (em, em_google, em_reddit, ph, ph_digits) of the org''s buyers and fans who granted advertising consent on a paid / issued order with a proven (or no) email proof (latest counted choice wins, a "no" from any checkout; mail opt-outs, the org list''s opt-outs, discarded, deleted and banned left out). No raw email or phone. Logged in exos_audience_exports; 3 a minute and 20 a day per org, shared with exos_org_audience_export. mig 20261121190500.';
 
--- ROLLBACK (manual): DROP TRIGGER exos_marketing_conversions_reddit_email ON
+-- Service role: a provider's row as exos_integration_secret gives it, but
+-- with has_secret instead of the secret (nothing is decrypted). The pinned
+-- dry run (exos-ads, ADS_WRITES_PINNED_OFF) plans from this.
+CREATE OR REPLACE FUNCTION public.exos_ads_credential_meta(p_org_id uuid, p_provider text)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  i public.exos_org_integrations%ROWTYPE;
+  c record;
+BEGIN
+  IF p_org_id IS NULL OR p_provider IS NULL OR p_provider NOT LIKE 'ads\_%' OR NOT (p_provider = ANY (public._exos_cred_providers())) THEN
+    RETURN NULL;
+  END IF;
+  SELECT * INTO i FROM public.exos_org_integrations x WHERE x.org_id = p_org_id AND x.provider = p_provider;
+  IF FOUND THEN
+    IF i.status = 'disabled' THEN
+      RETURN NULL;
+    END IF;
+    IF i.secret_id IS NOT NULL THEN
+      RETURN jsonb_build_object('provider', i.provider, 'status', i.status, 'config', i.config,
+                                'has_secret', true, 'writes_enabled', i.writes_enabled,
+                                'account_name', i.account_name, 'source', 'store');
+    END IF;
+  END IF;
+  SELECT * INTO c FROM public.exos_org_ad_credentials a
+   WHERE a.org_id = p_org_id AND a.platform = substr(p_provider, 5) AND a.secret_id IS NOT NULL;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  RETURN jsonb_build_object('provider', p_provider, 'status', CASE WHEN c.enabled THEN 'connected' ELSE 'unverified' END,
+                            'config', c.config || jsonb_strip_nulls(jsonb_build_object('test_event_code', c.test_event_code)),
+                            'has_secret', true, 'writes_enabled', c.enabled, 'account_name', NULL,
+                            'source', 'legacy:exos_org_ad_credentials');
+END $$;
+REVOKE ALL ON FUNCTION public.exos_ads_credential_meta(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_ads_credential_meta(uuid, text) TO service_role;
+
+-- ===========================================================================
+-- 6. The live export and account deletion (counted patches, rule 4)
+-- ===========================================================================
+CREATE OR REPLACE FUNCTION pg_temp.exos_patch_n(p_sig text, p_marker text, p_old text, p_new text, p_hits int)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE p_fn regprocedure := to_regprocedure(p_sig); v_def text; v_hits int;
+BEGIN
+  IF p_fn IS NULL THEN
+    RAISE EXCEPTION '%: not present', p_sig;
+  END IF;
+  v_def := replace(pg_get_functiondef(p_fn), chr(13), '');
+  p_marker := replace(p_marker, chr(13), ''); p_old := replace(p_old, chr(13), ''); p_new := replace(p_new, chr(13), '');
+  IF position(p_marker in v_def) > 0 THEN
+    RAISE NOTICE '%: already patched (%)', p_fn, p_marker;
+    RETURN;
+  END IF;
+  v_hits := (length(v_def) - length(replace(v_def, p_old, ''))) / length(p_old);
+  IF v_hits <> p_hits THEN
+    RAISE EXCEPTION '%: expected % match(es) for patch "%", found %', p_fn, p_hits, p_marker, v_hits;
+  END IF;
+  EXECUTE replace(v_def, p_old, p_new);
+END $$;
+
+-- exos_org_audience_export: the daily cap under the shared lock, and the
+-- same rules for whose "yes" counts (B2, S2), tombstoned / banned accounts
+-- out (B1). Its throttle-to-consent block, as written in 20260930101000.
+SELECT pg_temp.exos_patch_n('public.exos_org_audience_export(uuid,uuid)',
+  'exos: audience consent (mig 20261121190500)',
+$o$  IF (SELECT count(*) FROM public.exos_audience_exports x
+       WHERE x.org_id = p_org_id AND x.created_at > now() - interval '1 day') >= 20 THEN
+    RAISE EXCEPTION 'exos_org_audience_export: daily export limit reached (20 per organization)' USING ERRCODE = 'P0001';
+  END IF;
+
+  WITH sess AS (
+    -- Every checkout of this org, with the email it belongs to (normalized).
+    SELECT s.session_id, s.event_id, s.buyer_uid, s.status, s.consent_marketing, s.created_at,
+           lower(btrim(coalesce(nullif(btrim(s.buyer_email), ''), u.email))) AS email,
+           -- auth.users.phone (Supabase stores the digits with the country code).
+           regexp_replace(regexp_replace(coalesce(to_jsonb(u) ->> 'phone', ''), '\D', '', 'g'), '^0+', '') AS phone_digits,
+           (s.buyer_uid IS NOT NULL AND u.id IS NULL) AS account_gone
+      FROM public.exos_checkout_sessions s
+      LEFT JOIN auth.users u ON u.id = s.buyer_uid
+     WHERE s.org_id = p_org_id
+  ),
+  latest AS (
+    -- The most recent consent choice per email at this org's checkouts.
+    SELECT DISTINCT ON (x.email) x.email, x.consent_marketing AS choice
+      FROM sess x
+     WHERE x.email IS NOT NULL AND x.consent_marketing IN ('granted', 'denied')
+     ORDER BY x.email, x.created_at DESC, x.session_id DESC
+  ),
+  eligible AS (
+    SELECT b.email,
+           CASE WHEN b.phone_digits ~ '^[1-9][0-9]{7,14}$' THEN b.phone_digits END AS phone_digits
+      FROM sess b
+      LEFT JOIN latest l ON l.email = b.email
+     WHERE b.status IN ('fulfilled', 'partially_refunded')
+       AND (p_event_id IS NULL OR b.event_id = p_event_id)
+       AND NOT b.account_gone
+       AND b.email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+       AND b.email NOT LIKE 'deleted+%@deleted.invalid'
+       -- Advertising consent at checkout; never when the latest choice was "no".
+       AND coalesce(l.choice, '') <> 'denied'
+       AND b.consent_marketing = 'granted'
+$o$,
+$n$  /* exos: audience consent (mig 20261121190500) */ -- 20 a day, under the
+  -- per-org lock shared with exos_ads_audience_source (atomic).
+  PERFORM public._exos_audience_daily_gate(p_org_id, 'exos_org_audience_export: daily export limit reached (20 per organization)');
+
+  WITH sess AS (
+    -- Every checkout of this org, with the email it belongs to (normalized).
+    SELECT s.session_id, s.event_id, s.buyer_uid, s.status, s.consent_marketing, s.created_at,
+           lower(btrim(coalesce(nullif(btrim(s.buyer_email), ''), u.email))) AS email,
+           -- auth.users.phone (Supabase stores the digits with the country code).
+           regexp_replace(regexp_replace(coalesce(to_jsonb(u) ->> 'phone', ''), '\D', '', 'g'), '^0+', '') AS phone_digits,
+           -- Gone, tombstoned (exos_delete_my_account) or banned.
+           (s.buyer_uid IS NOT NULL AND (u.id IS NULL OR u.email LIKE 'deleted+%'
+              OR coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false))) AS account_gone,
+           -- A "yes" counts only from a paid / issued order with its email proven (or no proof needed).
+           public._exos_consent_grant_ok(s.status, s.session_id) AS trusted
+      FROM public.exos_checkout_sessions s
+      LEFT JOIN auth.users u ON u.id = s.buyer_uid
+     WHERE s.org_id = p_org_id
+  ),
+  latest AS (
+    -- The most recent counted choice per email: a "no" from any checkout, a
+    -- "yes" only from a trusted one; at the same moment a "no" wins.
+    SELECT DISTINCT ON (x.email) x.email, x.consent_marketing AS choice
+      FROM sess x
+     WHERE x.email IS NOT NULL
+       AND (x.consent_marketing = 'denied' OR (x.consent_marketing = 'granted' AND x.trusted))
+     ORDER BY x.email, x.created_at DESC, (x.consent_marketing = 'denied') DESC, x.session_id DESC
+  ),
+  eligible AS (
+    SELECT b.email,
+           CASE WHEN b.phone_digits ~ '^[1-9][0-9]{7,14}$' THEN b.phone_digits END AS phone_digits
+      FROM sess b
+      LEFT JOIN latest l ON l.email = b.email
+     WHERE b.status IN ('fulfilled', 'partially_refunded')
+       AND b.trusted
+       AND (p_event_id IS NULL OR b.event_id = p_event_id)
+       AND NOT b.account_gone
+       AND b.email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'
+       AND b.email NOT LIKE 'deleted+%@deleted.invalid'
+       -- Advertising consent at checkout; never when the latest choice was "no".
+       AND coalesce(l.choice, '') <> 'denied'
+       AND b.consent_marketing = 'granted'
+$n$, 1);
+
+-- exos_delete_my_account: the person's fan profiles go (by account, and by
+-- the confirmed email), and their earlier finished guest checkouts under that
+-- confirmed email get the tombstone address, so no export or audience finds
+-- them again.
+SELECT pg_temp.exos_patch_n('public.exos_delete_my_account()',
+  'exos: fans and guest orders (mig 20261121190500)',
+$o$  -- Close the login for good (the row stays so order history keeps its keys).
+$o$,
+$n$  /* exos: fans and guest orders (mig 20261121190500) */ -- fan profiles
+  -- are personal data (signup answers cascade with them); a finished guest
+  -- checkout under the confirmed email gets the tombstone address (a guest
+  -- row must keep an address; exports skip the tombstone), a pending one
+  -- keeps it (it may still be fulfilled).
+  DELETE FROM public.exos_fans
+   WHERE user_id = v_uid OR (v_email IS NOT NULL AND v_email <> '' AND lower(btrim(email)) = v_email);
+  IF v_email IS NOT NULL AND v_email <> '' THEN
+    UPDATE public.exos_checkout_sessions SET buyer_email = v_tomb
+     WHERE buyer_uid IS NULL AND status <> 'pending' AND lower(btrim(buyer_email)) = v_email;
+  END IF;
+
+  -- Close the login for good (the row stays so order history keeps its keys).
+$n$, 1);
+
+-- ROLLBACK (manual): restore exos_org_audience_export and exos_delete_my_account
+-- from their pg_get_functiondef taken before the apply (or 20260930101000 +
+-- 20261109100000's audit patch, and the deletion body's latest migrations);
+-- DROP TRIGGER exos_marketing_conversions_reddit_email ON
 -- exos_marketing_conversions; DROP TRIGGER exos_checkout_conversions_x ON
 -- exos_checkout_sessions; drop the functions created above; DELETE FROM
 -- exos_marketing_conversions WHERE platform = 'x' and restore the six-platform

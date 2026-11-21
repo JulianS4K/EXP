@@ -16,7 +16,7 @@ import type { ChannelAdapter, ChannelCtx, OrgCredential } from "../channels/adap
 import { createGatedHttp, type WriteRule } from "../channels/gatedHttp.ts";
 import { memoryAuditSink, rpcAuditSink, teeSink, type AuditStep } from "../channels/audit.ts";
 import { rpcUsageCounter, type UsageCounter } from "../channels/usage.ts";
-import { loadCredential } from "../channels/credentials.ts";
+import { loadCredential, parseCredential } from "../channels/credentials.ts";
 import { metaAdsAdapter, metaAdsHttp } from "../channels/adapters/metaAds.ts";
 import { redditAdsAdapter, redditAdsHttp } from "../channels/adapters/redditAds.ts";
 import { googleCustomerMatchAdapter, googleCustomerMatchHttp } from "../channels/adapters/googleCustomerMatch.ts";
@@ -26,6 +26,22 @@ import { boostConfig, planCampaign, type CampaignEventInput, type CampaignPlan }
 
 /** The build gate: every ad write stays a dry run (see the header). */
 export const ADS_WRITES_PINNED_OFF = true;
+
+/**
+ * While pinned, a plan needs to know only that a token is saved, never the
+ * token: exos_ads_credential_meta gives the row with has_secret (nothing is
+ * decrypted) and this stand-in takes the secret's place, so "connected"
+ * checks hold and a header shows a placeholder that GatedHttp redacts.
+ */
+export const PINNED_SECRET_STAND_IN = "pinned-dry-run-no-secret-read";
+
+/** The pinned read: the row without its secret, or null. Throws on an RPC failure. */
+export async function loadCredentialMeta(rpc: Rpc, orgId: string, provider: string): Promise<OrgCredential | null> {
+  const { data, error } = await rpc("exos_ads_credential_meta", { p_org_id: orgId, p_provider: provider });
+  if (error) throw new Error("credential read failed");
+  const d = data as Record<string, unknown> | null;
+  return parseCredential(d ? { ...d, secret: d.has_secret === true ? PINNED_SECRET_STAND_IN : null } : null);
+}
 
 export type AudienceChannel = "meta_ads" | "reddit_ads" | "google_customer_match";
 export type CampaignChannel = "meta_ads" | "reddit_ads";
@@ -72,10 +88,11 @@ const view = (s: AuditStep): StepView => ({
 });
 
 async function credentialFor(d: RunDeps, def: ChannelDef): Promise<OrgCredential> {
-  const c = await loadCredential(d.rpc, d.orgId, def.provider).catch(() => null);
+  const load = ADS_WRITES_PINNED_OFF ? loadCredentialMeta : loadCredential;
+  const c = await load(d.rpc, d.orgId, def.provider).catch(() => null);
   const cred: OrgCredential = c ?? { provider: def.provider, status: "unverified", config: {}, secret: null, writesEnabled: false, accountName: null, source: "none" };
   if (def.pixelFrom && typeof cred.config.pixel_id !== "string") {
-    const px = await loadCredential(d.rpc, d.orgId, def.pixelFrom).catch(() => null);
+    const px = await load(d.rpc, d.orgId, def.pixelFrom).catch(() => null);
     if (typeof px?.config.pixel_id === "string") cred.config = { ...cred.config, pixel_id: px.config.pixel_id };
   }
   return cred;
@@ -100,7 +117,7 @@ function makeCtx(d: RunDeps, def: ChannelDef, cred: OrgCredential, eventId?: str
 
 export interface AudiencePlanOut {
   channel: AudienceChannel;
-  audience: BuiltAudience["counts"];
+  audience: BuiltAudience["counts"] & { total: number; truncated: boolean };
   result: AdsResult;
   steps: StepView[];
 }
@@ -112,16 +129,20 @@ export async function planAudienceSync(d: RunDeps, req: {
   const def = CHANNELS[req.channel];
   const src = await d.rpc("exos_ads_audience_source", { p_org_id: d.orgId, p_event_id: req.eventId ?? null, p_actor: req.actor ?? null });
   if (src.error) throw Object.assign(new Error("audience source failed"), { cause: src.error });
-  const rows = ((src.data as { rows?: AudienceSourceRow[] } | null)?.rows ?? []) as AudienceSourceRow[];
+  const sd = src.data as { rows?: AudienceSourceRow[]; total?: number; truncated?: boolean } | null;
+  const rows = (sd?.rows ?? []) as AudienceSourceRow[];
   const built = await buildAudience(rows);
-  rows.length = 0; // the raw emails go no further
+  // More people than one pull carries (100,000): say so, never silently.
+  const truncated = sd?.truncated === true;
+  const total = typeof sd?.total === "number" ? sd.total : rows.length;
   const cred = await credentialFor(d, def);
   const { ctx, memory, audit } = makeCtx(d, def, cred, req.eventId ?? undefined);
   try {
     const result = await def.adapter.syncAudience!(ctx, {
       id: `${d.orgId}:${req.eventId ?? "all"}`, name: req.name, members: built.members, externalId: req.externalId ?? null,
     }) as AdsResult;
-    return { channel: req.channel, audience: built.counts, result, steps: memory.steps.map(view) };
+    if (truncated) result.warnings.push(`only the first ${rows.length} of ${total} people fit in one sync`);
+    return { channel: req.channel, audience: { ...built.counts, total, truncated }, result, steps: memory.steps.map(view) };
   } finally {
     await audit.flush?.();
   }

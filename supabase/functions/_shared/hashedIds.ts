@@ -30,13 +30,17 @@ export function normalizeEmailGoogle(raw: unknown): string | null {
  * Reddit's rule (Conversions API and CUSTOMER_LIST audiences): lower case,
  * trimmed, and in the local part everything from the first "+" on dropped
  * and every dot removed, on every domain (not only gmail). SQL twin:
- * _exos_email_sha256_reddit (mig 20261121190500).
+ * _exos_email_sha256_reddit (mig 20261121190500), with the same edges: only
+ * ASCII whitespace is trimmed (space, tab, newline, CR, VT, FF; not JS
+ * trim()'s Unicode spaces, which Postgres btrim leaves), and an address
+ * with whitespace left inside or with other than exactly one "@" gives null.
  */
 export function normalizeEmailReddit(raw: unknown): string | null {
-  const e = normalizeEmail(raw);
-  if (!e) return null;
-  const at = e.lastIndexOf("@");
-  const local = e.slice(0, at).split("+")[0].replace(/\./g, ""), domain = e.slice(at + 1);
+  if (typeof raw !== "string") return null;
+  const e = raw.replace(/^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g, "").toLowerCase();
+  if (!e || /[ \t\n\r\v\f]/.test(e) || e.split("@").length !== 2) return null;
+  const [rawLocal, domain] = e.split("@");
+  const local = rawLocal.split("+")[0].replace(/\./g, "");
   return local && domain ? `${local}@${domain}` : null;
 }
 

@@ -1,27 +1,45 @@
 // The one audience builder (ads phase, mig 20261121190500): Exos fans and
-// buyers -> consent-filtered, hashed, deduped members, and each platform's
-// rows from them. Pure: Web Crypto only (hashedIds.ts), so vitest imports it.
+// buyers -> consent-filtered, deduped members, and each platform's rows from
+// them. Pure, so vitest imports it.
 //
 // Input: exos_ads_audience_source's rows (service role), already limited in
-// SQL to people who granted ADVERTISING consent (the latest choice at the
-// org's checkouts wins; mail and list opt-outs, discarded and deleted left
-// out). The builder checks the consent flag again and drops anything that
-// isn't 'granted', so a row from anywhere else can't slip in. Every email /
-// phone is hashed here (hashedIds.ts: the one builder) and the raw value is
-// dropped: nothing raw comes back, and nothing raw goes into a plan, an
-// audit step or a payload.
+// SQL to people who granted ADVERTISING consent on a paid / issued order
+// whose email was proven (the latest counted choice wins; mail and list
+// opt-outs, discarded, deleted and banned left out), and already HASHED in
+// SQL (review of #138, S4: no raw email or phone leaves Postgres). Each row
+// carries the forms hashedIds.ts names (em, em_google, em_reddit, ph,
+// ph_digits), built by the same SQL helpers as the conversions outbox. The
+// builder checks the consent flag again, keeps only 64-hex values, and
+// ignores anything else in a row (a raw "email" / "phone" key included), so
+// nothing raw goes into a plan, an audit step or a payload.
 //
 // Dedupe: one member per person, by the plain email hash, else the phone
 // hash; a later row for the same person fills in a missing phone.
 
-import { hashedIdentifiers, type HashedIdentifiers } from "../hashedIds.ts";
+import type { HashedIdentifiers } from "../hashedIds.ts";
 
 export interface AudienceSourceRow {
-  email?: string | null;
-  phone?: string | null;
+  em?: string | null;
+  em_google?: string | null;
+  em_reddit?: string | null;
+  ph?: string | null;
+  ph_digits?: string | null;
   /** 'granted' only: anything else is dropped. */
   ad_consent?: string | null;
   source?: string | null;
+}
+
+const HEX64 = /^[0-9a-f]{64}$/;
+const HASH_KEYS = ["em", "em_google", "em_reddit", "ph", "ph_digits"] as const;
+
+/** A source row's hashes, each kept only when it is a SHA-256 hex. */
+export function rowHashes(r: AudienceSourceRow): HashedIdentifiers {
+  const out: HashedIdentifiers = {};
+  for (const k of HASH_KEYS) {
+    const v = r?.[k];
+    if (typeof v === "string" && HEX64.test(v)) out[k] = v;
+  }
+  return out;
 }
 
 export interface BuiltAudience {
@@ -35,7 +53,7 @@ export async function buildAudience(rows: readonly AudienceSourceRow[]): Promise
   const order: string[] = [];
   for (const r of rows) {
     if (r?.ad_consent !== "granted") { counts.noConsent++; continue; }
-    const h = await hashedIdentifiers({ email: r.email, phone: r.phone });
+    const h = rowHashes(r);
     const key = h.em ?? h.ph;
     if (!key) { counts.noIdentifier++; continue; }
     const seen = byKey.get(key);

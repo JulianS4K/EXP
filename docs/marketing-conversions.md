@@ -303,7 +303,10 @@ save refuses `ads_x` (a managed provider).
 | Sender | the `x_ads` adapter (`_shared/channels/adapters/xAds.ts`) through GatedHttp, allowlist `POST /12/measurement/conversions/<pixel>` only |
 | Drain step | `_shared/conversions/xDrain.ts` (`drainXRow`), called by `exos-conversions-drain` |
 
-An X row is sent only when **all** of these hold, and none does today: `EXOS_CONVERSIONS_LIVE=true`
+**X is pinned off in code**: `X_CONVERSIONS_PINNED_OFF` (`xDrain.ts`) hands the `x_ads` GatedHttp an
+org switch of false whatever the flags say, so an X row is only ever planned. Lifting the pin is a
+reviewed change plus the CLAUDE.md write exception for X. Behind the pin, an X row would be sent only
+when **all** of these hold, and none does today: `EXOS_CONVERSIONS_LIVE=true`
 on the drain; Exos's X app keys (`X_ADS_CONSUMER_KEY`, `X_ADS_CONSUMER_SECRET`; without them the row
 is "planned only"); and GatedHttp's decision for `x_ads` (the org's switch AND `EXOS_X_ADS_WRITES=on`).
 Otherwise the row is `skipped` with the reason, like the others. The org's token and token secret
@@ -327,8 +330,8 @@ recorded]`), never stored.
 
 | Piece | Where |
 |---|---|
-| Migration | `20261121190500_exos_ads.sql` (Reddit hash + trigger, X rows, providers `ads_x` / `ads_meta_api` / `ads_reddit_api`, `exos_ads_campaign_context`, `exos_ads_audience_source`); test `tests/exos/test_ads.sql` (AD1-AD5) |
-| Audience builder | `_shared/ads/audience.ts` (consent filter, `hashedIds.ts`, dedupe, per-platform rows) |
+| Migration | `20261121190500_exos_ads.sql` (Reddit hash + trigger, X rows, providers `ads_x` / `ads_meta_api` / `ads_reddit_api`, `exos_ads_campaign_context`, `exos_ads_audience_source`, `exos_ads_credential_meta`; patches `exos_org_audience_export` and `exos_delete_my_account`); tests `tests/exos/test_ads.sql` (AD1-AD9), `tests/exos/race_audience_cap.sh` |
+| Audience builder | `_shared/ads/audience.ts` (consent filter, the SQL's hashes only, dedupe, per-platform rows) |
 | Campaign planner | `_shared/ads/planner.ts` (one plan), `_shared/ads/geo.ts` (a small local city config; see below) |
 | Adapters | `_shared/channels/adapters/{metaAds,redditAds,googleCustomerMatch,xAds}.ts` (core, in the registry) |
 | Passes | `_shared/ads/run.ts`, edge function `exos-ads` (`/plan-audience`, `/plan-campaign`; owner / manager) |
@@ -337,12 +340,17 @@ recorded]`), never stored.
 
 **Who is on an audience.** `exos_ads_audience_source` (service role) returns the org's buyers with a
 fulfilled (or partly refunded) order who granted **advertising** consent at checkout, and its fans
-whose latest advertising choice there (by email or account) is granted. The latest choice wins (a
-later "no" removes an earlier "yes"); anyone unsubscribed from marketing mail, off the org's email
-list, discarded or deleted is left out. Joining the org's list or following it is not advertising
-consent. `exos-ads` hashes the emails / phones at once (`hashedIds.ts`: `em`, `em_google`,
-`em_reddit`, `ph`, `ph_digits`) and drops them; the builder checks the consent flag again. Every call
-is logged in `exos_audience_exports` and counts toward its 20 a day.
+whose latest advertising choice there (by email or account) is granted on an order that wasn't fully
+refunded. A "yes" counts only from a paid or issued order whose email was proven (or never needed
+proof): a stranger can type anyone's email into a guest checkout. A "no" counts from any checkout,
+the latest counted choice wins, and at the same moment a "no" wins. Anyone unsubscribed from
+marketing mail, off the org's email list, discarded, deleted or banned is left out. Joining the org's
+list or following it is not advertising consent. The rows are hashes only, built in SQL (`em`,
+`em_google`, `em_reddit`, `ph`, `ph_digits`, the names `hashedIds.ts` uses); no raw email or phone
+leaves Postgres, and the builder keeps only 64-hex values and checks the consent flag again. Over
+100,000 people, the first 100,000 go and the plan warns. Every call is logged in
+`exos_audience_exports`: 3 a minute and 20 a day per org, shared with the hashed CSV export and
+counted atomically. The hashed CSV export follows the same consent rules.
 
 **The price.** What Exos charges for a boost is `EXOS_ADS_BOOST_PRICE_CENTS`, default **0** (free at
 first). The ad budget is the organizer's daily budget, default $0 (the plan warns: a $0 campaign

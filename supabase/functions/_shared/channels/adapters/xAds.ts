@@ -60,7 +60,13 @@ async function sendConversion(ctx: ChannelCtx, conversion: Record<string, unknow
   const auth = await oauth1Header("POST", `${X_ADS_BASE}${path}`,
     { consumerKey: c.app.consumerKey, consumerSecret: c.app.consumerSecret, token: t.token, tokenSecret: t.tokenSecret },
     { nonce: c.nonce, timestamp: c.timestamp });
-  return ctx.http.request("POST", path, { body: c.body, headers: { Authorization: auth }, op: "conversion.send" });
+  // The audit row records the shape, never the hashed email / click id the
+  // body carries (owners and managers read "What we'd send").
+  const n = Array.isArray((c.body as { conversions?: unknown[] } | null)?.conversions) ? (c.body as { conversions: unknown[] }).conversions.length : 0;
+  return ctx.http.request("POST", path, {
+    body: c.body, headers: { Authorization: auth }, op: "conversion.send",
+    auditBody: { conversions: `[${n} conversion${n === 1 ? "" : "s"} with hashed identifiers, not recorded]` },
+  });
 }
 
 export const xAdsAdapter: ChannelAdapter = {
