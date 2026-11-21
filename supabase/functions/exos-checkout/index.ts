@@ -460,7 +460,8 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
       v = vErr ? null : (Array.isArray(vRows) ? vRows[0] : vRows) ?? null;
     } else {
       const g = await checkGuestVoucher(sb, event_id!, voucherCode, ipHash);
-      if ("error" in g) return json({ error: g.error }, g.status);
+      // 401: the SPA opens sign-in (reason sign_in), as for an account-only code below.
+      if ("error" in g) return json(g.status === 401 ? { error: g.error, reason: "sign_in" } : { error: g.error }, g.status);
       // Kept for accounts, or the guest tries used up: the buyer signs in.
       if (g.row.reason === "sign in required" || g.row.reason === "too many attempts") {
         return json({ error: "sign in to use this code", reason: "sign_in" }, 401);

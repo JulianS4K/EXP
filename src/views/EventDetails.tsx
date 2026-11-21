@@ -9,7 +9,7 @@ import { useParams, useNavigate, useLocation, Link } from 'react-router-dom';
 import { Event, Organization } from '../types';
 import { eventSharePath, getPublicEvent, getEventForEdit } from '../lib/events';
 import { mintTickets, claimFreeTickets, setTicketAttendee, listMyTicketsForEvent } from '../lib/tickets';
-import { claimFreeAsGuest, startCheckout } from '../lib/checkout';
+import { claimFreeAsGuest, needsSignIn, startCheckout } from '../lib/checkout';
 import { guestCheckoutAllowed } from '../lib/guestCheckout';
 import SocialLinks from '../components/SocialLinks';
 import ArtistLinks from '../components/ArtistLinks';
@@ -481,7 +481,7 @@ export default function EventDetails() {
   const paidNotOnSale = !externalShop && !stripeEnabled && (nominalPrice > 0 || addonSel.totalCents > 0);
 
   // Sign in, then pick up the purchase where the buyer left it.
-  const signInToBuy = async () => {
+  const signInToBuy = async (message = 'Sign in to grab your ticket.') => {
     if (!event) return;
     // Pick up where they left off once signed in (survives the OAuth
     // round trip, which reloads the page).
@@ -491,7 +491,7 @@ export default function EventDetails() {
     try {
       sessionStorage.setItem(RESUME_KEY, JSON.stringify({ id: event.id, at: Date.now(), tierId: selectedTierId, qty: quantity }));
     } catch { /* storage blocked */ }
-    toast({ kind: 'info', message: 'Sign in to grab your ticket.' });
+    toast({ kind: 'info', message });
     await signIn();
   };
 
@@ -614,6 +614,14 @@ export default function EventDetails() {
       }
       window.location.href = url; // leave the SPA for Stripe-hosted checkout
     } catch (err: any) {
+      // A guest's code that needs an account (review of #132, I5): sign in,
+      // then the purchase resumes with the code on the account's budget.
+      if (guestEmail && needsSignIn(err)) {
+        setPurchasing(false);
+        setGuestOpen(false);
+        void signInToBuy('Sign in to use this code.');
+        return;
+      }
       console.error('Checkout failed:', err);
       seatTaken(err);
       priceMoved(err);
