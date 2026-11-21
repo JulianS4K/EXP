@@ -103,6 +103,12 @@ export async function syncLuma(io: Io, ev: MirrorEvent, payload: any, steps: Ste
     if (pending?.slug && io.live) {
       const found = await lumaFindBySlug(io, pending.slug);
       if (found.error) return fail(steps, "couldn't check for the event an earlier pass created", found.error);
+      if (found.id && hooks?.taken) {
+        // The slug is Exos's own, but never adopt another Exos event's (mig 20261121100000).
+        const used = await hooks.taken([found.id]);
+        if (used === null) return fail(steps, "couldn't check which events are in use");
+        if (used.includes(found.id)) return fail(steps, "the event an earlier pass created belongs to another Exos event: link the right one");
+      }
       if (found.id) id = found.id;
     }
   }

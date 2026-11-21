@@ -3,7 +3,8 @@
 -- writes are switched on
 -- ============================================================================
 -- Touches:  C: FUNCTION _exos_channel_outstanding, _exos_channel_share_cap,
---              exos_channel_create_begin (service role)
+--              exos_channel_create_begin, exos_channel_external_taken,
+--              exos_channel_lease_renew (service role)
 --           W: exos_eventbrite_ticket_links (+ exos_created)
 --           P: exos_eventbrite_inventory_apply, exos_luma_inventory_apply
 --              (one lock per event, one promise across platforms),
@@ -11,7 +12,11 @@
 --              mapping), exos_channel_mark (a link to another external event
 --              is a conflict, never kept silently; first capacities and
 --              created classes recorded; the pending create cleared),
---              exos_channel_set (refuses an event already linked elsewhere)
+--              exos_channel_set (refuses an event already linked elsewhere,
+--              a taken id, link mode over a pending create; one lock per
+--              event), exos_eventbrite_link / _unlink, exos_backend_link /
+--              _unlink (refused under a mirror), exos_channel_remove (not while
+--              a create may be in flight)
 -- Pre-reqs: 20261014110000, 20261019090000, 20261029100000, 20261029160000
 --
 -- Every write to Eventbrite and Luma is still a dry run unless the org's
@@ -29,8 +34,14 @@
 --    _exos_channel_outstanding) comes off, and the shared pool (free less one
 --    pack) is split evenly between the platforms that sell the ticket type,
 --    so the first one to sync can't keep the second at 0 for good. The
---    primary hold stays the primary platform's, on top. With one platform the
---    cap equals the share it already computed (no change).
+--    primary hold stays the primary platform's, on top. One pack comes off
+--    the house's contested part too, so the platforms together never pass
+--    house - pack (+ the hold). With one platform the cap equals the share
+--    it already computed. A platform counts while its door link OR its
+--    mirror names the external event, so removing the channel (the event
+--    stays on sale there) doesn't zero it. The first capacity claim offers
+--    (share_cap) is read outside the lock with nothing used yet: the next
+--    apply, under the lock, corrects it (and Eventbrite's floor is 1).
 -- 2. A link to another external event. exos_channel_mark inserted the door /
 --    inventory links with ON CONFLICT DO NOTHING, so an event already linked
 --    to Eventbrite event A (or to pretix / another Luma event) kept that link
@@ -38,22 +49,37 @@
 --    new external id is KEPT on the mirror (so it is never created twice),
 --    the state is error with the reason, no link or ticket mapping is written,
 --    and exos-channel-sync makes no further call for that mirror until the
---    organizer resolves it and saves the channel again. exos_channel_set
---    refuses up front: another external id than the mirror already has, an
---    Eventbrite door link to a different event (link that one instead), a
---    ticket backend that isn't this Luma event.
+--    organizer resolves it and saves the channel again. An external id that
+--    belongs to another Exos event (any org: exos_channel_external_taken) is
+--    a conflict too, but NOT kept, and the pending create is cleared (same
+--    org, this used to fail 23505 on exos_channel_mirrors_external_uq on
+--    every pass). Caught earlier as well: exos_channel_set refuses another
+--    external id than the mirror has, a taken id, an Eventbrite door link to
+--    a different event, a ticket backend that isn't this Luma event, link
+--    mode while a create is pending, under one lock per event;
+--    exos_channel_create_begin refuses (and records) a door link found
+--    before anything is created; the door links can't be re-pointed or
+--    unlinked under a mirror (exos_eventbrite_link / _unlink,
+--    exos_backend_link / _unlink).
 -- 3. Duplicate creates. exos_channel_create_begin records the create a live
 --    pass is about to send (external_meta.pending_create: when, the name and
 --    start sent, Luma's slug) and extends the lease; the next pass looks the
 --    event up (Eventbrite: the org's events by name, start and creation
 --    time; Luma: its own slug, which Luma also refuses to reuse) before it
 --    creates again, and a create younger than 2 minutes is not repeated.
---    mark clears it once the mirror has its external id.
+--    Eventbrite's lookup only takes an event created between the first try
+--    (less 5 minutes) and the last try plus 2 minutes, never one another
+--    Exos event uses. The venue is made only after the create is begun and
+--    is kept with it, so a retry reuses it. mark clears it once the mirror
+--    has its external id. Each live write renews the lease
+--    (exos_channel_lease_renew), so a long pass isn't taken over.
 -- 4. Adopted Eventbrite classes. exos_eventbrite_ticket_links.exos_created
 --    marks the classes Exos created (from mark's tickets[].created); claim
 --    sends it with each mapping, and the details pass updates only those
 --    (with their price). A class Exos adopted by name is left to the
---    inventory sync's capacity-only write.
+--    inventory sync's capacity-only write. Existing rows start false (no
+--    backfill): fail-safe, since no mirror has synced live yet, and on an
+--    event Exos created the pass treats every class as Exos's anyway.
 --
 -- Built from the live bodies: every patch is a counted text replacement on
 -- pg_get_functiondef (supabase/README.md rule 4), checked against the body
@@ -93,9 +119,9 @@ COMMENT ON COLUMN public.exos_eventbrite_ticket_links.exos_created IS
 -- ---------------------------------------------------------------------------
 -- What each external platform can still sell of the event, per mapped ticket
 -- type: its capacity there (or the target Exos set, if higher: a target not
--- yet sent doesn't lower what it can sell) less what it sold. Only the
--- current external event's rows (Eventbrite: the door link's event; Luma: the
--- mirror's event).
+-- yet sent doesn't lower what it can sell) less what it sold. Only the rows
+-- of the external event the door link OR the mirror names (removing the
+-- mirror keeps counting through the door link; both gone: no longer counted).
 CREATE OR REPLACE FUNCTION public._exos_channel_outstanding(p_event_id uuid)
 RETURNS TABLE (provider text, tier_id uuid, outstanding integer)
 LANGUAGE sql STABLE SECURITY DEFINER
@@ -105,18 +131,43 @@ AS $$
          greatest(greatest(coalesce(k.eb_capacity, 0), coalesce(k.target_capacity, 0))
                   - coalesce(k.eb_sold, k.counted_sold, 0), 0)::int
     FROM public.exos_eventbrite_ticket_links k
-    JOIN public.exos_eventbrite_links lk ON lk.event_id = k.event_id AND lk.eb_event_id = k.eb_event_id
    WHERE k.event_id = p_event_id AND k.active
+     AND (EXISTS (SELECT 1 FROM public.exos_eventbrite_links lk WHERE lk.event_id = k.event_id AND lk.eb_event_id = k.eb_event_id)
+          OR EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+                      WHERE m.event_id = k.event_id AND m.provider = 'eventbrite' AND m.external_id = k.eb_event_id))
   UNION ALL
   SELECT 'luma'::text, k.tier_id,
          greatest(greatest(coalesce(k.luma_capacity, 0), coalesce(k.target_capacity, 0))
                   - coalesce(k.luma_sold, k.counted_sold, 0), 0)::int
     FROM public.exos_luma_ticket_links k
-    JOIN public.exos_channel_mirrors m ON m.event_id = k.event_id AND m.provider = 'luma' AND m.external_id = k.luma_event_id
    WHERE k.event_id = p_event_id AND k.active
+     AND (EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+                   WHERE m.event_id = k.event_id AND m.provider = 'luma' AND m.external_id = k.luma_event_id)
+          OR EXISTS (SELECT 1 FROM public.exos_backend_links b
+                      WHERE b.event_id = k.event_id AND b.provider = 'luma' AND b.external_ref = k.luma_event_id))
 $$;
 REVOKE ALL ON FUNCTION public._exos_channel_outstanding(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_channel_outstanding(uuid) TO service_role;
+
+-- Which of p_ids another Exos event (any org) already uses on p_provider: its
+-- mirror, or its door link (Eventbrite) / ticket backend link (Luma). A pass
+-- never adopts one, and mark refuses to record one (mig 20261121100000).
+CREATE OR REPLACE FUNCTION public.exos_channel_external_taken(p_event_id uuid, p_provider text, p_ids text[])
+RETURNS text[]
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce(array_agg(DISTINCT x.id), '{}'::text[])
+    FROM unnest(coalesce(p_ids, '{}'::text[])) AS x(id)
+   WHERE EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+                  WHERE m.provider = p_provider AND m.external_id = x.id AND m.event_id <> p_event_id)
+      OR (p_provider = 'eventbrite' AND EXISTS (SELECT 1 FROM public.exos_eventbrite_links l
+                                                 WHERE l.eb_event_id = x.id AND l.event_id <> p_event_id))
+      OR (p_provider = 'luma' AND EXISTS (SELECT 1 FROM public.exos_backend_links b
+                                           WHERE b.provider = 'luma' AND b.external_ref = x.id AND b.event_id <> p_event_id))
+$$;
+REVOKE ALL ON FUNCTION public.exos_channel_external_taken(uuid, text, text[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_channel_external_taken(uuid, text, text[]) TO service_role;
 
 -- The most `p_provider` may be offered for one ticket type, given what the
 -- other platform holds: p_share is the share the apply worked out for its own
@@ -126,9 +177,9 @@ GRANT EXECUTE ON FUNCTION public._exos_channel_outstanding(uuid) TO service_role
 --          cap = least(ceil(shared / n) + hold if primary,
 --                      shared + hold - what the others can still sell of it)
 --          n = 1 + (the other platform sells this ticket type)
---   house: H = total_tickets - tickets_sold, its primary hold set apart;
---          cap = least(ceil((H - holds) / n) + holds if primary,
---                      H - what the others can still sell) - p_used
+--   house: H = total_tickets - tickets_sold; Hc = H - holds - one pack;
+--          cap = least(ceil(Hc / n) + holds if primary,
+--                      Hc + holds - what the others can still sell) - p_used
 -- The primary hold is _exos_tier_free_raw - exos_effective_available on a
 -- ticket type the primary platform (eventbrite / luma) sells.
 CREATE OR REPLACE FUNCTION public._exos_channel_share_cap(
@@ -151,6 +202,7 @@ DECLARE
   v_cap      int;
   v_h        int;
   v_hold_all int := 0;
+  v_hc       int;
   v_mine     boolean;
   v_t        uuid;
 BEGIN
@@ -193,9 +245,13 @@ BEGIN
       END LOOP;
     END IF;
     v_hold_all := least(v_hold_all, v_h);
-    v_cap := least(v_cap, greatest(least(ceil((v_h - v_hold_all)::numeric / v_n_house)::int
+    -- One pack off the house's contested part too, as at the ticket type
+    -- (the hold stays the primary's): together the platforms never pass
+    -- H - pack (+ the hold).
+    v_hc := greatest(v_h - v_hold_all - v_pack, 0);
+    v_cap := least(v_cap, greatest(least(ceil(v_hc::numeric / v_n_house)::int
                                          + CASE WHEN v_mine THEN v_hold_all ELSE 0 END,
-                                         v_h - v_o_house) - coalesce(p_used, 0), 0));
+                                         v_hc + v_hold_all - v_o_house) - coalesce(p_used, 0), 0));
   END IF;
   RETURN least(p_share, greatest(v_cap, 0));
 END $$;
@@ -255,7 +311,9 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, 
   'v_conflict text;',
   $o$  v_maps   int := 0;$o$,
   $n$  v_maps   int := 0;
-  v_conflict text;   -- mig 20261121100000$n$, 1);
+  v_conflict text;   -- mig 20261121100000
+  v_taken  boolean := false;
+  v_orig   text;$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, jsonb)',
   'is a conflict (mig 20261121100000)',
@@ -266,7 +324,18 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, 
   -- stays on the mirror (so it is never created twice); no link or mapping is
   -- written and the pass is an error until the organizer resolves it.
   IF v_state = 'synced' AND m.external_id IS NOT NULL THEN
-    IF p_provider = 'eventbrite' THEN
+    -- Another Exos event's external event (any org): never adopted. One mark
+    -- per external id at a time, so two passes can't both take it.
+    PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_ext:' || p_provider || ':' || m.external_id, 0));
+    IF m.external_id = ANY (public.exos_channel_external_taken(p_event_id, p_provider, ARRAY[m.external_id])) THEN
+      v_taken := true;
+      v_conflict := initcap(p_provider) || ' event ' || m.external_id || ' already belongs to another Exos event';
+      SELECT x.external_id INTO v_orig FROM public.exos_channel_mirrors x WHERE x.event_id = p_event_id AND x.provider = p_provider;
+      m.external_id := v_orig;   -- not kept: it isn't this event's
+      v_state := 'error';
+      p_result := p_result || jsonb_build_object('error', left('conflict: ' || v_conflict
+        || '. Link the right event, or remove the channel and add it again.', 300));
+    ELSIF p_provider = 'eventbrite' THEN
       SELECT 'this event is already linked to Eventbrite event ' || l.eb_event_id INTO v_conflict
         FROM public.exos_eventbrite_links l WHERE l.event_id = p_event_id AND l.eb_event_id <> m.external_id;
     ELSE
@@ -326,7 +395,7 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, 
          -- stays until exos_channel_set clears it (mig 20261121100000).
          external_meta = ((CASE WHEN jsonb_typeof(p_result -> 'external_meta') = 'object' AND length((p_result -> 'external_meta')::text) <= 2000
                                 THEN external_meta || (p_result -> 'external_meta') ELSE external_meta END)
-                          - CASE WHEN m.external_id IS NOT NULL THEN 'pending_create' ELSE '' END)
+                          - CASE WHEN m.external_id IS NOT NULL OR v_taken THEN 'pending_create' ELSE '' END)
                          || CASE WHEN v_conflict IS NOT NULL THEN jsonb_build_object('conflict', left(v_conflict, 200)) ELSE '{}'::jsonb END,$n$, 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, jsonb)',
@@ -351,7 +420,16 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_set(uuid, text, text, text)',
   $o$  INSERT INTO public.exos_channel_mirrors AS m (event_id, provider, org_id, mode, external_id, created_by)$o$,
   $n$  -- One external event per platform (mig 20261121100000): refuse rather than
   -- keep an old link next to a new external event.
-  SELECT * INTO v_cur FROM public.exos_channel_mirrors WHERE event_id = p_event_id AND provider = p_provider;
+  -- One change per event at a time (exos_eventbrite_link / exos_backend_link take it too).
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  SELECT * INTO v_cur FROM public.exos_channel_mirrors WHERE event_id = p_event_id AND provider = p_provider FOR UPDATE;
+  IF v_ext IS NOT NULL AND v_ext = ANY (public.exos_channel_external_taken(p_event_id, p_provider, ARRAY[v_ext])) THEN
+    RAISE EXCEPTION 'exos_channel_set: that % event already belongs to another Exos event', p_provider USING ERRCODE = '23505';
+  END IF;
+  IF v_cur.external_id IS NULL AND v_ext IS NOT NULL AND jsonb_typeof(v_cur.external_meta -> 'pending_create') = 'object' THEN
+    RAISE EXCEPTION 'exos_channel_set: Exos is creating this event on % already; wait for it, or remove the channel first', p_provider
+      USING ERRCODE = '22023';
+  END IF;
   IF v_cur.external_id IS NOT NULL AND v_ext IS NOT NULL AND v_ext <> v_cur.external_id THEN
     RAISE EXCEPTION 'exos_channel_set: this event is already mirrored on % event %; remove it first', p_provider, v_cur.external_id
       USING ERRCODE = '23505';
@@ -384,9 +462,12 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_set(uuid, text, text, text)',
 -- ---------------------------------------------------------------------------
 -- p_marker: {name, start, slug?} as the pass will send them. Refused without
 -- the lease (lease-lost), once the mirror has an external id (has-external),
--- or while an earlier create is younger than 2 minutes (in-flight: the next
--- pass looks it up instead). Keeps the first time and Luma's slug across
--- tries, extends the lease. Returns {ok, pending}.
+-- while the event's door is linked to an event on that platform or its door
+-- list comes from elsewhere (conflict: recorded, so the sync stops; nothing
+-- is created that no promise counts), or while an earlier create is younger
+-- than 2 minutes (in-flight: the next pass looks it up instead). Keeps the
+-- first time, Luma's slug and the venue noted across tries, extends the
+-- lease. Returns {ok, pending}.
 CREATE OR REPLACE FUNCTION public.exos_channel_create_begin(p_event_id uuid, p_provider text, p_lease uuid, p_marker jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -398,6 +479,7 @@ DECLARE
   v_at    timestamptz;
   v_slug  text;
   v_next  jsonb;
+  v_conflict text;
 BEGIN
   IF p_marker IS NULL OR jsonb_typeof(p_marker) <> 'object' OR length(p_marker::text) > 600 THEN
     RAISE EXCEPTION 'exos_channel_create_begin: bad marker' USING ERRCODE = '22023';
@@ -408,6 +490,16 @@ BEGIN
   END IF;
   IF m.external_id IS NOT NULL THEN
     RETURN jsonb_build_object('ok', false, 'reason', 'has-external');
+  END IF;
+  v_conflict := CASE p_provider
+    WHEN 'eventbrite' THEN (SELECT 'this event is already linked to Eventbrite event ' || l.eb_event_id
+                              FROM public.exos_eventbrite_links l WHERE l.event_id = p_event_id)
+    ELSE (SELECT 'this event''s door list already comes from ' || CASE WHEN b.provider = 'luma' THEN 'Luma event ' || b.external_ref ELSE b.provider END
+            FROM public.exos_backend_links b WHERE b.event_id = p_event_id) END;
+  IF v_conflict IS NOT NULL THEN
+    UPDATE public.exos_channel_mirrors SET external_meta = external_meta || jsonb_build_object('conflict', left(v_conflict, 200))
+     WHERE event_id = p_event_id AND provider = p_provider;
+    RETURN jsonb_build_object('ok', false, 'reason', 'conflict', 'conflict', v_conflict);
   END IF;
   v_prev := CASE WHEN jsonb_typeof(m.external_meta -> 'pending_create') = 'object' THEN m.external_meta -> 'pending_create' END;
   v_at := CASE WHEN (v_prev ->> 'at') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' THEN (v_prev ->> 'at')::timestamptz END;
@@ -422,6 +514,8 @@ BEGIN
     'name', left(p_marker ->> 'name', 200),
     'start', left(p_marker ->> 'start', 40),
     'slug', v_slug,
+    'venue_id', v_prev ->> 'venue_id',
+    'venue_key', v_prev ->> 'venue_key',
     'tries', coalesce(CASE WHEN (v_prev ->> 'tries') ~ '^[0-9]{1,4}$' THEN (v_prev ->> 'tries')::int END, 0) + 1));
   UPDATE public.exos_channel_mirrors
      SET external_meta = external_meta || jsonb_build_object('pending_create', v_next),
@@ -431,6 +525,114 @@ BEGIN
 END $$;
 REVOKE ALL ON FUNCTION public.exos_channel_create_begin(uuid, text, uuid, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_channel_create_begin(uuid, text, uuid, jsonb) TO service_role;
+
+-- Renew the lease before each write of a live pass (exos-channel-sync), so a
+-- long pass isn't taken over mid-way; p_note ({venue_id, venue_key}) is kept
+-- with a pending create, so a retry reuses the venue it made. false: lease lost.
+CREATE OR REPLACE FUNCTION public.exos_channel_lease_renew(p_event_id uuid, p_provider text, p_lease uuid, p_note jsonb DEFAULT NULL)
+RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_note jsonb;
+BEGIN
+  IF p_note IS NOT NULL THEN
+    v_note := jsonb_strip_nulls(jsonb_build_object(
+      'venue_id', CASE WHEN (p_note ->> 'venue_id') ~ '^[0-9]{1,24}$' THEN p_note ->> 'venue_id' END,
+      'venue_key', left(p_note ->> 'venue_key', 300)));
+  END IF;
+  UPDATE public.exos_channel_mirrors
+     SET lease_until = greatest(lease_until, now() + interval '2 minutes'),
+         external_meta = CASE WHEN v_note IS NOT NULL AND v_note <> '{}'::jsonb AND jsonb_typeof(external_meta -> 'pending_create') = 'object'
+                              THEN jsonb_set(external_meta, '{pending_create}', (external_meta -> 'pending_create') || v_note)
+                              ELSE external_meta END
+   WHERE event_id = p_event_id AND provider = p_provider AND p_lease IS NOT NULL AND lease_id = p_lease AND lease_until >= now();
+  RETURN FOUND;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_channel_lease_renew(uuid, text, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_channel_lease_renew(uuid, text, uuid, jsonb) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 2. The door links can't be moved under a mirror.
+-- ---------------------------------------------------------------------------
+-- exos_eventbrite_link / _unlink and exos_backend_link / _unlink take the
+-- event's channel lock and refuse while a mirror on that platform names
+-- another external event (or is still creating one); unlinking refuses while
+-- the mirror exists (its classes are on sale: remove the channel first).
+-- exos_channel_remove refuses while a create may be in flight; after it, the
+-- door link keeps that platform in the promise (_exos_channel_outstanding).
+SELECT pg_temp.exos_patch_n('public.exos_eventbrite_link(uuid, uuid, text, text)',
+  'exos_channel_set:',
+  $o$  IF NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_accounts WHERE org_id = e.org_id) THEN
+    RAISE EXCEPTION 'exos_eventbrite_link: connect Eventbrite first' USING ERRCODE = '22023';
+  END IF;$o$,
+  $n$  IF NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_accounts WHERE org_id = e.org_id) THEN
+    RAISE EXCEPTION 'exos_eventbrite_link: connect Eventbrite first' USING ERRCODE = '22023';
+  END IF;
+  -- Not under a mirror on another Eventbrite event, nor one another Exos
+  -- event's mirror uses (mig 20261121100000).
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+              WHERE m.event_id = p_event_id AND m.provider = 'eventbrite' AND m.external_id IS DISTINCT FROM p_eb_event_id) THEN
+    RAISE EXCEPTION 'exos_eventbrite_link: this event is sold on Eventbrite through Also sell on (event %): link that one, or remove it there first',
+      coalesce((SELECT m.external_id FROM public.exos_channel_mirrors m WHERE m.event_id = p_event_id AND m.provider = 'eventbrite'), 'being created')
+      USING ERRCODE = '23505';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+              WHERE m.provider = 'eventbrite' AND m.external_id = p_eb_event_id AND m.event_id <> p_event_id) THEN
+    RAISE EXCEPTION 'exos_eventbrite_link: that Eventbrite event already belongs to another Exos event' USING ERRCODE = '23505';
+  END IF;$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_eventbrite_unlink(uuid, uuid)',
+  'remove it there first (mig 20261121100000)',
+  $o$  DELETE FROM public.exos_eventbrite_links WHERE event_id = p_event_id;$o$,
+  $n$  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m WHERE m.event_id = p_event_id AND m.provider = 'eventbrite') THEN
+    RAISE EXCEPTION 'exos_eventbrite_unlink: this event is sold on Eventbrite through Also sell on: remove it there first (mig 20261121100000)'
+      USING ERRCODE = '22023';
+  END IF;
+  DELETE FROM public.exos_eventbrite_links WHERE event_id = p_event_id;$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_backend_link(uuid, text, text, text)',
+  'exos_channel_set:',
+  $o$  INSERT INTO public.exos_backend_links AS l (event_id, org_id, provider, external_ref, external_name, list_id, linked_by, linked_at)$o$,
+  $n$  -- Not under a Luma mirror on another event (mig 20261121100000).
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+              WHERE m.event_id = p_event_id AND m.provider = 'luma'
+                AND (p_provider <> 'luma' OR m.external_id IS DISTINCT FROM v_ref)) THEN
+    RAISE EXCEPTION 'exos_backend_link: this event is sold on Luma through Also sell on (event %): link that one, or remove it there first',
+      coalesce((SELECT m.external_id FROM public.exos_channel_mirrors m WHERE m.event_id = p_event_id AND m.provider = 'luma'), 'being created')
+      USING ERRCODE = '23505';
+  END IF;
+  IF p_provider = 'luma' AND EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+                                      WHERE m.provider = 'luma' AND m.external_id = v_ref AND m.event_id <> p_event_id) THEN
+    RAISE EXCEPTION 'exos_backend_link: that Luma event already belongs to another Exos event' USING ERRCODE = '23505';
+  END IF;
+  INSERT INTO public.exos_backend_links AS l (event_id, org_id, provider, external_ref, external_name, list_id, linked_by, linked_at)$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_backend_unlink(uuid)',
+  'remove it there first (mig 20261121100000)',
+  $o$  DELETE FROM public.exos_backend_links WHERE event_id = p_event_id;$o$,
+  $n$  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m WHERE m.event_id = p_event_id AND m.provider = 'luma') THEN
+    RAISE EXCEPTION 'exos_backend_unlink: this event is sold on Luma through Also sell on: remove it there first (mig 20261121100000)'
+      USING ERRCODE = '22023';
+  END IF;
+  DELETE FROM public.exos_backend_links WHERE event_id = p_event_id;$n$, 1);
+
+SELECT pg_temp.exos_patch_n('public.exos_channel_remove(uuid, text)',
+  'still creating (mig 20261121100000)',
+  $o$  DELETE FROM public.exos_channel_mirrors WHERE event_id = p_event_id AND provider = p_provider;$o$,
+  $n$  PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_set:' || p_event_id::text, 0));
+  IF EXISTS (SELECT 1 FROM public.exos_channel_mirrors m
+              WHERE m.event_id = p_event_id AND m.provider = p_provider AND m.external_id IS NULL
+                AND (m.external_meta -> 'pending_create' ->> 'at') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T'
+                AND (m.external_meta -> 'pending_create' ->> 'at')::timestamptz > now() - interval '5 minutes') THEN
+    RAISE EXCEPTION 'exos_channel_remove: Exos is still creating this event on %; try again in a few minutes (mig 20261121100000)', p_provider
+      USING ERRCODE = '22023';
+  END IF;
+  DELETE FROM public.exos_channel_mirrors WHERE event_id = p_event_id AND provider = p_provider;$n$, 1);
 
 -- ROLLBACK (manual): restore exos_eventbrite_inventory_apply, exos_luma_inventory_apply,
 -- exos_channel_claim, exos_channel_mark and exos_channel_set from their bodies before

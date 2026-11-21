@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # One promise across platforms (mig 20261121100000): Eventbrite's and Luma's
-# inventory applies of the same event run one at a time. Timing-based, so
-# run by hand against a DB built by run_p0.sh:
+# inventory applies of the same event run one at a time. Timing-based, run
+# against a DB built by run_p0.sh:
 #   bash tests/exos/race_channel_promise.sh exos_p0_test
-# Expect:
+# In CI (exos-sql job, about 5 s). Expect:
 #   race 1 an Eventbrite apply holds its transaction open 1.5 s; a Luma apply
 #          of the same event started meanwhile waits for it (>= 1 s), then
 #          sees Eventbrite's new target: together they never offer more than
 #          the shared pool
 #   race 2 a Luma apply of ANOTHER event doesn't wait (the lock is per event)
+#   race 3 two owners link the same event to two different Eventbrite events
+#          at once (exos_channel_set): one wins, the other is refused (the
+#          per-event channel lock), never silently ignored
 # Its fixtures are removed afterwards.
 set -euo pipefail
 DB="${1:-exos_p0_test}"
@@ -77,4 +80,22 @@ t1=$(date +%s%N)
 wait $holder
 waited=$(( (t1 - t0) / 1000000 ))
 if [ "$waited" -lt 1000 ]; then echo "race 2 ok: another event ran in ${waited} ms"; else echo "race 2 FAILED: waited ${waited} ms"; fail=1; fi
+
+# race 3: two links of one event to two Eventbrite events at once.
+setlink() {
+  $P -c "SET ROLE authenticated; SELECT set_config('app.uid', '$A', false), set_config('app.jwt', '', false);
+         SELECT public.exos_channel_set('$E2', 'eventbrite', 'link', '$1');" >/dev/null 2>&1 && echo ok || echo refused
+}
+$P -c "SELECT pg_advisory_lock(hashtextextended('exos_channel_set:' || '$E2', 0)); SELECT pg_sleep(1.0);
+       SELECT pg_advisory_unlock(hashtextextended('exos_channel_set:' || '$E2', 0));" >/dev/null &
+holder=$!
+sleep 0.3
+o1=$(mktemp); o2=$(mktemp)
+setlink "7${EB}1" >"$o1" & p1=$!
+setlink "7${EB}2" >"$o2" & p2=$!
+wait $p1 $p2 $holder
+wins=$(cat "$o1" "$o2" | grep -c '^ok$' || true)
+kept=$($P -c "SELECT external_id FROM exos_channel_mirrors WHERE event_id='$E2' AND provider='eventbrite'")
+rm -f "$o1" "$o2"
+if [ "$wins" -eq 1 ] && [ -n "$kept" ]; then echo "race 3 ok: one link won ($kept), the other refused"; else echo "race 3 FAILED: $wins won, kept $kept"; fail=1; fi
 exit $fail

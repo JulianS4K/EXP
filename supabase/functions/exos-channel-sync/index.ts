@@ -37,7 +37,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
-import { contentHash, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
+import { contentHash, leasedIo, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
 import { EB_API, EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
 import { compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, syncLuma } from "../_shared/channels/luma.ts";
 import { lumaInventory } from "../_shared/channels/lumaInventory.ts";
@@ -128,7 +128,7 @@ async function pass(sb: SupabaseClient, c: Claimed) {
   const flag = Deno.env.get(c.provider === "eventbrite" ? "EXOS_EVENTBRITE_WRITES" : "EXOS_LUMA_WRITES");
   const live = writesLive(p.writes_enabled, flag);
   const steps: StepRecord[] = [];
-  const io = c.provider === "eventbrite"
+  const raw = c.provider === "eventbrite"
     ? makeIo({ fetch, base: EB_API, headers: { Authorization: `Bearer ${secret}` }, live, allowed: EB_WRITES, steps, standIn: ebStandIn })
     : makeIo({ fetch, base: LUMA_BASE, headers: { "x-luma-api-key": secret }, live, allowed: LUMA_WRITES, steps, standIn: lumaStandIn });
   const hash = await contentHash(ev);
@@ -140,7 +140,20 @@ async function pass(sb: SupabaseClient, c: Claimed) {
     await mark(sb, c, { state: "error", error: `conflict: ${conflict}. Unlink one of them, then save the channel again.`.slice(0, 300) });
     return { state: "conflict" };
   }
+  // Every live write renews the lease first (a lost lease sends nothing).
+  const renew = async (note?: Record<string, string>): Promise<boolean> => {
+    const { data, error } = await sb.rpc("exos_channel_lease_renew", {
+      p_event_id: c.event_id, p_provider: c.provider, p_lease: c.lease_id, p_note: note ?? null,
+    });
+    return !error && data === true;
+  };
+  const io = leasedIo(raw, () => renew());
   const hooks: SyncHooks = {
+    async taken(ids) {
+      const { data, error } = await sb.rpc("exos_channel_external_taken", { p_event_id: c.event_id, p_provider: c.provider, p_ids: ids });
+      return error || !Array.isArray(data) ? null : (data as string[]);
+    },
+    note: (n) => renew(n),
     async beginCreate(marker) {
       const { data, error } = await sb.rpc("exos_channel_create_begin", {
         p_event_id: c.event_id, p_provider: c.provider, p_lease: c.lease_id, p_marker: marker,
@@ -165,8 +178,10 @@ async function pass(sb: SupabaseClient, c: Claimed) {
   // 2. Luma's shared count, and 3. comps (the event must exist there).
   const lumaId = result.external_id ?? m.external_id;
   if (!lumaId || result.state === "error") return { state: result.state };
-  const inv = await lumaInventory(sb, io, steps, c.event_id, lumaId, live);
-  const comps = p.event?.primary_source === "luma" ? await lumaComps(sb, io, c.event_id, lumaId, live) : 0;
+  // After mark the lease is released: the count and comps have their own
+  // guards (the apply's read time, the comp queue's claim), as before.
+  const inv = await lumaInventory(sb, raw, steps, c.event_id, lumaId, live);
+  const comps = p.event?.primary_source === "luma" ? await lumaComps(sb, raw, c.event_id, lumaId, live) : 0;
   return { state: result.state, inventory: inv, comps };
 }
 
