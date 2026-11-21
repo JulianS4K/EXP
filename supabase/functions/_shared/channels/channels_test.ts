@@ -543,3 +543,39 @@ Deno.test("link mode: an event the account can't read (or another org's) gets on
   assertEquals([r2.state, r2.error], ["error", notOnAccount("luma")]);
   assertEquals(calls2.filter((c) => c.method === "POST").length, 0);
 });
+
+Deno.test("link mode: another organizer's PUBLIC Eventbrite event (it reads fine) gets the not-on-account answer and no write", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const meta = { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery };
+  const linked = (id: string) => ({ ...PAYLOAD, mirror: { mode: "link", status: "pending", external_id: id, external_meta: meta, last_hash: null } });
+  const calls: any[] = [];
+  const f = fakeFetch({
+    "GET /v3/events/990001/": () => ({ id: "990001", organization_id: "555", name: { text: "Theirs" } }),   // public: readable
+    "GET /v3/users/me/organizations/": () => ({ organizations: [{ id: "42" }], pagination: { has_more_items: false } }),
+    "POST /v3/events/990001/": () => ({}),
+  }, calls);
+  const r = await syncEventbrite(ebIo(f, []), ev, linked("990001"), [], "h");
+  // The same answer exos-channel-sync gives an id another org verified.
+  assertEquals([r.state, r.error], ["error", notOnAccount("eventbrite")]);
+  assertEquals(calls.filter((c) => c.method === "POST").length, 0);
+  // A dry run too: no plan against someone else's event.
+  const d = await syncEventbrite(ebIo(f, [], false), ev, linked("990001"), [], "h");
+  assertEquals([d.state, d.error], ["error", notOnAccount("eventbrite")]);
+
+  // Its own event, its organization on the second page of the token's: goes ahead.
+  const calls2: any[] = [];
+  let page = 0;
+  const f2 = fakeFetch({
+    "GET /v3/events/880001/": () => ({ id: "880001", organization_id: "43" }),
+    "GET /v3/users/me/organizations/": () => (++page === 1
+      ? { organizations: [{ id: "42" }], pagination: { has_more_items: true, continuation: "c2" } }
+      : { organizations: [{ id: "43" }], pagination: { has_more_items: false } }),
+    "POST /v3/events/880001/": () => ({}),
+    "GET /v3/events/880001/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/880001/ticket_classes/": () => ({ id: "5880" }),
+    "POST /v3/events/880001/publish/": () => ({}),
+  }, calls2);
+  const r2 = await syncEventbrite(ebIo(f2, []), ev, linked("880001"), [], "h");
+  assertEquals(r2.state, "synced");
+  assertEquals(calls2.some((c) => c.url.includes("continuation=c2")), true);
+});

@@ -16,6 +16,7 @@
 // A live create is recorded first (hooks.beginCreate, mig 20261121100000);
 // a pass that finds one recorded looks the event up by the name and start it
 // sent, created since then, before it creates again.
+import { ebOwns } from "../eventbrite/client.ts";
 import {
   beginRefused, firstCapacity, type Io, notOnAccount, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
   type StepRecord, type SyncHooks, type SyncResult, textToHtml, utc,
@@ -106,11 +107,15 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     meta.organization_id = org;
   }
 
-  // A linked event not yet synced: it must be readable with this account's
-  // token first (same answer as another org's event, mig 20261121100000).
+  // A linked event not yet synced must be one of this token's organizations'
+  // (a public event reads with any token): otherwise the same answer as
+  // another org's event, and nothing is sent to it (mig 20261121100000).
   if (id && mirror.status !== "synced") {
-    const r = await io.req("GET", `/events/${id}/`);
-    if (!r.ok) return { state: "error", error: notOnAccount("eventbrite"), plan: { steps } };
+    const owned = await ebOwns(async (path, params) => {
+      const q = params && Object.keys(params).length ? `?${new URLSearchParams(params as Record<string, string>)}` : "";
+      return io.req("GET", `${path}${q}`);
+    }, id);
+    if (!owned) return { state: "error", error: notOnAccount("eventbrite"), plan: { steps } };
   }
 
   if (ev.status === "cancelled") {
