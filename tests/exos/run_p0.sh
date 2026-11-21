@@ -560,6 +560,9 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_id
 # reports "already patched" and every function body keeps its md5 (its
 # markers must be in the text they write; Applier review of #130).
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121100000_exos_channel_risks
+# The same for the channel core migration (its three counted patches on the
+# integration functions; Applier review of #137).
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121162400_exos_channel_core
 # The same for the ads migration (its two counted patches: exos_org_audience_export,
 # exos_delete_my_account; Applier review of #138).
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads

@@ -186,9 +186,20 @@ Deno.test("redaction by pattern: body keys, header names, query names", async ()
                         monkey: "kept", keys: ["kept"], passenger: "kept" }),
     { key: "[redacted]", private_key: "[redacted]", access_key: "[redacted]", pass: "[redacted]", pwd: "[redacted]", jwt: "[redacted]",
       passphrase: "[redacted]", monkey: "kept", keys: ["kept"], passenger: "kept" });
-  // A bare "key" keeps a short targeting key (Meta / Reddit geo keys, numeric ids); anything else is redacted.
-  assertEquals(redact({ zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] }),
-    { zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] });
+  // A bare "key" keeps a geo key only inside a geo list (Meta's targeting.geo_locations.zips[{key}]);
+  // anything else under "key" is redacted. The same vectors are in tests/exos/test_channel_core.sql CC6b
+  // (_exos_channel_audit_scrub): keep the two lists identical.
+  const GEO_VECTORS: [string | null, unknown, boolean][] = [["zips", "US:10001", true], ["zips", "US", true], ["zips", "CA:M5V 2T6", true], ["zips", "2490299", true], ["zips", 3847, true], ["regions", "4081", true], ["cities", 2490299, true], ["countries", "US", true], ["custom_locations", "1234567890", true], ["zips", "us:10001", false], ["zips", "US:AAAAAAAAAAAAA", false], ["zips", "US:AKIAIOSFODNN7EXAMPLEwJalrXUtnFEMIK7MDENG", false], ["zips", "12345678901", false], ["zips", 12345678901, false], ["zips", 4111111111111111, false], ["zips", -5, false], ["zips", 3.5, false], ["zips", "US:1000_1", false], ["zips", true, false], ["zips", null, false], [null, "US:10001", false], [null, "123456789012", false], [null, 4111111111111111, false], [null, "2490299", false], [null, 3847, false], ["items", "US", false], ["tickets", 12, false]];
+  for (const [container, v, kept] of GEO_VECTORS) {
+    const got = container ? (redact({ [container]: [{ key: v }] }) as any)[container][0].key : (redact({ key: v }) as any).key;
+    assertEquals(got, kept ? v : "[redacted]", JSON.stringify([container, v]));
+  }
+  // Meta's real shape, and a "key" directly in an object (not a list) under a geo name.
+  assertEquals(redact({ targeting: { geo_locations: { zips: [{ key: "US:10001" }, { key: "US:11211" }] } } }),
+    { targeting: { geo_locations: { zips: [{ key: "US:10001" }, { key: "US:11211" }] } } });
+  assertEquals(redact({ zips: { key: "US:10001" } }), { zips: { key: "US:10001" } });
+  // A geo name further up doesn't reach a nested object's "key".
+  assertEquals(redact({ zips: [{ meta: { key: "US" } }] }), { zips: [{ meta: { key: "[redacted]" } }] });
   for (const v of ["K-LEAK", "sk_live_abcdefghijklmnop", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012", "us:10001", "US:" + "x".repeat(41), "1234567890123", { a: 1 }, true]) {
     assertEquals((redact({ key: v }) as Record<string, unknown>).key, "[redacted]", JSON.stringify(v));
   }
