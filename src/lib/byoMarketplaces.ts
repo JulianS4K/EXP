@@ -10,6 +10,13 @@ import { supabase } from './supabase';
 export const BYO_CHANNELS = ['stubhub', 'seatgeek', 'vivid', 'evo'] as const;
 export type ByoChannel = typeof BYO_CHANNELS[number];
 
+/**
+ * Marketplaces an own account can't hold seats for yet (exos_byo_set_allocation
+ * refuses a share above 0): Ticket Evolution numbers inventory per office, and
+ * Exos's listing plan carries Exos's own office.
+ */
+export const BYO_NOT_YET: ReadonlySet<ByoChannel> = new Set<ByoChannel>(['evo']);
+
 export const BYO_LABEL: Record<ByoChannel, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', evo: 'Ticket Evolution',
 };

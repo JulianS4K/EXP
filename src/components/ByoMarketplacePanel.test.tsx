@@ -98,6 +98,15 @@ describe('ByoMarketplacePanel', () => {
     expect(within(screen.getByTestId('byo-vivid')).getByText(/Not connected/)).toBeTruthy();
   });
 
+  it('Ticket Evolution with your own account is not supported yet: no input, no save', async () => {
+    render(<ByoMarketplacePanel eventId={EV} orgId={ORG} />);
+    const evo = await screen.findByTestId('byo-evo');
+    expect(within(evo).getByText(/Not supported yet/)).toBeTruthy();
+    expect((within(evo).getByLabelText('Ticket Evolution share (%)') as HTMLInputElement).disabled).toBe(true);
+    expect((within(evo).getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(screen.getByTestId('byo-vivid')).queryByText(/Not supported yet/)).toBeNull();
+  });
+
   it('the seats follow the % as it is typed', async () => {
     render(<ByoMarketplacePanel eventId={EV} orgId={ORG} />);
     const sh = await screen.findByTestId('byo-stubhub');

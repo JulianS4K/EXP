@@ -466,6 +466,15 @@ BEGIN
   IF v_ev.status = 'cancelled' AND v_pct > 0 THEN
     RAISE EXCEPTION 'exos_byo_set_allocation: event is cancelled' USING ERRCODE = '22023';
   END IF;
+  -- Ticket Evolution numbers inventory per office, and exos-distribute's plan
+  -- carries Exos's office id: byo_evo plans no writes for an own account yet,
+  -- so holding seats for it would hold them for a channel that can never list
+  -- (review of #143). Not supported until it plans with the organizer's own
+  -- office; 0% (releasing) stays allowed.
+  IF p_channel = 'evo' AND v_pct > 0 THEN
+    RAISE EXCEPTION 'exos_byo_set_allocation: Ticket Evolution with your own account is not supported yet'
+      USING ERRCODE = '22023';
+  END IF;
 
   -- One account per marketplace per event: not while the Exos network sells it
   -- (ticked under Distribution; exos_tg_events_byo_networks refuses the tick

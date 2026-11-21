@@ -34,6 +34,7 @@
 --        rows, new ids; a touched one refuses the switch); an order keeps the
 --        account it was first matched on
 --   BY17 an event edit doesn't pull an own-account marketplace's seats
+--   BY18 Ticket Evolution with an own account is refused (not supported yet)
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -399,6 +400,18 @@ BEGIN
   SELECT * INTO d FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1') AND channel = 'stubhub' AND tier_id = pg_temp.u('d1');
   ASSERT d.sell_cap = 2 AND d.status <> 'delisted', 'BY17: own seats kept ' || row_to_json(d);
   RAISE NOTICE 'BY17 PASS: an edit doesn''t pull own-account seats';
+END $$;
+
+-- BY18 own-account TEvo is refused until byo_evo plans with the organizer's
+-- own office: no seats held for a channel that can't list.
+DO $$
+BEGIN
+  ASSERT left(pg_temp.st(format($q$SELECT public.exos_byo_set_allocation(%L, 'evo', 10)$q$, pg_temp.u('e1'))), 5) = '22023',
+    'BY18: own TEvo refused';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_byo_allocations WHERE event_id = pg_temp.u('e1') AND channel = 'evo'), 'BY18: no own TEvo row';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1') AND channel = 'evo' AND account = 'own'),
+    'BY18: no own TEvo seats';
+  RAISE NOTICE 'BY18 PASS: own-account Ticket Evolution is refused (not supported yet)';
 END $$;
 
 ROLLBACK;

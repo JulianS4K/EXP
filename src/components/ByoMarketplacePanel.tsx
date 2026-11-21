@@ -8,10 +8,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Store } from 'lucide-react';
-import {
-  BYO_LABEL, loadByoView, minPctFor, pctProblem, previewByo, seatsFor, setByoAllocation,
-  type ByoChannel, type ByoChannelPlan, type ByoView,
-} from '../lib/byoMarketplaces';
+import { BYO_LABEL, loadByoView, minPctFor, pctProblem, previewByo, seatsFor, setByoAllocation, type ByoChannel, type ByoChannelPlan, type ByoView, BYO_NOT_YET } from '../lib/byoMarketplaces';
 
 export default function ByoMarketplacePanel({ eventId, orgId }: { eventId: string; orgId: string }) {
   const [view, setView] = useState<ByoView | null>(null);
@@ -86,6 +83,9 @@ export default function ByoMarketplacePanel({ eventId, orgId }: { eventId: strin
           {view.channels.map((ch) => {
             const label = BYO_LABEL[ch.channel];
             const pct = Number(draft[ch.channel] ?? ch.pct);
+            // Not supported yet (BYO_NOT_YET): nothing to set, unless an older
+            // share is still there to release.
+            const notYet = BYO_NOT_YET.has(ch.channel) && !ch.own;
             return (
               <li key={ch.channel} data-testid={`byo-${ch.channel}`} className="border border-slate-200 rounded-xl p-4 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -94,6 +94,7 @@ export default function ByoMarketplacePanel({ eventId, orgId }: { eventId: strin
                     {ch.connected ? 'Seller account connected' : 'Not connected (Org settings → Integrations)'}
                   </span>
                   {ch.network_ticked && <span className="text-[11px] text-amber-900">Ticked under Distribution: the Exos network sells it.</span>}
+                  {notYet && <span className="text-[11px] text-slate-600">Not supported yet with your own account.</span>}
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <label className="text-[11px] font-bold text-slate-700">
@@ -102,9 +103,10 @@ export default function ByoMarketplacePanel({ eventId, orgId }: { eventId: strin
                       aria-label={`${label} share (%)`}
                       value={draft[ch.channel] ?? ''}
                       onChange={(e) => setDraft((d) => ({ ...d, [ch.channel]: e.target.value }))}
+                      disabled={notYet}
                       className="mt-1 block w-28 rounded-lg border border-slate-300 px-2 py-1 text-sm" />
                   </label>
-                  <button type="button" onClick={() => void save(ch.channel)} disabled={busy !== null}
+                  <button type="button" onClick={() => void save(ch.channel)} disabled={busy !== null || notYet}
                     className="rounded-lg bg-slate-900 text-white text-xs font-bold px-3 py-2 disabled:opacity-50">
                     {busy === ch.channel ? 'Saving…' : 'Save'}
                   </button>

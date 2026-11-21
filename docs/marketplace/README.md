@@ -260,7 +260,9 @@ How it is built (one model, one planner, one transport):
   planned request; StubHub / SeatGeek updates PATCH the changed fields by our external id; deletes and delists
   are sync.ts `planDelist`. A Vivid Seats live-listing change is warned, not built yet. Ticket Evolution plans
   nothing for an own account yet: exos-distribute's plan carries Exos's own office id and TEvo numbers inventory per
-  office, so the organizer's office id has to be planned for first.
+  office, so the organizer's office id has to be planned for first. Until then `exos_byo_set_allocation` refuses a
+  Ticket Evolution share above 0 (22023, "not supported yet"; the panel shows it disabled), so no seats are held
+  for a channel that can't list.
 - **Dry run, pinned.** `BYO_WRITES_PINNED_OFF` hands GatedHttp an org switch of false, and exos-byo gives it a
   fetch that refuses every call: nothing reaches a marketplace, not even a read. The requests (secrets redacted)
   are in `exos_channel_audit` ("What we'd send") and in the panel's preview. Going live needs the pin removed in a
