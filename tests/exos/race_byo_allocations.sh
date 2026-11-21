@@ -12,10 +12,14 @@
 #          committed last, and both are audited
 #   race 3 the organizer grows StubHub while an Exos checkout takes the free
 #          seats: never more allocated + sold than the ticket type holds
-#   race 4 SeatGeek ticked under Distribution at the same moment the organizer
-#          sets an own SeatGeek share, both orders (review of #143, R1 race):
-#          the second waits on the event row and is refused, never ticked
-#          and own at once
+#   race 4 a marketplace ticked under Distribution at the same moment the
+#          organizer sets an own share of it, both orders (review of #143, R1
+#          race): exactly one side wins, never ticked and own at once (the own
+#          share locks the event row last and re-checks; a tick saved after it
+#          waits for it)
+#   race 5 an event save holds the row while an own-account sale is fulfilled
+#          and the organizer changes that share (review of #143, R10 / R12):
+#          no deadlock; the sale is fulfilled and the change goes through
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -33,7 +37,7 @@ cleanup() {
          DELETE FROM exos_transfers WHERE org_id='$O'; DELETE FROM exos_tickets WHERE org_id='$O';
          DELETE FROM exos_journal_lines WHERE entry_id IN (SELECT id FROM exos_journal_entries WHERE org_id='$O');
          DELETE FROM exos_journal_entries WHERE org_id='$O';
-         DELETE FROM exos_marketplace_orders WHERE org_id='$O' OR external_order_id LIKE 'b4race-%';
+         DELETE FROM exos_marketplace_orders WHERE org_id='$O' OR external_order_id LIKE 'b4race%';
          DELETE FROM exos_distribution_listings WHERE org_id='$O'; DELETE FROM exos_byo_allocations WHERE org_id='$O';
          DELETE FROM exos_ticket_tiers WHERE event_id IN ('$E','$E4'); DELETE FROM exos_events WHERE id IN ('$E','$E4');
          DELETE FROM exos_org_memberships WHERE org_id='$O'; DELETE FROM exos_orgs WHERE id='$O';
@@ -95,17 +99,43 @@ wait
 case "$out" in *"ticked under Distribution"*) r4a=refused ;; *) r4a="$out" ;; esac
 check "$r4a" "refused" "tick first: the own share waited and was refused"
 check "$($P -c "$(bad seatgeek)")" "f" "tick first: never ticked and own at once"
-# (b) the own share first, held open; the tick waits for it, then sees it.
-# Vivid: (a) left SeatGeek network rows, and an own switch is refused while
-# network rows exist (R4), so a fresh marketplace keeps (b) a pure race.
-( $P -c "BEGIN; $AS_OWNER SELECT exos_byo_set_allocation('$E4','vivid',10); SELECT pg_sleep(2); COMMIT;" >/dev/null ) &
+# (b) the own share first, held open; the tick goes in meanwhile. Either the
+# tick waits and is refused, or it commits first and the own share's last
+# re-check refuses it (rolled back): exactly one wins. Vivid: (a) left
+# SeatGeek network rows, and an own switch is refused while network rows
+# exist (R4), so a fresh marketplace keeps (b) a pure race.
+( $P -c "BEGIN; $AS_OWNER SELECT exos_byo_set_allocation('$E4','vivid',10); SELECT pg_sleep(2); COMMIT;" >/dev/null 2>&1 || true ) &
 sleep 0.5
-out=$($P -c "UPDATE exos_events SET distribution_networks = array_append(distribution_networks, 'vivid') WHERE id='$E4';" 2>&1 || true)
+$P -c "UPDATE exos_events SET distribution_networks = array_append(distribution_networks, 'vivid') WHERE id='$E4';" >/dev/null 2>&1 || true
 wait
-case "$out" in *"sold with your own seller account"*) r4b=refused ;; *) r4b="$out" ;; esac
-check "$r4b" "refused" "own share first: the tick waited and was refused"
-check "$($P -c "SELECT count(*) FROM exos_byo_allocations WHERE event_id='$E4' AND channel='vivid' AND pct > 0")" "1" "own share first: the own share stands"
+won=$($P -c "SELECT (CASE WHEN 'vivid' = ANY (distribution_networks) THEN 1 ELSE 0 END)
+                  + (CASE WHEN EXISTS (SELECT 1 FROM exos_byo_allocations WHERE event_id='$E4' AND channel='vivid' AND pct > 0) THEN 1 ELSE 0 END)
+             FROM exos_events WHERE id='$E4'")
+check "$won" "1" "own share first: exactly one of the tick and the own share won"
 check "$($P -c "$(bad vivid)")" "f" "own share first: never ticked and own at once"
+
+echo "race 5: an event save, an own-account sale's fulfilment and a share change at once"
+$P -c "$AS_OWNER SELECT exos_byo_set_allocation('$E4','stubhub',10);" >/dev/null
+L5=$($P -c "SELECT id FROM exos_distribution_listings WHERE event_id='$E4' AND channel='stubhub' AND tier_id='$T4'")
+$P -c "SELECT exos_record_marketplace_order(jsonb_build_object('channel','stubhub','external_order_id','b4race5-$R',
+         'external_listing_id','$L5','quantity',2,'sale_status','confirmed','proceeds','80.00','currency','USD',
+         'buyer_email','b4race-buyer5@x.com'));" >/dev/null
+O5=$($P -c "SELECT id FROM exos_marketplace_orders WHERE external_order_id='b4race5-$R'")
+LOG5=$(mktemp)
+( $P -c "BEGIN; UPDATE exos_events SET name = 'B4 Race 4 renamed' WHERE id='$E4'; SELECT pg_sleep(3); COMMIT;" >/dev/null 2>>"$LOG5" || echo "save failed" >>"$LOG5" ) &
+# The share change queues first, then the sale's fulfilment (it locks its
+# listing row, then wants the event row): the order that deadlocked when the
+# share change locked the event row up front.
+sleep 0.5
+( $P -c "$AS_OWNER SELECT exos_byo_set_allocation('$E4','stubhub',12);" >/dev/null 2>>"$LOG5" || echo "share failed" >>"$LOG5" ) &
+sleep 0.5
+( $P -c "SELECT status FROM exos_fulfil_marketplace_order('$O5');" >/dev/null 2>>"$LOG5" || echo "fulfil failed" >>"$LOG5" ) &
+wait
+check "$(grep -c 'deadlock detected' "$LOG5" || true)" "0" "no deadlock"
+check "$(grep -c 'failed' "$LOG5" || true)" "0" "the save, the fulfilment and the change all went through"
+check "$($P -c "SELECT count(*) FROM exos_tickets WHERE order_ref='stubhub:b4race5-$R'")" "2" "the sale's 2 tickets were issued"
+check "$($P -c "SELECT pct FROM exos_byo_allocations WHERE event_id='$E4' AND channel='stubhub'")" "12.00" "the share is 12%"
+rm -f "$LOG5"
 
 [ "$fail" -eq 0 ] && echo "race_byo_allocations: all passed"
 exit $fail

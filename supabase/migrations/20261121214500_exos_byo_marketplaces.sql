@@ -446,15 +446,11 @@ DECLARE
   v_why    text;
   v_removed boolean := false;
 BEGIN
-  -- The event row first, then the route lock: the order an event save takes
-  -- them in (its UPDATE holds the row, then exos_sync_marketplace_distribution
-  -- takes the route lock), so the two never deadlock. Holding the row also
-  -- serializes this with a concurrent Distribution tick or primary-market-only
-  -- change (exos_tg_events_byo_networks runs inside that UPDATE): whichever
-  -- goes second sees the first (review of #143, R1 race). Read after the lock,
-  -- so v_ev is the latest committed row.
-  PERFORM 1 FROM public.exos_events WHERE id = p_event_id FOR NO KEY UPDATE;
   -- The route lock every allocation change takes (exos_set_channel_allocation).
+  -- The event row is locked last, after the allocation rows (see the re-check
+  -- below): route, then allocation rows, then event row is the order every
+  -- other path takes (set_channel_allocation, apply_channel_split,
+  -- set_distribution_route, fulfilment), so this never deadlocks with them.
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
   SELECT * INTO v_ev FROM public.exos_events WHERE id = p_event_id;
   IF v_ev.id IS NULL THEN
@@ -565,6 +561,26 @@ BEGIN
     DELETE FROM public.exos_distribution_listings WHERE event_id = p_event_id AND channel = p_channel;
     DELETE FROM public.exos_byo_allocations WHERE event_id = p_event_id AND channel = p_channel;
     v_removed := true;
+  END IF;
+
+  -- Last, the event row (FOR NO KEY UPDATE), then the two rules again on the
+  -- latest committed row: a Distribution tick or primary market only saved
+  -- while this ran (its UPDATE holds the row, so this waits for it) refuses
+  -- the whole change, which rolls back with it. And once this holds the row, a
+  -- tick saved after waits, then its trigger sees the own share (review of
+  -- #143, R1 race). Locked here, not up front, to keep route -> allocation
+  -- rows -> event row (an up-front lock deadlocked with a network allocation
+  -- and with fulfilment).
+  IF v_pct > 0 THEN
+    SELECT * INTO v_ev FROM public.exos_events WHERE id = p_event_id FOR NO KEY UPDATE;
+    IF p_channel = ANY (coalesce(v_ev.distribution_networks, '{}'::text[])) THEN
+      RAISE EXCEPTION 'exos_byo_set_allocation: % is ticked under Distribution (the Exos network sells it there): untick it first to sell it with your own account', v_label
+        USING ERRCODE = '22023';
+    END IF;
+    IF coalesce(v_ev.exclusivity ->> 'primaryMarketOnly', 'false') = 'true' THEN
+      RAISE EXCEPTION 'exos_byo_set_allocation: this event is primary market only (no resale): turn that off first to sell it with your own accounts'
+        USING ERRCODE = '22023';
+    END IF;
   END IF;
 
   PERFORM public._exos_audit(v_ev.org_id, 'event.byo_allocation', 'event', p_event_id::text, p_event_id,
