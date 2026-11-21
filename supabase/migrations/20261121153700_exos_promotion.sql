@@ -13,7 +13,8 @@
 --              (owner / manager, or admin); _exos_print_placement_row,
 --              _exos_print_placement_slug (internal, no client grant)
 --           R: CREATE OR REPLACE _exos_channel_key (pure; + paid_search: google
---              paid_search is "Google ads")
+--              paid_search is "Google ads"; partiful its own key),
+--              _exos_channel_label (pure; + 'partiful' -> 'Partiful')
 --           R: exos_events, exos_has_org_role, exos_is_admin
 -- Pre-reqs: 20261029130000 (discovery publishing), 20261104150000 (posh_link)
 --
@@ -21,7 +22,11 @@
 --    here calls a third party): The Skint (web form), AllEvents (free
 --    posting from the organizer's account), Fever's free listing, Nonsense
 --    NYC (no known way to submit: submission_url NULL, the SPA shows "How to
---    submit: unknown") and Spotify concerts (through Bandsintown). Which
+--    submit: unknown"), Spotify concerts (through Bandsintown) and Partiful
+--    (operator 2026-11-21, "Also partiful": the organizer makes the invite
+--    page on their own Partiful account and links to Exos checkout; Partiful
+--    has no public API and its terms bar scraping, so nothing is automated
+--    or read). Which
 --    channels suit which event category is TypeScript (GENRE_CHANNELS in
 --    _shared/discovery/channels.ts); the table only carries the catalog.
 --    Songkick moves to the bottom (reports that it is winding down).
@@ -45,6 +50,10 @@
 --    ads beside cpc / paid / ppc. The rest of its body is unchanged (it is
 --    pure and only defined in 20261029120000, so it is replaced whole).
 --    Meta paid_social and qr / print (-> flyer) already mapped.
+--    Partiful is a recognised source: utm_source=partiful is its own channel
+--    key and _exos_channel_label (also pure and only defined in
+--    20261029120000, so replaced whole) names it "Partiful" instead of
+--    "Other".
 --
 -- Additive and re-run safe. Prod apply needs operator OK.
 -- ============================================================================
@@ -59,6 +68,7 @@ INSERT INTO public.exos_discovery_channels (id, name, kind, region, submission_u
   ('fever',            'Fever (free listing)',      'manual', 'global', 'https://business.feverup.com', false, 220),
   ('nonsense_nyc',     'Nonsense NYC',              'manual', 'NYC',    NULL, false, 230),
   ('spotify',          'Spotify concerts',          'manual', 'global', 'https://support.spotify.com/artists/article/concerts', true, 240),
+  ('partiful',         'Partiful',                  'manual', 'NYC',    'https://partiful.com', false, 250),
   ('songkick',         'Songkick',                  'manual', 'global', 'https://support.songkick.com/hc/en-us/articles/360011925897', true, 900)
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name, kind = EXCLUDED.kind, region = EXCLUDED.region,
@@ -208,6 +218,7 @@ AS $$
                  'copilot', 'copilot.microsoft', 'grok', 'mistral', 'deepseek', 'ai_assistant', 'ai') THEN 'ai'
       WHEN v = 'meta' THEN 'meta'
       WHEN v IN ('link', 'share_sheet', 'share') THEN 'share'
+      WHEN v = 'partiful' THEN 'partiful'
       WHEN v = '' THEN NULL
       -- Anyone can put anything in utm_source: an unknown key keeps only
       -- [a-z0-9_-] (no dots, so no domain), and its label is "Other".
@@ -221,3 +232,65 @@ AS $$
   END FROM k
 $$;
 REVOKE ALL ON FUNCTION public._exos_channel_key(text, text) FROM PUBLIC, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- 4. Channel label: Partiful
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public._exos_channel_label(p_channel text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE p_channel
+    WHEN 'direct' THEN 'Direct / unknown'
+    WHEN 'instagram' THEN 'Instagram'
+    WHEN 'facebook' THEN 'Facebook'
+    WHEN 'tiktok' THEN 'TikTok'
+    WHEN 'x' THEN 'X / Twitter'
+    WHEN 'email' THEN 'Email'
+    WHEN 'sms' THEN 'Text message'
+    WHEN 'whatsapp' THEN 'WhatsApp'
+    WHEN 'flyer' THEN 'Flyer / QR code'
+    WHEN 'partner' THEN 'Partner sites'
+    WHEN 'meta-ads' THEN 'Meta ads'
+    WHEN 'google-ads' THEN 'Google ads'
+    WHEN 'google' THEN 'Google'
+    WHEN 'meta' THEN 'Meta (Facebook / Instagram)'
+    WHEN 'reddit' THEN 'Reddit'
+    WHEN 'snapchat' THEN 'Snapchat'
+    WHEN 'microsoft' THEN 'Microsoft Ads'
+    WHEN 'embed' THEN 'Venue site embed'
+    WHEN 'ai' THEN 'AI assistants'
+    WHEN 'promo' THEN 'Promo links'
+    WHEN 'share' THEN 'Shared links'
+    WHEN 'box_office' THEN 'Box office'
+    WHEN 'eventbrite' THEN 'Eventbrite'
+    WHEN 'luma' THEN 'Luma'
+    WHEN 'pretix' THEN 'pretix'
+    WHEN 'hievents' THEN 'hi.events'
+    WHEN 'stubhub' THEN 'StubHub'
+    WHEN 'seatgeek' THEN 'SeatGeek'
+    WHEN 'vivid' THEN 'Vivid Seats'
+    WHEN 'gametime' THEN 'Gametime'
+    WHEN 'tickpick' THEN 'TickPick'
+    WHEN 'gotickets' THEN 'GoTickets'
+    WHEN 'evo' THEN 'TEvo'
+    WHEN 'tevo' THEN 'TEvo'
+    WHEN 'automatiq' THEN 'Automatiq'
+    WHEN 's4k' THEN 'S4K network'
+    WHEN 'comp' THEN 'Comps'
+    WHEN 'staff_issued' THEN 'Issued by staff'
+    WHEN 'referral_reward' THEN 'Referral rewards'
+    WHEN 'guest_list' THEN 'Guest lists'
+    WHEN 'posh' THEN 'Posh'
+    WHEN 'partiful' THEN 'Partiful'
+    WHEN 'import' THEN 'Imported list'
+    WHEN 'import:posh' THEN 'Imported list (Posh)'
+    ELSE CASE
+      WHEN p_channel LIKE 'promoter:%' THEN 'Promoters'
+      WHEN p_channel LIKE 'import:%' THEN 'Imported list'
+      ELSE 'Other'
+    END
+  END
+$$;
+REVOKE ALL ON FUNCTION public._exos_channel_label(text) FROM PUBLIC, anon, authenticated;

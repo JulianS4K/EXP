@@ -165,12 +165,27 @@ const CHANNEL_SPECS: readonly ChannelSpec[] = [
   {
     id: 'nonsense_nyc', name: 'Nonsense NYC', kind: 'manual', region: 'NYC',
     submissionUrl: null, verified: false, submitter: 'operator', howToSubmit: 'unknown',
-    notes: 'A weekly email of underground and odd NYC events, art and parties. How to submit is unknown: no form or address was found. Record what worked here if you get a listing.',
+    notes: 'A weekly email of underground and odd NYC events, art and parties. How to submit is unknown: no form or address was found. It prefers plain-text details over a Partiful link. Record what worked here if you get a listing.',
   },
   {
     id: 'spotify', name: 'Spotify concerts', kind: 'manual', region: 'global',
     submissionUrl: 'https://support.spotify.com/artists/article/concerts', verified: true, submitter: 'organizer',
     notes: "Spotify lists concerts from its ticketing partners (Ticketmaster, AXS, ...). Exos isn't one, so each artist adds the date in Bandsintown, which Spotify reads; it shows on the artist's Spotify profile within about a day.",
+  },
+  {
+    // Operator 2026-11-21 ("Also partiful"). No public API, and Partiful's
+    // terms bar scraping and bots: nothing is automated or read. The
+    // organizer makes an invite page on their own account with the Partiful
+    // kit (src/lib/discovery/partiful.ts) and points guests to Exos checkout.
+    id: 'partiful', name: 'Partiful', kind: 'manual', region: 'NYC',
+    submissionUrl: 'https://partiful.com', verified: false, submitter: 'organizer',
+    steps: [
+      'Create the event on your own Partiful account (partiful.com or the app).',
+      'Fill it in from the Partiful kit below: title, date and time, venue, description, cover image.',
+      'Put the Exos ticket link from the kit in the description and the event link, so guests buy on Exos.',
+      'Share the Partiful link or invite guests, then mark it live here with the Partiful event link.',
+    ],
+    notes: 'The invite and RSVP page for a party crowd; tickets stay on Exos. Free events take unlimited guests by link; in-app invites are capped at 1,000 per event. Nothing is sent to or read from Partiful.',
   },
   // Lowest priority: reports that Songkick is winding down.
   {
@@ -189,12 +204,12 @@ const EVERY = CHANNEL_SPECS.map((c) => c.id);
 export const GENRE_CHANNELS: Readonly<Record<MarketCategory | 'all', readonly string[]>> = {
   all: ['google_events', 'calendar_ics', 'ad_catalog', 'cityspark', 'posh_link'],
   concerts: ['bandsintown', 'spotify', 'donyc', 'oh_my_rockness', 'songkick'],
-  nightlife: ['resident_advisor', 'edmtrain', 'nonsense_nyc'],
+  nightlife: ['resident_advisor', 'edmtrain', 'nonsense_nyc', 'partiful'],
   comedy: ['timeout_nyc', 'the_skint', 'donyc'],
   theater: ['timeout_nyc'],
   festivals: ['fever', ...EVERY.filter((id) => id !== 'fever')],
   food_drink: ['timeout_nyc', 'the_skint', 'fever'],
-  community: ['meetup', 'allevents', 'the_skint'],
+  community: ['meetup', 'allevents', 'the_skint', 'partiful'],
   business: ['meetup', 'allevents', 'the_skint'],
   sports: [],
   other: ['allevents'],

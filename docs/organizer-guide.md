@@ -436,7 +436,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   once Exos is in its events ticketing program, and ad platforms only once the organizer adds the catalog URL.
 - **Calendars and listings sites (manual):** DoNYC, Time Out New York, CitySpark local calendars, Resident Advisor,
   Oh My Rockness, Edmtrain, Meetup, Bandsintown, Posh (third-party link), The Skint, AllEvents, Fever (free listing),
-  Nonsense NYC, Spotify concerts and, last, Songkick. **Queue for submission** puts the event in the operator's
+  Nonsense NYC, Spotify concerts, Partiful and, last, Songkick. **Queue for submission** puts the event in the operator's
   queue; a person submits it on the channel's form and records **Submitted**, **Live** (with the listing's URL) or
   **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
   again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
@@ -453,6 +453,15 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   and records **I submitted it** / **It's live** on the same screen.
 - **Posh (third-party link)** (`posh_link`, mig `20261104150000_exos_posh_link_channel.sql`): a free Posh event page
   whose **Get Tickets** button opens your Exos ticket link. See *Listing on Posh with a third-party link* below.
+- **Partiful** (`partiful`, operator 2026-11-21): the invite and RSVP page for a party crowd, with tickets on Exos.
+  Partiful has no public API and its terms bar scraping and bots, so Exos never sends to or reads from it. The
+  **Partiful kit** on the row has the steps, copy buttons for the title, date and time, venue and description (with the
+  ticket link in it), the cover as a square (1080x1080) and a story (1080x1920) image, and the Exos ticket link tagged
+  `utm_source=partiful&utm_medium=referral&utm_campaign=discovery` (`src/lib/discovery/partiful.ts`). Sales show as
+  *Partiful* in the channel report and as `partiful / referral` in Sources. Free events take unlimited guests through
+  the link; in-app invites are capped at 1,000 per event. Nonsense NYC wants plain-text details, not a Partiful link.
+  *Not built yet:* a fixed block for organizers who also sell on Partiful, and a Partiful guest-list CSV import for the
+  door; both wait until we confirm Partiful exports guest lists.
 - **Suggested for your event's category:** the list shows the channels that suit the event's category first, best
   first, and hides the others behind **Show all channels** (a channel the event already has a record on always shows).
   The category is derived from the event's category, genres and title (`marketCategory`,
@@ -464,23 +473,25 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   |---|---|
   | all | Google events feed, calendar feeds, ad catalogs, CitySpark, Posh (third-party link) |
   | Concerts | Bandsintown, Spotify, DoNYC, Oh My Rockness, Songkick (lowest) |
-  | Nightlife | Resident Advisor (electronic only), Edmtrain (electronic), Nonsense NYC |
+  | Nightlife | Resident Advisor (electronic only), Edmtrain (electronic), Nonsense NYC, Partiful |
   | Comedy | Time Out, The Skint, DoNYC |
   | Theater | Time Out |
   | Festivals | every channel, Fever first |
   | Food & drink | Time Out, The Skint, Fever |
-  | Community, Business | Meetup, AllEvents, The Skint |
+  | Community | Meetup, AllEvents, The Skint, Partiful |
+  | Business | Meetup, AllEvents, The Skint |
   | Sports | (the "all" ones) |
   | Other | AllEvents |
 - **City:** a channel's region is a city code (`NYC`: DoNYC, Time Out New York, Oh My Rockness, The Skint, Nonsense
-  NYC) or wider (`US`, `global`). City channels are suggested only for events whose venue is in that city; other events
+  NYC, Partiful; the city's `listings`) or wider (`US`, `global`). City channels are suggested only for events whose venue is in that city; other events
   fall back to the wider ones. Cities are data, in `_shared/discovery/cities.ts`: id, name, boroughs, the region codes
   that apply there, ad geo defaults (radius around the venue, DMA, a ZIP-by-borough list still to fill in) and a
   community list (to fill in), plus the city's poster rules for the playbook. NYC is the only city so far; adding one
   is a new entry there.
 - **Limits:** each suggestion shows the channel's own limits with a short reason, from one table,
   `CHANNEL_LIMITS` in `_shared/discovery/limits.ts` (rows of id, rule, action warn / block, reason, source; shaped like the channel-core platform limits table, which can replace it): Meetup's Starter plan caps an event at
-  10 attendees (Standard or Pro for more); AllEvents' free plan allows 5 active upcoming events; Google lists a free
+  10 attendees (Standard or Pro for more); AllEvents' free plan allows 5 active upcoming events; Partiful caps in-app
+  invites at 1,000 per event (a free event's link takes unlimited guests); Google lists a free
   event only if anyone can book it (an invite-only event with no public ticket type, or one hidden from search, isn't
   eligible); Shotgun is hidden for free events (it lists a free event only if it's 100% free there, with no ticketing
   elsewhere); resale marketplaces are not suggested for $0 tickets (the event editor's Marketplaces section says so).
@@ -511,6 +522,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
 | Fever (free listing) | manual | global | business.feverup.com: Fever's terms describe a free "0% Commission Link" listing; no public page for it, ask Fever (no) |
 | Nonsense NYC | manual | NYC | unknown: no form or address found |
 | Spotify concerts | manual | global | Spotify for Artists help "Adding concerts to Spotify": via Bandsintown, since Exos isn't a Spotify ticketing partner (yes) |
+| Partiful | manual | NYC | partiful.com: the organizer's own account, from the Partiful kit (no: no help page; no API) |
 | Songkick | manual | global | Songkick help: "Add an event" footer link (yes); lowest priority (reports it is winding down) |
 
 **Why Edmtrain and Meetup aren't automatic:** Edmtrain's public API is read-only (event and location listings with a

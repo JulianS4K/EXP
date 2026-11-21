@@ -127,6 +127,7 @@ describe('tracking links', () => {
     expect([q('facebook').get('utm_source'), q('facebook').get('utm_medium')]).toEqual(['facebook', 'organic_social']);
     expect([q('email').get('utm_source'), q('email').get('utm_medium')]).toEqual(['email', 'email']);
     expect([q('flyer').get('utm_source'), q('flyer').get('utm_medium')]).toEqual(['qr', 'print']);
+    expect([q('partiful').get('utm_source'), q('partiful').get('utm_medium')]).toEqual(['partiful', 'referral']);
     expect([q('meta-ads').get('utm_source'), q('meta-ads').get('utm_medium')]).toEqual(['meta', 'paid_social']);
     expect([q('google-ads').get('utm_source'), q('google-ads').get('utm_medium')]).toEqual(['google', 'paid_search']);
     // Paid links carry the platform's macros, braces left as written so the platform fills them in.

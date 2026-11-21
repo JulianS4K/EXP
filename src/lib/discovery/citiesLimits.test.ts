@@ -12,6 +12,11 @@ describe('cities', () => {
     expect(NYC!.boroughs).toHaveLength(5);
     expect(Object.keys(NYC!.adGeo.zipsByBorough)).toEqual([...NYC!.boroughs]);
     expect(NYC!.adGeo.radiusMiles).toBeGreaterThan(0);
+    // The city's listings are exactly the channels with its region.
+    for (const city of CITIES) {
+      expect([...city.listings].sort(), city.id).toEqual(DISCOVERY_CHANNELS.filter((c) => city.regions.includes(c.region)).map((c) => c.id).sort());
+    }
+    expect(NYC!.listings).toContain('partiful');
     // Every city region code is one some channel can carry; channel regions are city codes or wider.
     for (const c of DISCOVERY_CHANNELS) expect(['global', 'US', ...CITIES.flatMap((x) => x.regions)], c.id).toContain(c.region);
   });
@@ -39,6 +44,8 @@ describe('cities', () => {
     const rows = MANUAL_CHANNELS.map((c) => ({ id: c.id }));
     expect(rankChannels(rows, 'comedy', { city: NYC }).map((r) => r.id)).toEqual(['timeout_nyc', 'the_skint', 'donyc', 'cityspark', 'posh_link']);
     expect(rankChannels(rows, 'comedy', { city: null }).map((r) => r.id)).toEqual(['cityspark', 'posh_link']);
+    expect(rankChannels(rows, 'nightlife', { city: NYC }).map((r) => r.id)).toContain('partiful');
+    expect(rankChannels(rows, 'nightlife', { city: null }).map((r) => r.id)).not.toContain('partiful');
     expect(rankChannels(rows, 'concerts', { city: null }).map((r) => r.id))
       .toEqual(['bandsintown', 'spotify', 'songkick', 'cityspark', 'posh_link']);
     // Outside the US, a US-only channel (CitySpark) doesn't fit either.
@@ -71,6 +78,11 @@ describe('channel limits', () => {
     expect(channelLimits('meetup', paid)).toMatchObject([{ id: 'meetup_starter_cap', action: 'warn' }]);
     expect(channelLimits('meetup', paid)[0].reason).toMatch(/10 attendees.*Standard or Pro/);
     expect(channelLimits('allevents', free)[0].reason).toMatch(/5 active upcoming events/);
+  });
+
+  it('warns that Partiful caps in-app invites at 1,000', () => {
+    expect(channelLimits('partiful', free)).toMatchObject([{ id: 'partiful_invite_cap', action: 'warn' }]);
+    expect(channelLimits('partiful', paid)[0].reason).toMatch(/1,000 per event/);
   });
 
   it('warns that Google needs a free event to be publicly bookable', () => {

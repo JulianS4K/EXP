@@ -15,6 +15,8 @@
 //   * Google events: a free event must be publicly bookable, so an
 //     invite-only event (no public ticket type) or one hidden from search
 //     isn't eligible.
+//   * Partiful: in-app invites capped at 1,000 per event; a free event's
+//     link takes unlimited guests.
 //   * Resale marketplaces (StubHub, SeatGeek, Vivid Seats, Gametime,
 //     GoTickets, Ticket Evolution, TickPick): nothing to resell at $0.
 //
@@ -65,6 +67,11 @@ export const CHANNEL_LIMITS: readonly ChannelLimit[] = [
     id: 'google_free_bookable', channels: ['google_events'], rule: (f) => f.free && (f.inviteOnly || f.hidden), action: 'warn',
     reason: 'Google lists a free event only if anyone can book it: an invite-only or hidden event is not eligible.',
     source: 'Google events (free events must be publicly bookable)',
+  },
+  {
+    id: 'partiful_invite_cap', channels: ['partiful'], action: 'warn',
+    reason: 'Partiful caps in-app invites at 1,000 per event (a free event takes unlimited guests through its link).',
+    source: 'Partiful (operator research 2026-11-21)',
   },
   {
     id: 'resale_no_free', channels: RESALE_MARKETPLACES, rule: (f) => f.free, action: 'block',

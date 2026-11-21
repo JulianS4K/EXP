@@ -102,6 +102,14 @@ describe('genres', () => {
     for (const c of DISCOVERY_CHANNELS) expect(suitsCategory(c, 'festivals'), c.id).toBe(true);
   });
 
+  it('has Partiful as an organizer-account NYC channel for nightlife, community and festivals', () => {
+    expect(discoveryChannel('partiful')).toMatchObject({
+      kind: 'manual', region: 'NYC', submitter: 'organizer', submissionUrl: 'https://partiful.com', verified: false,
+      genres: ['nightlife', 'festivals', 'community'],
+    });
+    expect(discoveryChannel('partiful')!.steps?.length).toBeGreaterThan(2);
+  });
+
   it('marks Nonsense NYC manual with no known way to submit, and the new channels manual', () => {
     expect(discoveryChannel('nonsense_nyc')).toMatchObject({ kind: 'manual', submissionUrl: null, howToSubmit: 'unknown' });
     for (const id of ['the_skint', 'allevents', 'fever', 'spotify']) expect(discoveryChannel(id)?.kind, id).toBe('manual');
@@ -116,8 +124,8 @@ describe('rankChannels', () => {
     expect(rankChannels(rows, 'concerts').map((r) => r.id))
       .toEqual(['bandsintown', 'spotify', 'donyc', 'oh_my_rockness', 'songkick', 'cityspark', 'posh_link']);
     expect(rankChannels(rows, 'nightlife').map((r) => r.id))
-      .toEqual(['resident_advisor', 'edmtrain', 'nonsense_nyc', 'cityspark', 'posh_link']);
-    expect(rankChannels(rows, 'community').map((r) => r.id)).toEqual(['meetup', 'allevents', 'the_skint', 'cityspark', 'posh_link']);
+      .toEqual(['resident_advisor', 'edmtrain', 'nonsense_nyc', 'partiful', 'cityspark', 'posh_link']);
+    expect(rankChannels(rows, 'community').map((r) => r.id)).toEqual(['meetup', 'allevents', 'the_skint', 'partiful', 'cityspark', 'posh_link']);
     expect(rankChannels(rows, 'festivals').map((r) => r.id)[0]).toBe('fever');
     expect(rankChannels(rows, 'festivals')).toHaveLength(rows.length);
   });

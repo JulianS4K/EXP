@@ -49,6 +49,8 @@ const POLICY = {
   google: 'Google Ads: selling tickets needs Google\'s "Event ticket sales" certification before ads run.',
 };
 
+const PARTIFUL = 'Partiful as the invite / RSVP page (your own account, the kit under Discovery listings), with the Exos ticket link so guests buy on Exos. Nonsense NYC wants plain-text details, not a Partiful link.';
+
 const QR_PRINT = [
   'One placement per spot below, so each poster\'s QR shows what it sold under Sources > Placement.',
   'QR at least 2 cm (1 in) wide, high contrast, with the date and "Tickets" next to it.',
@@ -63,7 +65,7 @@ export const PLAYBOOK: Readonly<Record<MarketCategory, Playbook>> = {
   },
   nightlife: {
     platforms: [META, TIKTOK],
-    creative: ['Show the room full: crowd, lights, the DJ, in vertical video.', 'Put the lineup and set times on screen; post a countdown in Stories.'],
+    creative: ['Show the room full: crowd, lights, the DJ, in vertical video.', 'Put the lineup and set times on screen; post a countdown in Stories.', PARTIFUL],
     print: ['Bars, record shops and late-night spots near the venue.', ...QR_PRINT],
     policy: [POLICY.alcohol, POLICY.dating, POLICY.snap],
   },
@@ -81,7 +83,7 @@ export const PLAYBOOK: Readonly<Record<MarketCategory, Playbook>> = {
   },
   festivals: {
     platforms: [META, TIKTOK, GOOGLE],
-    creative: ['Lineup poster as a carousel, then artist-by-artist clips.', 'Last year\'s aftermovie beats any graphic.', 'Announce in waves: lineup, day splits, price steps.'],
+    creative: ['Lineup poster as a carousel, then artist-by-artist clips.', 'Last year\'s aftermovie beats any graphic.', 'Announce in waves: lineup, day splits, price steps.', PARTIFUL],
     print: ['Wide poster runs in the neighborhoods your buyers live in.', ...QR_PRINT],
     policy: [POLICY.alcohol, POLICY.google],
   },
@@ -99,7 +101,7 @@ export const PLAYBOOK: Readonly<Record<MarketCategory, Playbook>> = {
   },
   community: {
     platforms: [META, TIKTOK],
-    creative: ['Show people at the table: the game, the group, the host.', 'Say who it\'s for ("new players welcome") and what to bring.'],
+    creative: ['Show people at the table: the game, the group, the host.', 'Say who it\'s for ("new players welcome") and what to bring.', PARTIFUL],
     print: ['Game stores, libraries, campus and community boards.', ...QR_PRINT],
     policy: [POLICY.dating],
   },

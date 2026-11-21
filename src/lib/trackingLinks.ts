@@ -36,6 +36,8 @@ export const TRACKING_CHANNELS: readonly TrackingChannel[] = [
   { key: 'sms', label: 'Text message', source: 'sms', medium: 'sms' },
   { key: 'whatsapp', label: 'WhatsApp', source: 'whatsapp', medium: 'messaging' },
   { key: 'partner', label: 'Partner sites', source: 'partner', medium: 'referral' },
+  // Partiful: the organizer's invite page sends guests to Exos (referral; no API, nothing read).
+  { key: 'partiful', label: 'Partiful', source: 'partiful', medium: 'referral' },
   { key: 'flyer', label: 'Flyer / QR code', source: 'qr', medium: 'print' },
   { key: 'meta-ads', label: 'Paid: Meta', source: 'meta', medium: 'paid_social', ad: 'meta' },
   { key: 'google-ads', label: 'Paid: Google', source: 'google', medium: 'paid_search', ad: 'google' },

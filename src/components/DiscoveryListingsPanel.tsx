@@ -11,6 +11,8 @@ import { useToast } from '../context/ToastContext';
 import { discoveryRows, type DiscoveryEvent, type DiscoveryRow } from '../lib/discovery/channels';
 import { POSH_LINK_CHANNEL, poshLinkEligibility, type PoshLinkEligibility } from '../lib/discovery/poshLink';
 import PoshLinkPanel from './PoshLinkPanel';
+import PartifulKitPanel from './PartifulKitPanel';
+import { PARTIFUL_CHANNEL } from '../lib/discovery/partiful';
 import { eventChannels, queueListing, setListingStatus, withdrawListing } from '../lib/discovery/api';
 import { STATUS_LABEL, canQueue, hasManualSlot, rankChannels, takesSlot, type ChannelStatus } from '../../supabase/functions/_shared/discovery/channels.ts';
 import { MARKET_CATEGORY_LABEL, marketCategory } from '../../supabase/functions/_shared/marketplace/eventStandard.ts';
@@ -214,6 +216,7 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                 {r.id === POSH_LINK_CHANNEL && (
                   <PoshLinkPanel eventId={eventId} event={event} row={r} eligibility={posh} canEdit={canEdit} />
                 )}
+                {r.id === PARTIFUL_CHANNEL && <PartifulKitPanel event={event} row={r} />}
               </li>
             ))}
           </ul>

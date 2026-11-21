@@ -105,8 +105,8 @@ Every link Exos builds for an organizer's marketing follows one scheme (2026-11-
 
 | Tag | Value |
 |---|---|
-| `utm_source` | The platform or place: `instagram`, `facebook`, `tiktok`, `x`, `meta`, `google`, `email`, `qr`, ... |
-| `utm_medium` | `paid_social` (Meta, TikTok ads and catalogs), `paid_search` (Google ads and Merchant), `print` (posters and flyers), `email`, `organic_social`; and `sms`, `messaging` (WhatsApp), `referral` (partner sites) for the channels that are none of those |
+| `utm_source` | The platform or place: `instagram`, `facebook`, `tiktok`, `x`, `meta`, `google`, `email`, `qr`, `partiful`, ... |
+| `utm_medium` | `paid_social` (Meta, TikTok ads and catalogs), `paid_search` (Google ads and Merchant), `print` (posters and flyers), `email`, `organic_social`; and `sms`, `messaging` (WhatsApp), `referral` (partner sites, a Partiful invite page) for the channels that are none of those |
 | `utm_campaign` | The organizer's campaign name; on a paid link without one, the platform's campaign macro (Meta `{{campaign.name}}`, TikTok `__CAMPAIGN_NAME__`, Google `{campaignid}`); `catalog` in a catalog |
 | `utm_content` | The placement: a poster's slug on a print QR (`utm_source=qr&utm_medium=print&utm_content=poster-bedford-ave`), the platform's ad macro on a paid link (Meta `{{ad.name}}`, TikTok `__CID_NAME__`, Google `{creative}`), the event id in a catalog |
 

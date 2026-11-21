@@ -16,6 +16,8 @@ export interface CityConfig {
   name: string;
   /** Channel region codes that apply only here (channels.ts `region`). */
   regions: readonly string[];
+  /** The city's own listing channels (those whose region is one of `regions`), for reference; a test keeps it in step. */
+  listings: readonly string[];
   country: string;
   /** Lower-case names a venue address's city or region may carry for this city. */
   matches: readonly string[];
@@ -41,6 +43,7 @@ export const CITIES: readonly CityConfig[] = [
     id: 'nyc',
     name: 'New York City',
     regions: ['NYC'],
+    listings: ['donyc', 'timeout_nyc', 'oh_my_rockness', 'the_skint', 'nonsense_nyc', 'partiful'],
     country: 'US',
     matches: ['new york', 'new york city', 'nyc', 'manhattan', 'brooklyn', 'queens', 'bronx', 'the bronx', 'staten island', 'long island city', 'astoria', 'flushing', 'williamsburg', 'bushwick', 'harlem'],
     boroughs: ['Manhattan', 'Brooklyn', 'Queens', 'The Bronx', 'Staten Island'],

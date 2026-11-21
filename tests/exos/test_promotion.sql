@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Promotion (mig 20261121153700).
---   PR1 channels: the_skint, allevents, fever, nonsense_nyc (no URL), spotify
---       seeded as manual; songkick moved to the bottom; every channel listed
+--   PR1 channels: the_skint, allevents, fever, nonsense_nyc (no URL), spotify,
+--       partiful (NYC) seeded as manual; songkick moved to the bottom; every channel listed
 --       by exos_discovery_event_channels, songkick last
 --   PR2 placements: owner / manager add (slug from the name, -2 / -3 on a
 --       clash, whitespace collapsed); bad names refused; finance reads but
@@ -9,8 +9,9 @@
 --   PR3 remove: writer only; another org refused
 --   PR4 the 200 cap
 --   PR5 RLS on, no client grant on the table
---   PR6 _exos_channel_key: google + paid_search is Google ads; the old
---       mappings unchanged (cpc, qr / print, meta paid_social, organic)
+--   PR6 _exos_channel_key: google + paid_search is Google ads; partiful its
+--       own key, labelled Partiful; the old mappings and labels unchanged
+--       (cpc, qr / print, meta paid_social, organic)
 --   PR7 grants + search_path on the new functions
 -- Self-contained ids b7160000-…; runs after the full run_p0.sh chain.
 -- ============================================================================
@@ -68,9 +69,11 @@ BEGIN
   SELECT * INTO c FROM public.exos_discovery_channels WHERE id = 'fever';
   ASSERT FOUND AND c.kind = 'manual' AND NOT c.verified, 'PR1: fever not verified';
   ASSERT (SELECT count(*) FROM public.exos_discovery_channels
-           WHERE id IN ('the_skint', 'allevents', 'fever', 'nonsense_nyc', 'spotify') AND kind = 'manual' AND active) = 5, 'PR1: five new manual channels';
+           WHERE id IN ('the_skint', 'allevents', 'fever', 'nonsense_nyc', 'spotify', 'partiful') AND kind = 'manual' AND active) = 6, 'PR1: six new manual channels';
+  SELECT * INTO c FROM public.exos_discovery_channels WHERE id = 'partiful';
+  ASSERT FOUND AND c.region = 'NYC' AND c.submission_url = 'https://partiful.com' AND NOT c.verified, 'PR1: partiful';
   ASSERT (SELECT id FROM public.exos_discovery_channels WHERE active ORDER BY sort_order DESC, id LIMIT 1) = 'songkick', 'PR1: songkick last';
-  RAISE NOTICE 'OK  PR1 five channels seeded (Nonsense NYC without a URL), Songkick at the bottom';
+  RAISE NOTICE 'OK  PR1 six channels seeded (Nonsense NYC without a URL, Partiful NYC), Songkick at the bottom';
 END $$;
 
 SET LOCAL ROLE authenticated;
@@ -199,7 +202,13 @@ BEGIN
   ASSERT public._exos_channel_key('print', 'qr') = 'flyer', 'PR6: print / qr';
   ASSERT public._exos_channel_key('email', 'email') = 'email', 'PR6: email';
   ASSERT public._exos_channel_key('', 'paid_search') IS NULL, 'PR6: no source';
-  RAISE NOTICE 'OK  PR6 channel key: paid_search is Google ads, older mappings kept';
+  ASSERT public._exos_channel_key('partiful', 'referral') = 'partiful', 'PR6: partiful';
+  ASSERT public._exos_channel_key('https://partiful.com/e/abc', NULL) = 'partiful', 'PR6: partiful referrer form';
+  ASSERT public._exos_channel_label('partiful') = 'Partiful', 'PR6: Partiful label';
+  ASSERT public._exos_channel_label('flyer') = 'Flyer / QR code' AND public._exos_channel_label('posh') = 'Posh'
+     AND public._exos_channel_label('promoter:dj') = 'Promoters' AND public._exos_channel_label('nope') = 'Other', 'PR6: old labels';
+  ASSERT public._exos_channel_detail('partiful') IS NULL, 'PR6: a fixed channel has no detail';
+  RAISE NOTICE 'OK  PR6 channel key: paid_search is Google ads, Partiful its own channel and label, older mappings kept';
 END $$;
 
 -- PR7 ---------------------------------------------------------------------
@@ -210,7 +219,7 @@ BEGIN
              FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
             WHERE n.nspname = 'public'
               AND p.proname IN ('_exos_print_placement_slug', '_exos_print_placement_row', 'exos_print_placements',
-                                'exos_print_placement_add', 'exos_print_placement_remove', '_exos_channel_key') LOOP
+                                'exos_print_placement_add', 'exos_print_placement_remove', '_exos_channel_key', '_exos_channel_label') LOOP
     ASSERT r.proconfig @> ARRAY['search_path=public, pg_temp'], 'PR7: search_path ' || r.sig::text;
     ASSERT NOT has_function_privilege('anon', r.sig, 'EXECUTE'), 'PR7: anon ' || r.sig::text;
     IF r.proname LIKE '\_%' THEN
