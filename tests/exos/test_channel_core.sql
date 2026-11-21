@@ -383,6 +383,26 @@ BEGIN
   ASSERT a.request -> 'body' ->> 'keep' = 'monkey=1 stays', 'CC6: ordinary text kept, got ' || a.request;
   DELETE FROM public.exos_channel_audit WHERE id = a.id;
 END $$;
+
+-- CC6b: the bare "key" rule, vector by vector (the same list as gatedHttp_test.ts
+-- "redaction by pattern"; keep them identical): kept only inside a geo list, and
+-- only a geo key or an integer id of at most 10 digits.
+DO $$
+DECLARE v jsonb; c text; val jsonb; kept boolean; got jsonb;
+BEGIN
+  FOR v IN SELECT * FROM jsonb_array_elements($v$[["zips", "US:10001", true], ["zips", "US", true], ["zips", "CA:M5V 2T6", true], ["zips", "2490299", true], ["zips", 3847, true], ["regions", "4081", true], ["cities", 2490299, true], ["countries", "US", true], ["custom_locations", "1234567890", true], ["zips", "us:10001", false], ["zips", "US:AAAAAAAAAAAAA", false], ["zips", "US:AKIAIOSFODNN7EXAMPLEwJalrXUtnFEMIK7MDENG", false], ["zips", "12345678901", false], ["zips", 12345678901, false], ["zips", 4111111111111111, false], ["zips", -5, false], ["zips", 3.5, false], ["zips", "US:1000_1", false], ["zips", true, false], ["zips", null, false], [null, "US:10001", false], [null, "123456789012", false], [null, 4111111111111111, false], [null, "2490299", false], [null, 3847, false], ["items", "US", false], ["tickets", 12, false]]$v$::jsonb) LOOP
+    c := v ->> 0; val := v -> 1; kept := (v ->> 2)::boolean;
+    got := CASE WHEN c IS NULL THEN public._exos_channel_audit_scrub(jsonb_build_object('key', val)) -> 'key'
+                ELSE public._exos_channel_audit_scrub(jsonb_build_object(c, jsonb_build_array(jsonb_build_object('key', val)))) -> c -> 0 -> 'key' END;
+    ASSERT got = CASE WHEN kept THEN val ELSE to_jsonb('[redacted]'::text) END,
+           'CC6b: ' || v::text || ' gave ' || coalesce(got::text, 'NULL');
+  END LOOP;
+  ASSERT public._exos_channel_audit_scrub('{"targeting": {"geo_locations": {"zips": [{"key": "US:10001"}]}}}')
+           = '{"targeting": {"geo_locations": {"zips": [{"key": "US:10001"}]}}}', 'CC6b: Meta shape kept';
+  ASSERT public._exos_channel_audit_scrub('{"zips": [{"meta": {"key": "US"}}]}') = '{"zips": [{"meta": {"key": "[redacted]"}}]}',
+         'CC6b: a geo name further up does not reach a nested key';
+  RAISE NOTICE 'OK  CC6b bare "key" kept only as a geo key in a geo list';
+END $$;
 SELECT pg_temp.act('cc100000-0000-0000-0000-0000000000a2');
 SET LOCAL ROLE authenticated;
 DO $$ BEGIN

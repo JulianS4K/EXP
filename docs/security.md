@@ -1284,8 +1284,8 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   pattern: `*token*`, `*secret*`, `*signature*`, `api_key`, `access_key`, `X-Amz-*`, ...; paging cursors such as
   `pageToken` excepted) is refused. Every request is an audit step with credential headers (any name with token,
   secret, key, auth, signature, cookie, password or session), secret-named keys (`SECRET_KEY`: also
-  `private_key`, `access_key`, `pass`, `pwd`, `jwt`; a bare `key` unless its value is a short targeting key such as
-  Meta's geo `US:10001` or a numeric id, `secretEntry`) and every secret value redacted. Redaction is best effort:
+  `private_key`, `access_key`, `pass`, `pwd`, `jwt`; a bare `key` always, except a geo key such as Meta's `US:10001` or an
+  integer id of at most 10 digits inside a geo list (`zips`, `regions`, `cities`, ...; `secretEntry`)) and every secret value redacted. Redaction is best effort:
   adapters still send credentials only in headers.
 - **`exos_channel_audit`**: RLS, SELECT for owner / manager of the row's org (finance, scanners and other orgs read
   nothing), no client writes. Only `exos_channel_audit_record` (service role) writes: it drops query values from
