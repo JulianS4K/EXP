@@ -17,7 +17,7 @@
 // a pass that finds one recorded looks the event up by the name and start it
 // sent, created since then, before it creates again.
 import {
-  beginRefused, firstCapacity, type Io, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
+  beginRefused, firstCapacity, type Io, notOnAccount, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
   type StepRecord, type SyncHooks, type SyncResult, textToHtml, utc,
 } from "./model.ts";
 
@@ -106,6 +106,13 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     meta.organization_id = org;
   }
 
+  // A linked event not yet synced: it must be readable with this account's
+  // token first (same answer as another org's event, mig 20261121100000).
+  if (id && mirror.status !== "synced") {
+    const r = await io.req("GET", `/events/${id}/`);
+    if (!r.ok) return { state: "error", error: notOnAccount("eventbrite"), plan: { steps } };
+  }
+
   if (ev.status === "cancelled") {
     if (id && !meta.cancelled) {
       const r = await io.req("POST", `/events/${id}/cancel/`);
@@ -115,15 +122,26 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     return done(io, steps, id, url, meta, hash, []);
   }
 
-  // Venue: a new one whenever the place changes.
+  // The venue is made only once the event is going ahead (after the lookup
+  // and the recorded create, mig 20261121100000), and reused: the one noted
+  // with the pending create, else one of the org's with the same name and
+  // address, else a new one (a new one whenever the place changes).
   let venueId: string | null = meta.venue_id ?? null;
-  if (ev.venueName && (meta.venue_key !== ev.venueQuery || !venueId)) {
-    const r = await io.req("POST", `/organizations/${meta.organization_id}/venues/`, ebVenueBody(ev));
-    if (!r.ok || typeof r.body?.id !== "string") return fail(steps, "couldn't save the venue", r.error);
-    venueId = r.body.id;
-    meta.venue_id = venueId;
+  const venue = async (pending: PendingCreate | null): Promise<string | null | false> => {
+    if (!ev.venueName || (venueId && meta.venue_key === ev.venueQuery)) return venueId;
+    let vid: string | null = pending?.venue_id && pending.venue_key === ev.venueQuery ? pending.venue_id : null;
+    if (!vid && io.live) vid = await ebFindVenue(io, meta.organization_id, ev);
+    if (!vid) {
+      const r = await io.req("POST", `/organizations/${meta.organization_id}/venues/`, ebVenueBody(ev));
+      if (!r.ok || typeof r.body?.id !== "string") return false;
+      vid = r.body.id as string;
+      if (io.live && hooks?.note) await hooks.note({ venue_id: vid, venue_key: ev.venueQuery ?? "" });
+    }
+    venueId = vid;
+    meta.venue_id = vid;
     meta.venue_key = ev.venueQuery;
-  }
+    return vid;
+  };
 
   let recovered = false;
   if (!id) {
@@ -131,7 +149,7 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     // A create recorded by an earlier pass: find it before creating again.
     const pending = pendingCreate(meta);
     if (pending && io.live) {
-      const found = await ebFindCreated(io, meta.organization_id, pending);
+      const found = await ebFindCreated(io, meta.organization_id, pending, hooks?.taken);
       if (found.error) return fail(steps, "couldn't check for the event an earlier pass created", found.error);
       if (found.ids.length > 1) {
         return fail(steps, `${found.ids.length} events on Eventbrite match the one an earlier pass created: link the right one`);
@@ -144,15 +162,19 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     }
   }
   if (!id) {
+    let pending: PendingCreate | null = null;
     if (io.live && hooks) {
       const b = await hooks.beginCreate({ name: ev.name, start: ev.startUtc });
       if (!b.ok) return fail(steps, `didn't create the event: ${beginRefused(b.reason)}`, b.reason);
+      pending = b.pending ?? null;
     }
+    if ((await venue(pending)) === false) return fail(steps, "couldn't save the venue");
     const r = await io.req("POST", `/organizations/${meta.organization_id}/events/`, ebEventBody(ev, venueId));
     if (!r.ok || typeof r.body?.id !== "string") return fail(steps, "couldn't create the event", r.error);
     id = r.body.id;
     url = typeof r.body.url === "string" && r.body.url.startsWith("https://") ? r.body.url : url;
   } else if (changed) {
+    if ((await venue(pendingCreate(meta))) === false) return fail(steps, "couldn't save the venue");
     const r = await io.req("POST", `/events/${id}/`, ebEventBody(ev, venueId));
     if (!r.ok) return fail(steps, "couldn't update the event", r.error);
     if (typeof r.body?.url === "string" && r.body.url.startsWith("https://")) url = r.body.url;
@@ -225,23 +247,54 @@ function done(io: Io, steps: StepRecord[], id: string | null, url: string | null
 /**
  * The event an earlier pass may have created (its pending create): the
  * org's events with the name it sent (name_filter), the same start, created
- * since that pass's first try (less 5 minutes of clock skew). GET only.
- * `error` when the list couldn't be read: then nothing is created.
+ * between that pass's first try (less 5 minutes of clock skew) and its last
+ * try plus 2 minutes, and not another Exos event's (`taken`: any org's
+ * mirror or door link, asked of the database). GET only. Eventbrite has no
+ * field Exos can set at create and read back as a marker (`source` is
+ * undocumented beyond "api", and the description is rewritten HTML), so the
+ * bound and the exclusion are what stop a sibling's event being adopted.
+ * `error` when the list (or the check) couldn't be read: then nothing is created.
  */
-export async function ebFindCreated(io: Io, orgId: string, pending: PendingCreate): Promise<{ ids: string[]; url?: string; error?: string }> {
+export async function ebFindCreated(
+  io: Io, orgId: string, pending: PendingCreate, taken?: (ids: string[]) => Promise<string[] | null>,
+): Promise<{ ids: string[]; url?: string; error?: string }> {
   const name = typeof pending.name === "string" ? pending.name.trim() : "";
   const start = typeof pending.start === "string" ? utc(pending.start) : "";
   if (!name || !start || !/^[0-9]{1,24}$/.test(String(orgId))) return { ids: [], error: "no record of what was sent" };
   const since = Date.parse(pending.first ?? pending.at ?? "") - 5 * 60_000;
+  const until = Date.parse(pending.at ?? pending.first ?? "") + 2 * 60_000;
   const q = new URLSearchParams({ name_filter: name, status: "all", time_filter: "all", order_by: "created_desc", page_size: "50" });
   const r = await io.req("GET", `/organizations/${orgId}/events/?${q}`);
   if (!r.ok) return { ids: [], error: r.error ?? "failed" };
   const events: any[] = Array.isArray(r.body?.events) ? r.body.events : [];
-  const hits = events.filter((e) =>
-    typeof e?.id === "string" && /^[0-9]{1,24}$/.test(e.id)
-    && String(e?.name?.text ?? "").trim() === name
-    && utc(String(e?.start?.utc ?? "")) === start
-    && (!Number.isFinite(since) || !e?.created || Date.parse(e.created) >= since));
+  let hits = events.filter((e) => {
+    if (typeof e?.id !== "string" || !/^[0-9]{1,24}$/.test(e.id)) return false;
+    if (String(e?.name?.text ?? "").trim() !== name || utc(String(e?.start?.utc ?? "")) !== start) return false;
+    const created = Date.parse(String(e?.created ?? ""));
+    if (!Number.isFinite(created)) return false;    // no creation time: can't tell it was this pass's
+    return (!Number.isFinite(since) || created >= since) && (!Number.isFinite(until) || created <= until);
+  });
+  if (hits.length && taken) {
+    const used = await taken(hits.map((e) => e.id));
+    if (used === null) return { ids: [], error: "couldn't check which events are in use" };
+    hits = hits.filter((e) => !used.includes(e.id));
+  }
   const url = hits.length === 1 && typeof hits[0].url === "string" && hits[0].url.startsWith("https://") ? hits[0].url : undefined;
   return { ids: hits.map((e) => e.id), url };
+}
+
+const norm = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/** One of the org's venues with the same name and address (GET, first page), so a retry or a re-save reuses it. */
+export async function ebFindVenue(io: Io, orgId: string, ev: MirrorEvent): Promise<string | null> {
+  if (!/^[0-9]{1,24}$/.test(String(orgId))) return null;
+  const r = await io.req("GET", `/organizations/${orgId}/venues/`);
+  if (!r.ok || !Array.isArray(r.body?.venues)) return null;
+  const want = ebVenueBody(ev).venue;
+  const v = r.body.venues.find((x: any) => typeof x?.id === "string" && /^[0-9]{1,24}$/.test(x.id)
+    && norm(x.name) === norm(want.name)
+    && norm(x.address?.address_1) === norm(want.address.address_1)
+    && norm(x.address?.city) === norm(want.address.city)
+    && norm(x.address?.postal_code) === norm(want.address.postal_code));
+  return v ? v.id : null;
 }
