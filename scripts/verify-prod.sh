@@ -52,8 +52,10 @@ FUNCS=supabase/functions
 SINCE=20261027000000
 EXTRA_REQUIRED=(20261027090000_exos_api_scopes)
 # Defaults for settings read straight from the table (not via a _setting_* call
-# the scan below can read the default from).
-STATIC_SETTINGS="free_tier_max_capacity=150
+# the scan below can read the default from), or whose default a later migration
+# changed by text patch (free_tier_max_capacity: 149 since mig 20261121133000,
+# under 150 is free). These win over the scan.
+STATIC_SETTINGS="free_tier_max_capacity=149
 group_chat_retention_days=30
 request_ip_source=cloudflare"
 
@@ -439,11 +441,11 @@ db_checks() {
     # key=default from every _setting_*('key', default …) call in the migrations
     # since $SINCE, plus the keys read straight from the table.
     local f2 key def val
+    printf '%s\n' "$STATIC_SETTINGS" >"$TMP/settings"
     for f2 in "$MIG"/*exos*.sql; do
       v=$(basename "$f2"); v=${v%%_*}; [ "$v" -ge "$SINCE" ] 2>/dev/null || continue
       grep -oE "setting_[a-z]+\('[a-z_]+',[[:space:]]*[^,)]+" "$f2" | sed -E "s/^setting_[a-z]+\('([a-z_]+)',[[:space:]]*/\1=/"
-    done >"$TMP/settings"
-    printf '%s\n' "$STATIC_SETTINGS" >>"$TMP/settings"
+    done >>"$TMP/settings"
     awk -F= '!seen[$1]++' "$TMP/settings" | sort >"$TMP/settings.u"
     q "select key, value::text from public.exos_platform_settings" >"$TMP/settings.db" || add FAIL "7 settings" "query" "$(pgerr)"
     while IFS='=' read -r key def; do

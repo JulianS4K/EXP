@@ -1,6 +1,6 @@
 # Exos
 
-Primary ticketing platform for live events: organizers create events and tiered inventory, attendees buy and transfer tickets with rotating HMAC QR barcodes, organizers scan attendees at the door (online + offline with local registry fallback).
+Primary ticketing platform for live events: organizers create events and tiered inventory, attendees buy and transfer tickets with rotating HMAC QR barcodes (or, on free-tier events, one static QR per ticket, emailed as a PDF), organizers scan attendees at the door (online + offline with local registry fallback).
 
 > **Status:** Core flows live on Supabase (auth, tickets, transfers, scanner). Stripe checkout and Automatiq distribution are wired but dormant pending credential setup. See `KANBAN.md` for open items.
 
@@ -9,7 +9,7 @@ Primary ticketing platform for live events: organizers create events and tiered 
 - **Frontend:** React 19 + Vite 6, Tailwind, Framer Motion, lucide-react
 - **Auth + DB:** Supabase Auth + Supabase Postgres (migrated from Firebase)
 - **Payments:** Stripe Checkout (dormant — set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` to activate)
-- **QR Barcodes:** HMAC-SHA256 rotating codes (30-second buckets, ±2 accepted), verified server-side via `exos_check_in_ticket` RPC
+- **QR Barcodes:** per ticket, fixed when it is issued (`exos_tickets.code_mode`, mig `20261121153000`). Paid tier: HMAC-SHA256 rotating codes (30-second buckets, ±2 accepted). Free tier (at or under the free-tier cutoff, the fee's own rule): one static code, `S-{ticket}:{base32 HMAC}`, derived from the ticket's secret and holder (nothing stored), single use, attached to the confirmation email as a PDF; the door roster holds only its SHA-256. Tickets issued after an event grows past the cutoff rotate, earlier ones stay static. Both are verified server-side via `exos_check_in_ticket` RPC (`docs/wallet.md` "Static codes")
 - **Hosted at:** `vibepass-storefront-test.onrender.com/bridge/` (same-origin with FastAPI shell)
 
 ## Build

@@ -78,8 +78,8 @@ dashboard's own `exos_publish_event`, run by the person. No business rule lives 
 - **Drafts stay private.** `search_events`, `get_event`, `search`, `fetch`, the event page and the feeds read
   `exos_public_events`, which shows published events only (`test_mcp_writes.sql` M3).
 - **The fee line.** `create_event_draft` (preview and result) and `add_ticket_type` say plainly whether the event is
-  on the free tier: an event whose size (its capacity, capped by what its ticket types add up to) is 150 or less
-  (`FREE_TIER_MAX_CAPACITY`, `exos_event_is_free_tier`) pays no Exos fee; over it, the standard Exos fee (3% of each
+  on the free tier: an event whose size (its capacity, capped by what its ticket types add up to) is under 150
+  (`FREE_TIER_MAX_CAPACITY` = 149, `exos_event_is_free_tier`) pays no Exos fee; at 150 or more, the standard Exos fee (2% of each
   order, paid by the organizer, the first 6 months free). The result's line comes from SQL
   (`exos_mcp_fee_outcome`); the preview's from the same rule in TypeScript.
 - **Venues.** `venue_id` copies the org venue's name and address onto the event (the event API writes no venue

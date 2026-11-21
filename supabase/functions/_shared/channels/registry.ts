@@ -13,6 +13,7 @@ import { tiktokAdapter } from "./adapters/tiktok.ts";
 import { meetupAdapter } from "./adapters/meetup.ts";
 import { linkedinAdapter } from "./adapters/linkedin.ts";
 import { googleBusinessAdapter } from "./adapters/googleBusiness.ts";
+import { BYO_ADAPTERS } from "./adapters/byoMarketplace.ts";
 
 const legacy = (id: string, label: string, home: string, c: Parameters<typeof caps>[0]): ChannelAdapter =>
   ({ id, label, status: "legacy", home, caps: caps(c) });
@@ -30,6 +31,8 @@ export const ADAPTERS: readonly ChannelAdapter[] = [
   meetupAdapter,
   linkedinAdapter,
   googleBusinessAdapter,
+  // The organizer's own marketplace seller accounts (mig 20261121214500): dry run only, replaying exos-distribute's plan.
+  ...BYO_ADAPTERS,
   legacy("eventbrite", "Eventbrite", "exos-channel-sync + _shared/channels/eventbrite.ts", {
     role: "primary", createEvent: true, ticketTypes: true, setCapacity: true, readAttendees: true }),
   legacy("luma", "Luma", "exos-channel-sync + _shared/channels/luma.ts", {

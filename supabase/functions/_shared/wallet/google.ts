@@ -13,7 +13,7 @@
 import { fromBase64Url, toBase64Url, utf8 } from "./bytes.ts";
 import { importRsaSigningKey, rsaSign, WalletKeyError } from "./keys.ts";
 import { TOTP_DIGITS, TOTP_PERIOD_MS } from "./codes.ts";
-import { displayState, localIso, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
+import { displayState, localIso, passStaticCode, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
 
 export const WALLET_API = "https://walletobjects.googleapis.com/walletobjects/v1";
 export const OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -93,6 +93,9 @@ export function buildEventTicketObject(p: WalletPayload, issuerId: string): Reco
       id: "void", header: "Void",
       body: VOID_TEXT[p.void_reason ?? ""] ?? VOID_TEXT["ticket-voided"],
     }];
+  } else if (passStaticCode(p)) {
+    // A static-mode ticket (mig 20261121153000): its one S- code, not a TOTP.
+    obj.barcode = { type: "QR_CODE", renderEncoding: "UTF_8", value: passStaticCode(p), alternateText: shortTicket(p.ticket.id) };
   } else if (p.google_key_hex) {
     obj.rotatingBarcode = googleRotatingBarcode(p.google_pattern, p.google_key_hex, shortTicket(p.ticket.id));
   }

@@ -56,6 +56,10 @@ export interface WalletPayload {
   apple_code: string | null;
   /** 20-byte TOTP key, hex — null once the pass is voided. */
   google_key_hex: string | null;
+  /** A static-mode ticket's S- code (mig 20261121153000, ../staticCodes.ts):
+   *  both passes carry it instead of their own codes. Null / absent for a
+   *  rotating ticket or a voided pass. */
+  static_code?: string | null;
   google_pattern: string;
 }
 
@@ -119,6 +123,10 @@ export function localIso(isoUtc: string, timeZone: string | null | undefined): s
   const a = Math.abs(offsetMin);
   return `${local}${sign}${String(Math.floor(a / 60)).padStart(2, "0")}:${String(a % 60).padStart(2, "0")}`;
 }
+
+/** The one code a static-mode ticket's pass shows, or null (a rotating ticket). */
+export const passStaticCode = (p: WalletPayload): string | null =>
+  typeof p.static_code === "string" && p.static_code.startsWith("S-") ? p.static_code : null;
 
 /** Last 8 characters of the ticket id, as shown on the pass. */
 export const shortTicket = (id: string): string => id.replace(/-/g, "").slice(-8).toUpperCase();

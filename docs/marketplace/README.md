@@ -20,16 +20,16 @@ for grep (`text/`), machine-readable specs where the vendor publishes them
 (`openapi/`), and a README with the endpoint map.
 
 **Resale is for events over the free tier, opted in** (operator rules
-2026-10-14 and 2026-10-29, migs `20261014140000`, `20261029090000`): an event
-whose max capacity (its overall cap, never above what its capped ticket types
-add up to; else the capped types' sum; a table counts its party size) is 150
-or less is the **free tier** (no Exos fee, never resold), judged on the larger of
+2026-10-14, 2026-10-29 and 2026-11-21, migs `20261014140000`, `20261029090000`,
+`20261121133000`): an event whose max capacity (its overall cap, never above
+what its capped ticket types add up to; else the capped types' sum; a table
+counts its party size) is under 150 is the **free tier** (no Exos fee, never resold), judged on the larger of
 the max capacity and the tickets actually sold (`exos_event_tier_size`), so an
 event that sells past its cap (bypass vouchers, comps, box office) leaves it:
-the checkout counts sold + its own order (`exos_event_fee_terms`). Over 150, resale
+the checkout counts sold + its own order (`exos_event_fee_terms`). At 150 or more, resale
 needs an owner or manager's **opt-in for that event** (`exos_resale_consents`,
 `exos_set_resale_consent`), revoked by itself if the max capacity drops back
-to 150 or less. Until both hold, the marketplaces above (and TickPick, Tixel
+under 150. Until both hold, the marketplaces above (and TickPick, Tixel
 later) and the S4K route are off: nothing can be allocated, ticked
 marketplaces make no event rows, the auto split plans nothing, S4K can't be
 chosen and the feed leaves the event out; an event that loses either later
@@ -37,7 +37,7 @@ has its pools planned to 0 and its S4K pool released (withdrawing does it at
 once). Every path asks one function, `exos_resale_unlocked`. Eventbrite and
 Luma aren't resale and aren't affected. The numbers are operator settings
 (`exos_platform_settings`, service role): `free_tier_max_capacity` (default
-150), `free_tier_fee_bps` (0) and `resale_consent_required` (true); the old
+149, an inclusive maximum: under 150 is free), `free_tier_fee_bps` (0) and `resale_consent_required` (true); the old
 `resale_min_capacity` key is gone.
 
 **Last call** (spec §5, mig `20261029100000`): at 10 tickets left or fewer
@@ -53,7 +53,7 @@ happened go through.
 platform Exos can't sync (`primary_source = 'external'`, `primary_platform`
 DICE / Shotgun / RA / a box office) sells a block per ticket type: the block
 is the type's capacity, so the free-tier and resale rules above read the
-block (150 or less never resold; over 150 with the opt-in). For last call
+block (under 150 never resold; 150 or more with the opt-in). For last call
 Exos is the seller of its block: pools plan to 0, Exos keeps selling. At the
 release time (`block_release_at`, default 24 hours before doors) every pool
 plans to 0 (`block_released`), the auto split and the S4K feed leave the
@@ -119,9 +119,9 @@ see it and doesn't need it. An organizer's marketplace price in the grid still w
 
 Every sale records the per-ticket price its listing carried (`exos_marketplace_orders.list_unit_price`, from the
 plan entry's `unit_price` by `listing_ref`, set once) and `marketplace_fee` = listed price x quantity - proceeds.
-The Exos fee applies here too: 3% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
-to Exos, like the 3% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
-organizer 38.80 on a marketplace and 37.34 on Exos; the marketplace's fee already covers its card processing.
+The Exos fee applies here too: 2% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
+to Exos, like the 2% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
+organizer 39.20 on a marketplace and 37.74 on Exos; the marketplace's fee already covers its card processing.
 `exos_marketplace_fee_rates` shows each store's realized rate over 180 days: it confirms the known rates, and once
 a store with an unknown rate sells, its rate goes into `SELLER_FEES`. TEvo proceeds are net of `order.fee`, and
 SeatGeek's sub-cent `total` is rounded to the cent.
@@ -219,6 +219,64 @@ and where its code lives today.
   ...) stay in the function's env.
 - The first path on the core is a read: pretix's credential test in
   `exos-integrations` (`adapters/pretix.ts`).
+
+## Your own marketplace accounts (BYO, mig `20261121214500`)
+
+An organizer can sell a share of each ticket type on **StubHub, SeatGeek, Vivid Seats or Ticket Evolution with
+their own seller account**, instead of (not as well as) the Exos network. Operator decisions, 2026-11-21:
+
+- **Static PDF tickets and no Exos fee, at any event size** ("150 or sellers own accounts", "Both"). A sale on
+  the organizer's own account is priced at 0 bps (kept, docs/fees.md "Own marketplace accounts"); its money goes
+  from the marketplace to the organizer, so it is **off Exos's books** (no marketplace receivable, nothing paid
+  out). Its tickets are static codes. Exos checkout on the same event still follows the capacity rule.
+- **% allocations.** Per marketplace, a share of each ticket type's capacity: `floor(capacity x % / 100)`, at
+  least 1 above 0. A $0 ticket type is never offered (limits.ts, block); a table ticket type or one without a
+  capacity is skipped. The share can change at any time, never below what that marketplace already sold (the
+  smallest % allowed is shown and in the error); every change is audited (`event.byo_allocation`); no cooldown.
+- **One account per marketplace per event.** Not on a marketplace ticked under Distribution (the Exos network
+  sells it there), and ticking one the organizer sells with their own account is refused. A switch deletes the
+  allocation rows nothing ever happened on and is refused while any other is there (seats, a sale, a listing, a
+  sync), so a row the network once used is never the organizer's. Back to 0% with nothing ever done on its rows,
+  the marketplace is nobody's again; with sales, it stays the organizer's at the sold floor. The Exos network's own
+  gates (the S4K route, ticked under Distribution, the resale capacity rule) don't apply to the organizer's own
+  account, so a free-tier event can sell there; the $0 rule does. The auto split never shares an own-account
+  marketplace.
+
+How it is built (one model, one planner, one transport):
+
+- **The same allocation row.** `exos_byo_set_allocation(event, channel, pct)` (owner / manager) records the % in
+  `exos_byo_allocations` and sets each ticket type through `exos_set_channel_allocation` (its locks and free-seat
+  check), so the seats are set aside from Exos checkout and a marketplace sale takes them out of the allocation
+  exactly as for the network. Only it allocates an own-account channel (`exos_set_channel_allocation` refuses one
+  otherwise). Each row's `account` is `'own'`, fixed when the row is made; each order keeps the account of the
+  listing it was first matched to, and its fee and books follow that. An own-account order is never Exos's to pay
+  out (money view state `own_account`; no remittance covers it). Saving the event doesn't pull an own-account
+  marketplace's seats (only cancelling or unpublishing does). Primary market only and own shares don't mix: an own
+  share is refused on a primary-market-only event, and turning primary market only on is refused while an own share
+  is set (`exos_tg_events_byo_networks`). `exos_byo_set_allocation` locks the event row last (after the route lock
+  and the allocation rows, the order every other path takes) and re-checks both rules on it, so a share and a
+  Distribution tick saved at the same moment never both win (`race_byo_allocations.sh` race 4). `exos_byo_allocations_view(event)` is what
+  the panel reads.
+- **The same plan.** exos-distribute plans the allocation's listings as for every marketplace (`planned_listing`).
+  `exos-byo` (`/plan`) replays that plan on the channel core with the org's credential from the store (providers
+  `stubhub`, `seatgeek`, `vivid`, `tevo`, Org settings -> Integrations): `adapters/byoMarketplace.ts`, adapter ids
+  `byo_<channel>` (so `EXOS_BYO_<CHANNEL>_WRITES`, apart from the network's flags). Creates use each listing's
+  planned request; StubHub / SeatGeek updates PATCH the changed fields by our external id; deletes and delists
+  are sync.ts `planDelist`. A Vivid Seats live-listing change is warned, not built yet. Ticket Evolution plans
+  nothing for an own account yet: exos-distribute's plan carries Exos's own office id and TEvo numbers inventory per
+  office, so the organizer's office id has to be planned for first. Until then `exos_byo_set_allocation` refuses a
+  Ticket Evolution share above 0 (22023, "not supported yet"; the panel shows it disabled), so no seats are held
+  for a channel that can't list.
+- **Dry run, pinned.** `BYO_WRITES_PINNED_OFF` hands GatedHttp an org switch of false, and exos-byo gives it a
+  fetch that refuses every call: nothing reaches a marketplace, not even a read. The requests (secrets redacted)
+  are in `exos_channel_audit` ("What we'd send") and in the panel's preview. Going live needs the pin removed in a
+  reviewed change AND a CLAUDE.md write exception per marketplace in Julian's words.
+- **Not yet:** reading the organizer's own sales from their seller account (a sale reaching
+  `exos_record_marketplace_order` with the own-account listing is handled as above; polling the org's credential
+  is the next step); Gametime (an FTP inventory file of the whole account), TickPick (no listing plan) and
+  GoTickets (no org credential); Vivid Seats listing updates; Ticket Evolution with the organizer's own office.
+- Edit event -> **Your own marketplace accounts** (`ByoMarketplacePanel`). Tests: `tests/exos/test_byo_marketplaces.sql`
+  (BY1-BY17), `tests/exos/race_byo_allocations.sh`, `_shared/byo/byo_test.ts`, `ByoMarketplacePanel.test.tsx`.
 
 ## How StubHub ties into Exos
 

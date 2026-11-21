@@ -344,7 +344,7 @@ export function exosWriteTools(data: McpWriteData, opts: WriteToolOptions): Tool
         },
         online: { type: 'boolean', description: 'An online event (no venue needed)', default: false },
         description: { type: 'string', description: 'What the event is (plain text)', maxLength: 5000 },
-        capacity: { type: 'integer', minimum: 1, maximum: MAX_CAPACITY, description: 'Most tickets the event can sell overall. 150 or less is the free tier: no Exos fee.' },
+        capacity: { type: 'integer', minimum: 1, maximum: MAX_CAPACITY, description: `Most tickets the event can sell overall. Under ${FREE_TIER_MAX_CAPACITY + 1} is the free tier: no Exos fee.` },
         image_url: { type: 'string', description: 'Cover image, an https:// URL', maxLength: 1000 },
         confirm_token: confirmTokenSchema,
       },

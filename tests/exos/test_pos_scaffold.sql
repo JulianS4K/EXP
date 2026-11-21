@@ -409,16 +409,16 @@ BEGIN
   ASSERT (s ->> 'tax_cents')::int = 866, 'P8: tax ' || (s ->> 'tax_cents');
   ASSERT s -> 'tenders' = '{"cash":3640,"card":7500,"comp":880}'::jsonb, 'P8: tenders ' || (s -> 'tenders');
   ASSERT s -> 'tips' = '{"cash":200,"card":300,"total":500}'::jsonb, 'P8: tips ' || (s -> 'tips');
-  -- Card ticket sales: C 4000 + D floor(2000 x 2000 / 2880) = 1388 -> 5388; 3% half up = 162.
+  -- Card ticket sales: C 4000 + D floor(2000 x 2000 / 2880) = 1388 -> 5388; 2% half up = 108 (1.0776).
   ASSERT (s ->> 'card_ticket_cents')::int = 5388, 'P8: card ticket sales ' || (s ->> 'card_ticket_cents');
-  ASSERT (s ->> 'fee_bps')::int = 300 AND (s ->> 'exos_fee_cents')::int = 162, 'P8: Exos fee ' || (s ->> 'exos_fee_cents');
-  ASSERT (s ->> 'organizer_net_cents')::int = 3640 + 7500 - 162, 'P8: organizer net ' || (s ->> 'organizer_net_cents');
+  ASSERT (s ->> 'fee_bps')::int = 200 AND (s ->> 'exos_fee_cents')::int = 108, 'P8: Exos fee ' || (s ->> 'exos_fee_cents');
+  ASSERT (s ->> 'organizer_net_cents')::int = 3640 + 7500 - 108, 'P8: organizer net ' || (s ->> 'organizer_net_cents');
   -- Promoter: C 3636 + D floor(1818 x 2000 / 2880) = 1262 -> 4898 over 3 tickets.
   ASSERT s -> 'promoters' = '[{"promoter_id":"8c000000-0000-0000-0000-0000000009a1","tickets":3,"base_cents":4898}]'::jsonb,
          'P8: promoters ' || (s -> 'promoters');
   ASSERT s -> 'drawers' = '{"open":0,"closed":1,"float_cents":10000,"expected_cents":12960,"counted_cents":12950,"variance_cents":-10}'::jsonb,
          'P8: drawers ' || (s -> 'drawers');
-  RAISE NOTICE 'PASS P8 settlement summary: gross 12020, cash 3640 / card 7500 / comp 880, fee 162, variance -10';
+  RAISE NOTICE 'PASS P8 settlement summary: gross 12020, cash 3640 / card 7500 / comp 880, fee 108, variance -10';
 END $$;
 
 -- ── P9 settlement records ─────────────────────────────────────────────────
@@ -439,7 +439,7 @@ BEGIN
   ASSERT raised, 'P9: no final settlement with an open order';
   v := public.exos_pos_record_settlement('8c000000-0000-0000-0000-0000000000e1', false);
   ASSERT (SELECT status || '/' || card_cents || '/' || exos_fee_cents || '/' || organizer_net_cents || '/' || drawer_variance_cents
-            FROM public.exos_pos_settlements WHERE id = v) = 'draft/7500/162/10978/-10', 'P9: draft recorded';
+            FROM public.exos_pos_settlements WHERE id = v) = 'draft/7500/108/11032/-10', 'P9: draft recorded';
 END $$;
 RESET ROLE;
 -- Close the stray order (void, server side) so the night can be finalized.

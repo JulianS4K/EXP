@@ -49,18 +49,41 @@ describe('last call (mig 20261029100000)', () => {
 });
 
 describe('the resale opt-in (mig 20261029090000)', () => {
-  it('carries the version the server checks', () => {
-    expect(RESALE_CONSENT_VERSION).toBe('2026-10-29');
+  it('carries the version the server checks (the latest migration that sets it)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../../../supabase/migrations/', import.meta.url);
+    // The SQL value a fresh install ends on: the last migration (by name) that
+    // creates or patches _exos_resale_consent_version() to a new text.
+    let sql: string | null = null;
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) {
+      const body = readFileSync(new URL(f, dir), 'utf8');
+      if (!body.includes('_exos_resale_consent_version()')) continue;
+      const created = [...body.matchAll(/_exos_resale_consent_version\(\)\s+RETURNS text[^$]*\$\$ SELECT '([0-9-]+)'::text \$\$/g)];
+      const patched = [...body.matchAll(/\$n\$SELECT '([0-9-]+)'::text\$n\$/g)];
+      const last = [...created, ...patched].pop();
+      if (last) sql = last[1];
+    }
+    expect(sql).toBe(RESALE_CONSENT_VERSION);
+    expect(RESALE_CONSENT_VERSION).toBe('2026-11-21');
+  });
+
+  it('names the free tier the fee uses (under 150)', async () => {
+    const { RESALE_CONSENT_TEXT } = await import('./resaleConsent');
+    const text = RESALE_CONSENT_TEXT.join(' ');
+    expect(text).toContain('the free tier (under 150)');
+    expect(text).not.toMatch(/150 or less/);
   });
 
   it('words where an event stands', () => {
     const base = {
-      max_capacity: 120, capacity_bounded: true, free_tier_max_capacity: 150, free_tier: true, consent_required: true,
+      max_capacity: 120, capacity_bounded: true, free_tier_max_capacity: 149, free_tier: true, consent_required: true,
       consent_version: '2026-10-29', consent: null, last_revoked: null, resale_unlocked: false, locked_reason: 'x', can_manage: true,
     };
-    expect(salesRulesLine(parseSalesRules(base)!)).toMatch(/^Free tier: a max capacity of 120/);
+    expect(salesRulesLine(parseSalesRules(base)!)).toBe('Free tier: a max capacity of 120 (under 150). No Exos fee, and it is never listed on resale marketplaces or S4K.');
+    // No number from the server: the coded default (under 150).
+    expect(parseSalesRules({ ...base, free_tier_max_capacity: undefined })!.freeTierMaxCapacity).toBe(149);
     expect(salesRulesLine(parseSalesRules({ ...base, free_tier: false, capacity_bounded: false, max_capacity: 100 })!))
-      .toMatch(/needs a max capacity over 150/);
+      .toMatch(/needs a max capacity of 150 or more/);
     const big = { ...base, max_capacity: 300, free_tier: false };
     expect(salesRulesLine(parseSalesRules(big)!)).toBe('Resale is off until you opt in below.');
     expect(salesRulesLine(parseSalesRules({ ...big, last_revoked: { revoked_at: 'x', reason: 'capacity_dropped' } })!))

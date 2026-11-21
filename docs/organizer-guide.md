@@ -34,8 +34,8 @@ invite keeps their current role until it's approved (mig `20261104200000`).
 
 **Connect Stripe** opens Stripe's onboarding for a **Standard** connected account (Express only if the
 server sets `EXOS_CONNECT_ACCOUNT_TYPE=express`). Payouts go straight to the organizer's account; the
-platform keeps its fee: 3% of each sale, nothing in your first 6 months, and nothing at all on free-tier
-events (max capacity 150 or less). Details under **All-in pricing** below; your own fees on top
+platform keeps its fee: 2% of each sale, nothing in your first 6 months, and nothing at all on free-tier
+events (max capacity under 150; 150 or more pays the fee). Details under **All-in pricing** below; your own fees on top
 (facility fees and the like) are in `docs/fees.md`. The button appears only once payments are
 switched on platform-wide (`docs/payments-go-live.md`). Until then, **free events work fully and
 paid events can't be sold.**
@@ -49,15 +49,21 @@ paid events can't be sold.**
 - **Tiers:** price, capacity (required; there is no unlimited, and setting an existing tier to 0 closes it: stop sales), sales window, hidden or public.
 - **All-in pricing:** buyers always see the full price they'll pay. If a tier has a tax rule that
   *adds* tax, the storefront shows the price including that tax. Buyers pay no service fee.
-  **Free tier:** an event with a max capacity of 150 or less (its overall cap, else its capped
+  **Free tier:** an event with a max capacity under 150 (its overall cap, else its capped
   ticket types, a table counting its party size) pays no Exos fee at all, ever; only card
-  processing. It is also never listed on resale marketplaces or S4K. An event that sells past 150
-  anyway (a voucher that sells past sold-out, comps, the box office) leaves the free tier: the order
-  that crosses 150 and every one after pay the normal fee. Bigger events: your
+  processing. It is also never listed on resale marketplaces or S4K. 150 or more is paid (operator
+  2026-11-21). An event that reaches 150 anyway (a voucher that sells past sold-out, comps, the box
+  office) leaves the free tier: the order that takes it to 150 and every one after pay the normal
+  fee. Free-tier tickets get a **static QR
+  code**: one code per ticket that never changes, emailed as a PDF with the confirmation and
+  downloadable from My Tickets, so a printout works. **Rotating anti-screenshot QR codes are part
+  of the paid tier** (150 or more). The code type is fixed per ticket when it's
+  issued: if the event grows past the cutoff, tickets issued from then on rotate and the earlier
+  ones keep their static code, and the door takes both (see section 5). Events of 150 or more: your
   first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
-  takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
-  a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
-  card was charged there, so a 40.00 ticket pays you 38.80 (marketplace prices are raised to cover
+  takes 2% of every sale from your payout (3% before 2026-11-21), and card processing is yours, as with any card sale:
+  a 40.00 ticket sold on Exos pays you 37.74 (0.80, 2%, plus Stripe's 2.9% + 30¢, 1.46). On a marketplace the
+  card was charged there, so a 40.00 ticket pays you 39.20 (marketplace prices are raised to cover
   their own seller fee).
 - **Scheduled prices** (early-bird → regular → last-minute). Buyers are charged the price that's
   live when they check out, which is the one the storefront shows.
@@ -71,11 +77,11 @@ paid events can't be sold.**
   seats are reserved, not just at payment.
 - **Resale (Edit event → Marketplaces → Resale):** resale marketplaces (StubHub, SeatGeek, Vivid,
   Gametime, TickPick, GoTickets, Ticket Evolution) and the S4K network are only for events over the
-  free tier (max capacity over 150), and only once an owner or manager **opts in for that event**:
+  free tier (max capacity 150 or more), and only once an owner or manager **opts in for that event**:
   read the text, tick the box, **Opt in to resale**. Exos records who opted in, when, the text's
   version and the max capacity then. **Withdraw** takes it off at once: listings come down, their
-  seats come back to your checkout. If the max capacity later drops to 150 or less the opt-in ends
-  by itself, and you opt in again if it goes back over. Until then marketplaces you tick wait.
+  seats come back to your checkout. If the max capacity later drops under 150 the opt-in ends
+  by itself, and you opt in again if it goes back to 150 or more. Until then marketplaces you tick wait.
 - **Shared limits:** one limit several ticket types draw from, e.g. a 500-person room selling GA,
   VIP and Student while VIP keeps its own 50 (Edit event → Shared limits). A type sells while every
   limit it is in has room; 0 stops sales, there is no unlimited. See `docs/price-steps.md`.
@@ -439,7 +445,7 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
   again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
 - **Free-tier cap:** an event whose max capacity (`exos_event_max_capacity`) is at or under the free-tier cutoff
-  (`exos_platform_settings` `free_tier_max_capacity`, 150 when the row is missing) can use **at most 5 manual
+  (`exos_platform_settings` `free_tier_max_capacity`, 149 when the row is missing: under 150) can use **at most 5 manual
   channels**. A channel counts once queued and not withdrawn (rejected and removed ones still count; queueing them again
   doesn't add one); feeds never count. The 6th is refused with a message saying so; withdrawing a queued one frees the
   slot. An event with no capacity set at all counts as small.
@@ -551,8 +557,13 @@ until the operator switches it on.
 
 ## 5. At the door (`/checkin/:eventId`)
 
-- Staff with the **scanner** role scan the attendee's live QR code. It changes every 30 seconds
-  and is signed per ticket, so screenshots and forwarded codes stop working quickly.
+- Staff with the **scanner** role scan the attendee's live QR code. On the paid tier it changes every
+  30 seconds and is signed per ticket, so screenshots and forwarded codes stop working quickly.
+- **Static codes (free tier):** a free-tier ticket has one QR that never changes (`S-…`), on its PDF,
+  in the app and in the wallet pass. It lets one person in: the first scan wins and any copy is
+  refused "already checked in". A transfer or refund kills the old code. The printed string can be
+  typed into the scanner too. The scanner tells the two kinds apart by themselves, per ticket, online
+  and offline (`docs/wallet.md` "Static codes").
 - The server checks every scan: wrong event, already used, refunded or mid-transfer are all
   refused and logged.
 - **Offline mode:** download the roster before doors open. The device can then admit tickets
@@ -693,7 +704,7 @@ Posh tells Exos about every sale.
   same capacity on Posh by hand**. Those seats come off what Exos, Eventbrite and Luma can sell. The cap can only
   grow by seats that are free right now, and can't go below what Posh has already sold. Table ticket types and
   ones in a shared capacity group can't be capped for Posh. Posh is primary ticketing, not resale: the resale
-  rules (over 150 capacity plus the per-event opt-in, the pools) don't apply.
+  rules (150 or more capacity plus the per-event opt-in, the pools) don't apply.
 - **Sales**: a completed Posh order takes its tickets out of the Posh cap and shows in the event's counts and on
   Edit event → Posh. A **pending** order (one waiting for your approval on Posh) is listed but takes no seat and
   isn't on the door list; when you approve it on Posh, Posh's Order Created for it confirms it.
@@ -752,8 +763,8 @@ there.
   before doors). The block is the ticket type's capacity, and every ticket type needs one (no unlimited types on a
   block event). You can change the blocks and the time until the release; a block can't go below what it sold.
 - **Exos sells the block** on its event page, your tracking links and discovery, and on marketplaces only if the
-  block qualifies for resale: the block counts as the event's size, so a block of 150 or less is the free tier (no
-  Exos fee, never resold), and a bigger one resells only once you opt in.
+  block qualifies for resale: the block counts as the event's size, so a block under 150 is the free tier (no
+  Exos fee, never resold), and one of 150 or more resells only once you opt in.
 - **Last call** works on the block: near the end of it, marketplaces hand their seats back and Exos keeps selling
   the rest itself (Exos is the seller of its block).
 - **At the release time** (or **Release now**) Exos stops selling the block and shows, per ticket type, how many to

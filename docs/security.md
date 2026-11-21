@@ -127,8 +127,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `_exos_eb_attendee_upsert`, `_exos_eb_ts` (mig 20261014120000) | OK | Eventbrite check-ins, read from the API by `exos_eventbrite_apply` (service role only). Tables `exos_eventbrite_attendees` / `exos_eventbrite_barcodes` are RLS-on with no client grants; Eventbrite's codes are kept apart from Exos ticket codes. Nothing is written back to Eventbrite |
 | `exos_attendee_lookup`, `exos_eb_status_word` (mig 20261014120000) | OK | Lookup: owner / manager of the event's org (or admin); names and emails of that event only. The status word is a pure mapping (granted to everyone) |
 | `exos_set_s4k_split`, `exos_s4k_pool_status`, `_exos_s4k_pool`, `exos_tg_s4k_route_release` (mig 20261014130000) | OK | S4K's pool. Split: owner / manager, S4K route only, under the route lock, then the checkout locks (quotas, ticket type) before reading what's free, so it can't race a sale; never below what S4K sold. Status: owner / manager / finance. An S4K order locks the pool row first and takes seats from it only. The pool helper and trigger have no client EXECUTE |
-| `exos_event_max_capacity`, `exos_resale_unlocked`, `_exos_resale_locked_msg`, `exos_resale_min_capacity`, `exos_tg_tier_resale_resync` (mig 20261014140000, redefined 20261029090000) | OK | The resale rule (over the free tier's 150 AND opted in), checked inside every resale entry point (allocation, distribution request, marketplace sync trigger, auto split, pool plan, S4K route / split / feed). Helpers are service role only except the number itself; table `exos_platform_settings` is RLS-on with no client grants, so only the operator changes the settings |
-| `exos_set_resale_consent`, `exos_event_sales_rules` (mig 20261029090000) | OK | The per-event resale opt-in. Set / withdraw: owner / manager of the event's org (looked up from the event), refused on the free tier and with a stale text version; read: owner / manager / finance (the opt-in's email only to them). `exos_resale_consents` grants SELECT to authenticated with RLS owner / manager / finance; no client writes. Helpers (`_exos_setting_*`, `exos_free_tier_fee_bps`, `exos_resale_consent_required`, `exos_event_capacity_bounded`, `exos_event_is_free_tier`, `exos_resale_consent_active`, `_exos_resale_consent_*`, `exos_event_sold_count`, `exos_event_tier_size`, `exos_event_fee_bps`, `exos_event_fee_terms`, the triggers) are service role only. The free tier is judged on max(max capacity, tickets sold), plus the order at checkout, so selling past a 150 cap can't dodge the fee; `exos_free_tier_max_capacity` (the number) is authenticated. No anon grant |
+| `exos_event_max_capacity`, `exos_resale_unlocked`, `_exos_resale_locked_msg`, `exos_resale_min_capacity`, `exos_tg_tier_resale_resync` (mig 20261014140000, redefined 20261029090000) | OK | The resale rule (150 or more, over the free tier's 149 since mig 20261121133000, AND opted in), checked inside every resale entry point (allocation, distribution request, marketplace sync trigger, auto split, pool plan, S4K route / split / feed). Helpers are service role only except the number itself; table `exos_platform_settings` is RLS-on with no client grants, so only the operator changes the settings |
+| `exos_set_resale_consent`, `exos_event_sales_rules` (mig 20261029090000) | OK | The per-event resale opt-in. Set / withdraw: owner / manager of the event's org (looked up from the event), refused on the free tier and with a stale text version; read: owner / manager / finance (the opt-in's email only to them). `exos_resale_consents` grants SELECT to authenticated with RLS owner / manager / finance; no client writes. Helpers (`_exos_setting_*`, `exos_free_tier_fee_bps`, `exos_resale_consent_required`, `exos_event_capacity_bounded`, `exos_event_is_free_tier`, `exos_resale_consent_active`, `_exos_resale_consent_*`, `exos_event_sold_count`, `exos_event_tier_size`, `exos_event_fee_bps`, `exos_event_fee_terms`, the triggers) are service role only. The free tier is judged on max(max capacity, tickets sold), plus the order at checkout, so selling past a 149 cap can't dodge the fee; `exos_free_tier_max_capacity` (the number) is authenticated. No anon grant |
 | `exos_last_call_status`, `exos_set_last_call_threshold`, `exos_set_org_last_call_threshold` (mig 20261029100000) | OK | Last call. Status: owner / manager / finance; set: owner / manager (event looked up first; 0-10000). Helpers (`exos_event_last_call`, `exos_event_remaining`, `exos_event_last_call_threshold`, `exos_last_call_default`, `exos_last_call_closes`, `_exos_primary_url`, `_exos_primary_hold`) are service role only. Trigger `exos_tickets_last_call` refuses any Exos mint during last call on another primary, bypass vouchers included (exempt: `channel_source` 'stripe' fulfilment and marketplace channels, which only definer functions set) |
 | `exos_public_event_sale` + view `exos_public_event_sales` (mig 20261029100000) | OK, anon by design | The storefront's "sold here or on the primary" answer. A view calls functions as the reader, so this one definer function is anon-callable (H3 allowlist): published events only, and only last call, the selling platform and its public page URL |
 | `exos_fixed_block_status`, `exos_set_fixed_block`, `exos_release_fixed_block_now` (mig 20261029160000) | OK | Fixed block. Status: owner / manager / finance (or admin); set / release now: owner / manager of the event's org (event looked up first, signed in). Set takes only that event's ticket types (1-100000, not below sold), never another primary than Exos, and can't undo a release. Helpers (`exos_event_fixed_block`, `exos_event_block_release_at`, `exos_event_block_closed`, `_exos_fixed_block_release`, `_exos_queue_fixed_block_mail`) and the cron `exos_release_fixed_blocks` are service role only. Table `exos_fixed_block_releases`: RLS read for owner / manager / finance, no client writes. Trigger `exos_tickets_fixed_block` refuses every Exos mint after the release (same exemptions as last call). `_exos_primary_hold`, `exos_last_call_closes` and `exos_public_event_sale` were re-created: grants unchanged (the last stays anon by design, same columns) |
@@ -276,6 +276,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_org_pending_members`, `exos_org_member_approve`, `exos_org_member_reject`, `exos_set_invite_approval` (mig 20261104200000) | OK | Invite approval. List: owner / manager of the org (returns claimers' account emails to them only). Approve / reject: an owner, or a manager for finance / content / scanner (`_exos_member_decider`, no client grant), never for oneself. The switch: owner. A pending member is `disabled`, so no `exos_has_org_role` check passes; trigger `_exos_tg_membership_approval` refuses clients (`current_user` authenticated / anon) changing the approval columns or enabling a pending row |
 | `exos_pos_recount_drawer` (mig 20261104200000) | OK | Owner / manager of the drawer's org (door staff close drawers but don't recount), a closed drawer, 7 days, 3 recounts, a reason, no final settlement; the replaced count goes to `exos_pos_drawer_recounts` (RLS owner / manager / finance read, no client writes) |
 | `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
+| `exos_ticket_static_reissue` (mig 20261121153000) | OK | The holder of a static-mode ticket only (anyone else `P0002`), active and not in a transfer, 3 a minute per holder: a new barcode secret, so a new static code (the old one, its PDF and its other codes die) |
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
 | `exos_pos_kiosk_configure`, `exos_pos_kiosk_enter`, `exos_pos_kiosk_end` and the kiosk cores (mig 20261113191000) | OK | Kiosk mode ("Kiosk mode" below). The three RPCs: owner / manager of the device's org only (`_exos_member_role`; anyone else, a platform admin included, `P0002`), rate-limited. Every `_exos_pos_kiosk_*` core is service role only (`exos-pos`, with the kiosk credential): each resolves the credential first, then reaches the card walk-up cores as the member who started the kiosk |
@@ -1234,6 +1235,55 @@ Exos adopted.
   `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
   `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
 
+### Static door codes (mig 20261121153000)
+
+Nothing new is callable by anon (H3 unchanged). One new authenticated RPC, `exos_ticket_static_reissue` (the holder
+of a static-mode ticket only; anyone else `P0002`; 3 a minute per holder). `_exos_base32`, `_exos_static_code`,
+`_exos_static_code_canon`, `_exos_static_code_check`, `_exos_ticket_code_mode` and `exos_mail_ticket_pdf_rows` are
+service role only; the two trigger functions have no client EXECUTE. `exos_tickets.code_mode` is readable by
+`authenticated` (column grant) and never writable by a client; the mode is locked after issuance.
+`exos_mail_ticket_pdfs` is RLS on with no client grants.
+
+- **The code is a door credential, not stored.** `S-{ticket}:{base32(HMAC-SHA256(barcode_secret,
+  'static:{ticket}:{owner}'))[160 bits]}`: whoever can read the ticket's secret (its holder and buyer through the
+  gated view, the server) can make it, exactly as they can make the rotating code. The `static:` prefix keeps the MAC
+  apart from every other one made with the secret.
+- **Every change of holder rotates the secret.** The claim (`exos_claim_transfer`), the phone-RSVP claim and, from
+  this migration, the box office's email hand-over to a confirmed account (`_exos_pos_deliver_email`, patched).
+  Before it, that hand-over moved the ticket without a new secret: a scanner who sold the walk-up ticket could read
+  the secret while holding it and still make the buyer's `T-` codes afterwards (live in prod for rotating tickets;
+  with a static code it would have been permanent and printable). Test: `test_pos_walkup.sql` X1
+  (x1_pos_deliver_no_rotate).
+- **A leaked code can be replaced.** The holder's `exos_ticket_static_reissue` and `exos_wallet_reissue` (patched, for
+  a static-mode ticket) give the ticket a new secret, so the old `S-` code, its PDF, and its `T-` / `W-` codes stop
+  working and a live print code is voided (`secret-rotated`). A new secret was chosen over putting the wallet epoch
+  in the MAC: the app, the email PDF and the roster all derive the code from the secret, and a holder without a pass
+  needs a way too (ST10).
+- **A leaked roster can't mint.** The door keys get `s`, its SHA-256, for static-mode tickets only; the roster never
+  carries the code or the secret (ST6).
+- **Paid tier keeps its property.** `_exos_static_code_check` refuses an `S-` code unless the ticket's `code_mode` is
+  `static`, the code names this ticket, and it is the current holder's (ST4). A static ticket still accepts `T-`.
+  An insert can ask for `static` only on the static-code path (`exos.static_code_ok = 'on'` for its transaction;
+  nothing sets it yet): elsewhere it is refused (`42501`) where the rule says rotating (ST2). The rule locks the
+  event row (`FOR NO KEY UPDATE`, the lock every issuing path's `UPDATE exos_events` takes, so no path
+  deadlocks on it) before counting, so two orders can't both take the last static place
+  (`race_static_codes.sh` race 2; race 3: an API reservation and a free claim on one event at once).
+- **Single use** is the existing atomic status flip (ST4, `race_static_codes.sh` race 1, CI); offline duplicates
+  resolve on upload (ST7). Transfer (new owner + rotated secret) and refund (voided) kill the code (ST5).
+- **Email.** A mail carries only the static tickets its own transaction issued or handed over to that address
+  (`buyer_email`, `updated_at = now()`), never matched by the holding account's email (an org owner holds partner /
+  RSVP guests' tickets: those go to the guest, never in the owner's mail). The drain reads the codes through
+  `exos_mail_ticket_pdf_rows` only for tickets still held by the same holder; a transfer between queue and send drops
+  the page. The PDF names `attendee_name` only, never the holding account's profile name (ST9). Codes are never
+  written to `exos_mail`.
+- **Patched bodies** (counted marker patches, check each anchor against prod first; the migration header lists
+  them): `exos_check_in_ticket` (both), `_exos_door_keys`, `_exos_wallet_payload`, `exos_ticket_link_view` (2),
+  `exos_phone_rsvp_verify`, `_exos_partner_reservation_complete`, `exos_wallet_reissue`, `_exos_pos_deliver_email`.
+  `exos_ticket_link_view` now also answers `code_mode`, and the static code for a static ticket (same key check as
+  before).
+- Tests: `tests/exos/test_static_codes.sql` (ST1-ST10), `tests/exos/test_pos_walkup.sql` X1,
+  `tests/exos/race_static_codes.sh` (CI), `src/lib/staticCodes.test.ts`, `supabase/functions/_shared/staticCodes_test.ts`.
+
 ### Channel core: one credential store, GatedHttp, channel audit, usage (mig 20261121162400)
 
 Nothing new is callable by anon (H3 unchanged), and nothing is sent to a third party: no write path or allowlist is
@@ -1413,6 +1463,37 @@ Nothing new is callable by anon (H3 unchanged), and nothing is sent to a platfor
 - **Limits** (`limits.ts`): a cap now trims only a request in its own metric, so one platform's budgets
   (Meetup's attendees and GraphQL points) don't trim each other.
 
+### Own marketplace accounts, dry run only (mig 20261121214500)
+
+Nothing new is callable by anon, and nothing is sent to a marketplace (operator 2026-11-21: "For the APIs build and
+keep read only till build is complete"). Tests: `tests/exos/test_byo_marketplaces.sql` (BY1-BY17),
+`race_byo_allocations.sh`, `_shared/byo/byo_test.ts`; docs/marketplace/README.md "Your own marketplace accounts".
+
+- **RPCs, role-checked inside.** `exos_byo_set_allocation` and `exos_byo_allocations_view`: authenticated only, owner /
+  manager of the event's org (42501 otherwise). `exos_byo_allocations` has RLS on and no client grants; the helpers
+  (`_exos_byo_channel`, `_exos_byo_listing`, `_exos_byo_ticket`, `_exos_listing_untouched`) and the account triggers
+  are internal. The view shows whether the org's credential exists, never a secret or a credential id. Only
+  `exos_byo_set_allocation` allocates an own-account channel: it sets `exos.byo_alloc_ok` for its own transaction
+  (as #133's `exos.static_code_ok`; no client path sets a GUC), and `exos_set_channel_allocation` refuses an
+  own-account channel otherwise (42501), so the % rule, the sold floor and the audit can't be skipped (review of #143,
+  R2). Ticking a marketplace under Distribution is refused while the organizer sells it with their own account
+  (`exos_tg_events_byo_networks`, any path; R1). `exos-byo /plan` is limited to 10 a minute per org.
+- **Money stays right.** Each order carries the account of the listing it was first matched to
+  (`exos_marketplace_orders.account`, stamped once by `_exos_tg_order_account`), and the fee and the journal read that:
+  an own-account sale is priced at 0 bps and posts nothing to the journal; a sale first matched to an own-account
+  listing after it was priced is re-priced at 0; a later re-match changes nothing. A listing row's account is fixed
+  when the row is made (42501 on any change): the marketplace knows a listing by our row id, so switching a
+  marketplace between the network and the organizer's account deletes the rows nothing ever happened on and refuses
+  while any other row is there; new rows get new ids, so a network sale can never land on an own-account row (R4).
+  Payouts: the money view's first state is `own_account` (never `payable` or `clawback_due`, so
+  `exos_plan_org_payouts` never plans one), and `exos_record_remittance` refuses an own-account order (22023), so
+  payouts never pay out money Exos didn't receive (R3).
+- **Every write behind GatedHttp.** Each `byo_<channel>` adapter lists exactly its listing writes (StubHub POST /
+  PATCH / DELETE by our `ex...` external id only; SeatGeek PUT / PATCH by our id and the bulk delete; Vivid Seats
+  create / delete; Ticket Evolution inventory create / delete by numeric id); order, sale and broker-listing paths are
+  refused. Ticket Evolution plans nothing for an own account yet: exos-distribute's plan carries Exos's office id. `exos-byo` pins the org's switch off (`BYO_WRITES_PINNED_OFF`) and hands GatedHttp a fetch that refuses
+  every call. The org's credential goes in headers only and is redacted from every step.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)
@@ -1460,7 +1541,7 @@ Nothing new is callable by anon (H3 unchanged); tests in
 
 ### Search path
 
-`exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function
+`exos_platform_fee_bps()` (a plain `SELECT 300`, `SELECT 200` since mig 20261121133000) was the one Exos function
 without a pinned `search_path`; it now has `public, pg_temp`. The one other
 unpinned Exos routine, `exos_run_channel_splits_each`, can't be pinned (see
 "Hygiene 2026-11-09").

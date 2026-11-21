@@ -24,15 +24,26 @@ export interface LinkView {
   tier_name?: string | null;
   attendee_name?: string | null;
   code?: string | null;
+  /** 'static' (mig 20261121153000): one S- code that never changes. */
+  code_mode?: 'static' | 'rotating' | null;
   refresh_in_ms?: number;
   server_time?: string;
 }
 
-/** When to ask again: just after the code rotates (at least 2 s, at most 30 s). */
-export function nextRefreshMs(view: Pick<LinkView, 'refresh_in_ms'>): number {
+/** When to ask again: just after the code rotates (at least 2 s, at most 30 s).
+ *  A static code doesn't rotate: once a minute, to see a check-in. */
+export function nextRefreshMs(view: Pick<LinkView, 'refresh_in_ms' | 'code_mode'>): number {
+  if (view.code_mode === 'static') return 60_000;
   const ms = Number(view.refresh_in_ms);
   if (!Number.isFinite(ms)) return 30_000;
   return Math.min(Math.max(ms + 250, 2_000), 30_000);
+}
+
+/** The line under the code. */
+export function codeNote(view: Pick<LinkView, 'code_mode'>): string {
+  return view.code_mode === 'static'
+    ? "This code doesn't change, so you can print it. It lets one person in: the first scan wins. Keep this link to yourself: anyone with it can use the ticket."
+    : "The code changes every 30 seconds; screenshots won't scan. Keep this link to yourself: anyone with it can use the ticket.";
 }
 
 /** What the page says for a link that can't show a code. */

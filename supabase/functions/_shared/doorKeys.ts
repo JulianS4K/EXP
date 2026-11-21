@@ -22,6 +22,7 @@ import {
 } from "./wallet/codes.ts";
 import { fromHex, hmac, sha256, toBase64Url, toHex, utf8 } from "./wallet/bytes.ts";
 import { constantTimeEqual } from "./constantTime.ts";
+import { staticCode, staticCodeHash, type CodeMode } from "./staticCodes.ts";
 
 export const BUCKET_MS = 30_000;
 export const BUCKETS_PER_DAY = 2880;
@@ -50,6 +51,9 @@ export interface DoorKeys {
   /** SHA-256 hex of the ticket's live print code (mig 20261105120000): the
    *  ticket is printed, so only that paper admits it. */
   p?: string;
+  /** SHA-256 hex of a static-mode ticket's S- code (mig 20261121153000,
+   *  ./staticCodes.ts). Absent for a rotating ticket. */
+  s?: string;
 }
 
 export function parseDoorKeys(v: unknown): DoorKeys | null {
@@ -67,6 +71,7 @@ export function parseDoorKeys(v: unknown): DoorKeys | null {
   if (typeof r.wg === "string" && /^[0-9a-f]{40}$/.test(r.wg)) out.wg = r.wg;
   if (typeof r.we === "number" && Number.isInteger(r.we)) out.we = r.we;
   if (typeof r.p === "string" && /^[0-9a-f]{64}$/.test(r.p)) out.p = r.p;
+  if (typeof r.s === "string" && /^[0-9a-f]{64}$/.test(r.s)) out.s = r.s;
   return out;
 }
 
@@ -87,6 +92,8 @@ export async function doorKeysFromSecret(
   secret: string,
   nowMs: number,
   walletEpoch?: number | null,
+  /** The ticket's code_mode: 'static' adds `s`, the S- code's hash. */
+  codeMode?: CodeMode | null,
 ): Promise<DoorKeys> {
   const today = doorDay(Math.floor(nowMs / BUCKET_MS));
   const d: Record<string, string> = {};
@@ -96,6 +103,10 @@ export async function doorKeysFromSecret(
     out.we = walletEpoch;
     out.wa = toHex(await sha256(utf8(await appleWalletCode(ticketId, ownerId, secret, walletEpoch))));
     out.wg = toHex(await googleTotpKey(ticketId, ownerId, secret, walletEpoch));
+  }
+  if (codeMode === "static" && ownerId) {
+    const h = await staticCodeHash(await staticCode(ticketId, ownerId, secret));
+    if (h) out.s = h;
   }
   return out;
 }

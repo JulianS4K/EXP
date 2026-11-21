@@ -324,22 +324,22 @@ DECLARE o uuid := pg_temp.u('mk1'); p uuid := pg_temp.u('po1'); l uuid := pg_tem
 BEGIN
   INSERT INTO public.exos_marketplace_orders (id, channel, external_order_id, event_id, org_id, quantity, proceeds, currency, sale_status, status)
   VALUES (o, 'evo', 'MJ-1', pg_temp.u('e1'), pg_temp.u('1'), 2, 80.00, 'usd', 'delivered', 'delivered');
-  -- 3% Exos fee: 2.40; net 77.60.
+  -- 2% Exos fee (mig 20261121133000): 1.60; net 78.40.
   ASSERT pg_temp.n(o::text, 'mkt_sale') = 1, 'MJ4 sale posted';
-  ASSERT pg_temp.bal('marketplace_receivable', o::text) = 7760 AND pg_temp.bal('exos_fee', o::text) = 240
+  ASSERT pg_temp.bal('marketplace_receivable', o::text) = 7840 AND pg_temp.bal('exos_fee', o::text) = 160
      AND pg_temp.bal('ticket_revenue', o::text) = -8000, 'MJ4 receivable, fee, face';
   UPDATE public.exos_marketplace_orders SET proceeds = 90.00 WHERE id = o;
   ASSERT pg_temp.n(o::text, 'mkt_adjust') = 1 AND pg_temp.bal('ticket_revenue', o::text) = -9000
-     AND pg_temp.bal('marketplace_receivable', o::text) = 8730, 'MJ4 re-priced: the difference';
+     AND pg_temp.bal('marketplace_receivable', o::text) = 8820, 'MJ4 re-priced: the difference';
   UPDATE public.exos_marketplace_orders SET sale_note = 'touch' WHERE id = o;
   ASSERT pg_temp.n(o::text) = 2, 'MJ4 an unrelated update posts nothing';
   -- Paid out.
-  INSERT INTO public.exos_org_payouts (id, org_id, currency, amount, status, idempotency_key) VALUES (p, pg_temp.u('1'), 'usd', 87.30, 'planned', 'mj-payout-1');
-  INSERT INTO public.exos_org_payout_lines (id, payout_id, org_id, order_id, kind, amount) VALUES (l, p, pg_temp.u('1'), o, 'sale', 87.30);
+  INSERT INTO public.exos_org_payouts (id, org_id, currency, amount, status, idempotency_key) VALUES (p, pg_temp.u('1'), 'usd', 88.20, 'planned', 'mj-payout-1');
+  INSERT INTO public.exos_org_payout_lines (id, payout_id, org_id, order_id, kind, amount) VALUES (l, p, pg_temp.u('1'), o, 'sale', 88.20);
   ASSERT pg_temp.n(l::text) = 0, 'MJ4 planned: nothing yet';
   UPDATE public.exos_org_payouts SET status = 'sent', sent_at = now() WHERE id = p;
-  ASSERT pg_temp.n(l::text, 'mkt_payout') = 1 AND pg_temp.bal('marketplace_receivable', l::text) = -8730
-     AND pg_temp.bal('stripe_clearing', l::text) = 8730, 'MJ4 sent: receivable → cash';
+  ASSERT pg_temp.n(l::text, 'mkt_payout') = 1 AND pg_temp.bal('marketplace_receivable', l::text) = -8820
+     AND pg_temp.bal('stripe_clearing', l::text) = 8820, 'MJ4 sent: receivable → cash';
   ASSERT pg_temp.bal('marketplace_receivable', o::text) + pg_temp.bal('marketplace_receivable', l::text) = 0, 'MJ4 receivable settled';
   -- Cancelled: the sale is reversed (the clawback is its own payout line).
   UPDATE public.exos_marketplace_orders SET status = 'cancelled' WHERE id = o;

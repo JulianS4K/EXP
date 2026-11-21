@@ -25,6 +25,12 @@
 //                                 app (checkout-abandoned); such rows are held back
 //                                 (retried) while it's unset. _shared/mail-render.ts.
 //
+// Static-code tickets (mig 20261121153000): a 'ticket-issued' mail linked to
+// the recipient's static tickets (exos_mail_ticket_pdfs) goes out with them
+// as a PDF (_shared/staticTicketMail.ts). exos_mail_ticket_pdf_rows returns
+// only the ones still live with the same holder; if that read fails the mail
+// goes without the PDF (the app still shows the code) rather than wait.
+//
 // Payload rows (mig 20260929071000): rows queued by exos_mail_enqueue carry a
 // JSON payload and no html. The claim passes p_render_payload => true so
 // they're handed out, and _shared/mail-templates.ts renders subject + html
@@ -45,6 +51,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { normalizeAppUrl, renderMail } from "../_shared/mail-render.ts";
 import { renderTemplate } from "../_shared/mail-templates.ts";
+import { staticTicketAttachment, type StaticPdfRow } from "../_shared/staticTicketMail.ts";
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
@@ -109,6 +116,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     for (const e of (extra ?? []) as { id: string; list_unsubscribe: string }[]) unsubById.set(e.id, e.list_unsubscribe);
   }
 
+  // Static-code PDFs for this batch's ticket mails (best-effort, one read).
+  const pdfRows = new Map<string, StaticPdfRow[]>();
+  const ticketMails = rows.filter((r) => r.template === "ticket-issued").map((r) => r.id);
+  if (ticketMails.length > 0) {
+    const { data: pdfData, error: pdfErr } = await sb.rpc("exos_mail_ticket_pdf_rows", { p_mail_ids: ticketMails });
+    if (pdfErr) console.error("exos-mail-drain: static ticket read failed (sending without PDFs)", pdfErr.message);
+    for (const r of (pdfData ?? []) as { mail_id: string; ticket: StaticPdfRow }[]) {
+      pdfRows.set(r.mail_id, [...(pdfRows.get(r.mail_id) ?? []), r.ticket]);
+    }
+  }
+
   for (const row of rows) {
     let subject = row.subject;
     let html = row.html;
@@ -133,6 +151,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       failed++;
       continue;
     }
+    const attach = staticTicketAttachment(pdfRows.get(row.id) ?? []);
+    if (attach) rendered.html += attach.note;
     try {
       const res = await fetch(RESEND_ENDPOINT, {
         method: "POST",
@@ -146,6 +166,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           subject,
           html: rendered.html,
           ...(Object.keys(rendered.headers).length > 0 ? { headers: rendered.headers } : {}),
+          ...(attach ? { attachments: [attach.attachment] } : {}),
         }),
       });
       if (res.ok) {

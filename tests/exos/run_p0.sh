@@ -295,9 +295,12 @@ for m in \
   20261118120000_exos_waiting_room \
   20261119130000_exos_mcp_writes \
   20261121100000_exos_channel_risks \
+  20261121133000_exos_pricing_149_2pct \
+  20261121153000_exos_static_codes \
   20261121162400_exos_channel_core \
   20261121190500_exos_ads \
-  20261121203000_exos_social_listings; do
+  20261121203000_exos_social_listings \
+  20261121214500_exos_byo_marketplaces; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -552,9 +555,12 @@ for m in \
          20261118120000_exos_waiting_room \
          20261119130000_exos_mcp_writes \
          20261121100000_exos_channel_risks \
+         20261121133000_exos_pricing_149_2pct \
+         20261121153000_exos_static_codes \
          20261121162400_exos_channel_core \
          20261121190500_exos_ads \
-         20261121203000_exos_social_listings; do
+         20261121203000_exos_social_listings \
+         20261121214500_exos_byo_marketplaces; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -570,6 +576,8 @@ PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 202611211
 # replaces _exos_cred_managed / _exos_cred_providers in full after it, so it is
 # re-applied in the same check (reapply_check.sh: later migrations).
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads 20261121203000_exos_social_listings
+# The own-account marketplaces (mig 20261121214500): 11 counted patches, re-run safe.
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121214500_exos_byo_marketplaces
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_passes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
@@ -725,11 +733,15 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_waiting_r
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp_writes.sql"
 # claude/exos-channel-risks (mig 20261121100000): before Eventbrite / Luma writes go live: one promise across platforms (an event on Eventbrite AND Luma never offers the same free seats twice, per ticket type and per house; the shared pool split; one platform unchanged; one lock per event), a link to another external event refused at set and recorded as a conflict at mark (the new id kept, no link written, cleared by the next save), the pending create (lease, 2-minute in-flight, first time + slug kept, cleared once synced), a Luma ack keeps its steps, created classes + first capacities (race: race_channel_promise.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_risks.sql"
+# claude/exos-static-tickets (mig 20261121153000): static door codes (the free tier): the mode fixed per ticket at issuance (cutoff static, cutoff+1 rotating, growth keeps earlier tickets static, an explicit mode kept, the mode locked), the S- code (SQL = TS vector, canonical case), the door (static ticket in, first scan wins, the second "already checked in", a rotating ticket's S- code refused, another ticket's / holder's code refused, printed refuses it, older overload), void on transfer and refund, the roster carries only the hash (cannot mint), offline replay (first upload wins, the second used), wallet payload + link view, the PDF link + drain rows (race: race_static_codes.sh in CI)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_static_codes.sql"
 # claude/exos-channel-core (mig 20261121162400): the shared channel core: one credential store (only the service role decrypts through exos_integration_secret; owner / manager save through the shared write, audited, never read back; managed providers refused by the generic save / remove; DICE / Eventbrite / ad / Discord connects copied into the store by triggers, reconnects and disconnects followed; the backfill copies older rows, re-run safe; reads fall back to the old tables while a copy is missing; distribution moved to Vault with a stub left), the channel audit (scrubbed on write, owner / manager of the org read, no client writes), platform usage counters (live under the threshold, planned apart and deduped, rolling day / week / year, the summary's roles)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_core.sql"
 # claude/exos-ads (mig 20261121190500): the ads phase, dry run only: Reddit's email hash (parity constants with hashedIds.ts) on Reddit outbox rows only, X conversions queued from the store (ads_x on, consent granted, paid) and nowhere else, the new managed providers (refused by the generic save, read only by the service role), the planner's context (owner / manager, booleans only, no hidden venue pin), the audience source (service role only; hashes only; a "yes" only from a paid / issued order, not lost to a dispute, whose email the person proved (an email code, or their own confirmed account; never an SMS proof or an organizer's correction), a "no" from anywhere, the latest counted choice winning, by email and by account, a "no" on a tie; a fully refunded buyer's fan row out; mail / list opt-outs, discarded, deleted and banned out; event scope; logged; 3 a minute and 20 a day shared with the CSV export), the same consent rules in exos_org_audience_export, account deletion (fan rows and their tags, every guest checkout under the email, pending too), the Reddit hash's edges (race: race_audience_cap.sh, CI)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ads.sql"
 # claude/exos-social-listings (mig 20261121203000): social posting and listing APIs, dry run only: the new managed providers (ig_publish, tiktok_publish, meetup, linkedin, google_business; refused by the generic save / remove, read only by the service role, not listed in Integrations), the post kit's context (owner / manager only; a secret / TBA location without its venue; venue org; booleans and non-secret facts only; the Google connection counts for Business Profile)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_social_listings.sql"
+# claude/exos-byo-marketplaces (mig 20261121214500): selling on the organizer's OWN marketplace accounts, dry run only: % allocations per marketplace (floor, at least 1, never below sold, audited), one account per marketplace per event (the Exos network's gates skipped, $0 blocked), no Exos fee and off Exos's books on an own-account sale while an Exos checkout on the same 150+ event pays, static codes for its tickets, the auto split leaves it alone (race: race_byo_allocations.sh)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_byo_marketplaces.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

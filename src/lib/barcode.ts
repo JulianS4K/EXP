@@ -44,6 +44,14 @@
 //      (exos_addon_passes.barcode_secret, served to its holder only by
 //      exos_my_addon_passes). The server checks it in _exos_check_in_addon_pass.
 //
+//   6. A static-mode ticket (code_mode 'static', mig 20261121153000: the free
+//      tier, fixed per ticket at issuance) shows ONE code that never changes:
+//      `S-{ticketId}:{32 base32 chars}` (supabase/functions/_shared/
+//      staticCodes.ts). It parses as nothing else: two parts, its own prefix,
+//      a tail of A-Z / 2-7 only, so it can't be read as a four-part T- / A-
+//      code or the reverse. The door holds its SHA-256 (keys.s), never the
+//      code; the server refuses it for a rotating ticket.
+//
 // What this still doesn't give us:
 //   * Full defense against a malicious organizer. The camera scan is now
 //     server-verified, but an owner or manager can still force a MANUAL
@@ -65,6 +73,7 @@ import {
 import { printCodeTicketId } from '../../supabase/functions/_shared/print/tickets.ts';
 import { appleAddonWalletCode, verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
 import { constantTimeEqual } from '../../supabase/functions/_shared/constantTime.ts';
+import { staticCodeTicketId, verifyStaticWithKeys } from '../../supabase/functions/_shared/staticCodes.ts';
 
 const BUCKET_MS = 30_000;
 // Accept barcodes from the current bucket or up to N buckets in either
@@ -174,11 +183,11 @@ export interface VerifyResult {
  * "secret" segment for legacy barcodes because there's no integrity
  * guarantee on it — a fresh implementation would have used HMAC.
  */
-/** A reader that lower-cases ("t-…", "w-…", "p-…", "a-…"): the prefix in upper case,
+/** A reader that lower-cases ("t-…", "w-…", "p-…", "a-…", "s-…"): the prefix in upper case,
  *  as the server reads it (exos_check_in_ticket compares it case-insensitively).
  *  The rest of the code is case-sensitive and left alone. */
 export function normalizeCodePrefix(payload: string): string {
-  return typeof payload === 'string' && /^[twpa]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
+  return typeof payload === 'string' && /^[twpas]-/.test(payload) ? payload[0].toUpperCase() + payload.slice(1) : payload;
 }
 
 export async function verifyBarcode(
@@ -198,9 +207,20 @@ export async function verifyBarcode(
       ? { ok: true, legacy: false, ticketId }
       : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId };
   }
-  // A printed ticket admits on its paper only: its app and wallet codes are refused.
-  if (keys && typeof keys !== 'string' && keys.p && typeof payload === 'string' && /^[TW]-/.test(payload)) {
+  // A printed ticket admits on its paper only: its app, wallet and static codes are refused.
+  if (keys && typeof keys !== 'string' && keys.p && typeof payload === 'string' && /^[TWS]-/.test(payload)) {
     return { ok: false, reason: 'printed', legacy: false, ticketId: extractTicketIdFromAny(payload) ?? undefined };
+  }
+  // A static-mode ticket's one code (S-…, mig 20261121153000): the door holds
+  // its hash (keys.s), set only for a static-mode ticket, so a rotating
+  // ticket's S- code finds no key here and is refused by the server.
+  if (typeof payload === 'string' && payload.startsWith('S-')) {
+    const ticketId = staticCodeTicketId(payload);
+    if (!ticketId) return { ok: false, reason: 'malformed', legacy: false };
+    if (typeof keys === 'string' || !keys?.s) return { ok: false, reason: 'no-key', legacy: false, ticketId };
+    return (await verifyStaticWithKeys(payload, keys)).ok
+      ? { ok: true, legacy: false, ticketId }
+      : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId };
   }
   // Wallet pass codes (W-…, Apple static / Google TOTP; docs/wallet.md). The
   // signature is checked here; the server also requires the pass to be live
@@ -313,7 +333,7 @@ export async function verifyBarcode(
 export function extractTicketIdFromAny(payload: string): string | null {
   if (!payload || typeof payload !== 'string') return null;
   const p = normalizeCodePrefix(payload);
-  const trimmed = p.startsWith('T-') || p.startsWith('W-') || p.startsWith('P-') || p.startsWith('A-') ? p.slice(2) : p;
+  const trimmed = p.startsWith('T-') || p.startsWith('W-') || p.startsWith('P-') || p.startsWith('A-') || p.startsWith('S-') ? p.slice(2) : p;
   const id = trimmed.split(':')[0];
   return id || null;
 }

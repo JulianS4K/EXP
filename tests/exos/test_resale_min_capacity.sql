@@ -16,7 +16,7 @@
 -- Self-contained (a8 prefix), rolled back. Since mig 20261029090000 the
 -- rule is "max capacity over free_tier_max_capacity, and opted in"; this file
 -- keeps the 250 cases by setting the cutoff to 249 with no opt-in needed
--- (test_free_tier_resale.sql covers the 150 default and the opt-in). The
+-- (test_free_tier_resale.sql covers the 149 default, under 150 free, and the opt-in). The
 -- harness turns the rules off for older fixtures.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -177,7 +177,7 @@ BEGIN
   UPDATE public.exos_platform_settings SET value = '99' WHERE key = 'free_tier_max_capacity';
   ASSERT public.exos_resale_min_capacity() = 100 AND public.exos_resale_unlocked(pg_temp.u('e5')), 'R7: 100';
   UPDATE public.exos_platform_settings SET value = '"oops"' WHERE key = 'free_tier_max_capacity';
-  ASSERT public.exos_resale_min_capacity() = 151, 'R7: a bad value falls back to the 150 default';
+  ASSERT public.exos_resale_min_capacity() = 150, 'R7: a bad value falls back to the 149 default (under 150 is free, mig 20261121133000)';
 END $$;
 
 -- R8. Grants.
