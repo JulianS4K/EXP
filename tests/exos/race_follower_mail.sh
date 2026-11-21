@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Follower "new event" mail races (mig 20261111110000): two events of one org
-# going live at once must queue ONE mail to a follower (the 24-hour slot),
-# with the other event left waiting for the next window. Real parallel
-# sessions, timing-based, so run by hand against a DB built by run_p0.sh:
+# Follower "new event" mail races (migs 20261111110000, 20261112100000): a
+# publish only records notices; the digest job (exos_send_follower_digests)
+# builds and queues the mail. Whatever runs at once, a follower gets ONE mail
+# per org per 24 hours (the slot), and every event exactly one notice. Real
+# parallel sessions, timing-based, so run by hand against a DB built by
+# run_p0.sh:
 #   bash tests/exos/race_follower_mail.sh exos_p0_test
 # Expect:
-#   race 1 publish e1 held open (uncommitted) while e2 publishes: e2 waits on
-#          the slot row, then finds it used and stays pending; one mail
-#   race 2 six events published at the same moment in six sessions: one
-#          mail, five notices pending, none lost or doubled
+#   race 1 a digest held open (uncommitted) while a second digest runs: the
+#          second waits on the notice rows, finds them queued; one mail
+#   race 2 six publishes at the same moment, then six digests at once: six
+#          pending notices, then one mail with all six, none lost or doubled
+#   race 3 a digest held open while e2 publishes and a second digest runs:
+#          the second waits on the slot, finds it used; one mail, e2 waits
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -45,25 +49,46 @@ notices() { $P -c "SELECT count(*) FILTER (WHERE status='queued') || '/' || coun
                    FROM exos_follower_notices WHERE org_id='$O'"; }
 fail=0
 
-# race 1: e1's publish is held open; e2 publishes meanwhile.
+digest() { $P -c "SELECT public.exos_send_follower_digests(500)" >/dev/null; }
+held_digest() { $P -c "BEGIN; SELECT public.exos_send_follower_digests(500); SELECT pg_sleep(2); COMMIT;" >/dev/null; }
+
+# race 1: a digest is held open; a second one runs meanwhile.
 fresh
-$P -c "BEGIN; UPDATE exos_events SET status='published' WHERE id='$(ev 1)'; SELECT pg_sleep(2); COMMIT;" >/dev/null &
+publish 1; publish 2
+held_digest &
 sleep 0.5
-publish 2
+digest
 wait
-if [[ "$(mails)" == 1 && "$(notices)" == "1/1/2" ]]; then
-  echo "OK   race 1 publish during an uncommitted publish: one mail, the other event waits"
+if [[ "$(mails)" == 1 && "$(notices)" == "2/0/2" ]]; then
+  echo "OK   race 1 digest during an uncommitted digest: one mail with both events"
 else
   echo "FAIL race 1: mails $(mails), queued/pending/all $(notices)"; fail=1
 fi
 
-# race 2: six publishes at once.
+# race 2: six publishes at once, then six digests at once.
 fresh
 for i in 1 2 3 4 5 6; do publish "$i" & done
 wait
-if [[ "$(mails)" == 1 && "$(notices)" == "1/5/6" ]]; then
-  echo "OK   race 2 six publishes at once: one mail, five waiting"
+pre="$(mails) $(notices)"
+for i in 1 2 3 4 5 6; do digest & done
+wait
+if [[ "$pre" == "0 0/6/6" && "$(mails)" == 1 && "$(notices)" == "6/0/6" ]]; then
+  echo "OK   race 2 six publishes at once queue nothing; six digests at once: one mail with all six"
 else
-  echo "FAIL race 2: mails $(mails), queued/pending/all $(notices)"; fail=1
+  echo "FAIL race 2: before the digests $pre; mails $(mails), queued/pending/all $(notices)"; fail=1
+fi
+
+# race 3: a digest holds e1's slot open; e2 publishes and a second digest runs.
+fresh
+publish 1
+held_digest &
+sleep 0.5
+publish 2
+digest
+wait
+if [[ "$(mails)" == 1 && "$(notices)" == "1/1/2" ]]; then
+  echo "OK   race 3 publish + digest during an uncommitted digest: one mail, the other event waits"
+else
+  echo "FAIL race 3: mails $(mails), queued/pending/all $(notices)"; fail=1
 fi
 exit $fail
