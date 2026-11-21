@@ -1335,10 +1335,24 @@ exception for that platform.
   the answer says `truncated` with the `total`.
 - **Whose "yes" counts** (review of #138, B2 and B2'; the same rule now in
   `exos_org_audience_export`, live on prod). A guest can start a checkout with anyone's email, so a
-  "yes" counts only from an order that was paid or issued (fulfilled, partly or fully refunded), not
-  lost to a dispute, whose email the person proved (`_exos_consent_grant_ok`): an `exos_order_proofs`
-  row proven via `email_code` for that very address, or no proof row and their own confirmed,
-  live account with the same address. An SMS proof (it proves a phone: a stranger can start a
+  "yes" counts only from an order that was paid or issued (fulfilled, partly or fully refunded), with
+  no open or lost dispute (`dispute_status` NULL, `won` or `warning_closed`, the set payouts read; T2),
+  whose email the person proved (`_exos_consent_grant_ok`): an `exos_order_proofs` row proven via
+  `email_code` for that very address, or no proof row and their own live account with the same
+  address and a **verified** email (`_exos_account_email_verified`, T1): a Google / Apple / other
+  OAuth identity whose provider says `email_verified` for that address, or a confirmation mail
+  Supabase sent and the person answered (`confirmation_sent_at` set, `email_confirmed_at` at or after
+  it). `email_confirmed_at` alone isn't proof: with Supabase Auth's **Confirm email** off (prod today:
+  every account confirmed at sign-up, no confirmation mail sent) GoTrue sets it at sign-up, so anyone
+  could sign up as your address, buy and tick "yes". Turning Confirm email on makes new email/password
+  accounts count; until then their "yes" counts only after an email code. **Not changed here:** ticket
+  release for an account buyer (`_exos_proof_open` / `_exos_uid_email_confirmed`, mig
+  20261105100000) reads `email_confirmed_at` the same way, so with Confirm email off a stranger who
+  signs up as your address skips the email proof there too. Tightening it would make every current
+  account prove before release; that is Julian's call (or turn Confirm email on). An SMS send no
+  longer reopens the email code's guesses (T3, pre-existing and live): `email_attempts` counts wrong
+  codes against the email code only, an SMS send leaves it alone, and at 5 the email code stops
+  matching until a new one is mailed. An SMS proof (it proves a phone: a stranger can start a
   checkout with your email and prove their own) and an organizer's correction (`proven_via
   'organizer'`) never make a "yes". Guest orders from before proofs (mig 20261105100000: no proof row,
   no account) no longer count as a "yes". The buyer rows need the same. A "no" counts from any checkout (it can only take someone out); the latest counted
