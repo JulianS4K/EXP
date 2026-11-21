@@ -83,7 +83,7 @@ export interface ParsedDoorCode {
  *  downgrade and fails the signature check. */
 export function parseDoorCode(raw: string, source: DoorSource): ParsedDoorCode {
   const v = normalizeCodePrefix((raw || '').trim());
-  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.startsWith('A-') && !v.includes(':');
+  const bare = source === 'manual' && v !== '' && !v.startsWith('T-') && !v.startsWith('W-') && !v.startsWith('P-') && !v.startsWith('A-') && !v.startsWith('S-') && !v.includes(':');
   const id = v ? extractTicketIdFromAny(v) || v : null;
   // Ticket ids are UUIDs: anything over 128 chars can't be one.
   return { raw: v, ticketId: id && id.length <= 128 ? id : null, bare };

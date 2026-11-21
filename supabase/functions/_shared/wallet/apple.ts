@@ -9,7 +9,7 @@
 
 import { toHex, sha1, utf8 } from "./bytes.ts";
 import type { PassSigner } from "./pkcs7.ts";
-import { displayState, localIso, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
+import { displayState, localIso, passStaticCode, revealedLocation, shortTicket, VOID_TEXT, type WalletPayload } from "./payload.ts";
 import { solidPng } from "./png.ts";
 import { zipStore } from "./zip.ts";
 
@@ -141,7 +141,8 @@ export function buildApplePassJson(
   } else if (p.apple_code) {
     pass.barcodes = [{
       format: "PKBarcodeFormatQR",
-      message: p.apple_code,
+      // A static-mode ticket: its one S- code (mig 20261121153000).
+      message: passStaticCode(p) ?? p.apple_code,
       messageEncoding: "iso-8859-1",
       altText: shortTicket(p.ticket.id),
     }];

@@ -21,6 +21,7 @@
 --       accounts get a claim link; no re-delivery (owner / manager can, never
 --       a scanned ticket)
 --   W19 drawers are their holder's: sell into, void out of, close, gift cards
+--   X1  the email hand-over to an account rotates the secret (mig 20261121153000)
 -- Self-contained (BEGIN / ROLLBACK). Org …01: owner a1, manager a2, scanner a3
 -- (assigned to e1), scanner a6 (assigned to e2), scanner a7 (org-wide), finance a4;
 -- buyer a5 (no org); a8 an account whose email isn't confirmed.
@@ -466,6 +467,31 @@ BEGIN
   PERFORM pg_temp.act(pg_temp.u('a2'));
   ASSERT (public.exos_pos_order_codes((r ->> 'id')::uuid) -> 'skipped' -> 0 ->> 'reason') = 'in-transfer', 'W13: a manager: skipped, in transfer';
   RAISE NOTICE 'OK W13 the screen QR / paper is a print code that scans once; email to an account or a claim link';
+END $$;
+
+-- x1_pos_deliver_no_rotate (mig 20261121153000): the email hand-over to an
+-- account gives the ticket a new secret. Before, the seller, who could read
+-- the secret while holding the walk-up ticket, could still make the buyer's
+-- door code after the hand-over (and with a static code, for good).
+DO $$
+DECLARE r jsonb; t uuid; s_old text; s_new text; b bigint := floor(extract(epoch FROM now()) * 1000 / 30000)::bigint;
+BEGIN
+  r := pg_temp.sell('a3', 'd5', 1, '6a');
+  SELECT id, barcode_secret INTO t, s_old FROM public.exos_tickets WHERE order_ref = 'pos:' || (r ->> 'id');
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = t) = pg_temp.u('a3'), 'X1: the seller holds it';
+  PERFORM pg_temp.act(pg_temp.u('a2'));
+  PERFORM public.exos_pos_order_email((r ->> 'id')::uuid, 'b0c7-fan@x.com');
+  SELECT barcode_secret INTO s_new FROM public.exos_tickets WHERE id = t;
+  ASSERT (SELECT owner_id FROM public.exos_tickets WHERE id = t) = pg_temp.u('a5'), 'X1: handed over';
+  ASSERT s_new IS DISTINCT FROM s_old, 'X1: a new secret';
+  -- The code the seller could make with the old secret: refused.
+  ASSERT public.exos_check_in_ticket(t, 'camera', 'verified',
+           'T-' || t || ':' || pg_temp.u('a5') || ':' || b || ':' || public._exos_door_code_mac(t, pg_temp.u('a5'), b, s_old),
+           pg_temp.u('e1'), NULL, NULL, 'door-1') ->> 'reason' = 'barcode-rejected', 'X1: the old secret''s code is refused';
+  ASSERT public.exos_check_in_ticket(t, 'camera', 'verified',
+           'T-' || t || ':' || pg_temp.u('a5') || ':' || b || ':' || public._exos_door_code_mac(t, pg_temp.u('a5'), b, s_new),
+           pg_temp.u('e1'), NULL, NULL, 'door-1') ->> 'reason' = 'checked-in', 'X1: the buyer''s code works';
+  RAISE NOTICE 'OK X1 x1_pos_deliver_no_rotate: the hand-over rotates the secret; the seller''s old code is refused';
 END $$;
 
 -- ── W14 ─────────────────────────────────────────────────────────────────────

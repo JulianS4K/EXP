@@ -53,7 +53,12 @@ paid events can't be sold.**
   ticket types, a table counting its party size) pays no Exos fee at all, ever; only card
   processing. It is also never listed on resale marketplaces or S4K. An event that sells past 150
   anyway (a voucher that sells past sold-out, comps, the box office) leaves the free tier: the order
-  that crosses 150 and every one after pay the normal fee. Bigger events: your
+  that crosses 150 and every one after pay the normal fee. Free-tier tickets get a **static QR
+  code**: one code per ticket that never changes, emailed as a PDF with the confirmation and
+  downloadable from My Tickets, so a printout works. **Rotating anti-screenshot QR codes are part
+  of the paid tier** (over the free-tier cutoff). The code type is fixed per ticket when it's
+  issued: if the event grows past the cutoff, tickets issued from then on rotate and the earlier
+  ones keep their static code, and the door takes both (see section 5). Bigger events: your
   first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
   takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
   a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
@@ -551,8 +556,13 @@ until the operator switches it on.
 
 ## 5. At the door (`/checkin/:eventId`)
 
-- Staff with the **scanner** role scan the attendee's live QR code. It changes every 30 seconds
-  and is signed per ticket, so screenshots and forwarded codes stop working quickly.
+- Staff with the **scanner** role scan the attendee's live QR code. On the paid tier it changes every
+  30 seconds and is signed per ticket, so screenshots and forwarded codes stop working quickly.
+- **Static codes (free tier):** a free-tier ticket has one QR that never changes (`S-…`), on its PDF,
+  in the app and in the wallet pass. It lets one person in: the first scan wins and any copy is
+  refused "already checked in". A transfer or refund kills the old code. The printed string can be
+  typed into the scanner too. The scanner tells the two kinds apart by themselves, per ticket, online
+  and offline (`docs/wallet.md` "Static codes").
 - The server checks every scan: wrong event, already used, refunded or mid-transfer are all
   refused and logged.
 - **Offline mode:** download the roster before doors open. The device can then admit tickets

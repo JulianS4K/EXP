@@ -427,6 +427,9 @@ export interface Ticket {
   purchaseDate: Timestamp;
   barcodeValue: string;
   barcodeSecret?: string;
+  /** How the door code works, fixed at issuance (mig 20261121153000): one
+   *  static S- code (printable) or the rotating T- code. */
+  codeMode?: 'static' | 'rotating';
   tierId?: string;
   tierName?: string;
   orderId?: string;

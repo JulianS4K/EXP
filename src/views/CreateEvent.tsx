@@ -76,6 +76,7 @@ function shiftLocalDatetime(value: string, minutes: number): string {
 // writes a misleading `syncStatus: 'failed'` to the doc.
 import { MARKETPLACE_NETWORKS, SHOW_MARKETPLACES, autoTicketType } from '../lib/tierType';
 import { eventCapacityBounded, eventMaxCapacity, resaleLockedText, resaleUnlocked } from '../lib/marketplace/resaleGate';
+import { doorCodeTierText } from '../lib/staticTickets';
 import { ACCESSIBLE_NOTE_MAX, hasAccessInfo, parseAccessibility, serializeAccessibility, type EventAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import { slugify } from '../lib/orgs';
@@ -1770,14 +1771,21 @@ export default function CreateEvent() {
              // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
              const caps = ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table));
              const cap = eventMaxCapacity(Number(formData.totalTickets) || 0, caps);
-             return resaleUnlocked(cap) ? (
-               <p role="status" className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">
-                 Resale needs your opt-in for this event: after you save, Edit event → Marketplaces → Resale.
-               </p>
-             ) : (
-               <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
-                 {resaleLockedText(cap, undefined, eventCapacityBounded(Number(formData.totalTickets) || 0, caps))}
-               </p>
+             const bounded = eventCapacityBounded(Number(formData.totalTickets) || 0, caps);
+             return (
+               <>
+                 {resaleUnlocked(cap) ? (
+                   <p role="status" className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">
+                     Resale needs your opt-in for this event: after you save, Edit event → Marketplaces → Resale.
+                   </p>
+                 ) : (
+                   <p role="status" className="type text-xs text-amber-400 border-l-2 border-amber-400 pl-3">
+                     {resaleLockedText(cap, undefined, bounded)}
+                   </p>
+                 )}
+                 {/* Static vs rotating door codes (mig 20261121153000). */}
+                 <p className="type text-xs text-white/60 border-l-2 border-white/20 pl-3">{doorCodeTierText(cap, bounded)}</p>
+               </>
              );
            })()}
            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
