@@ -29,6 +29,7 @@ import DoorImport from '../components/DoorImport';
 import EventbriteSync from '../components/EventbriteSync';
 import WaitlistPanel from '../components/WaitlistPanel';
 import DropListPanel from '../components/DropListPanel'; // claude/exos-drop-list
+import WaitingRoomPanel from '../components/WaitingRoomPanel'; // claude/exos-waiting-room
 import AnnouncementsPanel from '../components/AnnouncementsPanel';
 import RemindersPanel from '../components/RemindersPanel';
 import EventAnalyticsPanel from '../components/EventAnalyticsPanel';
@@ -339,6 +340,9 @@ export default function OrganizerEventReport() {
         </div>
 
         {tab === 'overview' && (<>
+        {/* On-sale waiting room (mig 20261118120000): the switch and its numbers (owner / manager,
+            audited) and live counts (owner / manager / finance); checked in SQL. */}
+        <WaitingRoomPanel eventId={event.id} timezone={event.timezone} canView={canSeeMoney(activeRole, isAdmin)} />
         {/* Money: settlement summary + per-order CSV (owner / manager / finance;
             hidden before the money views exist). Read-only. */}
         {/* End-of-night money (online, door, fees, promoters owed); mig 20261102150000. */}

@@ -174,8 +174,18 @@ import {
 } from "../_shared/payouts/commissionMethods.ts";
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
+import { wroomAttach, wroomBindSession } from "../_shared/wroomCheckout.ts";
+import { expireOwnStripeSession } from "../_shared/wroomStripe.ts";
 
-Deno.serve(async (req: Request): Promise<Response> => {
+// exos: waiting room — ids are checked before they reach the queue check.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+// exos: waiting room — the handler runs with the request's waiting-room
+// attempt (wroomRun, below): a checkout attached to a turn that then fails
+// releases the turn for another try.
+Deno.serve((req: Request): Promise<Response> => wroomRun(req, handleCheckout));
+
+async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response> {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
 
   // Checked where a charge is made: a guest's free claim needs no Stripe.
@@ -222,6 +232,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // exos: group pay (mig 20261108120000): a seat link's token, or the group (host's cover).
     group_seat?: string;
     group_cover?: string;
+    // exos: waiting room (mig 20261118120000): the browser's queue token.
+    queue_token?: string;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -236,6 +248,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
   const buyerUid = user?.id ?? null;
   const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
+  // exos: waiting room (mig 20261118120000): the browser's queue token; checked
+  // in SQL once the event and ticket type are resolved (below).
+  const queueToken = typeof p.queue_token === "string" && /^[0-9a-f]{64}$/.test(p.queue_token) ? p.queue_token : "";
   // exos: group pay — the seat (or the host's cover) decides the event, type and quantity
   // (after the sign-in / guest-email checks: no database read for a stranger).
   const groupIn = await groupCheckout(p, user?.id ?? null);
@@ -308,6 +323,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 10) {
     return json({ error: "quantity must be 1-10" }, 400);
   }
+  // Canonical ids only (lower-case, hyphenated): every check below sees the
+  // same value the database resolves, never a variant it would also accept.
+  if (!UUID_RE.test(String(event_id)) || !UUID_RE.test(String(tier_id))) {
+    return json({ error: "invalid event_id / tier_id" }, 400);
+  }
 
   // Trusted reads (price/capacity/connected account) + ledger write via service_role.
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -317,6 +337,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .select("id, name, price, price_schedule, capacity, sold, event_id, visibility, tax_rate_id, exos_tax_rules(rate_percent, price_includes_tax), exos_events!inner(id, org_id, name, status, currency)")
     .eq("id", tier_id).eq("event_id", event_id).maybeSingle();
   if (tierErr || !tier) return json({ error: "tier not found" }, 404);
+
+  // exos: waiting room (mig 20261118120000): while the event's room is open,
+  // only an admitted turn of THIS event (the queue token, or the signed-in
+  // account's place) may go on. Checked in SQL with the event and type as the
+  // database resolved them, before any hold, write or Stripe call; check-only
+  // (nothing is bound yet: a later refusal here leaves the turn untouched).
+  // The hold functions check it again, and the attach below binds the
+  // checkout to the turn. Before the migration (no function) nothing changes.
+  {
+    const t0 = tier as unknown as { id: string; event_id: string };
+    const { error: wrErr } = await sb.rpc("exos_wroom_require", {
+      p_event_id: t0.event_id, p_tier_id: t0.id, p_token: queueToken || null,
+      p_buyer_uid: buyerUid, p_email: buyerUid ? null : buyerEmail,
+    });
+    const refused = wroomRefusal(wrErr?.code);
+    if (refused) return json(refused, 409);
+    if (wrErr && wrErr.code !== "PGRST202") {
+      console.error("exos-checkout: waiting room check failed", wrErr.message);
+      return json({ error: "could not check the queue, try again" }, 503);
+    }
+    wr.eventId = t0.event_id;
+    wr.tierId = t0.id;
+  }
 
   // Reserved seating (mig 20261030140000). Read on its own so a database
   // without the column reads as general admission.
@@ -931,6 +974,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // charge oversell). Bypass vouchers skip it — they may exceed caps, honored at
   // fulfillment. Held for 30 min; released here on failure, consumed at mint,
   // else swept by the exos_expire_holds cron.
+  // exos: waiting room — one open checkout per turn: attach this attempt to the
+  // turn under the entry's row lock before any hold or Stripe call (a second,
+  // parallel checkout on the same turn is refused here, XWR02). Every path
+  // below, with or without a hold, is covered; wroomRun releases it if this
+  // checkout then fails, and the session row binds it (wroomBind).
+  {
+    // The same buyer starting again (a reload, a second tab) takes over: their
+    // earlier Stripe session is expired on our own platform account first.
+    const att = await wroomAttach({
+      rpc: async (fn, args) => await sb.rpc(fn, args),
+      expireStripe: (id) => expireOwnStripeSession(stripeKey, id),
+      markExpired: async (id) => {
+        const { error } = await sb.from("exos_checkout_sessions").update({ status: "expired" })
+          .eq("session_id", id).eq("status", "pending");
+        if (error) console.error("exos-checkout: waiting room take-over: session not marked", error.message);
+      },
+      log: (m) => console.error(m),
+    }, {
+      p_event_id: wr.eventId ?? event_id, p_tier_id: wr.tierId ?? tier_id, p_token: queueToken || null,
+      p_buyer_uid: buyerUid, p_email: buyerUid ? null : buyerEmail, p_attempt: wr.attempt,
+    });
+    if (att.kind === "refused") return json(wroomRefusal(att.code), 409);
+    if (att.kind === "error") {
+      console.error("exos-checkout: waiting room attach failed", att.message);
+      return json({ error: "could not check the queue, try again" }, 503);
+    }
+    wr.attached = att.attached;
+    wr.buyerUid = buyerUid;
+    wr.email = buyerUid ? null : buyerEmail;
+  }
+
   let holdId: string | null = null;
   if (!bypassCapacity || group) {
     // A hidden tier's hold re-checks the voucher (mig 20260925003000). Only
@@ -969,12 +1043,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
         ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
-      })
+      }).setHeader("x-exos-queue", queueToken)
       : await sb.rpc("exos_create_guest_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity, p_email: buyerEmail,
         p_ip_hash: ipHash,
         p_voucher_code: voucherUnlocksTier ? voucherCode : null,
-      });
+      }).setHeader("x-exos-queue", queueToken);
+    const holdRefused = wroomRefusal(holdErr?.code);
+    if (holdRefused) return json(holdRefused, 409);
     if (holdErr) {
       return json({
         error: holdErr.message || "not enough tickets available",
@@ -1037,6 +1113,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // guest one keyed claim link per ticket, as for a paid guest order.
   if (freeGuest) {
     const sessionId = `free_${crypto.randomUUID()}`;
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const fInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       // Reserved seating / timed entry: a signed-in buyer lands here only for
@@ -1085,6 +1165,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // gives it back through the session's status trigger).
   if (giftFull) {
     const sessionId = `gc_${crypto.randomUUID().replaceAll("-", "")}`;
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const gInsErr = await insertSessionRow(sb, {
       session_id: sessionId, event_id, tier_id, org_id: ev.org_id,
       buyer_uid: buyerUid, buyer_email: buyerEmail, ...(buyerUid ? {} : { guest: true }),
@@ -1154,6 +1238,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return json({ error: "could not start PayPal checkout" }, 502);
     }
     const orderId = typeof order.id === "string" ? order.id : "";
+    // Not bound: the PayPal order is never recorded, so it can't be captured.
+    if (!(await wroomBind(sb, wr, sessionId))) {
+      await releaseHold(sb, holdId);
+      return json(WROOM_BIND_FAILED, 503);
+    }
     const ppRow: Record<string, unknown> = {
       session_id: sessionId,
       event_id, tier_id, org_id: ev.org_id,
@@ -1290,6 +1379,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json({ error: "could not create checkout session" }, 502);
   }
 
+  if (!(await wroomBind(sb, wr, session.id))) {
+    // Not bound to the turn: nobody pays on this session.
+    try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+    await releaseHold(sb, holdId);
+    return json(WROOM_BIND_FAILED, 503);
+  }
   const ledgerRow: Record<string, unknown> = {
     session_id: session.id,
     provider_expires_at: new Date((session.expires_at || stripeExpiresAt) * 1000).toISOString(),
@@ -1378,7 +1473,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (embedded) return json({ client_secret: session.client_secret, session_id: session.id, ...proofOut });
   return json({ url: session.url, session_id: session.id, ...proofOut });
-});
+}
 
 // Columns added by mig 20260929131000 (checkout records). Nice to have, never
 // worth losing a sale over.
@@ -1586,4 +1681,58 @@ function taxCents(amount: number, ratePercent: number, inclusive: boolean): numb
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+
+// --- exos: waiting room (mig 20261118120000) --------------------------------
+interface WroomAttempt {
+  /** This checkout's attempt id (attached to the turn by exos_wroom_attach). */
+  attempt: string;
+  attached: boolean;
+  eventId: string | null;
+  tierId: string | null;
+  buyerUid: string | null;
+  email: string | null;
+}
+
+/** The buyer's answer for a refused turn, or null. */
+function wroomRefusal(code: string | undefined): Record<string, string> | null {
+  if (code === "XWR01") return { error: "you're in the queue: wait for your turn", reason: "waiting_room" };
+  if (code === "XWR02") return { error: "your turn is already checking out in another window", reason: "waiting_room_busy" };
+  if (code === "XWR03") return { error: "this turn was used: join the line again to buy more", reason: "waiting_room_used" };
+  return null;
+}
+
+/** Run the handler; a checkout that fails after attaching releases the turn
+ *  (its bound session too, so the turn can try again). */
+async function wroomRun(req: Request, handler: (req: Request, wr: WroomAttempt) => Promise<Response>): Promise<Response> {
+  const wr: WroomAttempt = {
+    attempt: crypto.randomUUID(), attached: false, eventId: null, tierId: null, buyerUid: null, email: null,
+  };
+  const release = async () => {
+    if (!wr.attached || !wr.eventId) return;
+    const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { error } = await sb.rpc("exos_wroom_release", { p_event_id: wr.eventId, p_attempt: wr.attempt });
+    if (error) console.error("exos-checkout: waiting room release failed", error.message);
+  };
+  try {
+    const res = await handler(req, wr);
+    if (res.status >= 400) await release();
+    return res;
+  } catch (e) {
+    await release();
+    throw e;
+  }
+}
+
+const WROOM_BIND_FAILED = { error: "could not check the queue, try again", reason: "waiting_room_retry" };
+
+/** The order's session id on the attached turn, before its row is written
+ *  (fulfilment spends the turn; a failed / expired session frees it). False:
+ *  not bound (the caller stops before any money moves). */
+// deno-lint-ignore no-explicit-any
+async function wroomBind(sb: SupabaseClient<any, any, any>, wr: WroomAttempt, sessionId: string): Promise<boolean> {
+  if (!wr.attached || !wr.eventId) return true;
+  return await wroomBindSession(async (fn, args) => await sb.rpc(fn, args), {
+    p_event_id: wr.eventId, p_attempt: wr.attempt, p_session_id: sessionId, p_buyer_uid: wr.buyerUid, p_email: wr.email,
+  }, (m) => console.error(m));
 }

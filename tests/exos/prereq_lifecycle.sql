@@ -22,8 +22,11 @@ CREATE SCHEMA IF NOT EXISTS auth;
 CREATE TABLE IF NOT EXISTS auth.users (
   id uuid PRIMARY KEY,
   email text,
-  email_confirmed_at timestamptz
+  email_confirmed_at timestamptz,
+  created_at timestamptz DEFAULT now()
 );
+-- Supabase's auth.users has created_at (the waiting room's account rule reads it).
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
   SELECT NULLIF(current_setting('app.uid', true), '')::uuid
 $$;

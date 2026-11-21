@@ -10,6 +10,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { handle, EV, TIER, TIER2, ORG, UID, TICKET, EVENT_ROW, ownerTables, tables } from './mock.mjs';
 import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
 import { dropMock } from './mock.mjs'; // claude/exos-drop-list
+import { wroomMock } from './mock.mjs'; // claude/exos-waiting-room
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -484,6 +485,24 @@ await check('event report: drop list tile', async (page, run) => {
   await page.locator('[data-drop-panel]').getByRole('heading', { name: 'Drop list' }).waitFor({ timeout: 8000 });
   await run();
 }, { signedIn: true, include: '[data-drop-panel]', mock: ownerMock({ rpcs: dropMock({}).rpcs }) });
+
+// claude/exos-waiting-room (mig 20261118120000): the queue on the event page,
+// the queue page (lobby) and the organizer's panel. Blocking.
+await check('event page: waiting room (in line)', async (page, run) => {
+  await page.goto(BASE + '/event/' + EV);
+  await page.locator('[data-waiting-room]').getByRole('heading', { name: /in line/ }).waitFor({ timeout: 8000 });
+  await run();
+}, { include: '[data-waiting-room]', mock: wroomMock({ admitAfter: 1000 }) });
+await check('waiting room page (lobby)', async (page, run) => {
+  await page.goto(BASE + '/event/' + EV + '/queue');
+  await page.getByRole('heading', { name: "You're in the waiting room" }).waitFor({ timeout: 8000 });
+  await run();
+}, { mock: wroomMock({ lobby: true }) });
+await check('event report: waiting room panel', async (page, run) => {
+  await page.goto(BASE + '/dashboard/event/' + EV);
+  await page.locator('[data-wroom-panel]').getByRole('heading', { name: 'Waiting room' }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-wroom-panel]', mock: ownerMock({ rpcs: wroomMock({}).rpcs }) });
 
 await browser.close();
 

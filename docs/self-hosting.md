@@ -71,6 +71,7 @@ everything else with `--no-verify-jwt`.
 | `DISCORD_APPLICATION_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` | "Add Exos bot to your server" | your Discord application (`docs/discord.md`). Unset: only the channel webhook is offered. Optional `DISCORD_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-discord/callback`) |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
+| `TURNSTILE_SECRET_KEY` | the waiting room's human check (`exos-wroom-join`) | your Cloudflare Turnstile widget's secret key; pair it with `VITE_TURNSTILE_SITE_KEY` below. Unset: organizers can't turn the check on (the toggle is greyed out) and `exos-wroom-join` answers 503 |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
 Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
@@ -93,6 +94,7 @@ npm ci --include=dev && npm run build && npm start
 | `TRUST_PROXY_HOPS` | number of proxies in front (Render: 1) |
 | `EXOS_AI_DISCOVERY` | leave off until you want crawler / AI pages |
 | `VITE_EXOS_LUMA` | `on` shows Luma in the app (Integrations, ticketing choices); set with `EXOS_LUMA_ENABLED` |
+| `VITE_TURNSTILE_SITE_KEY` | build time; the waiting room's human check. Create a Turnstile widget in Cloudflare (Turnstile → Add widget; mode Managed; hostnames: your app host, or turn on "any hostname" if organizers use custom domains: `exos-wroom-join` checks the answer's hostname itself against `EXOS_APP_BASE_URL` / `EXOS_APP_URL` / `EXOS_REDIRECT_ORIGINS` and each org's verified custom domains, and refuses every check when none is set), put its site key here and its secret key in the edge secret `TURNSTILE_SECRET_KEY`, deploy `exos-wroom-join` (`--no-verify-jwt`), rebuild the app. Both unset: the check stays off |
 
 The app is built under `/bridge/` (vite `base`); serve it at `https://<host>/bridge/` or change `base` and
 `EXOS_APP_URL` together.
@@ -149,6 +151,17 @@ The first `X-Forwarded-For` entry is never used (the client writes it).
 IPv6 callers are limited per /64. Requests with no usable IP share one
 `unknown` bucket with the same caps, so a misconfigured proxy shows up as
 legitimate requests being limited together, never as no limit.
+
+The waiting room's Turnstile check (`exos-wroom-join`) uses the same rule: the
+edge function passes on the `cf-connecting-ip` and `X-Forwarded-For` it
+received and the database resolves them, never `x-real-ip`. Without a usable
+address it answers 503 instead of a place in the `unknown` bucket. So:
+
+- a self-host **without** Cloudflare in front must set `request_ip_source` to
+  `xff_last` and run behind a proxy that appends the client to
+  `X-Forwarded-For`;
+- hosted Supabase must stay on `cloudflare`: calls to edge functions there
+  carry Cloudflare's header and no `X-Forwarded-For` hop of the client's.
 
 ## Upstream rules (kept in code, not configuration)
 

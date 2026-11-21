@@ -50,13 +50,24 @@ describe('bridgeCsp', () => {
 
   it('frames the organizer video only on the event page, privacy-enhanced hosts only', () => {
     for (const path of ['/bridge/event/1', '/bridge/e/late-night']) {
-      expect(bridgeCsp(path)).toContain('frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com https://www.youtube-nocookie.com https://player.vimeo.com;');
+      expect(bridgeCsp(path)).toContain('frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com https://www.youtube-nocookie.com https://player.vimeo.com https://challenges.cloudflare.com;');
     }
     for (const path of ['/bridge/', '/bridge/dashboard', '/bridge/embed/event/1', '/bridge/o/nights']) {
       expect(bridgeCsp(path)).not.toContain('youtube-nocookie');
       expect(bridgeCsp(path)).not.toContain('player.vimeo.com');
     }
     expect(bridgeCsp('/bridge/event/1')).not.toContain('https://www.youtube.com');
+  });
+
+  it('allows Cloudflare Turnstile only on the event and queue pages, never on the card page', () => {
+    for (const path of ['/bridge/event/1', '/bridge/event/1/queue', '/bridge/e/late-night']) {
+      const csp = bridgeCsp(path);
+      expect(csp.split('; ').find((d) => d.startsWith('script-src'))).toContain('https://challenges.cloudflare.com');
+      expect(csp.split('; ').find((d) => d.startsWith('frame-src'))).toContain('https://challenges.cloudflare.com');
+    }
+    for (const path of ['/bridge/embed/event/1', '/bridge/embed/return', '/bridge/', '/bridge/dashboard', '/bridge/pay/paypal', '/bridge/my-tickets']) {
+      expect(bridgeCsp(path, '?token=ABC')).not.toContain('challenges.cloudflare.com');
+    }
   });
 
   it("the card page (Embedded Checkout) runs only our code and Stripe's (PCI SAQ A)", () => {

@@ -3,6 +3,7 @@
 // a guest later saves a ticket to their account from its link. The pure
 // rules are shared with the function (supabase/functions/_shared/rsvp.ts).
 
+import { queueBody } from './waitingRoom';
 import { supabase } from './supabase';
 
 export { codeSentText, maskPhone, normalizeRsvpPhone, rsvpErrorMessage } from '../../supabase/functions/_shared/rsvp.ts';
@@ -42,7 +43,9 @@ export const rsvpStart = (input: {
   ...(input.answers ? { answers: input.answers } : {}),
 });
 
-export const rsvpVerify = (rsvpId: string, code: string) => call<RsvpVerify>({ action: 'verify', rsvp_id: rsvpId, code });
+// The waiting room's queue token for the event, when it has a room (mig 20261118120000).
+export const rsvpVerify = (rsvpId: string, code: string, eventId?: string) =>
+  call<RsvpVerify>({ action: 'verify', rsvp_id: rsvpId, code, ...(eventId ? queueBody(eventId) : {}) });
 
 /** The ticket page path from a full link (the key stays in the fragment). */
 export function ticketPathFromUrl(url: string | null | undefined): string | null {

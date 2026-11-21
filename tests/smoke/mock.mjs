@@ -323,3 +323,35 @@ export const dropMock = (st = {}) => ({
   },
 });
 
+
+// --- claude/exos-waiting-room: on-sale waiting room (mig 20261118120000) -----
+// No room by default (every event page asks once). wroomMock(st) puts this
+// browser in line: the join answers "waiting" with a token, each poll moves it
+// up, and st.admitAfter polls later it is admitted. st records the calls.
+Object.assign(rpcs, { exos_wroom_join: () => ({ state: 'off' }), exos_wroom_status: () => ({ state: 'off' }) });
+export const WROOM_TOKEN = 'f'.repeat(64);
+export const WROOM_SUMMARY = {
+  enabled: true, phase: 'live', window_minutes: 15, admit_per_minute: 300, admission_minutes: 10, idle_close_minutes: 10,
+  on_sale_at: new Date(Date.now() - 6e4).toISOString(), opens_at: new Date(Date.now() - 96e4).toISOString(),
+  closed_at: null, closed_reason: null, counts: { waiting: 4210, admitted: 300, checked_out: 1250, expired: 41, total: 5801 },
+  wait_minutes: 15, can_manage: true,
+};
+export const wroomMock = (st = {}) => ({
+  rpcs: {
+    exos_wroom_join: (b) => {
+      st.joins = (st.joins ?? 0) + 1;
+      if (st.lobby) return { state: 'lobby', token: WROOM_TOKEN, phase: 'lobby', on_sale_at: new Date(Date.now() + 6e5).toISOString(), poll_after_ms: 30000 };
+      return { state: 'waiting', token: WROOM_TOKEN, phase: 'live', position: 3, ahead: 2, eta_minutes: 1, admit_per_minute: 300, poll_after_ms: 2000, ...(b.p_token ? {} : {}) };
+    },
+    exos_wroom_status: (b) => {
+      st.polls = (st.polls ?? 0) + 1;
+      st.pollToken = b.p_token;
+      if (st.polls >= (st.admitAfter ?? 1)) {
+        return { state: 'admitted', phase: 'live', admitted_until: new Date(Date.now() + 6e5).toISOString(), poll_after_ms: 60000 };
+      }
+      return { state: 'waiting', phase: 'live', position: 2, ahead: 1, eta_minutes: 1, poll_after_ms: 2000 };
+    },
+    exos_wroom_summary: () => ({ ...WROOM_SUMMARY, ...(st.off ? { enabled: false, phase: 'off', counts: { waiting: 0, admitted: 0, checked_out: 0, expired: 0, total: 0 } } : {}) }),
+    exos_wroom_configure: (b) => { st.configure = b; return { ...WROOM_SUMMARY, enabled: b.p_enabled, phase: b.p_enabled ? 'before' : 'off' }; },
+  },
+});

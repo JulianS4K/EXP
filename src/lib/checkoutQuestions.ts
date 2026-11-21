@@ -12,6 +12,7 @@
 //   door       a ticket's answers (RLS: door staff read per-ticket answers
 //              of their event) and setting one at the door
 
+import { queueHeader } from './waitingRoom';
 import { supabase } from './supabase';
 import { toCsv } from './csv';
 import {
@@ -249,7 +250,7 @@ export async function claimFreeTicketsAnswered(input: {
     p_event_id: input.eventId, p_tier_id: input.tierId, p_quantity: input.quantity,
     p_promoter_id: input.promoterId ?? null, p_channel: input.channel ?? null,
     p_order_ref: input.orderRef, p_answers: input.answers ?? null,
-  });
+  }).setHeader('x-exos-queue', queueHeader(input.eventId)); // the waiting room's gate (mig 20261118120000)
   if (error) throw rpcError(error, 'Could not reserve tickets.');
   return (data ?? []) as string[];
 }

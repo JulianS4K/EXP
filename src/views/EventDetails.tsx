@@ -45,6 +45,7 @@ import { mentionsFor, withMentions } from '../lib/socialTags';
 import EventCountdown from '../components/EventCountdown';
 import WaitlistCTA from '../components/WaitlistCTA';
 import DropListCTA from '../components/DropListCTA';
+import WaitingRoomGate from '../components/WaitingRoomGate'; // claude/exos-waiting-room
 import { saleState } from '../lib/dropList';
 import PhoneRsvpLink from '../components/PhoneRsvpLink';
 import GroupPayStart from '../components/GroupPayStart';
@@ -1540,7 +1541,9 @@ export default function EventDetails() {
                       Tickets are sold by the organizer on {externalShop.name}. You'll check out there.
                     </p>
                   </>
-                ) : (<>
+                ) : (<WaitingRoomGate eventId={event.id} timezone={event.timezone}>
+                {/* On-sale waiting room (mig 20261118120000): while the event's room is open the
+                    queue replaces the buy box until this browser is admitted (the SQL gate enforces it). */}
                 {/* A valid voucher can unlock a sold-out event (or pin a price). */}
                 <VoucherField
                   eventId={event.id}
@@ -1615,7 +1618,7 @@ export default function EventDetails() {
                   <GroupPayStart eventId={event.id} tierId={selectedTier.id} quantity={quantity} maxPerOrder={maxPerOrder} signedIn={!!user}
                     needsSlot={slotTier} slotId={slotTier ? slotId : null} />
                 )}
-                </>)}
+                </WaitingRoomGate>)}
 
                 {paidNotOnSale && !soldOut && (
                   <p className="type mt-3 text-[11px] text-white/50 leading-relaxed">

@@ -14,6 +14,7 @@
 // comp + test-mint path (wired to EventDetails' admin "TEST" button) that makes
 // the whole flow exercisable on Supabase without a payment processor.
 
+import { queueHeader } from './waitingRoom';
 import { Timestamp } from './timestamp';
 import { supabase } from './supabase';
 import { assertNotEmailName } from '../../supabase/functions/_shared/nameGuard.ts';
@@ -879,7 +880,7 @@ export async function claimFreeTickets(input: {
     p_promoter_id: input.promoterId ?? null,
     p_channel: input.channel ?? null,
     p_order_ref: input.orderRef ?? null,
-  });
+  }).setHeader('x-exos-queue', queueHeader(input.eventId)); // the waiting room's gate (mig 20261118120000)
   if (error) throw error;
   return (data ?? []) as string[];
 }

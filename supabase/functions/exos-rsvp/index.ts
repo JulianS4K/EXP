@@ -125,7 +125,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // verify
     const appBase = normalizeAppUrl(Deno.env.get("EXOS_APP_URL"));
     if (!appBase) return json({ ok: false, error: "unavailable" }, 503);
-    const { data, error } = await sb.rpc("exos_phone_rsvp_verify", { p_rsvp_id: parsed.rsvpId, p_code: parsed.code, p_app_base: appBase });
+    // exos: waiting room (mig 20261118120000): the browser's queue token, for
+    // an event whose room is open (the SQL gate checks it first).
+    const queueToken = typeof rawBody.queue_token === "string" && /^[0-9a-f]{64}$/.test(rawBody.queue_token) ? rawBody.queue_token : "";
+    const { data, error } = await sb.rpc("exos_phone_rsvp_verify", { p_rsvp_id: parsed.rsvpId, p_code: parsed.code, p_app_base: appBase })
+      .setHeader("x-exos-queue", queueToken);
+    if (error && ["XWR01", "XWR03"].includes(String(error.code))) return json({ ok: false, error: "waiting_room" }, 409);
     if (error) throw error;
     const v = data as { ok: boolean; error?: string; attempts_left?: number; event_id?: string; tickets?: { id: string; url: string | null }[];
                         channel?: string; to?: string; org_id?: string; event_name?: string };

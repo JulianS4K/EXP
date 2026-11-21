@@ -34,6 +34,7 @@ const OFF_WORDS: Record<string, string[]> = {
   'attendance-report': ['attendance report', 'by postal code', 'XLSX', 'sales pace'], // claude/exos-attendance-report
   'discord-promotion': ['Discord'], // claude/exos-discord
   'drop-list': ['Notify me', 'drop list', 'on-sale blast', 'list presale', 'when tickets go on sale'], // claude/exos-drop-list
+  'waiting-room': ['waiting room', 'virtual queue', 'place in line', 'queue fairly', 'admitted buyers'], // claude/exos-waiting-room
   // Paused by the operator 2026-11-17 (claude/exos-focus-core):
   'split-with-friends': ['split with friends', 'split the cost', 'pay you back', 'pay them back', 'pay back'],
   'matched-seats': ['matched seat', 'matched seats', 'tables or crews', 'grouped with', 'meet new people', 'strangers'],

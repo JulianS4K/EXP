@@ -44,6 +44,9 @@ card field**, and Stripe's is never loaded on the PayPal page:
 - The event page has no card field (Stripe Checkout is a redirect). Its "Pay with Venmo / PayPal" button does a
   full page load to `/bridge/pay/paypal` (`src/views/PayPalCheckout.tsx`), so no script from the event page carries
   over. The SDK is injected only there.
+- Cloudflare Turnstile (a waiting room's human check, mig 20261118120000) loads only on the event page and its queue
+  page (`/bridge/event/...`, `/bridge/e/...`), which hold no card field; the CSP allows `challenges.cloudflare.com`
+  there only and never on `/bridge/embed/` (Stripe's Embedded Checkout) or the PayPal page (`headers.test.ts`).
 - That path has its own CSP: `script-src 'self'` plus PayPal's and Venmo's hosts, no `js.stripe.com`, no pixels, no
   Maps (`src/lib/hosting/headers.ts` `isPayPalPagePath`). Every other page's CSP leaves PayPal out, the embed (Stripe
   Embedded Checkout) included. `headers.test.ts` pins both directions.

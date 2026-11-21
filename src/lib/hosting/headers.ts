@@ -57,6 +57,13 @@ const MAPS_PREFIXES = ['/bridge/event/', '/bridge/map'];
 const VIDEO_FRAME = ' https://www.youtube-nocookie.com https://player.vimeo.com';
 const VIDEO_PREFIXES = ['/bridge/event/', '/bridge/e/'];
 
+// Cloudflare Turnstile, for a waiting room with its human check on (mig
+// 20261118120000): only the event page and its queue page (/bridge/event/:id
+// and /bridge/event/:id/queue; /bridge/e/<slug> keeps the first document's
+// CSP), never the embed (Stripe's card form, docs/pci.md).
+const TURNSTILE = ' https://challenges.cloudflare.com';
+const TURNSTILE_PREFIXES = ['/bridge/event/', '/bridge/e/'];
+
 const startsWithAny = (path: string, prefixes: string[]) => prefixes.some((p) => path.startsWith(p));
 
 // PayPal's JS SDK and the frames / calls its buttons make (PayPal's CSP guide).
@@ -75,6 +82,7 @@ export function bridgeCsp(path: string, search = ''): string {
   const embed = isEmbedPath(path);
   const maps = !embed && startsWithAny(path, MAPS_PREFIXES);
   const video = startsWithAny(path, VIDEO_PREFIXES);
+  const turnstile = !embed && startsWithAny(path, TURNSTILE_PREFIXES);
   if (isPayPalPagePath(path)) {
     return (
       "default-src 'self'; " +
@@ -96,6 +104,7 @@ export function bridgeCsp(path: string, search = ''): string {
     "script-src 'self' https://js.stripe.com" +
     (pixels ? PIXEL_SCRIPT : '') +
     (maps ? MAPS_SCRIPT : '') +
+    (turnstile ? TURNSTILE : '') +
     '; ' +
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "font-src 'self' https://fonts.gstatic.com; " +
@@ -107,6 +116,7 @@ export function bridgeCsp(path: string, search = ''): string {
     '; ' +
     'frame-src https://js.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://www.google.com' +
     (video ? VIDEO_FRAME : '') +
+    (turnstile ? TURNSTILE : '') +
     '; ' +
     (maps ? "worker-src 'self' blob:; " : "worker-src 'self'; ") +
     "manifest-src 'self'; " +
