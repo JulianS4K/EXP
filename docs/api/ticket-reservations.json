@@ -231,6 +231,26 @@
               "quantity": 2
             }
           ]
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's checkout questions: { order: {...}, tickets: [{...}] }, one tickets entry per ticket in the reservation's order_items order. Checked like checkout (options, lengths, \"show only if\" conditions; hidden staff questions allowed) but never required. Kept once per reservation: the reserve's, else the complete call's.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -295,6 +315,13 @@
           },
           "headers": {
             "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "An answer is invalid (not one of the options, too long, a question this event doesn't ask buyers, answers for more tickets than reserved).",
+          "example": {
+            "error": "checkout question \"Size\" (ticket 1): pick one of the options"
           }
         }
       ],
@@ -394,6 +421,26 @@
           "required": false,
           "description": "Attendee email.",
           "example": "jane@example.com"
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's checkout questions: { order: {...}, tickets: [{...}] }, one tickets entry per ticket in the reservation's order_items order. Checked like checkout (options, lengths, \"show only if\" conditions; hidden staff questions allowed) but never required. Kept once per reservation: the reserve's, else the complete call's.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -478,6 +525,13 @@
           "description": "The Idempotency-Key was already used for another reservation (other lines or event).",
           "example": {
             "error": "this Idempotency-Key was already used for another reservation"
+          }
+        },
+        {
+          "status": 400,
+          "description": "An answer is invalid (not one of the options, too long, a question this event doesn't ask buyers, answers for more tickets than reserved).",
+          "example": {
+            "error": "checkout question \"Size\" (ticket 1): pick one of the options"
           }
         }
       ],
@@ -764,6 +818,26 @@
           "required": false,
           "description": "What you collected from your buyer, in major units; recorded for reconciliation.",
           "example": 54.0
+        },
+        {
+          "name": "ticket_reservation[answers]",
+          "location": "body",
+          "type": "object",
+          "required": false,
+          "description": "Answers to the event's checkout questions: { order: {...}, tickets: [{...}] }, one tickets entry per ticket in the reservation's order_items order. Checked like checkout (options, lengths, \"show only if\" conditions; hidden staff questions allowed) but never required. Kept once per reservation: the reserve's, else the complete call's.",
+          "example": {
+            "order": {
+              "5b0c8a2e-1f3d-4c6e-9a7b-2d4e6f8a0c1e": "Acme Inc."
+            },
+            "tickets": [
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "L"
+              },
+              {
+                "7d2e4f6a-8b0c-4d1e-a3f5-6b7c8d9e0f1a": "M"
+              }
+            ]
+          }
         }
       ],
       "responses": [
@@ -844,6 +918,13 @@
           },
           "headers": {
             "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"tickets:write\""
+          }
+        },
+        {
+          "status": 400,
+          "description": "An answer is invalid (not one of the options, too long, a question this event doesn't ask buyers, answers for more tickets than reserved).",
+          "example": {
+            "error": "checkout question \"Size\" (ticket 1): pick one of the options"
           }
         }
       ]

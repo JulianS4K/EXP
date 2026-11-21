@@ -23,9 +23,12 @@ import {
   walletEligible,
   type WalletAvailability,
   type WalletKind,
+  type WalletPlatform,
 } from '../lib/walletButtons';
 import {
   cachedWalletAvailability,
+  fetchAddonPassApple,
+  fetchAddonPassGoogleUrl,
   fetchApplePass,
   fetchGoogleSaveUrl,
   markWalletUnavailable,
@@ -82,6 +85,90 @@ export function useAvailableWallets(enabled: boolean) {
   };
 }
 
+/**
+ * Hand a pass to the wallet: Apple's .pkpass bytes (iOS: Safari opens a
+ * .pkpass it navigates to in Wallet; elsewhere it downloads), Google's save
+ * link (an Android in-app browser hands it to the real browser).
+ */
+async function deliverPass(
+  kind: WalletKind, platform: WalletPlatform, inApp: string | null | undefined,
+  apple: () => Promise<Blob>, google: () => Promise<string>, fileName: string,
+): Promise<void> {
+  if (kind === 'apple') {
+    const url = URL.createObjectURL(await apple());
+    if (platform === 'ios') {
+      window.location.assign(url);
+    } else {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    return;
+  }
+  const saveUrl = await google();
+  window.location.assign((inApp && platform === 'android' ? androidOpenInBrowserUrl(saveUrl) : null) ?? saveUrl);
+}
+
+/**
+ * "Add to … Wallet" for one add-on unit with its own entry code
+ * (POST /exos-wallet/addon-pass, docs/wallet.md "Add-on passes"). The card
+ * passes the wallets the session probe found set up (useAvailableWallets), so
+ * the buttons stay hidden exactly when the ticket's do. Inside an iOS in-app
+ * browser Apple's button is left out: the ticket's "open in Safari" escape on
+ * the same page covers it.
+ */
+export function AddonWalletButtons({ passId, name, kinds, platform, onUnavailable }: {
+  passId: string;
+  /** The add-on as the holder sees it ("VIP lounge · 1 of 2"): part of each button's name. */
+  name: string;
+  kinds: WalletKind[];
+  platform: WalletPlatform;
+  onUnavailable: (kind: WalletKind) => void;
+}) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState<WalletKind | null>(null);
+  const [inApp] = useState(currentInAppState);
+  const shown = kinds.filter((k) => !(k === 'apple' && inApp.kind && platform === 'ios'));
+  if (shown.length === 0) return null;
+  const add = async (kind: WalletKind) => {
+    setBusy(kind);
+    try {
+      await deliverPass(kind, platform, inApp.kind, () => fetchAddonPassApple(passId), () => fetchAddonPassGoogleUrl(passId),
+        `exos-addon-${passId.slice(0, 8)}.pkpass`);
+    } catch (err) {
+      if (err instanceof WalletUnavailableError) {
+        onUnavailable(kind);
+        toast({ kind: 'warn', message: `${kind === 'apple' ? 'Apple' : 'Google'} Wallet isn't available right now.` });
+      } else {
+        toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create the wallet pass.' });
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <div className="flex flex-wrap justify-center gap-2" data-testid="addon-wallet-buttons">
+      {shown.map((kind) => (
+        <button
+          key={kind}
+          type="button"
+          onClick={() => void add(kind)}
+          disabled={busy !== null}
+          aria-label={`${LABEL[kind]}: ${name}`}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-black text-white border border-white/30 hover:border-white font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary px-3 py-2 text-xs"
+        >
+          <Wallet className="w-3.5 h-3.5" aria-hidden="true" />
+          {busy === kind ? 'Preparing…' : LABEL[kind]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function WalletButtons({ ticket, compact = false, className = '' }: {
   ticket: WalletTicket;
   /** Smaller buttons for lists (My Tickets). */
@@ -108,26 +195,8 @@ export default function WalletButtons({ ticket, compact = false, className = '' 
   const add = async (kind: WalletKind) => {
     setBusy(kind);
     try {
-      if (kind === 'apple') {
-        const blob = await fetchApplePass(ticket.id);
-        const url = URL.createObjectURL(blob);
-        if (platform === 'ios') {
-          // Safari hands a .pkpass it navigates to straight to Wallet.
-          window.location.assign(url);
-        } else {
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `exos-ticket-${ticket.id.slice(0, 8)}.pkpass`;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-        }
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      } else {
-        const saveUrl = await fetchGoogleSaveUrl(ticket.id);
-        // In an Android in-app browser, hand the save link to the real browser.
-        window.location.assign((inApp.kind && platform === 'android' ? androidOpenInBrowserUrl(saveUrl) : null) ?? saveUrl);
-      }
+      await deliverPass(kind, platform, inApp.kind, () => fetchApplePass(ticket.id), () => fetchGoogleSaveUrl(ticket.id),
+        `exos-ticket-${ticket.id.slice(0, 8)}.pkpass`);
     } catch (err) {
       if (err instanceof WalletUnavailableError) {
         markUnavailable(kind);

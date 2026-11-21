@@ -428,7 +428,7 @@
       "method": "POST",
       "path": "/v1/tickets/:id/undo-check-in",
       "summary": "Undo a check-in",
-      "description": "Puts a used ticket back to active (a scan by mistake), as Undo in the door app. Needs an owner or manager and a reason.",
+      "description": "Puts a used ticket back to active (a scan by mistake), as Undo in the door app. Needs an owner or manager and a reason. An add-on pass id (an add-on with its own entry code, from scan-lookup's addon_pass) undoes that pass's scan with the door's rules for the key's creator: the scanner who scanned it may undo their own scan within 10 minutes; an owner or manager any time, every scan up to now. The answer then has kind: \"addon\", and ok: false with a reason (needs-manager, undo-window-passed, not-checked-in, reason-required, voided) when it can't.",
       "scope": "checkin:write",
       "parameters": [
         {
@@ -436,7 +436,7 @@
           "location": "path",
           "type": "string (UUID)",
           "required": true,
-          "description": "The ticket's id. One of another organization answers 404.",
+          "description": "The ticket's id, or an add-on pass id. One of another organization answers 404.",
           "example": "2b9e4f1a-7c3d-4e5f-8a6b-0c1d2e3f4a5b"
         },
         {
@@ -446,6 +446,14 @@
           "required": true,
           "description": "Why (kept on the record).",
           "example": "scanned the wrong ticket"
+        },
+        {
+          "name": "device",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "Optional. The door or device name kept on an add-on pass's undo record (default \"api\"; at most 60 characters).",
+          "example": "Gate 2"
         },
         {
           "name": "Idempotency-Key",

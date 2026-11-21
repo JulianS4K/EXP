@@ -1,7 +1,8 @@
 # Money journal, sales tax by jurisdiction, $0 orders
 
-Migration `20261108100000_exos_money_journal.sql`. Tests: `tests/exos/test_money_journal.sql` (run by `run_p0.sh`),
-`tests/exos/race_money_journal.sh` (by hand), `src/lib/journal.test.ts`. Code: `src/lib/journal.ts` (pure),
+Migrations `20261108100000_exos_money_journal.sql` and `20261110100000_exos_journal_complete.sql` (card at the door,
+gift cards, payouts, the drawer). Tests: `tests/exos/test_money_journal.sql` and `tests/exos/test_journal_complete.sql`
+(run by `run_p0.sh`), `tests/exos/race_money_journal.sh` (by hand, races 1 to 7), `src/lib/journal.test.ts`. Code: `src/lib/journal.ts` (pure),
 `src/lib/journalApi.ts` (reads), `src/components/finance/JournalPanel.tsx` (Payouts page),
 `src/components/finance/EventSalesTax.tsx` (the event's Money section), `supabase/functions/exos-api/journal.ts`
 (`GET /v1/journal`, `docs/api/journal.json`).
@@ -26,22 +27,28 @@ It follows the existing money model, never a second one: the settlement (`src/li
 | 1000 | Cash at Stripe / clearing (`stripe_clearing`) | asset |
 | 1010 | PayPal balance due from Exos (`paypal_receivable`) | asset |
 | 1020 | POS cash drawer | asset |
+| 1030 | Bank (payouts received) | asset |
+| 1040 | Cash on hand (outside Exos): the drawer float's source, counted cash after close, cash / checks / cards taken outside Exos | asset |
 | 1100 | Marketplace receivable | asset |
 | 2000 | Organizer payable (owed to Exos) | liability |
 | 2100 | Sales tax payable | liability |
 | 2200 | Promoter commissions payable | liability |
 | 2300 | Gift cards outstanding | liability |
 | 2400 | Tips payable (POS) | liability |
+| 3000 | Opening balances (imported gift cards) | equity |
 | 4000 | Ticket revenue (face; add-ons included) | revenue |
 | 4010 | Buyer fees (passed-on fee rules) | revenue |
 | 4020 | Bar and merch sales (POS) | revenue |
 | 4030 | Donations | revenue |
+| 4040 | Gift card breakage (voided balances) | revenue |
 | 4900 | Refunds | contra revenue |
 | 5000 | Exos fee | expense |
 | 5010 | Card processing fees | expense |
 | 5020 | Disputes | expense |
 | 5030 | Promoter commissions | expense |
 | 5040 | Cash paid-outs (POS) | expense |
+| 5050 | Cash over / short (POS) | expense |
+| 5060 | Gift cards given away | expense |
 
 ## What posts what
 
@@ -56,10 +63,27 @@ It follows the existing money model, never a second one: the settlement (`src/li
 | Promoter commission | `commission_accrued`: Dr commissions, Cr payable; `commission_paid`: Dr payable, Cr clearing; reversed: `commission_reversed`. Commissions paid inside the Exos fee (`platform_fee`) are Exos's cost and post nothing. |
 | POS cash tender (`exos_pos_payments`, cash) | `pos_cash_sale`: Dr drawer (amount + tip), Cr tips, tax (pro rata to the order), face / bar and merch (by the order's lines). |
 | POS cash out (`exos_pos_paid_outs`) | `pos_void` / `pos_refund`: Dr refunds + tax, Cr drawer. `pos_paid_out`: Dr cash paid-outs, Cr drawer. |
+| POS card tender (`exos_pos_payments`, card; Stripe Terminal) | `pos_card_sale`, like an online order: Dr clearing (charge), Cr tax, face / bar and merch (the order's lines, as cash); Dr Exos fee + card fees, Cr clearing: the application fee withheld (`exos_pos_card_payments`). A capture that never became a sale (`refund_pending`) posts nothing: in and out at Stripe. |
+| POS card refund (`exos_pos_reversals`, `card_refund_status` succeeded) | `pos_card_refund`: Dr refunds + tax, Cr clearing (net), Cr Exos fee + card fees (the application fee comes back in proportion, as online). Nothing while the refund is pending. |
+| Gift card sale (`exos_gift_card_ledger`, issue) | `gc_issue`: Cr gift cards outstanding (a liability, never revenue). Dr: online, Stripe clearing less the application fee (Dr Exos fee; the commerce order's `application_fee_cents`); cash sold from a drawer, the drawer; cash, check or a card taken outside Exos, cash on hand; a comp, gift cards given away; an import, opening balances. |
+| Gift card redemption | On a checkout order: the order's own `sale` entry (Dr gift cards, above): nothing posts from the ledger's hold / release rows. On a partner reservation (`exos_gift_card_redemptions`, captured when the reservation completes): `gc_redeem`: Dr gift cards, Cr ticket revenue. |
+| Refund back to a gift card (`exos_gift_card_ledger`, refund) | `gc_refund`: Dr refunds + the tax share (the order's tax × the amount ÷ the order's value, never more than the order's tax not yet handed back), Cr gift cards outstanding: the liability is restored. |
+| Gift card void (`exos_gift_card_ledger`, void) | `gc_void`: Dr gift cards, Cr breakage. When the purchase itself was refunded (`exos_commerce_refund` voids the card): `gc_purchase_refund`: Dr gift cards, Cr clearing (net), Cr Exos fee (returned in proportion). |
+| Instant payout (`exos_org_instant_payouts`, sent) | `stripe_payout`: Dr bank, Cr Stripe clearing; one that fails later: `stripe_payout_reversal`. |
+| PayPal remittance (`exos_paypal_org_remittances`) | `paypal_remittance`: Dr bank (Stripe clearing for a `stripe_transfer`), Cr PayPal receivable. |
+| Drawer (`exos_pos_drawer_sessions`) | `drawer_float`: Dr drawer, Cr cash on hand. At close: `drawer_variance` (source id `<drawer>:variance`): Dr / Cr drawer against cash over / short (counted − expected); `drawer_close` (`<drawer>:close`): Dr cash on hand, Cr drawer (the counted cash leaves). A recount posts the difference (`…_adjust`). The drawer's postings are the close's expected terms, so a closed drawer nets to zero. |
 
-Not in the journal yet: POS card tenders (Stripe Terminal), gift card sales and gift-card balance restored on a refund,
-PayPal remittances to the org, Stripe payouts to the organizer's bank, the drawer float and count variance, absorbed
-fees (an allocation, not money), the Exos fee on walk-up cash sales (an open operator decision, docs/pos.md).
+Gift cards are posted at commit (a deferred trigger on the ledger): a box-office card is tied to its drawer, and a
+refunded purchase's commerce order marked refunded, right after the ledger row is written.
+
+Not in the journal: Stripe's scheduled payouts from the connected account (Exos records none; only instant payouts),
+Stripe's fee on an instant payout (only an estimate is known), absorbed fees (an allocation, not money), the Exos fee
+owed on a gift-card-paid order when that part is refunded back to the card (the sale's owed fee stays).
+
+**TODO (operator decision): the Exos fee on walk-up cash sales is NOT posted.** Whether Exos charges a fee on cash taken
+at the door, and how it would be collected (there is no charge to withhold it from), is open (docs/pos.md). Until it is
+decided, `pos_cash_sale` carries no Exos fee line and nothing records one as owed; when it is decided, post it as an
+`organizer_payable` line (Dr Exos fee, Cr organizer payable, like the gift card part of an online order).
 
 ## Reads
 

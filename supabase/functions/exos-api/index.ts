@@ -185,7 +185,7 @@ import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
 import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
-  reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
+  reservationAnswersParam, reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
 } from "../_shared/partners/sales.ts";
 
 const RATE_LIMIT = 120; // requests per credential per minute
@@ -1404,7 +1404,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       return {
         data: await rpc(sb, "_exos_partner_reserve", {
           p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
-          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items), p_attrs: {}, p_comp: false, p_dry_run: true,
+          p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items),
+          // exos: reservation answers — checked by the quote too (mig 20261110120000).
+          p_attrs: withAnswers({}, reservationAnswersParam(c.body, "ticket_reservation")), p_comp: false, p_dry_run: true,
         }),
       };
     }
@@ -1417,7 +1419,10 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
           p_org_id: orgId, p_event_id: id, p_partner_id: null, p_api_key_id: c.cred.id,
           p_lines: parseOrderItems(p.order_items_attributes ?? p.order_items),
           // An Idempotency-Key makes a resend the same reservation (mig 20261104130000).
-          p_attrs: c.idempotencyKey ? { ...reservationAttrs(p), idempotency_key: c.idempotencyKey } : reservationAttrs(p),
+          p_attrs: withAnswers(
+            c.idempotencyKey ? { ...reservationAttrs(p), idempotency_key: c.idempotencyKey } : reservationAttrs(p),
+            reservationAnswersParam(c.body, "ticket_reservation"), // exos: reservation answers (mig 20261110120000)
+          ),
           p_comp: false, p_dry_run: false,
         }),
       });
@@ -2398,6 +2403,10 @@ async function partnerHandle(
     case "public-list-ticket-types":
       return await rpc(sb, "_exos_partner_ticket_types", { p_org_id: org, p_partner_id: p.id, p_event_id: eventId() });
 
+    // claude/exos-leftovers-9: the questions a reservation answers (mig 20261110120000).
+    case "public-list-questions":
+      return await rpc(sb, "_exos_partner_event_questions", { p_org: org, p_event: eventId() });
+
     case "public-create-reservation": {
       const r = unwrapParams(body, "ticket_reservation");
       if (r.resale_order_items_attributes !== undefined) {
@@ -2405,7 +2414,9 @@ async function partnerHandle(
       }
       return new Created(await rpc(sb, "_exos_partner_reserve", {
         p_org_id: org, p_event_id: eventId(), p_partner_id: p.id, p_api_key_id: null,
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items),
+        // exos: reservation answers — required ones for partners (mig 20261110120000).
+        p_attrs: keyed(withAnswers(reservationAttrs(r), reservationAnswersParam(body, "ticket_reservation"))),
         p_comp: false, p_dry_run: false,
       }));
     }
@@ -2432,6 +2443,11 @@ async function partnerHandle(
     case "public-complete-reservation": {
       const token = await partnerReservation(sb, p, eventId(), params.token);
       const r = unwrapParams(body, "ticket_reservation");
+      // exos: reservation answers — when the reserve sent none (kept once; mig 20261110120000).
+      const answers = reservationAnswersParam(body, "ticket_reservation");
+      if (answers !== undefined) {
+        await rpc(sb, "_exos_partner_reservation_answers", { p_org: org, p_partner: p.id, p_token: token, p_answers: answers });
+      }
       const out = await rpc(sb, "_exos_partner_reservation_complete", {
         p_org_id: org, p_partner_id: p.id, p_token: token, p_attrs: reservationAttrs(r), p_app_base: appBase(),
       }) as Record<string, unknown>;
@@ -2446,7 +2462,8 @@ async function partnerHandle(
       const r = unwrapParams(body, "comp");
       return new Created((await rpc(sb, "_exos_partner_comp", {
         p_org_id: org, p_partner_id: p.id, p_event_id: eventId(),
-        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items), p_attrs: keyed(reservationAttrs(r)),
+        p_lines: parseOrderItems(r.order_items_attributes ?? r.order_items),
+        p_attrs: keyed(withAnswers(reservationAttrs(r), reservationAnswersParam(body, "comp"))), // exos: reservation answers
         p_app_base: appBase(),
       }) as Record<string, unknown>).order);
     }
@@ -2475,6 +2492,11 @@ async function partnerHandle(
     }
   }
   throw new ApiError(404, "not found");
+}
+
+/** A reservation's p_attrs with its checkout answers, when some were sent (mig 20261110120000). */
+function withAnswers(attrs: Record<string, unknown>, answers: Record<string, unknown> | undefined): Record<string, unknown> {
+  return answers === undefined ? attrs : { ...attrs, answers };
 }
 
 /** The partner's reservation for this event (404 for any other). */

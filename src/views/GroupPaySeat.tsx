@@ -3,7 +3,9 @@
 // Anyone with the link sees the event, the price, the group's deadline and how
 // many seats are paid, and pays for exactly this seat through the normal
 // checkout (signed in, or as a guest with an email). The ticket is theirs, its
-// own order. Nothing about the other friends is shown or sent.
+// own order. Nothing about the other friends is shown or sent (nor the
+// host's names for the seats). A price-step type shows the price the group
+// locked; a timed type, the group's slot (mig 20261110110000).
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -14,7 +16,8 @@ import { startCheckout } from '../lib/checkout';
 import { buyerTierPrice } from '../lib/pricing';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { maskEmail } from '../lib/doorSearch';
-import { formatCountdown, seatPayable, secondsLeft, viewSeat, type SeatView } from '../lib/groupPay';
+import { slotIdLabel } from '../lib/slots';
+import { formatCountdown, groupSeatPrice, seatPayable, secondsLeft, viewSeat, type SeatView } from '../lib/groupPay';
 
 export default function GroupPaySeat() {
   const { token = '' } = useParams();
@@ -37,20 +40,22 @@ export default function GroupPaySeat() {
     return () => { alive = false; window.clearInterval(poll); window.clearInterval(tick); };
   }, [token]);
 
-  // The price the event page shows for this ticket type (all-in).
+  // The price the event page shows for this ticket type (all-in), or the one
+  // the group locked for a price-step type.
   const eventId = view?.eventId;
   const tierId = view?.tierId;
+  const locked = view?.unitPriceCents ?? null;
   useEffect(() => {
     if (!eventId || !tierId) return undefined;
     let alive = true;
     getPublicEvent(eventId).then((ev) => {
       const tier = ev?.ticketTiers?.find((t) => t.id === tierId);
       if (!alive || !tier) return;
-      setPrice(buyerTierPrice(tier));
+      setPrice(groupSeatPrice(tier, locked, buyerTierPrice(tier)));
       setTierName(tier.name);
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [eventId, tierId]);
+  }, [eventId, tierId, locked]);
 
   if (view === undefined) return <Shell><p className="text-slate-500">Loading…</p></Shell>;
   if (view === null) return <Shell><p className="text-slate-700 font-bold">This seat link isn't valid. Ask whoever sent it for a new one.</p></Shell>;
@@ -98,6 +103,7 @@ export default function GroupPaySeat() {
           {price !== null && <p className="font-black text-slate-900">{formatCurrency(price, cur)}</p>}
         </div>
         {tierName && <p className="text-xs text-slate-500 mt-1">{tierName}. The price includes every fee.</p>}
+        {view.slotId && <p className="text-xs text-slate-500 mt-1" data-testid="seat-slot">Entry slot: {slotIdLabel(view.slotId)}</p>}
         <p className="text-xs text-slate-500 mt-3 flex items-center gap-2"><Users className="w-4 h-4" /> {view.paid} of {view.seats} paid</p>
         {view.groupStatus === 'open' && left > 0 && (
           <p className="text-sm font-black mt-2 flex items-center gap-2 text-amber-700" data-testid="seat-countdown">

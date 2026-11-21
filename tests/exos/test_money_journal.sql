@@ -163,7 +163,8 @@ BEGIN
                            'public.exos_event_in_app_report(uuid)'] LOOP
     ASSERT position('/* exos: zero orders */' in pg_get_functiondef(f::regprocedure)) > 0, 'MJ0 marker in ' || f;
   END LOOP;
-  ASSERT (SELECT count(*) FROM public.exos_journal_accounts()) = 19, 'MJ0 the chart';
+  -- 19 here; 25 since mig 20261110100000 (test_journal_complete.sql JC0).
+  ASSERT (SELECT count(*) FROM public.exos_journal_accounts()) >= 19, 'MJ0 the chart';
   ASSERT (SELECT bool_and(public._exos_journal_account_ok(code)) FROM public.exos_journal_accounts()), 'MJ0 chart codes accepted';
   RAISE NOTICE 'OK  MJ0 shape: RLS, read-only grants, writers closed, search_path, markers, chart';
 END $$;

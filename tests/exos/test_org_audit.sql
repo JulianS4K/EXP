@@ -102,14 +102,15 @@ BEGIN
       'gift_card.reissue', 'donation.offline_refund', 'donation.delete', 'payout.mark', 'payout.cancel', 'payout.instant',
       'promoter.settle', 'promoter.payout_record', 'promoter.payout_cancel', 'settlement.update', 'settlement.finalize',
       'settlement.reopen', 'member.approve', 'member.reject', 'invite.settings', 'oauth_app.delete', 'voucher.issue',
-      'tier.price_steps', 'tier.channel_price', 'export.run'] LOOP
+      'tier.price_steps', 'tier.channel_price', 'export.run',
+      'order.group_cover', 'hold.group_cancel'] LOOP  -- the last two: mig 20261110110000 (group pay 2)
     ASSERT EXISTS (SELECT 1 FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace
                      AND position('/* exos: audit ' || m || ' */' in pg_get_functiondef(p.oid)) > 0), 'A0 marker ' || m;
   END LOOP;
   ASSERT (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f'
-            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 34, 'A0 34 patched functions';
+            AND pg_get_functiondef(p.oid) ~ '/\* exos: audit [a-z_]+\.[a-z_]+ \*/') = 36, 'A0 36 patched functions';
   ASSERT (SELECT count(DISTINCT tgrelid) FROM pg_trigger WHERE tgname IN ('exos_audit_ins_del', 'exos_audit_upd')) = 10, 'A0 ten tables';
-  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 34 patched functions, 10 audited tables';
+  RAISE NOTICE 'OK  A0 RLS, read-only grants, definer helpers pinned and revoked, 36 patched functions, 10 audited tables';
 END $$;
 
 -- A1 -------------------------------------------------------------------------

@@ -6,7 +6,8 @@ us; Exos never calls a marketplace for this. The full endpoint reference is on `
 Partner sales" (`docs/api/partner-sales.json`); this page is how it works.
 
 - **Migration:** `supabase/migrations/20261031130000_exos_partner_sales.sql`. Harness:
-  `tests/exos/test_partner_sales.sql`.
+  `tests/exos/test_partner_sales.sql`. Checkout answers on reservations: `20261110120000_exos_leftovers_9.sql`,
+  `tests/exos/test_leftovers_9.sql` (LO1, LO2).
 - **Code:** `supabase/functions/exos-api/index.ts` (`partnerApi`), `_shared/partners/sales.ts` (parsing),
   `_shared/api/routes.ts` (the `/public/…` rows). Wallet fallback: `exos-wallet` `POST /link-pass`.
 - **UI:** Org settings → Distribution partners (`DistributionPartnersPanel`), Edit event → Sell through partners
@@ -111,6 +112,20 @@ balance back.
 - **Retries:** send an `Idempotency-Key` header (8-100 of `A-Za-z0-9_.:-`) on reserve and on comps. A resend with
   the same key and body answers the first reservation (same token, `idempotent_replay: true`) instead of holding
   the seats again or minting a second comp; the same key with other lines is 400. Keys are per partner.
+- **Checkout questions** (mig `20261110120000`, docs/checkout-questions.md). The organizer's questions ("T-shirt
+  size?", "Company") are asked of partner buyers too. `GET /public/confirms/:id/questions` lists them (label, kind,
+  options, required, per order or per ticket, ticket types, "show only if"); questions hidden from checkout are left
+  out. Send the answers with the reserve call: `ticket_reservation[answers] = { order: { <question id>: value },
+  tickets: [{ <question id>: value }, ...] }`, one tickets entry per ticket in the order the reservation lists its
+  `order_items` (the ticket types' order; for one type, simply ticket 1..n). They are checked like Exos checkout
+  (options, lengths, ranges, "show only if" conditions) before a seat is held, and **required questions are
+  required**: without them the reserve answers 422 `reason: "questions_required"` with `missing: [{ question_id,
+  label, ticket }]` and holds nothing, so ask your buyer before you charge. An invalid answer is 400. Answers are
+  stored with the reservation (order ref `po:<reservation>`, like online answers) and attached to each ticket at
+  complete; the organizer sees them in the event report and the API. Complete may carry answers when the reserve
+  sent none (optional ones); a reservation keeps one set, the first sent. Comps take `comp[answers]` the same way.
+  Organizer reservations take `answers` on reserve, `/build` (checked, not stored) and complete: checked, hidden
+  staff questions allowed, never required.
 - **Member presales:** while an organizer's member presale runs on a ticket type, partners can't reserve it (422,
   `reason: not_available`); organizer reservations still can.
   That is the default (`block`); an organizer can set `allow` for the organization or one event, and partners then
@@ -156,6 +171,7 @@ in an order comes with `delivery.url`:
 | Opendate | Exos |
 |---|---|
 | `GET /public/confirms/{id}/ticket_types` | same path |
+| (none) | `GET /public/confirms/{id}/questions`: the checkout questions a reservation answers |
 | `POST/PUT/DELETE /public/confirms/{id}/ticket_reservations[/{token}]`, `…/{token}/complete` | same paths (+ `GET …/{token}`) |
 | `GET /public/orders`, `/public/orders/{id}`, `…/ticket_pdfs[/{ticket_id}]` | same paths; links instead of PDFs |
 | `POST /public/confirms/{id}/comps` | same path; needs the comps scope |
