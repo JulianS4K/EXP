@@ -289,7 +289,8 @@ for m in \
   20261113193000_exos_attendance_report \
   20261113194000_exos_discord \
   20261114100000_exos_leftovers_15 \
-  20261117190000_exos_social_off; do
+  20261117190000_exos_social_off \
+  20261118100000_exos_drop_list; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -538,7 +539,8 @@ for m in \
          20261113193000_exos_attendance_report \
          20261113194000_exos_discord \
          20261114100000_exos_leftovers_15 \
-         20261117190000_exos_social_off; do
+         20261117190000_exos_social_off \
+         20261118100000_exos_drop_list; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -687,5 +689,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_pos_kiosk
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_discord.sql"
 # claude/exos-focus-core (mig 20261117190000): social / friends features paused by the operator 2026-11-17: off by default (platform setting social_features_enabled), the admin-only audited setter, new starts refuse with XSOFF (a split or a friend added to one, a new matched type, a group chat, a join, a member added, a texts opt-in) before any write, the relay stops (queued relay / confirmation texts skipped, inbound answered "paused" once a day, STOP still works), and what exists keeps working (the split's paid tick sends the ticket and its claim link claims, an existing matched type edits and shows, a member re-joins and posts); the suites above turn it on for themselves
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_social_off.sql"
+# claude/exos-drop-list (mig 20261118100000): the drop list ("Notify me"): open only before the public on-sale, guest double opt-in (link, or the 6-digit code from the signing-up browser, 5 tries) with a constant answer, signed-in one click + texts (consent words, STOP), dedupe, rate limits (network, address), roles (summary owner / manager / finance, export owner / manager + export.run), cross-org, the list-only presale code (exos_check_voucher marker; hold path), the blast (once per member, presale then on-sale, opted out / left / pending skipped, texts in quiet hours, monthly cap, no provider), leave, sweep (race: race_drop_list.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_drop_list.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

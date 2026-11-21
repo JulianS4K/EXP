@@ -131,6 +131,11 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
       expires_at: '2026-11-07T15:00:00+00:00', agent_name: 'Ann <7f>' },
   },
   'settlement-finalized': { org, event: event(), token: TOKEN, marketing: false },
+  'drop-confirm': { org, event: event(), token: TOKEN, code: '042917', leave_token: 'b'.repeat(64), marketing: false },
+  'drop-on-sale': {
+    org, event: event(), kind: 'presale', code: 'LISTA1B2C3D4E5', on_sale_at: '2026-10-01T16:00:00+00:00',
+    leave_token: 'b'.repeat(64), marketing: false,
+  },
   'ticket-counts': {
     org, recipient_name: 'Ann <7f>', optout_token: TOKEN, marketing: false,
     counts: { event: event(), currency: 'USD', tiers: [{ name: 'GA <early>', paid: 300, comps: 10, gross_cents: 600000 }], paid_sold: 300,
@@ -398,6 +403,33 @@ describe('renderTemplate', () => {
     const r = ok('post-event');
     const m = renderMail(r.html, `{{app_url}}/unsubscribe?t=${TOKEN}`, APP);
     expect(m).toEqual({ ok: true, html: r.html, headers: { 'List-Unsubscribe': `<${APP}/unsubscribe?t=${TOKEN}>` } });
+  });
+});
+
+describe('drop list (mig 20261118100000)', () => {
+  it('drop-confirm: the link, the 6-digit code and the leave link; nothing else of the person', () => {
+    const r = ok('drop-confirm');
+    expect(r.subject).toBe('Confirm: tell me when Show <One> & "Friends" goes on sale');
+    expect(r.html).toContain(`${APP}/drop/confirm?t=${TOKEN}`);
+    expect(r.html).toContain('042917');
+    expect(r.html).toContain(`${APP}/drop/leave?t=${'b'.repeat(64)}`);
+    expect(r.html).toContain('Show &lt;One&gt;');
+    expect(renderTemplate('drop-confirm', { ...PAYLOADS['drop-confirm'], code: '12ab' }, APP)).toEqual({ ok: false, error: 'drop-confirm: code missing' });
+    expect(renderTemplate('drop-confirm', { ...PAYLOADS['drop-confirm'], leave_token: 'x' }, APP).ok).toBe(false);
+  });
+
+  it('drop-on-sale: presale with the code in the link, or plain on-sale; always the leave link', () => {
+    const r = ok('drop-on-sale');
+    expect(r.subject).toBe('Your presale is open: Show <One> & "Friends"');
+    expect(r.html).toContain(`${APP}/event/${EV}?code=LISTA1B2C3D4E5`);
+    expect(r.html).toContain('before the public on-sale');
+    expect(r.html).toContain(`/drop/leave?t=${'b'.repeat(64)}`);
+    const plain = ok('drop-on-sale', { ...PAYLOADS['drop-on-sale'], kind: 'on_sale', code: null });
+    expect(plain.subject).toBe('Tickets are on sale: Show <One> & "Friends"');
+    expect(plain.html).toContain(`${APP}/event/${EV}"`);
+    expect(plain.html).not.toContain('?code=');
+    expect(plain.html).toContain('Leave this list');
+    expect(renderTemplate('drop-on-sale', { ...PAYLOADS['drop-on-sale'], code: '"><x>' }, APP).ok).toBe(false);
   });
 });
 

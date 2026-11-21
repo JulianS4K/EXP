@@ -9,6 +9,7 @@ import { chromium, devices } from 'playwright';
 import AxeBuilder from '@axe-core/playwright';
 import { handle, EV, TIER, TIER2, ORG, UID, TICKET, EVENT_ROW, ownerTables, tables } from './mock.mjs';
 import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
+import { dropMock } from './mock.mjs'; // claude/exos-drop-list
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'];
@@ -447,6 +448,42 @@ await check('social features paused: "not available" (split with friends)', asyn
   await run();
 }, { signedIn: true, mock: ownerMock({ rpcs: { exos_split_get: () => ({ session_id: 'cs_a11y_1', event_id: EV, amount_cents: 4000,
   quantity: 2, currency: 'usd', split: null, tickets: [], shares: [] }) } }) });
+
+// claude/exos-drop-list (mig 20261118100000): "Notify me" on the event page
+// (guest form, the code step, the signed-in one click with texts), the mail
+// links and the organizer's tile. Blocking; the drop list parts only where
+// the page around them is scanned elsewhere.
+await check('event page: drop list (guest)', async (page, run) => {
+  await page.goto(BASE + '/event/' + EV);
+  const box = page.locator('[data-drop-list]');
+  await box.getByLabel('Email').waitFor({ timeout: 8000 });
+  await run('form');
+  await box.getByLabel('Email').fill('fan@x.com');
+  await box.getByRole('button', { name: /Notify me/ }).click();
+  await box.getByLabel('Code from the email').waitFor({ timeout: 8000 });
+  await run('code');
+}, { include: '[data-drop-list]', mock: dropMock({}) });
+await check('event page: drop list (signed in, texts)', async (page, run) => {
+  await page.goto(BASE + '/event/' + EV);
+  const box = page.locator('[data-drop-list]');
+  await box.getByLabel(/Also text me/).click();
+  await box.getByLabel('Mobile number').waitFor({ timeout: 8000 });
+  await run('form');
+  await box.getByLabel('Mobile number').fill('212 555 0101');
+  await box.getByRole('button', { name: /Notify me/ }).click();
+  await box.getByLabel('Code from the text').waitFor({ timeout: 8000 });
+  await run('text code');
+}, { signedIn: true, include: '[data-drop-list]', mock: dropMock({}) });
+await check('drop list confirm link', async (page, run) => {
+  await page.goto(BASE + '/drop/confirm?t=' + 'c'.repeat(64));
+  await page.getByRole('button', { name: 'Confirm' }).waitFor({ timeout: 8000 });
+  await run();
+}, { mock: dropMock({}) });
+await check('event report: drop list tile', async (page, run) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=marketing');
+  await page.locator('[data-drop-panel]').getByRole('heading', { name: 'Drop list' }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-drop-panel]', mock: ownerMock({ rpcs: dropMock({}).rpcs }) });
 
 await browser.close();
 

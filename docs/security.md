@@ -81,6 +81,10 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). NULL for every token while group pay is off (mig 20261111120000, the default). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the event and ticket type ids (also published only, since mig 20261109110000), and the group's time slot and locked step price (published only, mig 20261110110000). Never the host's seat labels, another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
 | `exos_neighborhoods_list`, `exos_neighborhood_page` (mig 20261111110000) | OK (anon + authenticated; rate limited) | Neighborhood pages (`/nyc`, `/nyc/<slug>`): published events that aren't `noindex`, haven't ended and start in the next 1-14 days, placed by their public pin (`exos_public_event_geo`: fresh, never a secret / TBA location), each as the public card `_exos_public_event_json` plus the org's public name and slug; per neighborhood only a count. The count of listed events with no pin is added only for platform admins (`exos_is_admin()`). 120 calls a minute per network between the two (`_exos_request_ip_bucket()`, the platform-set IP), checked first. In the H3 allowlist |
 | `exos_unfollow_by_token` (mig 20261111110000) | OK (anon + authenticated; 64-hex token) | The unfollow link in `follower-new-event` mail: a 64-hex token per (org, follower) (two UUIDv4s), format-checked; it removes only that follow (and its waiting notices), keeping `followers_count` right. Answers `{ ok, org_name }`; a malformed or unknown token answers `{ ok: false }` and nothing else. In the H3 allowlist |
+| `exos_drop_status` (mig 20261118100000) | OK (anon + authenticated) | A published event's drop list: open or not, the public on-sale time, whether the list gets a presale, and the consent words. Signed in: the caller's own signup only (joined, texts, a masked number). Nothing about anyone else; a draft answers `{ open: false }` |
+| `exos_drop_signup` (mig 20261118100000) | OK (anon + authenticated; rate limited) | A guest's "Notify me". Always `{ ok, status: 'check_email' }` for a well-formed request to an open list: new, pending, already listed or held by a per-address limit (no enumeration). 10 a minute per network (`_exos_request_ip_bucket`) and 5 per address (lower case, `+tag` folded), before any write; 120 a minute per event answers `{ ok: false, status: 'try_again' }` (per event, nothing about an address); 3 confirm mails a day per address and event, 10 across lists; none when already listed. Stores the address, the consent words and the sanitized first-touch promoter / UTM tags; no IP. The browser token (64 hex) is stored hashed |
+| `exos_drop_confirm`, `exos_drop_leave` (mig 20261118100000) | OK (anon + authenticated; 64-hex token) | The confirm link (two UUIDv4s, only its SHA-256 stored, 7 days) and the leave token (one per mail, only its SHA-256 stored). A link made before the person left, or spent by the leave, answers `{ ok: false }`. Answer ok and the event (and org) name only. The pages take a click, so a mail scanner changes nothing |
+| `exos_drop_confirm_code` (mig 20261118100000) | OK (anon + authenticated; 256-bit browser token) | The 6-digit code from the confirm mail, only with the hashed browser token of the signup that asked for it (the guest-proof pattern, mig 20261105100000): 5 wrong tries spend the code, 20 tries a minute per network, 24 hours. Answers `{ ok }` only, the same false for a wrong code, a spent one or no signup |
 
 ### Callable by authenticated
 
@@ -929,6 +933,50 @@ to review:
   accepts those four kinds and counts them toward its 200-a-day cap (markers
   `exos: attendance export kinds`, `exos: attendance export cap`). Text cells
   are inline strings, which a spreadsheet never evaluates as formulas.
+
+### Drop list (mig 20261118100000)
+
+- **Tables.** `exos_drop_signups`, `exos_drop_confirms`, `exos_drop_settings`: RLS on, no client grants (RPCs only),
+  `org_id` on every row. No anon or fan read of the list.
+- **Signed in.** `exos_drop_join` (one click; needs a confirmed account email, which is the proof; 10 joins a
+  minute). A number is never stored as consented on the form's word: join texts it a one-time code
+  (`exos_rsvp_sms_outbox`). Against SMS pumping, checked before the outbox under per-account, per-org and per-number
+  locks over the sends logged in `exos_drop_sms_codes`: 5 a day per account, 5 a day per number (all accounts and
+  orgs), 300 a day per org, 3 per number per 10 minutes, 60 s apart, 2 numbers per signup, none after 10 wrong codes
+  for the number in a day (across signups), 100 of the org's 300 for accounts new to it (established: a proved
+  number or a paid order, amount > 0, not fully refunded, at least 7 days old), 5,000 sends a day platform-wide for
+  everyone (a hard spend ceiling that trades availability) and 2,000 of them for newcomers, both counted under one
+  platform advisory lock (race 6); every change of `exos_orgs.country` is an `org.country` audit row (trigger
+  `exos_orgs_country_audit`); numbers only in the org's country (+1 for US / CA / US
+  territories; other NANP countries by area code, `_exos_drop_nanp_iso`; 900 never) or an owner's audited allowlist
+  (`exos_drop_set_sms_countries`, owner / admin, `drop_list.sms_countries_set`), no extensions, NANP for +1, refused
+  before any log or send; one `try_again` answer
+  whichever cap (`race_drop_list.sh` race 5). None to a stopped number, same answer as sent. and `exos_drop_verify_sms` (the caller's own signup, 10 minutes, 5 tries, 10 a
+  minute) stores the number and the consent words. `exos_drop_leave_mine`: the caller's own rows.
+- **Organizers.** `exos_drop_list_summary`: owner / manager / finance of the event's org (or admin), counts and
+  sources only, never an address; the same 42501 for another org's event or an unknown id. `exos_drop_list_export`:
+  owner / manager only (the fans export pattern), 3 a minute and 20 a day per org, an `export.run` row (entity
+  `drop_list`); email, dates, texts yes / no, source; no phone, no tokens. `exos_drop_list_set_presale`: owner /
+  manager, a hidden ticket type of the same event, audited `drop_list.presale_set`; frozen once the list was notified.
+  Content and scanner roles get nothing.
+- **The list-only code.** `exos_check_voucher` (marker `/* exos: drop list code */`) answers "invalid code" for a
+  drop-list presale code unless the buyer is a confirmed member: signed in, the account or its confirmed email; the
+  service role (`exos-checkout`, which passes the verified account email; the JWT role must be exactly
+  `service_role`), that email; anything else (anon, no claims), never. Only members confirmed before the presale
+  opened; signups close when it opens. So the hold path (`exos_create_hold`'s hidden-type gate) and checkout honour it for members
+  only. The code expires at the public on-sale.
+- **The blast.** `exos_drop_list_blast` / `exos_drop_list_sweep`: service role only (cron `exos-drop-list-blast-5min`,
+  created inactive). Each signup is claimed once under a per-event advisory lock and `FOR UPDATE SKIP LOCKED`, and
+  its mail keyed `drop-on-sale:<id>` (`tests/exos/race_drop_list.sh`). Texts re-check consent at queue time (left,
+  opted out, a STOP after the consent in `exos_sms_stops`, 8 a month, the org's provider) and go through the
+  existing outbox and `exos-sms-drain`, 9:00-20:00 in the event's zone (validated against `pg_timezone_names`, else
+  America/New_York), with "Reply STOP to opt out.". Any `exos_sms_stops` row (until START) or subscriber opt-out is a
+  hard stop, at the blast and in `exos_sms_claim` (marker `/* exos: drop list stop */`, `drop_list` campaigns only;
+  also skips a text whose signup left). Each event runs in its own subtransaction, so one bad event can't stop the
+  rest. The lock comes before the presale is read.
+- **Leaving.** Leave tokens are stored hashed (one per mail, `exos_drop_leave_tokens` for confirm mails, kept as long
+  as the signup so an old link works after the 8-day confirm sweep). Leaving spends the signup's open confirms first (the
+  confirm's lock order), and a confirm older than the leave never re-joins (`race_drop_list.sh` race 4).
 
 ### Search path
 

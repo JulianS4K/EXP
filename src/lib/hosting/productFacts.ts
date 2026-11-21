@@ -383,6 +383,13 @@ export const PRODUCT_FACTS: ProductFact[] = [
       'supabase/migrations/20261113194000_exos_discord.sql', 'supabase/migrations/20261114100000_exos_leftovers_15.sql'],
     note: 'Branch claude/exos-discord: not on main, migration not applied. Branch claude/exos-wave15-leftovers adds an automatic reminder (24 or 48 hours before, off by default), deleting the Discord event when the Exos event is deleted, and a test message. Dark until EXOS_DISCORD_ENABLED=on; a dry run until the org switch and EXOS_DISCORD_WRITES=on; the bot needs the platform\'s Discord application (docs/discord.md).',
   },
+  {
+    id: 'drop-list', audience: 'organizer', status: 'off',
+    claim: 'Before tickets go on sale, fans can tap "Notify me" on the event page; each confirmed signup gets one email (and one text if they opted in) when the event goes on sale, and organizers can give the list a presale that opens before the public on-sale.',
+    code: ['src/components/DropListCTA.tsx', 'src/components/DropListPanel.tsx', 'src/lib/dropList.ts',
+      'supabase/migrations/20261118100000_exos_drop_list.sql'],
+    note: 'Branch claude/exos-drop-list: not on main, migration not applied. Nothing is sent until exos-mail-drain runs with Resend (docs/email.md) and the cron exos-drop-list-blast-5min, created inactive, is turned on; texts also need the org\'s Twilio / Telnyx and EXOS_SMS_LIVE=on.',
+  },
 ];
 
 const STATUS_LABEL: Record<FactStatus, string> = {

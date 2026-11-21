@@ -285,3 +285,41 @@ export function kioskPos(st) {
     }
   };
 }
+
+// --- claude/exos-drop-list: drop list (mig 20261118100000) -------------------
+// The Fall Party announced, GA and VIP on sale in 3 days: the page offers
+// "Notify me". dropMock(st) answers the drop RPCs; st records what was sent.
+const onSale = new Date(Date.now() + 3 * 864e5).toISOString();
+export const DROP_TIERS = tables.exos_public_tiers.map((t) => ({ ...t, sales_start: onSale }));
+const DROP_STATUS = {
+  open: true, on_sale_at: onSale, list_presale: true,
+  email_consent_text: 'Email me once when tickets for Fall Party from Brooklyn Nights go on sale. I can leave this list at any time.',
+  sms_consent_text: 'Text me once at this number when tickets for Fall Party from Brooklyn Nights go on sale. Msg & data rates may apply. Reply STOP to cancel, HELP for help. Consent is not a condition of purchase.',
+};
+export const DROP_SUMMARY = {
+  open: true, on_sale_at: onSale, signups: 42, confirmed: 31, pending: 11, sms: 9, left: 1, notified: 0, texts_queued: 0,
+  sources: [
+    { label: 'promoter:dj-kay', promoter: 'dj-kay', utm_source: null, utm_medium: null, utm_campaign: null, signups: 20, confirmed: 16 },
+    { label: 'instagram', promoter: null, utm_source: 'instagram', utm_medium: 'story', utm_campaign: 'drop', signups: 15, confirmed: 11 },
+    { label: 'direct', promoter: null, utm_source: null, utm_medium: null, utm_campaign: null, signups: 7, confirmed: 4 },
+  ],
+  presale: { status: 'set', minutes: 60, tier_id: HIDDEN, tier_name: 'Presale', code: 'LISTA1B2C3D4E5',
+    opens_at: new Date(Date.parse(onSale) - 36e5).toISOString(), public_on_sale_at: onSale },
+  can_manage: true,
+};
+export const dropMock = (st = {}) => ({
+  tables: { exos_public_tiers: DROP_TIERS },
+  rpcs: {
+    exos_drop_status: () => ({ ...DROP_STATUS, ...(st.joined ? { joined: true, sms: false } : {}) }),
+    exos_drop_signup: (b) => { st.signup = b; return { ok: true, status: 'check_email' }; },
+    exos_drop_confirm_code: (b) => { st.code = b; return { ok: b.p_code === '123456' }; },
+    // Texts wait for the code texted to the number (nothing consented yet).
+    exos_drop_join: (b) => { st.join = b; return { ...DROP_STATUS, joined: true, sms: false, sms_pending: !!b.p_sms, pending_hint: b.p_sms ? '…0101' : null }; },
+    exos_drop_verify_sms: (b) => ({ ...DROP_STATUS, joined: true, verified: b.p_code === '654321', sms: b.p_code === '654321', phone_hint: '…0101' }),
+    exos_drop_confirm: (b) => (/^[0-9a-f]{64}$/.test(b.p_token) ? { ok: true, event_id: EV, event_name: 'Fall Party', org_name: 'Brooklyn Nights' } : { ok: false }),
+    exos_drop_leave: (b) => (/^[0-9a-f]{64}$/.test(b.p_token) ? { ok: true, event_name: 'Fall Party' } : { ok: false }),
+    exos_drop_list_summary: () => DROP_SUMMARY,
+    exos_drop_list_export: () => { st.exported = true; return { count: 1, rows: [{ email: 'fan@x.com', joined_at: '2026-11-18', confirmed_at: '2026-11-18', texts: true, promoter: 'dj-kay' }] }; },
+  },
+});
+

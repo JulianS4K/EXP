@@ -71,6 +71,73 @@ follow is refused with 54000 and nothing changes).
   address. Addresses come only from **Export CSV** (`exos_org_followers_export`): the same rows with the email,
   3 a minute and 20 a day per org, each one an `export.run` row (entity `followers`) in the org audit log.
 
+## Drop list ("Notify me")
+
+Mig `20261118100000_exos_drop_list.sql`, harness `tests/exos/test_drop_list.sql` (race: `tests/exos/race_drop_list.sh`,
+by hand). For an announced event that isn't on sale yet: the moment promoters sell out on an Instagram drop.
+
+- **When it shows.** A published, upcoming event sold on Exos whose public ticket types (capacity above 0) all open
+  later (`sales_start` in the future). The event page shows **Notify me when tickets go on sale**
+  (`src/components/DropListCTA.tsx`); once one public type is on sale it goes away, and a sold-out event keeps the
+  waitlist. Why not the waitlist, followers or signup forms: the waitlist is for a sold-out event (queue positions,
+  offers, holds); a follow is org-wide; a signup form joins the org's newsletter list. This is narrower consent, one
+  event and one message, so it has its own table and joins neither the org's list nor the fan profiles.
+- **Signing up.** Signed in with a confirmed email: one click (`exos_drop_join`), with an optional text behind its own
+  checkbox and consent words. The number counts only once it is proved: a one-time 6-digit code is texted to it
+  (`exos_rsvp_sms_outbox`, the order-proof SMS path; a dry run until `EXOS_SMS_LIVE=on`) and typed back
+  (`exos_drop_verify_sms`), so nobody can sign up someone else's phone. Codes (against SMS pumping, logged in
+  `exos_drop_sms_codes`): 5 a day per account, 5 a day per number across accounts and orgs, 300 a day per org (of
+  which accounts new to the org share 100; established means a proved number or a paid order there, amount above $0,
+  not fully refunded and at least 7 days old), and two platform-wide caps in `exos_platform_settings`: `drop_sms_codes_daily_cap`, 5,000
+  sends a day in all, stops everyone (a hard spend ceiling, traded against availability on a day it fills; both caps
+  are counted under one platform lock, so parallel requests can't overshoot them), and
+  `drop_sms_codes_daily_newcomer_cap`, 2,000 a day, stops only newcomers so they can't use up the total. 3 per
+  number per 10 minutes, 60 s apart, at most 2 numbers per signup, and none to a number with 10 wrong codes typed in a
+  day; over any of them the page says try later (the same answer whichever). Numbers: no extensions or dial
+  strings, a real NANP number for +1, and only the org's own country (`exos_orgs.country`; +1 for US / CA and the US
+  territories, while the other NANP countries such as Jamaica 876 / 658 or the Dominican Republic 809 / 829 / 849
+  are placed by area code as their own countries, and 900 is never texted) unless its
+  owner allows more with `exos_drop_set_sms_countries` (an audited allowlist, RPC only for now; a change of
+  `exos_orgs.country` itself is an `org.country` audit row); any other number
+  gets "texts aren't available for this number" before anything is logged or sent. A number that replied STOP gets
+  no text. The code isn't held for quiet hours: the person asked for it on the page and it lasts 10 minutes (the usual
+  exemption for user-requested one-time codes, as for the order-proof codes). Leaving and re-joining with the same
+  number sends a new code. Everyone else: an email
+  (`exos_drop_signup`), then the mail's **Confirm** link (`/drop/confirm?t=`, a page that takes a click) or its
+  6-digit code typed on the event page, which only works from the browser that signed up (the guest-proof pattern).
+  The answer is always "check your email": it never says whether an address is already on the list. Limits: 10 a
+  minute per network and 5 per address (lower case, `+tag` folded); 3 confirm mails a day per address and event and
+  10 a day per address across lists. When an event's own limit (120 a minute) is full, the page says "try again in a
+  minute" (per event, so it says nothing about an address). Signups close when a list presale opens.
+- **What is kept.** The address, the consent words and times, the number and its words when texts were asked for,
+  and the first-touch promoter code and UTM tags. No IP, no name. Unconfirmed signups go after 30 days, a list 30
+  days after its event (`exos_drop_list_sweep`).
+- **The organizer's tile.** Event report → Marketing → **Drop list** (`src/components/DropListPanel.tsx`): signed up,
+  confirmed, texts opted in, waiting to confirm, and the sources (promoter / UTM), so the room can be sized before the
+  on-sale. Owner / manager / finance; never an address. **Export CSV** (owner / manager): email, dates, texts yes /
+  no, source; no phone; 3 a minute and 20 a day per org, an `export.run` row each. The raw addresses are the
+  operator's privacy call: owner / manager export; the people on it consented to one on-sale email, not to the org's
+  list. Finance sees the counts and that a presale is set, not its code.
+- **List presale.** Owner / manager pick one of the event's **hidden** ticket types and N minutes (5 to 1440). Exos
+  makes the existing presale shape: one code for that type, valid until the public on-sale, and the type opens N
+  minutes early. The code works only for list members confirmed before the presale opened (`exos_check_voucher`:
+  signed in, or the verified email exos-checkout passes; it is checked again when checkout starts), so a forwarded
+  code does nothing; the type's own price applies. Members confirmed later hear at the public on-sale. If the public on-sale moves later, the presale shows as stale
+  and the list hears at the on-sale instead; set it again. Turning it off deletes an unused code.
+- **The blast.** At the public on-sale (or when the list presale opens), each confirmed member gets one
+  `drop-on-sale` mail (with the code while the presale runs) and, if they opted in, one text from the org's own
+  Twilio / Telnyx (a `drop_list` campaign in the SMS tab) at 9:00-20:00 in the event's zone (an unknown zone falls
+  back to America/New_York; one event failing never holds up the others); a presale text that
+  quiet hours push past the on-sale says "on sale" instead. Once per member, even across parallel runs.
+  `exos_drop_list_blast` runs from the cron `exos-drop-list-blast-5min`, **created inactive**: nothing goes out until
+  it and `exos-mail-drain` are on (and `exos-sms-drain` with `EXOS_SMS_LIVE=on` for texts).
+- **Leaving.** Every mail has a leave link (`/drop/leave?t=`, also its List-Unsubscribe; only hashes stored); texts
+  end "Reply STOP to opt out." A confirm mail's leave link keeps working after its confirm row is swept (the leave
+  tokens live in `exos_drop_leave_tokens`, kept as long as the signup). Any STOP on record for the number is a hard stop until START, checked at the blast and
+  again by `exos_sms_claim` at send time. Signed-in fans can leave from the event page. Leaving spends every open
+  confirm link and code, so an old mail can't put the person back. An account opted
+  out of follow-up mail gets no on-sale email.
+
 ## Signup forms
 
 An org builds a form (title, intro, button, whether to ask for a name, whether to offer texts, tags to put on
