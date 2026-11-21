@@ -1342,10 +1342,14 @@ exception for that platform.
   address and a **verified** email (`_exos_account_email_verified`, T1): a Google / Apple / other
   OAuth identity whose provider says `email_verified` for that address, or a confirmation mail
   Supabase sent and the person answered (`confirmation_sent_at` set, `email_confirmed_at` at or after
-  it). `email_confirmed_at` alone isn't proof: with Supabase Auth's **Confirm email** off (prod today:
+  it), the last only while the platform setting `auth_confirm_email_on` is true (default false).
+  `email_confirmed_at` alone isn't proof: with Supabase Auth's **Confirm email** off (prod today:
   every account confirmed at sign-up, no confirmation mail sent) GoTrue sets it at sign-up, so anyone
-  could sign up as your address, buy and tick "yes". Turning Confirm email on makes new email/password
-  accounts count; until then their "yes" counts only after an email code. **Not changed here:** ticket
+  could sign up as your address, buy and tick "yes". And an answered mail proves the address it went
+  to, not the account's address now: while Confirm email is off an email change is applied at once,
+  with no mail to the new address. So set `auth_confirm_email_on` only after turning on Confirm email
+  (and Secure email change), and unset it if Confirm email is ever turned off. Until then an
+  email/password account's "yes" doesn't count; a Google / Apple sign-in's does. **Not changed here:** ticket
   release for an account buyer (`_exos_proof_open` / `_exos_uid_email_confirmed`, mig
   20261105100000) reads `email_confirmed_at` the same way, so with Confirm email off a stranger who
   signs up as your address skips the email proof there too. Tightening it would make every current

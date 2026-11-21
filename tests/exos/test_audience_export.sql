@@ -22,6 +22,11 @@
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
+-- The fixture accounts below answered a confirmation mail, which counts only
+-- while the operator says Supabase Auth's "Confirm email" is on
+-- (auth_confirm_email_on). These suites model that; AD11 / A8 turn it off.
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('auth_confirm_email_on', 'true')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 -- As in prod: follows (mig 20260520140000, not in this chain) and the
 -- account phone column. Rolled back with the rest.
 CREATE TABLE IF NOT EXISTS public.exos_org_follows (
@@ -349,5 +354,24 @@ BEGIN
   ASSERT encode(sha256(convert_to('ae-t1mailed@x.com','UTF8')),'hex') = ANY (hs), 'A8: an answered confirmation mail is exported';
   ASSERT NOT (encode(sha256(convert_to('ae-t2open@x.com','UTF8')),'hex') = ANY (hs)), 'A8 T2: an order with an open dispute exported';
   RAISE NOTICE 'OK  A8 a verified email only (not email_confirmed_at alone); open disputes out';
+END $$;
+-- A8b: with auth_confirm_email_on off (the default, prod today), the
+-- answered mail no longer counts (an email change could have swapped the
+-- address without a mail); the Google-verified sign-in still does.
+UPDATE public.exos_platform_settings SET value = 'false' WHERE key = 'auth_confirm_email_on';
+DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audience:%';
+DELETE FROM public.exos_audience_exports WHERE org_id = 'ae000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.uid', 'ae000000-0000-0000-0000-0000000000a0', true);
+CREATE TEMP TABLE ae_raw8b ON COMMIT DROP AS SELECT public.exos_org_audience_export('ae000000-0000-0000-0000-000000000001') AS j;
+RESET ROLE;
+DO $$
+DECLARE hs text[];
+BEGIN
+  SELECT array_agg(r ->> 'email_sha256') INTO hs FROM ae_raw8b, jsonb_array_elements(ae_raw8b.j -> 'rows') r;
+  ASSERT NOT (encode(sha256(convert_to('ae-t1mailed@x.com','UTF8')),'hex') = ANY (coalesce(hs, '{}'))),
+    'A8b: with auth_confirm_email_on off, an answered confirmation mail was exported';
+  ASSERT encode(sha256(convert_to('ae-t1google@x.com','UTF8')),'hex') = ANY (coalesce(hs, '{}')), 'A8b: a Google-verified sign-in is still exported';
+  RAISE NOTICE 'OK  A8b the confirmation branch counts only with auth_confirm_email_on; OAuth-verified still does';
 END $$;
 ROLLBACK;

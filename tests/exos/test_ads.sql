@@ -45,6 +45,11 @@
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
+-- The fixture accounts below answered a confirmation mail, which counts only
+-- while the operator says Supabase Auth's "Confirm email" is on
+-- (auth_confirm_email_on). These suites model that; AD11 / A8 turn it off.
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('auth_confirm_email_on', 'true')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 
 -- As in prod, auth.users has confirmation_sent_at. The fixture accounts below
 -- answered a confirmation mail (sent a minute before their confirmed time), so
@@ -776,6 +781,32 @@ DO $$
 BEGIN
   ASSERT (SELECT proven_via FROM public.exos_order_proofs WHERE session_id = 'cs_test_ad1_t3') = 'sms', 'AD11 T3: proven by the phone code';
   RAISE NOTICE 'OK  AD11 T3 an SMS send leaves the email code locked after 5 wrong codes; the phone code still proves';
+END $$;
+-- T1b (security review of ea13aaa): an answered mail proves the address it
+-- went to. While "Confirm email" is off an email change applies at once,
+-- with no mail to the new address, so the confirmation branch counts only
+-- with auth_confirm_email_on. Off (the default, prod today): t1-mailed no
+-- longer counts, nor does an account that answered a mail for its own
+-- address and then switched to the victim's; a Google-verified one still does.
+UPDATE public.exos_platform_settings SET value = 'false' WHERE key = 'auth_confirm_email_on';
+INSERT INTO auth.users(id,email,email_confirmed_at,confirmation_sent_at) VALUES
+  ('ad100000-0000-0000-0000-0000000000d8','t1b-own@x.com',now(),now() - interval '1 hour');
+UPDATE auth.users SET email = 't1b-victim@x.com' WHERE id = 'ad100000-0000-0000-0000-0000000000d8';
+SELECT pg_temp.acct('cs_test_ad1_t1b', 'ad100000-0000-0000-0000-0000000000d8', 't1b-victim@x.com');
+SELECT pg_temp.fresh_minute();
+DO $$
+DECLARE e text[]; x text[];
+BEGIN
+  e := pg_temp.emails(pg_temp.source(NULL));
+  x := pg_temp.xemails(pg_temp.xp());
+  ASSERT NOT ('t1b-victim@x.com' = ANY (e)) AND NOT ('t1b-victim@x.com' = ANY (x)),
+    'AD11 T1b: an answered mail for another address, then an email change, made a "yes" (source ' || e::text || ', export ' || x::text || ')';
+  ASSERT NOT ('t1-mailed@x.com' = ANY (e)) AND NOT ('t1-mailed@x.com' = ANY (x)),
+    'AD11 T1b: with auth_confirm_email_on off, an answered confirmation mail still counted';
+  ASSERT 't1-google@x.com' = ANY (e) AND 't1-google@x.com' = ANY (x),
+    'AD11 T1b: a Google-verified email should count with the setting off';
+  ASSERT public._exos_setting_bool('auth_confirm_email_on', false) IS FALSE, 'AD11 T1b: the setting is off';
+  RAISE NOTICE 'OK  AD11 T1b the confirmation branch counts only with auth_confirm_email_on (default off); OAuth-verified still does';
 END $$;
 
 ROLLBACK;

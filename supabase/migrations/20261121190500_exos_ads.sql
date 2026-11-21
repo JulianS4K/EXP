@@ -107,9 +107,12 @@
 --    mail Supabase sent and the person answered). email_confirmed_at alone
 --    isn't proof: with Supabase Auth's "Confirm email" off (prod today),
 --    GoTrue sets it at sign-up and sends nothing, so anyone could sign up as
---    your address, buy, and tick "yes". Turning "Confirm email" on makes new
---    email/password accounts count; until then their "yes" counts only after
---    an email code. The ticket-release rule (_exos_uid_email_confirmed /
+--    your address, buy, and tick "yes"; and an answered mail proves only the
+--    address it went to, which an instant email change can swap. So the
+--    confirmation branch counts only with the operator setting
+--    auth_confirm_email_on = true (default false), set once "Confirm email"
+--    (and "Secure email change") are on; until then an email/password
+--    account's "yes" doesn't count, a Google / Apple one does. The ticket-release rule (_exos_uid_email_confirmed /
 --    _exos_proof_open, mig 20261105100000) reads email_confirmed_at the same
 --    way and is NOT changed here: tightening it would make every current
 --    account prove before release, which is Julian's call (docs/security.md).
@@ -393,10 +396,21 @@ COMMENT ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) IS
 --     this address and its provider says email_verified (a JSON boolean or a
 --     string 'true'), or
 --   * Supabase sent a confirmation mail and the person answered it
---     (confirmation_sent_at set, email_confirmed_at at or after it).
+--     (confirmation_sent_at set, email_confirmed_at at or after it), AND the
+--     operator has said Supabase Auth's "Confirm email" is on
+--     (exos_platform_settings auth_confirm_email_on = true; default false).
 -- With "Confirm email" off GoTrue sets email_confirmed_at at sign-up and
 -- sends nothing (confirmation_sent_at stays NULL), so that alone proves
--- nothing. Columns are read through to_jsonb and auth.identities through a
+-- nothing. And a mail answered once proves the address it went to, not the
+-- account's address now: while "Confirm email" is off an email change is
+-- applied at once, with no mail to the new address, so an account that
+-- answered a mail for its own address could switch to yours and still pass
+-- (security review of ea13aaa). The confirmation branch is trusted only
+-- while every email change needs a confirmation too, i.e. "Confirm email"
+-- is on (and "Secure email change", which also mails the old address); the
+-- operator sets auth_confirm_email_on only then, and unsets it if Confirm
+-- email is ever turned off. Until then only a provider-verified identity
+-- counts. Columns are read through to_jsonb and auth.identities through a
 -- guarded dynamic query, so a Supabase without either still answers (false).
 CREATE OR REPLACE FUNCTION public._exos_account_email_verified(p_uid uuid, p_email text)
 RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -414,7 +428,8 @@ BEGIN
   IF v_u IS NULL THEN
     RETURN false;
   END IF;
-  IF (v_u ->> 'confirmation_sent_at') IS NOT NULL AND (v_u ->> 'email_confirmed_at') IS NOT NULL
+  IF public._exos_setting_bool('auth_confirm_email_on', false)
+     AND (v_u ->> 'confirmation_sent_at') IS NOT NULL AND (v_u ->> 'email_confirmed_at') IS NOT NULL
      AND (v_u ->> 'email_confirmed_at')::timestamptz >= (v_u ->> 'confirmation_sent_at')::timestamptz
      AND lower(btrim(coalesce(v_u ->> 'email', ''))) = v_email THEN
     RETURN true;
