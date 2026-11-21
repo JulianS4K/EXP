@@ -234,7 +234,10 @@ their own seller account**, instead of (not as well as) the Exos network. Operat
   capacity is skipped. The share can change at any time, never below what that marketplace already sold (the
   smallest % allowed is shown and in the error); every change is audited (`event.byo_allocation`); no cooldown.
 - **One account per marketplace per event.** Not on a marketplace ticked under Distribution (the Exos network
-  sells it there), and not while the network still holds seats, sold or is live on it. The Exos network's own
+  sells it there), and ticking one the organizer sells with their own account is refused. A switch deletes the
+  allocation rows nothing ever happened on and is refused while any other is there (seats, a sale, a listing, a
+  sync), so a row the network once used is never the organizer's. Back to 0% with nothing ever done on its rows,
+  the marketplace is nobody's again; with sales, it stays the organizer's at the sold floor. The Exos network's own
   gates (the S4K route, ticked under Distribution, the resale capacity rule) don't apply to the organizer's own
   account, so a free-tier event can sell there; the $0 rule does. The auto split never shares an own-account
   marketplace.
@@ -244,14 +247,20 @@ How it is built (one model, one planner, one transport):
 - **The same allocation row.** `exos_byo_set_allocation(event, channel, pct)` (owner / manager) records the % in
   `exos_byo_allocations` and sets each ticket type through `exos_set_channel_allocation` (its locks and free-seat
   check), so the seats are set aside from Exos checkout and a marketplace sale takes them out of the allocation
-  exactly as for the network. Each row's `account` is `'own'` (the trigger keeps it in step; a row that has sold,
-  holds seats or is live can't change account). `exos_byo_allocations_view(event)` is what the panel reads.
+  exactly as for the network. Only it allocates an own-account channel (`exos_set_channel_allocation` refuses one
+  otherwise). Each row's `account` is `'own'`, fixed when the row is made; each order keeps the account of the
+  listing it was first matched to, and its fee and books follow that. An own-account order is never Exos's to pay
+  out (money view state `own_account`; no remittance covers it). Saving the event doesn't pull an own-account
+  marketplace's seats (only cancelling, unpublishing or primary market only does). `exos_byo_allocations_view(event)`
+  is what the panel reads.
 - **The same plan.** exos-distribute plans the allocation's listings as for every marketplace (`planned_listing`).
   `exos-byo` (`/plan`) replays that plan on the channel core with the org's credential from the store (providers
   `stubhub`, `seatgeek`, `vivid`, `tevo`, Org settings -> Integrations): `adapters/byoMarketplace.ts`, adapter ids
   `byo_<channel>` (so `EXOS_BYO_<CHANNEL>_WRITES`, apart from the network's flags). Creates use each listing's
   planned request; StubHub / SeatGeek updates PATCH the changed fields by our external id; deletes and delists
-  are sync.ts `planDelist`. A Vivid Seats or Ticket Evolution live-listing change is warned, not built yet.
+  are sync.ts `planDelist`. A Vivid Seats live-listing change is warned, not built yet. Ticket Evolution plans
+  nothing for an own account yet: exos-distribute's plan carries Exos's own office id and TEvo numbers inventory per
+  office, so the organizer's office id has to be planned for first.
 - **Dry run, pinned.** `BYO_WRITES_PINNED_OFF` hands GatedHttp an org switch of false, and exos-byo gives it a
   fetch that refuses every call: nothing reaches a marketplace, not even a read. The requests (secrets redacted)
   are in `exos_channel_audit` ("What we'd send") and in the panel's preview. Going live needs the pin removed in a
@@ -259,9 +268,9 @@ How it is built (one model, one planner, one transport):
 - **Not yet:** reading the organizer's own sales from their seller account (a sale reaching
   `exos_record_marketplace_order` with the own-account listing is handled as above; polling the org's credential
   is the next step); Gametime (an FTP inventory file of the whole account), TickPick (no listing plan) and
-  GoTickets (no org credential); Vivid Seats / Ticket Evolution listing updates.
+  GoTickets (no org credential); Vivid Seats listing updates; Ticket Evolution with the organizer's own office.
 - Edit event -> **Your own marketplace accounts** (`ByoMarketplacePanel`). Tests: `tests/exos/test_byo_marketplaces.sql`
-  (BY1-BY12), `tests/exos/race_byo_allocations.sh`, `_shared/byo/byo_test.ts`, `ByoMarketplacePanel.test.tsx`.
+  (BY1-BY17), `tests/exos/race_byo_allocations.sh`, `_shared/byo/byo_test.ts`, `ByoMarketplacePanel.test.tsx`.
 
 ## How StubHub ties into Exos
 

@@ -1466,21 +1466,32 @@ Nothing new is callable by anon (H3 unchanged), and nothing is sent to a platfor
 ### Own marketplace accounts, dry run only (mig 20261121214500)
 
 Nothing new is callable by anon, and nothing is sent to a marketplace (operator 2026-11-21: "For the APIs build and
-keep read only till build is complete"). Tests: `tests/exos/test_byo_marketplaces.sql` (BY1-BY12),
+keep read only till build is complete"). Tests: `tests/exos/test_byo_marketplaces.sql` (BY1-BY17),
 `race_byo_allocations.sh`, `_shared/byo/byo_test.ts`; docs/marketplace/README.md "Your own marketplace accounts".
 
 - **RPCs, role-checked inside.** `exos_byo_set_allocation` and `exos_byo_allocations_view`: authenticated only, owner /
   manager of the event's org (42501 otherwise). `exos_byo_allocations` has RLS on and no client grants; the helpers
-  (`_exos_byo_channel`, `_exos_byo_listing`, `_exos_byo_ticket`) and the account trigger are internal. The view shows
-  whether the org's credential exists, never a secret or a credential id.
-- **Money stays right.** An own-account sale is priced at 0 bps and posts nothing to the journal, so payouts never pay
-  out money Exos didn't receive; a sale matched later to an own-account listing is re-priced at 0, and matched back to
-  a network listing at the network's rate. The account follows `exos_byo_allocations`, and a row that has sold, holds
-  seats or is live can't change account (55000), so a past sale's account can't be flipped to change its fee.
+  (`_exos_byo_channel`, `_exos_byo_listing`, `_exos_byo_ticket`, `_exos_listing_untouched`) and the account triggers
+  are internal. The view shows whether the org's credential exists, never a secret or a credential id. Only
+  `exos_byo_set_allocation` allocates an own-account channel: it sets `exos.byo_alloc_ok` for its own transaction
+  (as #133's `exos.static_code_ok`; no client path sets a GUC), and `exos_set_channel_allocation` refuses an
+  own-account channel otherwise (42501), so the % rule, the sold floor and the audit can't be skipped (review of #143,
+  R2). Ticking a marketplace under Distribution is refused while the organizer sells it with their own account
+  (`exos_tg_events_byo_networks`, any path; R1). `exos-byo /plan` is limited to 10 a minute per org.
+- **Money stays right.** Each order carries the account of the listing it was first matched to
+  (`exos_marketplace_orders.account`, stamped once by `_exos_tg_order_account`), and the fee and the journal read that:
+  an own-account sale is priced at 0 bps and posts nothing to the journal; a sale first matched to an own-account
+  listing after it was priced is re-priced at 0; a later re-match changes nothing. A listing row's account is fixed
+  when the row is made (42501 on any change): the marketplace knows a listing by our row id, so switching a
+  marketplace between the network and the organizer's account deletes the rows nothing ever happened on and refuses
+  while any other row is there; new rows get new ids, so a network sale can never land on an own-account row (R4).
+  Payouts: the money view's first state is `own_account` (never `payable` or `clawback_due`, so
+  `exos_plan_org_payouts` never plans one), and `exos_record_remittance` refuses an own-account order (22023), so
+  payouts never pay out money Exos didn't receive (R3).
 - **Every write behind GatedHttp.** Each `byo_<channel>` adapter lists exactly its listing writes (StubHub POST /
   PATCH / DELETE by our `ex...` external id only; SeatGeek PUT / PATCH by our id and the bulk delete; Vivid Seats
   create / delete; Ticket Evolution inventory create / delete by numeric id); order, sale and broker-listing paths are
-  refused. `exos-byo` pins the org's switch off (`BYO_WRITES_PINNED_OFF`) and hands GatedHttp a fetch that refuses
+  refused. Ticket Evolution plans nothing for an own account yet: exos-distribute's plan carries Exos's office id. `exos-byo` pins the org's switch off (`BYO_WRITES_PINNED_OFF`) and hands GatedHttp a fetch that refuses
   every call. The org's credential goes in headers only and is redacted from every step.
 
 ### Search path

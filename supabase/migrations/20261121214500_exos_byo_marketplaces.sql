@@ -2,20 +2,31 @@
 -- 20261121214500_exos_byo_marketplaces.sql — sell on the organizer's OWN
 -- marketplace accounts (BYO), DRY RUN ONLY
 -- ============================================================================
--- Touches:  W: TABLE exos_distribution_listings (+ account: 'platform' | 'own')
+-- Touches:  W: TABLE exos_distribution_listings (+ account: 'platform' | 'own',
+--              fixed when the row is made), exos_marketplace_orders (+ account:
+--              the account of the listing the order was first matched to)
 --           C: TABLE exos_byo_allocations (RLS on, RPCs only)
 --           C: FUNCTION _exos_byo_channels, _exos_byo_provider, _exos_byo_channel,
---              _exos_byo_listing, _exos_byo_ticket (internal), the trigger
---              _exos_tg_listing_account, exos_byo_set_allocation and
---              exos_byo_allocations_view (owner / manager)
+--              _exos_byo_listing, _exos_byo_ticket, _exos_listing_untouched
+--              (internal), the triggers _exos_tg_listing_account,
+--              _exos_tg_order_account, exos_tg_events_byo_networks,
+--              exos_byo_set_allocation and exos_byo_allocations_view (owner /
+--              manager)
 --           W: FUNCTION exos_set_channel_allocation (6 counted patches: an own-
---              account channel skips the S4K / network / resale-capacity gates
---              of the Exos network route and refuses a $0 ticket type),
+--              account channel is allocated only by exos_byo_set_allocation
+--              (exos.byo_alloc_ok), skips the S4K / network / resale-capacity
+--              gates of the Exos network route and refuses a $0 ticket type),
 --              _exos_channel_split_plan (1: the auto split never touches an
---              own-account channel), exos_tg_marketplace_fee (2: no Exos fee on
---              an own-account sale), exos_journal_post_marketplace (1: an own-
---              account sale is off Exos's books), exos_tg_ticket_code_mode
---              (1: an own-account sale's tickets are static codes)
+--              own-account channel), exos_sync_marketplace_distribution (1: an
+--              event edit doesn't pull an own-account channel's seats),
+--              exos_tg_marketplace_fee (2: no Exos fee on an own-account sale),
+--              exos_journal_post_marketplace (1: an own-account sale is off
+--              Exos's books), exos_tg_ticket_code_mode (1: an own-account
+--              sale's tickets are static codes), exos_record_remittance (1: no
+--              remittance covers an own-account order)
+--           W: VIEW exos_marketplace_order_money (replaced in full from its one
+--              definition, mig 20260929070000: state 'own_account' first, so
+--              payouts never plan an own-account order)
 --           R: exos_org_integrations (the org's marketplace credentials,
 --              providers stubhub / seatgeek / vivid / tevo since mig
 --              20261016090000), exos_org_audit (event.byo_allocation)
@@ -61,8 +72,15 @@
 --       own account. The $0 rule does.
 --   One account per marketplace per event: own-account selling on a
 --   marketplace the event is ticked for under Distribution (the Exos network)
---   is refused, and so is a switch while a row of the other account is
---   holding seats, sold or live.
+--   is refused, ticking one the organizer sells with their own account is
+--   refused (exos_tg_events_byo_networks), and a switch is refused while a
+--   row anything ever happened on is there (_exos_listing_untouched). A
+--   listing row's account never changes: the marketplace knows a listing by
+--   our row id, so the switch deletes the untouched rows and new ones are
+--   made, and each order keeps the account it was sold on (its own column).
+--   Back to 0% with nothing ever done on its rows, the marketplace is nobody's
+--   again. Payouts never pay out an own-account sale (state 'own_account',
+--   and no remittance covers one).
 --
 -- Re-run safe (counted marker patches; tests/exos/reapply_check.sh).
 -- D4 authors; applying to prod is operator-gated.
@@ -155,6 +173,16 @@ BEGIN
       CHECK (account IN ('platform', 'own'));
   END IF;
 END $c$;
+-- The account of the listing a marketplace order was first matched to
+-- (_exos_tg_order_account, below).
+ALTER TABLE public.exos_marketplace_orders ADD COLUMN IF NOT EXISTS account text;
+DO $c$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_marketplace_orders_account_chk') THEN
+    ALTER TABLE public.exos_marketplace_orders ADD CONSTRAINT exos_marketplace_orders_account_chk
+      CHECK (account IS NULL OR account IN ('platform', 'own'));
+  END IF;
+END $c$;
 
 CREATE OR REPLACE FUNCTION public._exos_byo_listing(p_listing_id uuid)
 RETURNS boolean LANGUAGE sql STABLE
@@ -176,36 +204,32 @@ AS $$
      AND left(coalesce(p_order_ref, ''), length(p_channel) + 1) = p_channel || ':'
      AND EXISTS (SELECT 1
                    FROM public.exos_marketplace_orders mo
-                   JOIN public.exos_distribution_listings dl ON dl.id = mo.distribution_listing_id
                   WHERE mo.channel = p_channel
                     AND mo.external_order_id = substr(p_order_ref, length(p_channel) + 2)
-                    AND dl.account = 'own')
+                    AND mo.account = 'own')
 $$;
 REVOKE ALL ON FUNCTION public._exos_byo_ticket(text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public._exos_byo_ticket(text, text) TO service_role;
 
--- The column follows exos_byo_allocations; a row that has sold, holds seats
--- or is (or was) live on the marketplace keeps the account it has.
+-- A row's account is set when the row is made (from exos_byo_allocations) and
+-- never changes after (review of #143, R4): the marketplace knows a listing by
+-- our row id ('ex' + id), so a row that was once the network's and became the
+-- organizer's would take the network's later sales as the organizer's (no fee,
+-- off the books), and the other way round. Switching a marketplace between
+-- the Exos network and the organizer's own account deletes the rows nothing
+-- ever happened on (_exos_listing_untouched) and refuses while any other row
+-- is there; new rows are made for the new account, with new ids.
 CREATE OR REPLACE FUNCTION public._exos_tg_listing_account()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE v_want text;
 BEGIN
-  v_want := CASE WHEN public._exos_byo_channel(NEW.event_id, NEW.channel) THEN 'own' ELSE 'platform' END;
   IF TG_OP = 'INSERT' THEN
-    NEW.account := v_want;
+    NEW.account := CASE WHEN public._exos_byo_channel(NEW.event_id, NEW.channel) THEN 'own' ELSE 'platform' END;
     RETURN NEW;
   END IF;
   IF NEW.account IS DISTINCT FROM OLD.account THEN
-    IF NEW.account IS DISTINCT FROM v_want THEN
-      RAISE EXCEPTION 'exos_distribution_listings: the account follows exos_byo_allocations' USING ERRCODE = '42501';
-    END IF;
-    IF OLD.sold_qty > 0 OR coalesce(OLD.requested_qty, 0) > 0 OR OLD.external_listing_id IS NOT NULL
-       OR OLD.listed_snapshot IS NOT NULL OR OLD.status IN ('listing', 'listed', 'delisting') THEN
-      RAISE EXCEPTION 'exos_distribution_listings: this marketplace has sold, holds seats or is live on the other account'
-        USING ERRCODE = '55000';
-    END IF;
+    RAISE EXCEPTION 'exos_distribution_listings: a row''s account is fixed when it is made' USING ERRCODE = '42501';
   END IF;
   RETURN NEW;
 END $$;
@@ -215,6 +239,60 @@ DROP TRIGGER IF EXISTS exos_distribution_listings_account ON public.exos_distrib
 CREATE TRIGGER exos_distribution_listings_account
   BEFORE INSERT OR UPDATE OF account ON public.exos_distribution_listings
   FOR EACH ROW EXECUTE FUNCTION public._exos_tg_listing_account();
+
+-- Nothing ever happened on this row: no seats set aside or held, nothing sold
+-- or matched to it, never sent to the marketplace (no external ids, no live
+-- snapshot, never synced, no TEvo remote id), and not live or failed. Only
+-- such a row may be deleted when a marketplace switches account.
+CREATE OR REPLACE FUNCTION public._exos_listing_untouched(p_id uuid)
+RETURNS boolean LANGUAGE sql STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.exos_distribution_listings d
+     WHERE d.id = p_id
+       AND coalesce(d.sell_cap, 0) = 0 AND coalesce(d.requested_qty, 0) = 0 AND d.sold_qty = 0
+       AND d.external_listing_id IS NULL AND d.external_event_id IS NULL AND d.listed_snapshot IS NULL
+       AND d.last_synced_at IS NULL AND d.last_sold_at IS NULL
+       AND d.status IN ('pending', 'planned', 'delisted'))
+  AND NOT EXISTS (SELECT 1 FROM public.exos_marketplace_orders WHERE distribution_listing_id = p_id)
+  AND NOT EXISTS (SELECT 1 FROM public.exos_tevo_remote_ids WHERE allocation_id = p_id)
+$$;
+REVOKE ALL ON FUNCTION public._exos_listing_untouched(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_listing_untouched(uuid) TO service_role;
+
+-- Each marketplace order carries the account of the listing it was first
+-- matched to (R4), set by this trigger and never changed after: the fee
+-- (exos_tg_marketplace_fee) and Exos's books (exos_journal_post_marketplace)
+-- follow the account that made the sale, not a listing's account today. NULL
+-- until the order is matched to a listing (priced and booked as the network's
+-- meanwhile, as before).
+-- Orders before this migration: every listing is the network's.
+UPDATE public.exos_marketplace_orders o SET account = d.account
+  FROM public.exos_distribution_listings d
+ WHERE d.id = o.distribution_listing_id AND o.account IS NULL;
+
+CREATE OR REPLACE FUNCTION public._exos_tg_order_account()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.account IS NOT NULL THEN
+    NEW.account := OLD.account;
+  ELSIF NEW.distribution_listing_id IS NULL THEN
+    NEW.account := NULL;
+  ELSE
+    NEW.account := (SELECT account FROM public.exos_distribution_listings WHERE id = NEW.distribution_listing_id);
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_order_account() FROM PUBLIC, anon, authenticated;
+-- Named to fire before exos_marketplace_orders_fee (same timing, by name), so
+-- the fee reads the stamped account.
+DROP TRIGGER IF EXISTS exos_marketplace_orders_account ON public.exos_marketplace_orders;
+CREATE TRIGGER exos_marketplace_orders_account
+  BEFORE INSERT OR UPDATE OF distribution_listing_id, account ON public.exos_marketplace_orders
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_order_account();
 
 -- ---------------------------------------------------------------------------
 -- 4. The Exos network route's gates don't apply to the organizer's own
@@ -228,7 +306,7 @@ SELECT pg_temp.exos_patch_n('public.exos_set_channel_allocation(uuid,text,uuid,i
 SELECT pg_temp.exos_patch_n('public.exos_set_channel_allocation(uuid,text,uuid,integer)',
   '/* exos: byo own account */',
   E'  v_label := CASE p_channel WHEN ''stubhub''',
-  E'  v_own := public._exos_byo_channel(p_event_id, p_channel); /* exos: byo own account */\n  v_label := CASE p_channel WHEN ''stubhub''', 1);
+  E'  v_own := public._exos_byo_channel(p_event_id, p_channel); /* exos: byo own account */\n  IF v_own AND coalesce(current_setting(''exos.byo_alloc_ok'', true), '''') <> ''on'' THEN\n    RAISE EXCEPTION ''exos_set_channel_allocation: % is sold with your own seller account on this event: set its share under Your own marketplace accounts'', initcap(p_channel)\n      USING ERRCODE = ''42501'';\n  END IF;\n  v_label := CASE p_channel WHEN ''stubhub''', 1);
 SELECT pg_temp.exos_patch_n('public.exos_set_channel_allocation(uuid,text,uuid,integer)',
   '/* exos: byo s4k */',
   E'IF v_ev.distribution_route = ''s4k'' AND p_qty > 0 THEN',
@@ -253,6 +331,16 @@ SELECT pg_temp.exos_patch_n('public._exos_channel_split_plan(uuid)',
   E'WHERE c = ANY (coalesce(e.distribution_networks, ''{}''::text[])) ORDER BY o);',
   E'WHERE c = ANY (coalesce(e.distribution_networks, ''{}''::text[]))\n                    AND NOT public._exos_byo_channel(p_event_id, c) /* exos: byo not split */ ORDER BY o);', 1);
 
+-- The event trigger pulls a marketplace's seats back whenever the event is
+-- saved while that marketplace isn't ticked under Distribution. An own-account
+-- marketplace never is, so every edit of the event (its name, its date) took
+-- the organizer's own listings down. It is pulled only when the event is
+-- cancelled or unpublished, or set to primary market only.
+SELECT pg_temp.exos_patch_n('public.exos_sync_marketplace_distribution()',
+  '/* exos: byo not pulled */',
+  E'IF NOT v_ticked OR v_primary OR NEW.status = ''cancelled''',
+  E'IF (NOT v_ticked AND NOT public._exos_byo_channel(NEW.id, v_ch)) /* exos: byo not pulled */ OR v_primary OR NEW.status = ''cancelled''', 1);
+
 -- ---------------------------------------------------------------------------
 -- 5. No Exos fee on an own-account sale (priced once, as every sale since
 --    mig 20261121133000), and none of its money on Exos's books.
@@ -260,16 +348,68 @@ SELECT pg_temp.exos_patch_n('public._exos_channel_split_plan(uuid)',
 SELECT pg_temp.exos_patch_n('public.exos_tg_marketplace_fee()',
   '/* exos: byo no fee */',
   E'      NEW.exos_fee_bps := public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now()));',
-  E'      NEW.exos_fee_bps := CASE WHEN public._exos_byo_listing(NEW.distribution_listing_id) THEN 0 /* exos: byo no fee */\n                               ELSE public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now())) END;', 1);
+  E'      NEW.exos_fee_bps := CASE WHEN NEW.account = ''own'' THEN 0 /* exos: byo no fee */\n                               ELSE public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now())) END;', 1);
 SELECT pg_temp.exos_patch_n('public.exos_tg_marketplace_fee()',
   '/* exos: byo relinked */',
   E'    NEW.exos_fee_bps := OLD.exos_fee_bps;\n',
-  E'    NEW.exos_fee_bps := OLD.exos_fee_bps;\n    -- A sale matched to its listing after it was first priced. /* exos: byo relinked */\n    IF NEW.distribution_listing_id IS DISTINCT FROM OLD.distribution_listing_id THEN\n      IF public._exos_byo_listing(NEW.distribution_listing_id) THEN\n        NEW.exos_fee_bps := 0;\n      ELSIF public._exos_byo_listing(OLD.distribution_listing_id) THEN\n        NEW.exos_fee_bps := public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, OLD.created_at, now()));\n      END IF;\n    END IF;\n', 1);
+  E'    NEW.exos_fee_bps := OLD.exos_fee_bps;\n    -- A sale first matched to an own-account listing after it was priced as\n    -- the network''s: no Exos fee. The account is stamped once\n    -- (_exos_tg_order_account), so a later re-match changes nothing. /* exos: byo relinked */\n    IF NEW.account = ''own'' AND OLD.account IS NULL THEN\n      NEW.exos_fee_bps := 0;\n    END IF;\n', 1);
 
 SELECT pg_temp.exos_patch_n('public.exos_journal_post_marketplace(uuid)',
   '/* exos: byo off the books */',
   E'  IF o.organizer_net IS NOT NULL AND o.proceeds IS NOT NULL\n',
-  E'  IF o.organizer_net IS NOT NULL AND o.proceeds IS NOT NULL\n     AND NOT public._exos_byo_listing(o.distribution_listing_id) /* exos: byo off the books */\n', 1);
+  E'  IF o.organizer_net IS NOT NULL AND o.proceeds IS NOT NULL\n     AND o.account IS DISTINCT FROM ''own'' /* exos: byo off the books */\n', 1);
+
+-- Payouts (R3): the money of an own-account sale went from the marketplace to
+-- the organizer, never through Exos, so the payout ledger never treats it as
+-- Exos's to pay. The money view (mig 20260929070000, its only definition;
+-- check prod's view text matches it first, rule 4) gets a first state,
+-- 'own_account', ahead of every other: never 'payable', never 'clawback_due',
+-- so exos_plan_org_payouts (which reads only those) never plans it. The
+-- columns are unchanged.
+CREATE OR REPLACE VIEW public.exos_marketplace_order_money WITH (security_invoker = true) AS
+  SELECT o.id AS order_id, o.org_id, o.event_id, o.channel, o.external_order_id, o.quantity,
+         upper(coalesce(o.currency, 'USD')) AS currency,
+         o.proceeds, o.exos_fee, o.organizer_net,
+         coalesce(r.confirmed, 0) AS received,
+         coalesce(r.reported, 0) AS reported,
+         s.amount AS paid_amount, s.payout_status,
+         c.amount AS clawback_amount,
+         CASE
+           WHEN o.account = 'own' THEN 'own_account'
+           WHEN o.status = 'cancelled' OR o.sale_status = 'cancelled' THEN
+             CASE WHEN s.payout_status IN ('sent', 'sending', 'planned') AND c.amount IS NULL THEN 'clawback_due'
+                  WHEN c.amount IS NOT NULL THEN 'clawed_back'
+                  ELSE 'cancelled' END
+           WHEN s.payout_status = 'sent' THEN 'paid'
+           WHEN s.payout_status IN ('planned', 'sending') THEN 'in_payout'
+           WHEN o.status NOT IN ('fulfilled', 'delivered') THEN 'awaiting_delivery'
+           WHEN o.organizer_net IS NULL THEN 'needs_price'
+           WHEN coalesce(r.confirmed, 0) < o.proceeds - 0.01 THEN
+             CASE WHEN coalesce(r.reported, 0) >= o.proceeds - 0.01 THEN 'reported_unconfirmed' ELSE 'awaiting_marketplace' END
+           ELSE 'payable'
+         END AS state
+    FROM public.exos_marketplace_orders o
+    LEFT JOIN LATERAL (
+      SELECT sum(a.amount) FILTER (WHERE m.confirmed) AS confirmed, sum(a.amount) AS reported
+        FROM public.exos_remittance_allocations a
+        JOIN public.exos_marketplace_remittances m ON m.id = a.remittance_id
+       WHERE a.order_id = o.id) r ON true
+    LEFT JOIN LATERAL (
+      SELECT l.amount, p.status AS payout_status
+        FROM public.exos_org_payout_lines l JOIN public.exos_org_payouts p ON p.id = l.payout_id
+       WHERE l.order_id = o.id AND l.kind = 'sale') s ON true
+    LEFT JOIN LATERAL (
+      SELECT l.amount FROM public.exos_org_payout_lines l
+       WHERE l.order_id = o.id AND l.kind = 'clawback') c ON true;
+REVOKE ALL ON public.exos_marketplace_order_money FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.exos_marketplace_order_money TO authenticated, service_role;
+
+-- A marketplace remittance never covers an own-account order: that money was
+-- paid to the organizer's own seller account.
+SELECT pg_temp.exos_patch_n('public.exos_record_remittance(jsonb)',
+  '/* exos: byo no remittance */',
+  E'    SELECT id INTO v_order FROM public.exos_marketplace_orders\n     WHERE channel = p ->> ''channel'' AND external_order_id = a ->> ''external_order_id'';\n',
+  E'    SELECT id INTO v_order FROM public.exos_marketplace_orders\n     WHERE channel = p ->> ''channel'' AND external_order_id = a ->> ''external_order_id'';\n    IF v_order IS NOT NULL AND EXISTS (SELECT 1 FROM public.exos_marketplace_orders\n                                        WHERE id = v_order AND account = ''own'') /* exos: byo no remittance */ THEN\n      RAISE EXCEPTION ''exos_record_remittance: order % on % was sold with the organizer''''s own seller account; its money never comes to Exos'',\n        a ->> ''external_order_id'', p ->> ''channel'' USING ERRCODE = ''22023'';\n    END IF;\n', 1);
 
 -- ---------------------------------------------------------------------------
 -- 6. An own-account sale's tickets are static codes (PDF), at any size.
@@ -304,6 +444,7 @@ DECLARE
   v_tiers  jsonb := '[]'::jsonb;
   v_skip   jsonb := '[]'::jsonb;
   v_why    text;
+  v_removed boolean := false;
 BEGIN
   -- The route lock every allocation change takes (exos_set_channel_allocation).
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
@@ -326,29 +467,36 @@ BEGIN
     RAISE EXCEPTION 'exos_byo_set_allocation: event is cancelled' USING ERRCODE = '22023';
   END IF;
 
+  -- One account per marketplace per event: not while the Exos network sells it
+  -- (ticked under Distribution; exos_tg_events_byo_networks refuses the tick
+  -- the other way round), on create and on every change (review of #143, R1).
+  IF v_pct > 0 AND p_channel = ANY (coalesce(v_ev.distribution_networks, '{}'::text[])) THEN
+    RAISE EXCEPTION 'exos_byo_set_allocation: % is ticked under Distribution (the Exos network sells it there): untick it first to sell it with your own account', v_label
+      USING ERRCODE = '22023';
+  END IF;
+  -- Only this function allocates an own-account channel (R2): its share is
+  -- the % rule, audited. exos_set_channel_allocation refuses one otherwise.
+  PERFORM set_config('exos.byo_alloc_ok', 'on', true);
+
   SELECT pct INTO v_old FROM public.exos_byo_allocations WHERE event_id = p_event_id AND channel = p_channel FOR UPDATE;
   IF NOT FOUND THEN
-    -- One account per marketplace per event: not while the Exos network sells it.
-    IF v_pct > 0 AND p_channel = ANY (coalesce(v_ev.distribution_networks, '{}'::text[])) THEN
-      RAISE EXCEPTION 'exos_byo_set_allocation: % is ticked under Distribution (the Exos network sells it there): untick it first to sell it with your own account', v_label
-        USING ERRCODE = '22023';
-    END IF;
+    -- The network's rows on this marketplace: a row anything ever happened on
+    -- stays the network's, so the marketplace does (R4); untouched ones go,
+    -- and new rows are made for the organizer's account, with new ids.
     IF EXISTS (SELECT 1 FROM public.exos_distribution_listings
                 WHERE event_id = p_event_id AND channel = p_channel AND account = 'platform'
-                  AND (sold_qty > 0 OR coalesce(requested_qty, 0) > 0 OR coalesce(sell_cap, 0) > 0
-                       OR external_listing_id IS NOT NULL OR listed_snapshot IS NOT NULL
-                       OR status IN ('listing', 'listed', 'delisting'))) THEN
-      RAISE EXCEPTION 'exos_byo_set_allocation: the Exos network still has seats or sales on % for this event', v_label
+                  AND NOT public._exos_listing_untouched(id)) THEN
+      RAISE EXCEPTION 'exos_byo_set_allocation: the Exos network has (or had) seats, sales or listings on % for this event, so % stays the network''s here', v_label, v_label
         USING ERRCODE = '22023';
     END IF;
     IF v_pct = 0 THEN
+      PERFORM set_config('exos.byo_alloc_ok', '', true);
       RETURN jsonb_build_object('channel', p_channel, 'pct', 0, 'tiers', '[]'::jsonb, 'skipped', '[]'::jsonb);
     END IF;
+    DELETE FROM public.exos_distribution_listings
+     WHERE event_id = p_event_id AND channel = p_channel AND account = 'platform';
     INSERT INTO public.exos_byo_allocations (event_id, channel, org_id, pct, updated_by)
     VALUES (p_event_id, p_channel, v_ev.org_id, v_pct, auth.uid());
-    -- Rows the Exos network left idle on it become the organizer's.
-    UPDATE public.exos_distribution_listings SET account = 'own'
-     WHERE event_id = p_event_id AND channel = p_channel AND account = 'platform';
   ELSE
     UPDATE public.exos_byo_allocations SET pct = v_pct, updated_by = auth.uid(), updated_at = now()
      WHERE event_id = p_event_id AND channel = p_channel;
@@ -382,14 +530,53 @@ BEGIN
     PERFORM public.exos_set_channel_allocation(p_event_id, p_channel, t.id, v_qty);
     v_tiers := v_tiers || jsonb_build_object('tier_id', t.id, 'name', t.name, 'capacity', t.capacity, 'quantity', v_qty, 'sold', v_sold);
   END LOOP;
+  PERFORM set_config('exos.byo_alloc_ok', '', true);
+
+  -- 0% and nothing ever happened on its rows: the marketplace goes back to
+  -- being nobody's (the network can be ticked for it again) (R2). Otherwise
+  -- it stays the organizer's at 0%, with what sold.
+  IF v_pct = 0 AND NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings
+                                WHERE event_id = p_event_id AND channel = p_channel
+                                  AND NOT public._exos_listing_untouched(id)) THEN
+    DELETE FROM public.exos_distribution_listings WHERE event_id = p_event_id AND channel = p_channel;
+    DELETE FROM public.exos_byo_allocations WHERE event_id = p_event_id AND channel = p_channel;
+    v_removed := true;
+  END IF;
 
   PERFORM public._exos_audit(v_ev.org_id, 'event.byo_allocation', 'event', p_event_id::text, p_event_id,
-    jsonb_build_object('channel', p_channel, 'pct', jsonb_build_array(v_old, v_pct)),
+    jsonb_build_object('channel', p_channel, 'pct', jsonb_build_array(v_old, v_pct), 'removed', v_removed),
     NULL, NULL, v_label || ' with your own account');
-  RETURN jsonb_build_object('channel', p_channel, 'pct', v_pct, 'tiers', v_tiers, 'skipped', v_skip);
+  RETURN jsonb_build_object('channel', p_channel, 'pct', v_pct, 'tiers', v_tiers, 'skipped', v_skip, 'removed', v_removed);
 END $$;
 REVOKE ALL ON FUNCTION public.exos_byo_set_allocation(uuid, text, numeric) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_byo_set_allocation(uuid, text, numeric) TO authenticated, service_role;
+
+-- One account per marketplace per event, the other way round (R1): ticking a
+-- marketplace under Distribution (the event form's RLS update,
+-- exos_request_distribution, any path) is refused while the organizer sells
+-- it with their own account. Only newly ticked ones are checked, so a no-op
+-- save of the list passes.
+CREATE OR REPLACE FUNCTION public.exos_tg_events_byo_networks()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE c text;
+BEGIN
+  FOR c IN SELECT x FROM unnest(coalesce(NEW.distribution_networks, '{}'::text[])) x
+            WHERE NOT (x = ANY (coalesce(OLD.distribution_networks, '{}'::text[]))) LOOP
+    IF public._exos_byo_channel(NEW.id, c) THEN
+      RAISE EXCEPTION '% is sold with your own seller account on this event: set its share to 0 under Your own marketplace accounts before ticking it under Distribution',
+        CASE c WHEN 'stubhub' THEN 'StubHub' WHEN 'seatgeek' THEN 'SeatGeek' WHEN 'vivid' THEN 'Vivid Seats' WHEN 'evo' THEN 'Ticket Evolution' ELSE initcap(c) END
+        USING ERRCODE = '22023';
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public.exos_tg_events_byo_networks() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_events_byo_networks ON public.exos_events;
+CREATE TRIGGER exos_events_byo_networks
+  BEFORE UPDATE OF distribution_networks ON public.exos_events
+  FOR EACH ROW EXECUTE FUNCTION public.exos_tg_events_byo_networks();
 
 -- ---------------------------------------------------------------------------
 -- 8. What the panel shows (owner / manager): per own-account marketplace, the

@@ -127,6 +127,13 @@ interface PlanShape {
 }
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+// exos-distribute plans Ticket Evolution listings for Exos's own office
+// (TEVO_OFFICE_ID in the request body) and TEvo numbers inventory per office,
+// so replaying that plan with the organizer's token would list in, or delete
+// from, the wrong office (review of #143). Until the organizer's office id is
+// read from their credential and planned for, nothing is planned for it.
+const TEVO_OWN_OFFICE = "Ticket Evolution with your own account needs your own office id in the plan, which isn't built yet: nothing is planned for it.";
 const cents = (p: unknown): number | null => (typeof p === "number" && Number.isFinite(p) ? Math.round(p * 100) : null);
 
 async function sendDelist(ctx: ChannelCtx, res: AdsResult, plan: DelistPlan | null, op: string) {
@@ -142,6 +149,7 @@ async function planListings(ctx: ChannelCtx, alloc: unknown, _prev: unknown): Pr
   if (!isByoChannel(channel)) throw new Error("byo: unknown marketplace");
   const def = BYO_DEFS[channel];
   const res = newResult(`byo_${channel}`, ctx);
+  if (channel === "evo") { res.warnings.push(TEVO_OWN_OFFICE); return res; }
   if (!res.connected) res.warnings.push(`Your ${def.label} seller account isn't connected (Org settings → Integrations): the requests below are what Exos would send once it is.`);
   for (const row of rows ?? []) {
     if (row.skip) { res.warnings.push(`${row.name}: ${row.skip}.`); continue; }
@@ -190,6 +198,7 @@ async function delist(ctx: ChannelCtx, snapshot: unknown): Promise<AdsResult> {
   const { channel, snapshot: snap } = (snapshot ?? {}) as { channel?: unknown; snapshot?: unknown };
   if (!isByoChannel(channel)) throw new Error("byo: unknown marketplace");
   const res = newResult(`byo_${channel}`, ctx);
+  if (channel === "evo") { res.warnings.push(TEVO_OWN_OFFICE); return res; }
   await sendDelist(ctx, res, planDelist(channel, snap ?? null), "listing.delist");
   return res;
 }

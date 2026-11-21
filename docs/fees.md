@@ -122,6 +122,8 @@ What each kind of sale charges after the rate moves (and when an event leaves th
 A sale on the organizer's OWN marketplace seller account (docs/marketplace/README.md "Your own marketplace accounts")
 pays **no Exos fee, at any event size** (operator 2026-11-21): `exos_tg_marketplace_fee` prices it at 0 bps and keeps
 that, and `exos_journal_post_marketplace` posts nothing for it (the money goes from the marketplace to the organizer).
+Both read the account the order was first matched on (`exos_marketplace_orders.account`, stamped once), so a sale
+keeps its fee whatever happens to the listing later, and payouts never include it (money view state `own_account`).
 Exos checkout sales on the same event still pay what `exos_event_fee_bps` says.
 
 ## Not covered yet

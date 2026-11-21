@@ -60,6 +60,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!data?.event || data.event.org_id !== org) return json({ error: "pick an event of this organization" }, 400, cors);
 
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  // Each plan reads up to four org credentials: 10 a minute per org (review of #143).
+  const { data: ok, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: `byo_plan:${org}`, p_limit: 10 });
+  if (rlErr) return json({ error: "try again in a moment" }, 503, cors);
+  if (ok !== true) return json({ error: "too many previews, wait a minute", reason: "rate_limited" }, 429, cors);
   const deps: ByoRunDeps = {
     orgId: org,
     rpc: (fn, args) => sb.rpc(fn, args),

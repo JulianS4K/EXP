@@ -130,7 +130,7 @@ Deno.test("updates and deletes: StubHub PATCH / DELETE by our external id; SeatG
   assertEquals(out.channels[1].steps[1].body, { seller_listing_ids: [L3] });
 });
 
-Deno.test("Vivid Seats / Ticket Evolution: creates and delists; a live-listing change is warned, not invented", async () => {
+Deno.test("Vivid Seats / Ticket Evolution: Vivid delists and warns a live change; TEvo plans nothing until its own office id is planned", async () => {
   const ops = { create: [], update: [{ listing_id: L1, patch: { price: 45 } }], delete: [] };
   const d = deps({ vivid: store("vivid"), tevo: store("tevo") });
   const out = await planByo(d, { eventId: "e1", channels: [
@@ -142,7 +142,9 @@ Deno.test("Vivid Seats / Ticket Evolution: creates and delists; a live-listing c
   const vivid = out.channels[0];
   assert(vivid.result.warnings.some((w) => w.includes("isn't built yet")), "the Vivid update is warned");
   assertEquals(vivid.steps.map((s) => `${s.method} ${s.path}`), [`DELETE /listings/v2/delete?internalTicketId=${L2}`]);
-  assertEquals(out.channels[1].steps.map((s) => `${s.method} ${s.path}`), ["DELETE /v9/inventory/777"]);
+  // TEvo: Exos's office is in the plan, so nothing is planned for an own account yet.
+  assertEquals(out.channels[1].steps.length, 0);
+  assert(out.channels[1].result.warnings.some((w) => w.includes("office id")), "the TEvo gap is said");
 });
 
 Deno.test("limits: a $0 ticket type or listing is never planned (every resale marketplace blocks zero_price)", async () => {

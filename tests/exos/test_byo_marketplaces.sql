@@ -23,6 +23,17 @@
 --   BY11 a network sale on the same event pays 2% and is on the books; matched
 --        to the own-account listing instead it is re-priced at 0, and back
 --   BY12 the view: %, smallest %, credential connected or not, per type
+--   BY13 (review of #143, R1) ticking a marketplace under Distribution is
+--        refused while it is sold with the organizer's own account
+--   BY14 (R2) only exos_byo_set_allocation allocates an own-account channel;
+--        0% with nothing ever done gives the marketplace back; 0% with sales
+--        keeps it the organizer's
+--   BY15 (R3) an own-account sale is never Exos's to pay out: state
+--        own_account, no remittance covers it, no payout line
+--   BY16 (R4) a once-network row is never reused for the own account (new
+--        rows, new ids; a touched one refuses the switch); an order keeps the
+--        account it was first matched on
+--   BY17 an event edit doesn't pull an own-account marketplace's seats
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -132,7 +143,7 @@ BEGIN
   RESET ROLE;
   ASSERT left(pg_temp.st(format($q$UPDATE public.exos_distribution_listings SET account = 'platform'
                                    WHERE event_id = %L AND channel = 'stubhub'$q$, pg_temp.u('e1'))), 5) = '42501',
-    'BY4: the account follows exos_byo_allocations';
+    'BY4: a row''s account is fixed when it is made';
   PERFORM pg_temp.as_('authenticated', pg_temp.u('a0'));
   RAISE NOTICE 'BY4 PASS: one account per marketplace per event';
 END $$;
@@ -151,11 +162,16 @@ BEGIN
   RAISE NOTICE 'BY5 PASS: own account sells a free-tier event; the network does not';
 END $$;
 
--- BY6 $0 by hand
+-- BY6 $0 by hand: refused outright (only exos_byo_set_allocation allocates an
+-- own-account channel), and behind that gate the $0 rule still holds.
 DO $$
 BEGIN
+  ASSERT pg_temp.st(format('SELECT public.exos_set_channel_allocation(%L, %L, %L, 3)', pg_temp.u('e1'), 'stubhub', pg_temp.u('d3'))) LIKE '42501%own seller account%',
+    'BY6: by hand, refused';
+  PERFORM set_config('exos.byo_alloc_ok', 'on', true);
   ASSERT pg_temp.st(format('SELECT public.exos_set_channel_allocation(%L, %L, %L, 3)', pg_temp.u('e1'), 'stubhub', pg_temp.u('d3'))) LIKE '22023%$0%',
     'BY6: a $0 type is never on a resale marketplace';
+  PERFORM set_config('exos.byo_alloc_ok', '', true);
   RAISE NOTICE 'BY6 PASS: $0 blocked';
 END $$;
 RESET ROLE;
@@ -221,15 +237,16 @@ END $$;
 -- BY10 the auto split leaves it alone
 DO $$
 BEGIN
-  UPDATE public.exos_events SET distribution_networks = ARRAY['seatgeek', 'stubhub'], channel_split_mode = 'auto' WHERE id = pg_temp.u('e1');
+  UPDATE public.exos_events SET channel_split_mode = 'auto' WHERE id = pg_temp.u('e1');
   ASSERT NOT EXISTS (SELECT 1 FROM public._exos_channel_split_plan(pg_temp.u('e1')) WHERE channel = 'stubhub'),
     'BY10: no split share for an own-account marketplace';
   ASSERT EXISTS (SELECT 1 FROM public._exos_channel_split_plan(pg_temp.u('e1')) WHERE channel = 'seatgeek'), 'BY10: the network still splits';
-  UPDATE public.exos_events SET distribution_networks = ARRAY['seatgeek'], channel_split_mode = 'manual' WHERE id = pg_temp.u('e1');
+  UPDATE public.exos_events SET channel_split_mode = 'manual' WHERE id = pg_temp.u('e1');
   RAISE NOTICE 'BY10 PASS: never split';
 END $$;
 
--- BY11 a network sale on the same event pays 2%; matched to the own-account listing instead, 0; and back
+-- BY11 a network sale on the same event pays 2%; an unmatched sale first matched
+-- to the own-account listing is re-priced at 0; a matched sale keeps its account
 DO $$
 DECLARE o uuid; m record; ga uuid; sg uuid;
 BEGIN
@@ -244,13 +261,25 @@ BEGIN
   ASSERT m.exos_fee_bps = 200 AND m.exos_fee = 0.80 AND m.organizer_net = 39.20, 'BY11: the network sale pays 2% ' || row_to_json(m);
   ASSERT EXISTS (SELECT 1 FROM public.exos_journal_entries WHERE source_table = 'exos_marketplace_orders' AND source_id = o::text),
     'BY11: the network sale is on the books';
+  ASSERT m.account = 'platform', 'BY11: stamped the network''s ' || row_to_json(m);
+  -- Re-matched to the own-account listing: the account it was sold on stays.
   UPDATE public.exos_marketplace_orders SET distribution_listing_id = ga WHERE id = o;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
-  ASSERT m.exos_fee_bps = 0 AND m.exos_fee = 0 AND m.organizer_net = 40.00, 'BY11: matched to its own-account listing: 0 ' || row_to_json(m);
-  UPDATE public.exos_marketplace_orders SET distribution_listing_id = sg WHERE id = o;
+  ASSERT m.account = 'platform' AND m.exos_fee_bps = 200 AND m.exos_fee = 0.80, 'BY11: a re-match keeps the account and fee ' || row_to_json(m);
+  ASSERT left(pg_temp.st(format($q$UPDATE public.exos_marketplace_orders SET account = 'own' WHERE id = %L$q$, o)), 2) = 'ok'
+     AND (SELECT account FROM public.exos_marketplace_orders WHERE id = o) = 'platform', 'BY11: the stamp can''t be rewritten';
+  -- A sale recorded before it was matched (no listing): the network's rate,
+  -- then first matched to the own-account listing: 0, off the books.
+  INSERT INTO public.exos_marketplace_orders (channel, external_order_id, event_id, org_id, quantity, proceeds, currency, sale_status)
+  VALUES ('stubhub', 'b4-sh-late', pg_temp.u('e1'), pg_temp.u('1'), 1, 40.00, 'USD', 'confirmed')
+  RETURNING id INTO o;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
-  ASSERT m.exos_fee_bps = 200 AND m.exos_fee = 0.80, 'BY11: and back: re-priced at today''s rate ' || row_to_json(m);
-  RAISE NOTICE 'BY11 PASS: the account decides the fee, also when a sale is matched later';
+  ASSERT m.exos_fee_bps = 200, 'BY11: unmatched, priced as the network''s meanwhile ' || row_to_json(m);
+  ASSERT m.account IS NULL AND m.distribution_listing_id IS NULL, 'BY11: unmatched, no account yet ' || row_to_json(m);
+  UPDATE public.exos_marketplace_orders SET distribution_listing_id = ga WHERE id = o;
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  ASSERT m.account = 'own' AND m.exos_fee_bps = 0 AND m.exos_fee = 0 AND m.organizer_net = 40.00, 'BY11: first matched to its own-account listing: 0 ' || row_to_json(m);
+  RAISE NOTICE 'BY11 PASS: the account a sale was first matched on decides its fee';
 END $$;
 
 -- BY12 the view
@@ -269,5 +298,107 @@ BEGIN
   RAISE NOTICE 'BY12 PASS: the view';
 END $$;
 RESET ROLE;
+
+-- More events for the review cases: e3 (network SeatGeek with history), e4 (clean).
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
+  (pg_temp.u('e3'),pg_temp.u('1'),'B4 Switch','published',now() + interval '60 days','Hall',257,0,ARRAY['seatgeek']),
+  (pg_temp.u('e4'),pg_temp.u('1'),'B4 Clean','published',now() + interval '60 days','Hall',257,0,'{}');
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,sort_order) VALUES
+  (pg_temp.u('d5'),pg_temp.u('e3'),'GA',40,200,0,1),
+  (pg_temp.u('d6'),pg_temp.u('e4'),'GA',40,200,0,1);
+
+-- BY13 R1: no ticking a marketplace the organizer sells with their own account
+DO $$
+DECLARE e text;
+BEGIN
+  e := pg_temp.st(format($q$UPDATE public.exos_events SET distribution_networks = ARRAY['seatgeek', 'stubhub'] WHERE id = %L$q$, pg_temp.u('e1')));
+  ASSERT e LIKE '22023%StubHub is sold with your own seller account%', 'BY13: the tick is refused, got ' || e;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_events WHERE id = pg_temp.u('e1') AND 'stubhub' = ANY (distribution_networks)), 'BY13: not ticked';
+  -- A save that doesn't add one still goes through.
+  UPDATE public.exos_events SET distribution_networks = distribution_networks WHERE id = pg_temp.u('e1');
+  RAISE NOTICE 'BY13 PASS: no ticking an own-account marketplace';
+END $$;
+
+-- BY14 R2: only exos_byo_set_allocation; 0% gives it back when nothing happened
+SELECT pg_temp.as_('authenticated', pg_temp.u('a0'));
+DO $$
+DECLARE e text; r jsonb;
+BEGIN
+  e := pg_temp.st(format('SELECT public.exos_set_channel_allocation(%L, %L, %L, 150)', pg_temp.u('e1'), 'stubhub', pg_temp.u('d1')));
+  ASSERT e LIKE '42501%own seller account%', 'BY14: a direct allocation on an own channel is refused, got ' || e;
+  ASSERT (SELECT sell_cap FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1') AND channel = 'stubhub' AND tier_id = pg_temp.u('d1')) = 2,
+    'BY14: the share stands (1% = 2)';
+  -- e4: own StubHub at 10%, back to 0% with nothing sold or sent: nobody's again.
+  PERFORM public.exos_byo_set_allocation(pg_temp.u('e4'), 'stubhub', 10);
+  r := public.exos_byo_set_allocation(pg_temp.u('e4'), 'stubhub', 0);
+  ASSERT (r ->> 'removed')::boolean, 'BY14: removed ' || r;
+  RESET ROLE;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_byo_allocations WHERE event_id = pg_temp.u('e4')), 'BY14: no own-account row';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e4') AND channel = 'stubhub'), 'BY14: its rows gone';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE org_id = pg_temp.u('1') AND action = 'event.byo_allocation'
+                  AND event_id = pg_temp.u('e4') AND (changes ->> 'removed')::boolean), 'BY14: the removal is audited';
+  -- And the network can be ticked for it again.
+  UPDATE public.exos_events SET distribution_networks = ARRAY['stubhub'] WHERE id = pg_temp.u('e4');
+  UPDATE public.exos_events SET distribution_networks = '{}' WHERE id = pg_temp.u('e4');
+  -- e1's StubHub sold 2: 0% is refused (BY8), so it stays the organizer's.
+  ASSERT EXISTS (SELECT 1 FROM public.exos_byo_allocations WHERE event_id = pg_temp.u('e1') AND channel = 'stubhub'), 'BY14: e1 stays own';
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a0'));
+  RAISE NOTICE 'BY14 PASS: only the %% function allocates; 0%% gives an untouched marketplace back';
+END $$;
+RESET ROLE;
+
+-- BY15 R3: an own-account sale is never Exos's to pay out
+DO $$
+DECLARE o uuid; e text; st text; n int;
+BEGIN
+  SELECT id INTO o FROM public.exos_marketplace_orders WHERE channel = 'stubhub' AND external_order_id = 'b4-1';
+  ASSERT (SELECT account FROM public.exos_marketplace_orders WHERE id = o) = 'own', 'BY15: stamped own';
+  e := pg_temp.st($q$SELECT public.exos_record_remittance('{"channel":"stubhub","external_id":"b4-rem-1","amount":"80.00","source":"manual","allocations":[{"external_order_id":"b4-1","amount":"80.00"}]}'::jsonb)$q$);
+  ASSERT e LIKE '22023%own seller account%', 'BY15: no remittance covers it, got ' || e;
+  SELECT state INTO st FROM public.exos_marketplace_order_money WHERE order_id = o;
+  ASSERT st = 'own_account', 'BY15: state ' || coalesce(st, 'null');
+  PERFORM public.exos_plan_org_payouts(pg_temp.u('1'));
+  SELECT count(*) INTO n FROM public.exos_org_payout_lines WHERE order_id = o;
+  ASSERT n = 0, 'BY15: never in a payout';
+  RAISE NOTICE 'BY15 PASS: own-account money never through Exos''s payouts';
+END $$;
+
+-- BY16 R4: a network row is never reused; a touched one refuses the switch
+DO $$
+DECLARE old_id uuid; new_id uuid; e text;
+BEGIN
+  -- e3 SeatGeek on the network: set aside, then pulled back to 0 (untouched otherwise).
+  PERFORM public.exos_set_channel_allocation(pg_temp.u('e3'), 'seatgeek', pg_temp.u('d5'), 10);
+  SELECT id INTO old_id FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e3') AND channel = 'seatgeek' AND tier_id = pg_temp.u('d5');
+  PERFORM public.exos_set_channel_allocation(pg_temp.u('e3'), 'seatgeek', pg_temp.u('d5'), 0);
+  UPDATE public.exos_events SET distribution_networks = '{}' WHERE id = pg_temp.u('e3');
+  -- A row the network synced once is the network's for good.
+  UPDATE public.exos_distribution_listings SET last_synced_at = now() WHERE id = old_id;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a0'));
+  e := pg_temp.st(format('SELECT public.exos_byo_set_allocation(%L, %L, 10)', pg_temp.u('e3'), 'seatgeek'));
+  ASSERT e LIKE '22023%stays the network''s%', 'BY16: a touched network row refuses the switch, got ' || e;
+  RESET ROLE;
+  UPDATE public.exos_distribution_listings SET last_synced_at = NULL WHERE id = old_id;
+  PERFORM pg_temp.as_('authenticated', pg_temp.u('a0'));
+  PERFORM public.exos_byo_set_allocation(pg_temp.u('e3'), 'seatgeek', 10);
+  RESET ROLE;
+  SELECT id INTO new_id FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e3') AND channel = 'seatgeek' AND tier_id = pg_temp.u('d5');
+  ASSERT new_id IS DISTINCT FROM old_id AND (SELECT account FROM public.exos_distribution_listings WHERE id = new_id) = 'own',
+    'BY16: a new own row, new id';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE id = old_id), 'BY16: the untouched network row is gone';
+  ASSERT left(pg_temp.st(format($q$UPDATE public.exos_distribution_listings SET account = 'platform' WHERE id = %L$q$, new_id)), 5) = '42501',
+    'BY16: never flipped back';
+  RAISE NOTICE 'BY16 PASS: rows never change account';
+END $$;
+
+-- BY17 an event edit keeps the organizer's own listings
+DO $$
+DECLARE d record;
+BEGIN
+  UPDATE public.exos_events SET name = 'B4 Big renamed', starts_at = starts_at + interval '1 day' WHERE id = pg_temp.u('e1');
+  SELECT * INTO d FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1') AND channel = 'stubhub' AND tier_id = pg_temp.u('d1');
+  ASSERT d.sell_cap = 2 AND d.status <> 'delisted', 'BY17: own seats kept ' || row_to_json(d);
+  RAISE NOTICE 'BY17 PASS: an edit doesn''t pull own-account seats';
+END $$;
 
 ROLLBACK;
