@@ -2,7 +2,10 @@
 // that belongs to a live hook is limited per hook (its hash). A token that
 // doesn't is limited per caller NETWORK (IPv4 /24, IPv6 /48, hashed): keying
 // unknown tokens by their own hash let anyone create one exos_rate_hits row
-// per made-up token, without bound. Pure, for the Deno tests.
+// per made-up token, without bound. The network is the platform's address
+// header (clientIp: cf-connecting-ip, else x-real-ip, else the last
+// X-Forwarded-For hop); with none, unknown tokens share one bucket. Pure, for
+// the Deno tests.
 import { clientIp } from "../guest.ts";
 import { sha256Hex } from "./payload.ts";
 

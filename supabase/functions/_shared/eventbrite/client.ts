@@ -247,6 +247,20 @@ export async function readEvent(fetchImpl: Fetch, token: string, id: string): Pr
   return c ? { ok: true, status: r.status, body: c } : { ok: false, status: 502, body: null, error: "bad event" };
 }
 
+/**
+ * Whether the event belongs to one of the token's organizations (a public
+ * event reads with any token, so a read alone proves nothing). GET only.
+ * Marks a door link verified (exos_channel_link_verified, mig 20261121100000).
+ */
+export async function ebOwnsEvent(fetchImpl: Fetch, token: string, id: string): Promise<boolean> {
+  if (!isEbId(id)) return false;
+  const ev = await ebGet<{ organization_id?: string }>(fetchImpl, token, `/events/${id}/`);
+  const org = ev.ok ? ev.body?.organization_id : null;
+  if (!isEbId(org)) return false;
+  const orgs = await ebGet<{ organizations?: Array<{ id?: string }> }>(fetchImpl, token, "/users/me/organizations/");
+  return orgs.ok && (orgs.body?.organizations ?? []).some((o) => o?.id === org);
+}
+
 export interface EventChoice { id: string; name: string; start: string | null; status: string | null }
 
 function toChoice(e: EbEvent): EventChoice | null {
