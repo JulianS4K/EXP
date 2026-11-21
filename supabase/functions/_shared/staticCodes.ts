@@ -26,7 +26,8 @@
 // local check and the tests (staticCodes.test.ts pins both to one vector).
 // Pure TypeScript: Deno and vitest both load it.
 
-import { hmac, sha256, timingSafeEqual, toHex, utf8 } from "./wallet/bytes.ts";
+import { constantTimeEqual } from "./constantTime.ts";
+import { hmac, sha256, toHex, utf8 } from "./wallet/bytes.ts";
 
 /** The two ways a ticket's door code can work, fixed per ticket at issuance. */
 export type CodeMode = "static" | "rotating";
@@ -88,5 +89,5 @@ export async function staticCodeHash(raw: string): Promise<string | null> {
 export async function verifyStaticWithKeys(raw: string, keys: { s?: string } | null | undefined): Promise<{ ok: boolean; noKey?: boolean }> {
   if (!keys?.s) return { ok: false, noKey: true };
   const h = await staticCodeHash(raw);
-  return { ok: !!h && timingSafeEqual(h, keys.s) };
+  return { ok: !!h && constantTimeEqual(h, keys.s) };
 }
