@@ -182,7 +182,11 @@ BEGIN
        -- claude/exos-group-pay: one group-buy seat by its 128-bit link token:
        -- the event, the deadline, this seat's state and paid / open counts;
        -- no people, emails or other seats' links (mig 20261108120000)
-       'exos_group_seat_view');
+       'exos_group_seat_view',
+       -- claude/exos-neighborhoods (mig 20261111110000): neighborhood pages:
+       -- published, listed (not noindex) upcoming events with a public pin;
+       -- the unfollow link's 64-hex token (answers ok + org name only)
+       'exos_neighborhoods_list', 'exos_neighborhood_page', 'exos_unfollow_by_token');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

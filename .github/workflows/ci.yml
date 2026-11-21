@@ -86,7 +86,9 @@ jobs:
           exit $fail
 
       - name: Deno tests (ssrf, ticket backends, sms, posh, group pages)
-        run: deno test --node-modules-dir=none supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts
+        # --allow-read: groupGate_test.ts reads exos-checkout's source to check the
+        # group-pay-off gate comes before any DB claim or Stripe call.
+        run: deno test --node-modules-dir=none --allow-read=supabase/functions/exos-checkout supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)
@@ -122,7 +124,8 @@ jobs:
   exos-sql:
     name: Exos SQL (migrations + lifecycle)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # 15: the race scripts add about a minute to the suites.
+    timeout-minutes: 15
     # Applies the exos migrations to a throwaway Postgres and drives the real
     # RPC bodies: platform suite + ticket lifecycle (mint → roster → HMAC scan
     # → transfer/claim/reissue → void).
@@ -164,6 +167,21 @@ jobs:
 
       - name: Exos P0 suite (every exos migration in order, as prod was built; then the suites + replay)
         run: bash tests/exos/run_p0.sh exos_p0_test
+
+      # Real parallel sessions against the run_p0 database. Only the race
+      # scripts that hold one side's transaction open (pg_sleep) so the other
+      # starts while it is uncommitted, and that passed 5 runs in a row
+      # locally: money journal, group pay, org audit, and the end-to-end races
+      # with the simulation's invariants. Each cleans up after itself. The
+      # other race_*.sh stay by hand (see their headers).
+      - name: Exos race scripts (journal, group pay, audit, end-to-end)
+        run: |
+          set -e
+          for r in race_money_journal race_group_pay race_org_audit race_full; do
+            echo "::group::$r"
+            bash "tests/exos/$r.sh" exos_p0_test
+            echo "::endgroup::"
+          done
 
       - name: RLS security (barcode_secret least-privilege)
         # Moved from Terminal-2's supabase-rls workflow with the migrations

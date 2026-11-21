@@ -29,7 +29,7 @@ browser ──► vibepass-storefront-test (Terminal-2, Python)
 | `/bridge` | 308 → `/bridge/` |
 | `/bridge/assets/*`, icons, `manifest.json`, `sw.js` | Static from `dist/`. Hashed assets are immutable; a missing asset is a 404, never the shell |
 | `/bridge/*` (any client route) | The SPA shell, `no-cache`. Link-unfurl bots get per-event / per-org tags spliced between the `SSR_META` markers in `index.html` |
-| `/bridge/sitemap.xml` | Upcoming published events + organizer pages (10 min cache); 404 without Supabase env |
+| `/bridge/sitemap.xml` | The app landing pages (`/bridge/apps/door`, `events`, `promote`, `money`), upcoming published events + organizer pages (10 min cache); 404 without Supabase env |
 | `/sitemap.xml` | 301 → `/bridge/sitemap.xml` |
 | `/robots.txt` | For direct visits to this host. Through the Render link, Terminal-2 serves its own |
 | `/llms.txt`, `/bridge/llms.txt` | Only with `EXOS_AI_DISCOVERY=on` (see below); a 404 until then |
@@ -81,8 +81,8 @@ With it on:
 - **FAQPage JSON-LD** from the organizer's FAQ (not on hidden events or promoter pages).
 - **`/llms.txt`**: what Exos is, that prices are all-in and purchases happen on the event page, the sitemap, the
   MCP endpoint (from `VITE_SUPABASE_URL`), what Exos does for ticket buyers and organizers (the `Live` and
-  `At launch` facts from `src/lib/hosting/productFacts.ts`; the map to the code is `docs/ai-facts.md`), and up to 200
-  upcoming public events. Cached 10 minutes.
+  `At launch` facts from `src/lib/hosting/productFacts.ts`; the map to the code is `docs/ai-facts.md`), the four app
+  landing pages (`src/lib/apps/landing.ts`), and up to 200 upcoming public events. Cached 10 minutes.
 
 Through the Render link this needs `EXOS_ORIGIN` set (Terminal-2's own `static/bridge/` fallback has none of it).
 Check after turning it on:

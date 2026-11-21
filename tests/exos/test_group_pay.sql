@@ -41,9 +41,15 @@
 --       and what the host already has or holds; live group seats of all hosts
 --       reserve at most a quarter of what's left (>= 10); 3 starts an hour,
 --       cancelled ones included; a same-buyer re-claim within 2 minutes (G5)
+-- Group pay v2 is paused (operator 2026-11-09, mig 20261111120000): off by
+-- default; this suite turns the switch on in its setup and off at the end
+-- (test_group_pay_off.sql checks the off state).
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
+
+-- The switch (mig 20261111120000): on for this suite only.
+SELECT public.exos_set_group_pay_enabled(true, 'test_group_pay.sql: setup');
 
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('c7e00000-0000-0000-0000-0000000000a0','c7-owner@x.com',now()),
@@ -849,5 +855,9 @@ BEGIN
          LIKE '53400%too many groups started%', 'G18 cancel and restart can''t refresh the holds';
   RAISE NOTICE 'OK  G18 abuse limits: maxPerAccount over the whole group and live holds, the per-event group ceiling, 3 starts an hour';
 END $$;
+
+-- The switch back off (the ROLLBACK undoes it too).
+SELECT public.exos_set_group_pay_enabled(false, 'test_group_pay.sql: done');
+DO $$ BEGIN ASSERT NOT public._exos_group_pay_on(), 'switch back off'; END $$;
 
 ROLLBACK;

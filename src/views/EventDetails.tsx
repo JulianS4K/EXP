@@ -1601,7 +1601,9 @@ export default function EventDetails() {
                   </button>
                 )}
                 {/* Group buy v2 (mig 20261108120000): friends each pay their own seat. Timed
-                    types too, in the picked slot (mig 20261110110000); never reserved seating. */}
+                    types too, in the picked slot (mig 20261110110000); never reserved seating.
+                    Paused (mig 20261111120000): GroupPayStart renders nothing unless
+                    VITE_EXOS_GROUP_PAY=on. */}
                 {stripeEnabled && !soldOut && !paidNotOnSale && !!selectedTier && priceToDisplay > 0 && !seatedSelected
                   && !voucher && (selectedTier.visibility ?? 'public') === 'public' && (
                   <GroupPayStart eventId={event.id} tierId={selectedTier.id} quantity={quantity} maxPerOrder={maxPerOrder} signedIn={!!user}

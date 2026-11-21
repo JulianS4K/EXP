@@ -11,6 +11,7 @@ import {
   buildSitemap,
   dateLabel,
   effectivePrice,
+  esc,
   eventSummary,
   eventTags,
   fromPriceCents,
@@ -21,6 +22,7 @@ import {
   type PublicReader,
 } from './seo';
 import { isLinkCrawler } from './crawler';
+import { APP_LANDINGS } from '../apps/landing';
 
 const EV = '11111111-1111-4111-8111-111111111111';
 const TIER = '22222222-2222-4222-8222-222222222222';
@@ -40,6 +42,11 @@ describe('previewTarget', () => {
     ['my-tickets', '', null],
     ['event/not-a-uuid', '', null],
     ['o/../../etc', '', null],
+    ['nyc', '', ['neighborhoods', 'nyc']],
+    ['nyc/bushwick', '', ['neighborhood', 'bushwick']],
+    ['nyc/long-island-city/', '', ['neighborhood', 'long-island-city']],
+    ['nyc/Bushwick', '', null],
+    ['nyc/../etc', '', null],
   ])('%s ?%s', (page, query, expected) => {
     expect(previewTarget(page, query)).toEqual(expected);
   });
@@ -270,6 +277,28 @@ describe('buildSitemap', () => {
   });
 });
 
+describe('neighborhood pages (mig 20261111110000)', () => {
+  const base = 'https://x.example';
+  const hoods = fake({ exos_neighborhoods: [{ slug: 'bushwick', name: 'Bushwick', city: 'nyc' }, { slug: 'ridgewood', name: 'Ridgewood', city: 'nyc' }] });
+  it('previews the index and a neighborhood; an unknown one gets none', async () => {
+    const one = await buildPreview(hoods, ['neighborhood', 'bushwick'], base);
+    expect(one).toContain('<title>This week in Bushwick</title>');
+    expect(one).toContain(`canonical" href="${base}/bridge/nyc/bushwick"`);
+    expect(one).toContain('index, follow');
+    expect(await buildPreview(hoods, ['neighborhoods', 'nyc'], base)).toContain('New York events by neighborhood');
+    expect(await buildPreview(hoods, ['neighborhood', 'nowhere'], base)).toBeNull();
+    const broken: PublicReader = async () => { throw new Error('relation does not exist'); };
+    expect(await buildPreview(broken, ['neighborhood', 'bushwick'], base)).toBeNull();
+  });
+  it('lists the pages in the sitemap when the table is there', async () => {
+    const xml = await buildSitemap(hoods, base);
+    expect(xml).toContain(`${base}/bridge/nyc</loc>`);
+    expect(xml).toContain(`${base}/bridge/nyc/bushwick</loc>`);
+    expect(xml).toContain(`${base}/bridge/nyc/ridgewood</loc>`);
+    expect(await buildSitemap(fake({}), base)).not.toContain('/bridge/nyc');
+  });
+});
+
 describe('isLinkCrawler', () => {
   it('matches unfurl bots, not browsers', () => {
     expect(isLinkCrawler('facebookexternalhit/1.1')).toBe(true);
@@ -454,5 +483,29 @@ describe('Open Graph for Meta and WhatsApp', () => {
     expect(tags).toContain('og:image" content="https://x.example/bridge/icon-512.png"');
     expect(tags).toContain('og:url" content="https://x.example/bridge/map"');
     expect(inject('<head><!-- SSR_META_START --><title>x</title><!-- SSR_META_END --></head>', tags)).toContain('Exos | Live the Moment');
+  });
+});
+
+// The apps suite's landing pages (src/lib/apps/landing.ts; claude/exos-apps-pages).
+describe('app landing pages', () => {
+  const base = 'https://x.example';
+  it('gives each page its own crawler card on its canonical path', () => {
+    for (const app of APP_LANDINGS) {
+      const tags = defaultTags(base, `${app.path.slice(1)}/?utm_source=instagram`);
+      expect(tags).toContain(`<title>${esc(app.title)} | Exos</title>`);
+      expect(tags).toContain(`og:description" content="${esc(app.description)}"`);
+      expect(tags).toContain(`og:url" content="${base}/bridge${app.path}"`);
+      expect(tags).toContain('index, follow');
+    }
+    expect(defaultTags(base, 'apps/box-office')).toContain('Exos | Live the Moment');
+  });
+  it('lists the pages in the sitemap and llms.txt', async () => {
+    const xml = await buildSitemap(fake({}), base);
+    const txt = await buildLlmsTxt(fake({}), base);
+    expect(txt).toContain('## Apps for organizers');
+    for (const app of APP_LANDINGS) {
+      expect(xml).toContain(`<loc>${base}/bridge${app.path}</loc>`);
+      expect(txt).toContain(`- [Exos ${app.name}](${base}/bridge${app.path}): ${app.headline}`);
+    }
   });
 });

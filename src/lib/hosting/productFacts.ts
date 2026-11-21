@@ -148,11 +148,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/views/TransferTicket.tsx', 'src/views/ClaimTicket.tsx'],
   },
   {
-    id: 'group-pay', audience: 'fan', status: 'at_launch',
+    id: 'group-pay', audience: 'fan', status: 'off',
     claim: 'A group can pay separately: the host holds up to 10 seats for 30 minutes (timed-entry and price-step tickets too, at one slot and one locked price) and texts each friend a link to pay for their own seat, and can cover whatever is left.',
     code: ['src/lib/groupPay.ts', 'src/components/GroupPayStart.tsx', 'src/views/GroupPayHost.tsx', 'src/views/GroupPaySeat.tsx',
-      'supabase/migrations/20261108120000_exos_group_pay.sql', 'supabase/migrations/20261110110000_exos_group_pay_2.sql'],
-    note: 'Each friend pays in the normal checkout, so it works once paid checkout is on.',
+      'supabase/migrations/20261108120000_exos_group_pay.sql', 'supabase/migrations/20261110110000_exos_group_pay_2.sql',
+      'supabase/migrations/20261111120000_exos_group_pay_off.sql', 'src/lib/groupPayFlag.ts'],
+    note: 'Paused by operator 2026-11-09: dormant behind the group_pay_enabled platform setting, EXOS_GROUP_PAY on exos-checkout and VITE_EXOS_GROUP_PAY in the build, all off. "Split with friends" (the host pays, friends pay back) is unaffected.',
   },
   {
     id: 'refunds', audience: 'fan', status: 'at_launch',
@@ -220,6 +221,12 @@ export const PRODUCT_FACTS: ProductFact[] = [
     code: ['src/views/DoorApp.tsx', 'src/lib/door/imports.ts', 'supabase/migrations/20261013090000_exos_door_imports.sql'],
   },
   {
+    id: 'door-name-checkin', audience: 'organizer', status: 'live',
+    claim: 'Door staff can check guests in by name as well as by scanning, on as many phones as they need.',
+    code: ['src/views/OrganizerCheckIn.tsx', 'src/lib/door/roster.ts', 'src/views/DoorApp.tsx'],
+    note: 'An organizer can turn check-in by name off for an event (QR only).',
+  },
+  {
     id: 'walkup-questions', audience: 'organizer', status: 'live',
     claim: 'Walk-up sales at the door ask the same checkout questions as online; staff can skip them to keep the line moving, and every skip is logged.',
     code: ['src/components/DoorSellPanel.tsx', 'supabase/functions/_shared/pos/walkup.ts',
@@ -237,6 +244,20 @@ export const PRODUCT_FACTS: ProductFact[] = [
     claim: 'Events appear in Google Search and Maps ticket links.',
     code: ['supabase/functions/exos-google-feed/index.ts'],
     note: 'The feed is deployed; Exos has not joined Google\'s events ticketing program.',
+  },
+  {
+    id: 'neighborhood-pages', audience: 'fan', status: 'live',
+    claim: 'Exos has a page of this week\'s events for each New York neighborhood, such as Bushwick, Williamsburg, Ridgewood and the Lower East Side, at /nyc.',
+    code: ['src/views/NeighborhoodPage.tsx', 'src/views/NeighborhoodsIndex.tsx', 'src/lib/neighborhoods.ts',
+      'supabase/migrations/20261111110000_exos_neighborhoods.sql'],
+    note: 'Live once mig 20261111110000 is applied (scripts/rollout-prod.sh); events need a geocoded venue (exos-geocode).',
+  },
+  {
+    id: 'follower-new-event-email', audience: 'fan', status: 'off',
+    claim: 'Fans who follow an organizer get an email when it announces a new event, at most one a day, with a one-click unfollow link.',
+    code: ['src/lib/followers.ts', 'supabase/functions/_shared/mail-templates.ts',
+      'supabase/migrations/20261111110000_exos_neighborhoods.sql'],
+    note: 'Queued, never sent, until exos-mail-drain runs with Resend (docs/email.md); the hourly batch cron exos-follower-digests-hourly is created inactive.',
   },
   {
     id: 'calendar-feeds', audience: 'fan', status: 'live',

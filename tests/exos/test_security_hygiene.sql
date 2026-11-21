@@ -288,6 +288,9 @@ END $$;
 RESET ROLE;
 
 -- S7 ---------------------------------------------------------------------------
+-- Group pay v2 is paused (mig 20261111120000): the seat page answers only
+-- with the switch on, so S7 turns it on (rolled back with the rest).
+SELECT public.exos_set_group_pay_enabled(true, 'test_security_hygiene.sql: S7');
 INSERT INTO public.exos_group_buys(id, org_id, event_id, tier_id, host_uid, quantity, deadline)
 VALUES (pg_temp.u('71'), pg_temp.u('01'), pg_temp.u('e1'), pg_temp.u('d1'), pg_temp.u('a3'), 2, now() + interval '20 minutes');
 INSERT INTO public.exos_group_buy_seats(group_id, org_id, seat_no, token, status) VALUES
@@ -316,5 +319,7 @@ BEGIN
   RAISE NOTICE 'OK  S7 the seat page names no event or ticket type once the event is unpublished';
 END $$;
 RESET ROLE;
+
+SELECT public.exos_set_group_pay_enabled(false, 'test_security_hygiene.sql: S7 done');
 
 ROLLBACK;

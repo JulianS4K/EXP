@@ -10,6 +10,7 @@ import Footer from './components/Footer';
 import ErrorBoundary from './components/ErrorBoundary';
 import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
+import GroupPayGate from './components/GroupPayGate';
 import { isPixelRoute, leavePixelScope } from './lib/pixels';
 
 // Home is the landing page — keep it eagerly loaded so the first paint is
@@ -74,6 +75,8 @@ const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
 const DoorApp = lazy(() => import('./views/DoorApp'));
+// The apps suite's public landing pages (docs/strategy.md "Apps"; claude/exos-apps-pages).
+const AppLanding = lazy(() => import('./views/AppLanding'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 // Series, collections, timed entry (mig 20261030150000).
@@ -81,6 +84,10 @@ const SeriesEditor = lazy(() => import('./views/SeriesEditor'));
 const SeriesManager = lazy(() => import('./views/SeriesManager'));
 const OrgCollections = lazy(() => import('./views/OrgCollections'));
 const CollectionPage = lazy(() => import('./views/CollectionPage'));
+// claude/exos-neighborhoods (mig 20261111110000): neighborhood pages + the mail's unfollow link.
+const NeighborhoodsIndex = lazy(() => import('./views/NeighborhoodsIndex'));
+const NeighborhoodPage = lazy(() => import('./views/NeighborhoodPage'));
+const Unfollow = lazy(() => import('./views/Unfollow'));
 const OrgPromote = lazy(() => import('./views/OrgPromote'));
 const BookingCalendar = lazy(() => import('./views/BookingCalendar'));
 const OrgOffers = lazy(() => import('./views/OrgOffers'));
@@ -199,9 +206,13 @@ export default function App() {
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
-                    <Route path="/group-pay/seat/:token" element={<GroupPaySeat />} />
-                    <Route path="/group-pay/:groupId" element={<GroupPayHost />} />
+                    {/* Group pay v2 is paused (mig 20261111120000): "not available" unless VITE_EXOS_GROUP_PAY=on. */}
+                    <Route path="/group-pay/seat/:token" element={<GroupPayGate><GroupPaySeat /></GroupPayGate>} />
+                    <Route path="/group-pay/:groupId" element={<GroupPayGate><GroupPayHost /></GroupPayGate>} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
+                    <Route path="/unfollow" element={<Unfollow />} />
+                    <Route path="/nyc" element={<NeighborhoodsIndex />} />
+                    <Route path="/nyc/:neighborhood" element={<NeighborhoodPage />} />
                     <Route path="/offer/:offerId" element={<OfferRespond />} />
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />
                     <Route path="/ticket-counts/opt-out" element={<TicketCountsOptOut />} />
@@ -234,6 +245,10 @@ export default function App() {
                     <Route path="/create-event" element={<CreateEvent />} />
                     <Route path="/checkin/:eventId" element={<OrganizerCheckIn />} />
                     <Route path="/door" element={<DoorApp />} />
+                    <Route path="/apps/door" element={<AppLanding app="door" />} />
+                    <Route path="/apps/events" element={<AppLanding app="events" />} />
+                    <Route path="/apps/promote" element={<AppLanding app="promote" />} />
+                    <Route path="/apps/money" element={<AppLanding app="money" />} />
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />

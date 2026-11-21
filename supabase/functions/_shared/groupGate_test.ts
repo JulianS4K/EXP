@@ -1,5 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { type GateDeps, gateGroupClaim, GROUP_CLAIM_PER_NETWORK, groupClaimBuckets } from "./groupGate.ts";
+import {
+  type GateDeps, gateGroupClaim, GROUP_CLAIM_PER_NETWORK, GROUP_PAY_OFF, groupClaimBuckets, groupPayEnvOn, groupPayOffGate,
+} from "./groupGate.ts";
 
 const SEAT = "ab".repeat(16);
 const IP = "f".repeat(64);
@@ -94,4 +96,70 @@ Deno.test("buckets: per seat and network, per seat; within exos_rate_hit's 200 c
   assertEquals(b[0].limit, GROUP_CLAIM_PER_NETWORK);
   const c = groupClaimBuckets({ seat: null, cover: "c7e00000-0000-4000-8000-000000000001" }, "x".repeat(500));
   assertEquals(c.every((x) => x.bucket.length <= 200), true);
+});
+
+// ── Group pay v2 paused (operator 2026-11-09, mig 20261111120000) ──────────
+const OFF = { status: 403 as const, body: { error: "Group pay isn't available", reason: "group_pay_off" } };
+
+Deno.test("group pay off: EXOS_GROUP_PAY unset (or anything but on) refuses a seat or a cover with 403 group_pay_off", () => {
+  for (const env of [undefined, null, "", "off", "true", "1", "yes", "onn"]) {
+    assertEquals(groupPayEnvOn(env), false, `env ${env}`);
+    assertEquals(groupPayOffGate({ group_seat: SEAT }, env), OFF, `seat, env ${env}`);
+    assertEquals(groupPayOffGate({ group_cover: "c7e00000-0000-4000-8000-000000000001" }, env), OFF, `cover, env ${env}`);
+    // A malformed or null group field is still a group body: refused, not read.
+    assertEquals(groupPayOffGate({ group_seat: null }, env), OFF);
+    assertEquals(groupPayOffGate({ group_seat: 42, group_cover: "x" }, env), OFF);
+  }
+  assertEquals(GROUP_PAY_OFF, OFF.body);
+});
+
+Deno.test("group pay off: an ordinary checkout body is never touched", () => {
+  for (const env of [undefined, "on"]) {
+    assertEquals(groupPayOffGate({}, env), null);
+    assertEquals(groupPayOffGate({ event_id: "e", tier_id: "t", quantity: 2 } as Record<string, unknown>, env), null);
+    assertEquals(groupPayOffGate(null, env), null);
+  }
+});
+
+Deno.test("group pay off: EXOS_GROUP_PAY=on lets a group body through to the SQL switch", () => {
+  for (const env of ["on", "ON", " on "]) {
+    assertEquals(groupPayEnvOn(env), true);
+    assertEquals(groupPayOffGate({ group_seat: SEAT }, env), null);
+  }
+});
+
+Deno.test("group pay off: the SQL switch's XGOFF at the claim is a 403, never a Stripe call", async () => {
+  const { d, calls } = deps({ claim: { data: null, error: { code: "XGOFF", message: "Group pay isn't available" } } });
+  assertEquals(await gateGroupClaim({ seat: SEAT, cover: null }, IP, d, { signedIn: true }), OFF);
+  assertEquals(calls.some((c) => c.startsWith("stripe")), false);
+});
+
+// exos-checkout itself (its handler can't be imported: Deno.serve at the top
+// level): the env gate runs right after the body is parsed, and before the
+// group context read, the rate gate, the claim and every Stripe call; the
+// context's XGOFF is a 403 too. Needs --allow-read (CI's deno test step).
+Deno.test("exos-checkout refuses a group body first, before any DB claim or Stripe call", async () => {
+  const src = await Deno.readTextFile(new URL("../exos-checkout/index.ts", import.meta.url));
+  const at = (needle: string) => {
+    const i = src.indexOf(needle);
+    if (i < 0) throw new Error(`exos-checkout no longer has: ${needle}`);
+    return i;
+  };
+  const handler = at("Deno.serve(");
+  const parsed = at("p = JSON.parse(raw)");
+  const gate = at('groupPayOffGate(p, Deno.env.get("EXOS_GROUP_PAY"))');
+  const refused = at("if (groupOff) return json(groupOff.body, groupOff.status);");
+  assertEquals(handler < parsed && parsed < gate && gate < refused, true, "the gate right after the body is parsed");
+  for (const later of ["await groupCheckout(p", "gateGroupClaim(group", 'sb.rpc("exos_group_claim"', 'sb.rpc("exos_rate_hit"',
+                       'sb.rpc("exos_group_checkout_ctx"', "new Stripe("]) {
+    // Every occurrence inside the handler comes after the gate (the helpers below it are called later).
+    let i = src.indexOf(later, handler);
+    assertEquals(i > 0, true, `exos-checkout no longer has: ${later}`);
+    for (; i >= 0; i = src.indexOf(later, i + 1)) assertEquals(i > refused, true, `${later} before the group-pay-off gate`);
+  }
+  // Nothing between the handler's start and the gate reads the DB or calls Stripe.
+  const head = src.slice(handler, refused);
+  assertEquals(/\.rpc\(|\.from\(|new Stripe\(|stripe\./.test(head), false, "no DB or Stripe call before the gate");
+  // The SQL switch: the context's XGOFF is the same 403.
+  assertEquals(src.includes('if (error?.code === "XGOFF") return { error: { ...GROUP_PAY_OFF }, status: 403 };'), true);
 });

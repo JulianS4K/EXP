@@ -32,6 +32,9 @@ export interface MetaInput {
   event?: SchemaEvent;
   // Keep this page out of search results (per-person pages).
   noindex?: boolean;
+  // Any other schema.org JSON-LD for a page that isn't one event (a
+  // neighborhood's ItemList, mig 20261111110000). Ignored when `event` is set.
+  jsonLd?: Record<string, unknown>;
 }
 
 export interface SchemaEvent {
@@ -106,8 +109,9 @@ export function applyMeta(input: MetaInput): void {
   // Schema.org Event JSON-LD.
   // Single <script type="application/ld+json" id="vibepass-jsonld">.
   // Skipped on noindex pages: no point describing what search shouldn't list.
-  if (input.event && !input.noindex) {
-    const ld = buildEventJsonLd(input.event);
+  const ldObject = input.noindex ? null : input.event ? buildEventJsonLd(input.event) : input.jsonLd ?? null;
+  if (ldObject) {
+    const ld = ldObject;
     let script = document.getElementById('vibepass-jsonld') as HTMLScriptElement | null;
     if (!script) {
       script = document.createElement('script');

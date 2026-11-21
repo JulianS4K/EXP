@@ -1,6 +1,7 @@
 // /unsubscribe?t=<token> — the link at the bottom of every follow-up mail:
 // "finish your order" (mig 20260926060000), and the after-show mail, sales
-// digests, weekly summaries and setup nudges (mig 20260929071000). Works
+// digests, weekly summaries and setup nudges (mig 20260929071000), and the
+// followers' new-event mail (mig 20261111110000). Works
 // signed out: the token alone identifies the account. It takes a click rather
 // than firing on page load, because mail scanners open links before the
 // reader does. Only follow-ups are turned off; tickets, receipts, refunds,
@@ -48,7 +49,7 @@ export default function MailUnsubscribe() {
       ) : (
         <>
           <p className="disp text-3xl md:text-4xl tracking-tight mb-4">Stop follow-up emails?</p>
-          <p className="text-sm text-white/60 mb-6">We'll stop reminders about orders you didn't finish, after-show notes, and organizer digests and tips. Tickets, receipts and event updates still arrive.</p>
+          <p className="text-sm text-white/60 mb-6">We'll stop reminders about orders you didn't finish, after-show notes, new-event emails from organizers you follow, and organizer digests and tips. Tickets, receipts and event updates still arrive.</p>
           <button
             type="button"
             onClick={unsubscribe}

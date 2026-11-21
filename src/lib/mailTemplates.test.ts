@@ -36,6 +36,11 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
     event: event(), org, following: false, marketing: true, unsubscribe_token: TOKEN,
     next_events: [{ id: EV2, name: 'Next <Show>', starts_at: '2026-11-01T01:00:00+00:00', timezone: 'America/New_York', venue_name: 'Club' }],
   },
+  'follower-new-event': {
+    org, marketing: true, unsubscribe_token: TOKEN, unfollow_token: 'b'.repeat(64), more: 0,
+    events: [{ id: EV, name: 'Show <One> & "Friends"', starts_at: '2026-10-02T00:00:00+00:00', timezone: 'America/New_York',
+      venue_name: 'Hall & Annex', venue_location: 'Brooklyn, NY' }],
+  },
   'event-published': { event: event(), marketing: false },
   'inventory-low': { event: event(), tier: { id: TIER, name: 'GA <early>', capacity: 10, sold: 9, remaining: 1 }, marketing: false },
   'inventory-sold-out': { event: event(), tier: { id: TIER, name: 'GA', capacity: 10, sold: 10, remaining: 0 }, marketing: false },
@@ -212,6 +217,25 @@ describe('renderTemplate', () => {
     expect(r.html).toContain(`href="${APP}/event/${EV2}">Next &lt;Show&gt;</a>`);
     expect(r.html).toContain(`href="${APP}/unsubscribe?t=${TOKEN}"`);
     expect(ok('post-event', { ...PAYLOADS['post-event'], following: true }).html).not.toContain('/organizer/');
+  });
+
+  it('follower-new-event: one or several events, unfollow + unsubscribe links, no one else\'s data', () => {
+    const r = ok('follower-new-event');
+    expect(r.subject).toBe('New from Org <7f> & Co: Show <One> & "Friends"');
+    expect(r.html).toContain(`href="${APP}/event/${EV}">Show &lt;One&gt; &amp; &quot;Friends&quot;</a>`);
+    expect(r.html).toContain('Hall &amp; Annex, Brooklyn, NY');
+    expect(r.html).toContain(`href="${APP}/unfollow?t=${'b'.repeat(64)}"`);
+    expect(r.html).toContain(`href="${APP}/unsubscribe?t=${TOKEN}"`);
+    expect(r.html).toContain(`href="${APP}/organizer/${ORG}"`);
+    const two = ok('follower-new-event', { ...PAYLOADS['follower-new-event'], more: 2,
+      events: [...(PAYLOADS['follower-new-event'].events as object[]), { id: EV2, name: 'Next', starts_at: null }] });
+    expect(two.subject).toBe('4 new events from Org <7f> & Co');
+    expect(two.html).toContain('And 2 more on their page.');
+    expect(renderTemplate('follower-new-event', { ...PAYLOADS['follower-new-event'], unfollow_token: '"><x' }, APP).ok).toBe(false);
+    expect(renderTemplate('follower-new-event', { ...PAYLOADS['follower-new-event'], events: [] }, APP).ok).toBe(false);
+    expect(renderTemplate('follower-new-event', { ...PAYLOADS['follower-new-event'], unsubscribe_token: undefined }, APP).ok).toBe(false);
+    expect(renderTemplate('follower-new-event', { ...PAYLOADS['follower-new-event'],
+      events: [{ id: 'javascript:alert(1)', name: 'x' }] }, APP).ok).toBe(false);
   });
 
   it('marketing mails refuse to render without a valid unsubscribe token', () => {

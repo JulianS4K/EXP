@@ -139,6 +139,9 @@
 // group's slot (its holds are already on it) and a price-step type's the
 // price each seat locked at the start (exos_group_checkout_ctx), never the
 // current step or anything the client sends.
+// Paused (operator 2026-11-09, mig 20261111120000): a group body gets 403
+// group_pay_off unless EXOS_GROUP_PAY=on (unset = off) AND the SQL switch
+// group_pay_enabled is on; the env check comes right after the body is parsed.
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
@@ -170,7 +173,7 @@ import {
   type CommissionPlan,
 } from "../_shared/payouts/commissionMethods.ts";
 import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_shared/questions.ts";
-import { gateGroupClaim } from "../_shared/groupGate.ts";
+import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
 
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
@@ -224,6 +227,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const raw = await readCapped(req, MAX_BODY_BYTES);
   if (raw === null) return json({ error: "request body too large" }, 413);
   try { p = JSON.parse(raw); } catch { return json({ error: "invalid JSON" }, 400); }
+  // exos: group pay off (operator 2026-11-09, mig 20261111120000): a group
+  // body is refused here, first: before the rate gate, any DB claim or Stripe.
+  const groupOff = groupPayOffGate(p, Deno.env.get("EXOS_GROUP_PAY"));
+  if (groupOff) return json(groupOff.body, groupOff.status);
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
   if (!user && p.guest_email === undefined) return json({ error: "unauthorized" }, 401);
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
@@ -1493,6 +1500,7 @@ type GroupRef = {
 const GROUP_REASONS: Record<string, string> = {
   XG404: "group_link", XG403: "group_host", XG410: "group_closed", XG411: "group_paid",
   XG409: "seat_taken", XG412: "group_changed", XG400: "group_link", XG429: "seat_checkout_open",
+  XGOFF: "group_pay_off",
 };
 function groupReason(code: unknown): string {
   return GROUP_REASONS[String(code ?? "")] ?? "group";
@@ -1518,6 +1526,8 @@ async function groupCheckout(
     event_id?: string; tier_id?: string; quantity?: number;
     slot_id?: string | null; unit_price_cents?: number | null; price_step_id?: string | null;
   } | null;
+  // exos: group pay off — the SQL switch (group_pay_enabled) answers XGOFF.
+  if (error?.code === "XGOFF") return { error: { ...GROUP_PAY_OFF }, status: 403 };
   if (error || !ctx?.event_id || !ctx.tier_id || !ctx.quantity) {
     return { error: { error: error?.message || "this group link isn't valid", reason: groupReason(error?.code) }, status: 409 };
   }

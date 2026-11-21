@@ -62,9 +62,14 @@ cleanup() {
          DELETE FROM exos_ticket_tiers WHERE event_id IN ('$E','$E2'); DELETE FROM exos_events WHERE id IN ('$E','$E2');
          DELETE FROM exos_org_memberships WHERE org_id='$O'; DELETE FROM exos_orgs WHERE id='$O';
          DELETE FROM auth.users WHERE email LIKE '%@race-gp.test';" >/dev/null
+  # Group pay v2 is paused (mig 20261111120000): back off at the end.
+  $P -c "SELECT public.exos_set_group_pay_enabled(false, 'race_group_pay.sh: done')" >/dev/null
 }
 cleanup
 trap cleanup EXIT
+# Group pay v2 is paused (operator 2026-11-09, mig 20261111120000): the switch
+# is on for these races only (cleanup turns it off again).
+$P -c "SELECT public.exos_set_group_pay_enabled(true, 'race_group_pay.sh: setup')" >/dev/null
 $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner@race-gp.test',now()),
          ('$HOST','host@race-gp.test',now()),('$F1','f1@race-gp.test',now()),('$F2','f2@race-gp.test',now()),
          ('$F3','f3@race-gp.test',now()),('$F4','f4@race-gp.test',now()),('$F5','f5@race-gp.test',now()),

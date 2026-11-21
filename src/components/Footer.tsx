@@ -1,12 +1,13 @@
 import { TicketIcon, Twitter, Github, Instagram, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { openConsentSettings } from '../lib/consent';
+import { APP_LINKS } from '../lib/apps/links';
 
 export default function Footer() {
   return (
     <footer className="bg-white text-slate-900 border-t border-slate-100 pt-20 pb-10 mt-20 relative z-10">
       <div className="max-w-7xl mx-auto px-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-10 mb-14">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-10 mb-14">
           <div className="col-span-1 md:col-span-1">
             <Link to="/" className="flex items-center gap-2 mb-5 group">
               <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center">
@@ -39,6 +40,16 @@ export default function Footer() {
               <li><Link to="/dashboard" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Organizer Dashboard</Link></li>
               <li><Link to="/create-event" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Create an Event</Link></li>
               <li><Link to="/onboarding" className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">Get Started</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            {/* The apps suite (docs/strategy.md "Apps"): cross-links live here, not in a menu. */}
+            <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.2em] mb-4">Apps</h4>
+            <ul className="space-y-3">
+              {APP_LINKS.map((a) => (
+                <li key={a.id}><Link to={a.path} className="text-slate-500 text-sm font-medium hover:text-slate-900 transition-colors">{a.name}</Link></li>
+              ))}
             </ul>
           </div>
 
