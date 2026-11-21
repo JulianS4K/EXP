@@ -1299,6 +1299,88 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   last of a budget, and refuses anything but READ COMMITTED (a REPEATABLE READ snapshot would sum stale rows); planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
   owner / manager only (42501 otherwise).
 
+### The ads phase, dry run only (mig 20261121190500)
+
+Nothing new is callable by anon (H3 unchanged), and nothing this phase adds can send to an ad
+platform: both of its senders are pinned off in code (operator 2026-11-21: "For the APIs build and
+keep read only till build is complete"). Tests: `tests/exos/test_ads.sql` (AD1-AD9),
+`tests/exos/race_audience_cap.sh`, `_shared/ads/ads_test.ts`, `src/components/BoostEventPanel.test.tsx`;
+docs/marketing-conversions.md "Ads" has the platforms and the operator steps.
+
+**What can send today, exactly.** The older server-side conversions drain (`exos-conversions-drain`,
+mig 20260930100000: Meta, TikTok, GA4, Google Ads, Reddit, Snap) sends a queued Purchase when
+`EXOS_CONVERSIONS_LIVE=true` and the org's credential for that platform is enabled; it is not
+scheduled (no cron) and the flag is off. That path predates this phase and is unchanged in how it is
+gated; this phase changes only Reddit's payload on it (`PURCHASE`, the Reddit email hash). X rows
+(new here) never send: `X_CONVERSIONS_PINNED_OFF` (`_shared/conversions/xDrain.ts`) hands the `x_ads`
+GatedHttp an org switch of false whatever the flags say. `exos-ads` (audiences, campaigns) never
+sends: `ADS_WRITES_PINNED_OFF`. Lifting either pin is a reviewed code change plus the CLAUDE.md write
+exception for that platform.
+
+- **Every ad write behind GatedHttp.** The four adapters (`meta_ads`, `reddit_ads`,
+  `google_customer_match`, `x_ads`) each list exactly their write paths (no DELETE, nothing retried);
+  anything else is refused. `exos-ads` pins the org's switch off (`ADS_WRITES_PINNED_OFF`) and hands
+  GatedHttp a fetch that refuses every call, so a plan never reaches a platform whatever the flags.
+  A stand-in id (`planned_<kind>`) lets a chain be planned; `liveSafe` refuses to send one live.
+  X conversions are pinned off in code (`X_CONVERSIONS_PINNED_OFF`); behind the pin they would need
+  `EXOS_CONVERSIONS_LIVE=true`, Exos's X app keys, the org's switch and `EXOS_X_ADS_WRITES=on` (all
+  off). The X step's audit row records the shape, never its hashed email or click id (`auditBody`).
+  While pinned, `exos-ads` reads credentials through `exos_ads_credential_meta` (service role:
+  `has_secret`, never the secret), so a dry run decrypts nothing.
+- **Hashes only, and not in the audit.** `exos_ads_audience_source` (service role only) returns
+  SHA-256 hashes (`em`, `em_google`, `em_reddit`, `ph`, `ph_digits`), built in SQL by the outbox's
+  helpers: no raw email or phone leaves Postgres. The builder keeps only 64-hex values and re-checks
+  the consent flag. A batch of hashes is recorded in `exos_channel_audit` as a count
+  (`RequestOptions.auditBody`), never the hashes. More than 100,000 people: the first 100,000, and
+  the answer says `truncated` with the `total`.
+- **Whose "yes" counts** (review of #138, B2 and B2'; the same rule now in
+  `exos_org_audience_export`, live on prod). A guest can start a checkout with anyone's email, so a
+  "yes" counts only from an order that was paid or issued (fulfilled, partly or fully refunded), with
+  no open or lost dispute (`dispute_status` NULL, `won` or `warning_closed`, the set payouts read; T2),
+  whose email the person proved (`_exos_consent_grant_ok`): an `exos_order_proofs` row proven via
+  `email_code` for that very address, or no proof row and their own live account with the same
+  address and a **verified** email (`_exos_account_email_verified`, T1): a Google or Apple identity
+  (an allowlist; not Microsoft / Azure, whose tenant admin sets the mail claim, nor SSO) whose
+  provider says `email_verified` for that address, or a confirmation mail
+  Supabase sent and the person answered (`confirmation_sent_at` set, `email_confirmed_at` at or after
+  it), the last only while the platform setting `auth_confirm_email_on` is true (default false).
+  `email_confirmed_at` alone isn't proof: with Supabase Auth's **Confirm email** off (prod today:
+  every account confirmed at sign-up, no confirmation mail sent) GoTrue sets it at sign-up, so anyone
+  could sign up as your address, buy and tick "yes". And an answered mail proves the address it went
+  to, not the account's address now: while Confirm email is off an email change is applied at once,
+  with no mail to the new address. So set `auth_confirm_email_on` only after turning on Confirm email
+  (and Secure email change), and unset it if Confirm email is ever turned off. Until then an
+  email/password account's "yes" doesn't count; a Google / Apple sign-in's does. **Not changed here:** ticket
+  release for an account buyer (`_exos_proof_open` / `_exos_uid_email_confirmed`, mig
+  20261105100000) reads `email_confirmed_at` the same way, so with Confirm email off a stranger who
+  signs up as your address skips the email proof there too. Tightening it would make every current
+  account prove before release; that is Julian's call (or turn Confirm email on). An SMS send no
+  longer reopens the email code's guesses (T3, pre-existing and live): `email_attempts` counts wrong
+  codes against the email code only, an SMS send leaves it alone, and at 5 the email code stops
+  matching until a new one is mailed. An SMS proof (it proves a phone: a stranger can start a
+  checkout with your email and prove their own) and an organizer's correction (`proven_via
+  'organizer'`) never make a "yes". Guest orders from before proofs (mig 20261105100000: no proof row,
+  no account) no longer count as a "yes". The buyer rows need the same. A "no" counts from any checkout (it can only take someone out); the latest counted
+  choice per email and per account wins, and at the same moment a "no" wins. A fan is in only on a
+  "yes" that came with an order not fully refunded. Tombstoned (deleted) and banned accounts are out,
+  and `exos_delete_my_account` deletes the person's fan rows (by account and by confirmed email) and
+  their tags, and gives every guest checkout under that email the tombstone address, pending ones
+  too (one paid later still reaches its buyer through the paying page's phone proof or the
+  organizer's resend). A ban counts while `banned_until` is in the future: an expired ban counts
+  again.
+- **Throttles, shared and atomic.** The source and the hashed CSV export share 3 a minute
+  (`exos_rate_hit('audience:<org>')`) and 20 a day per org, counted in `exos_audience_exports` under
+  a per-org advisory lock held to commit (`_exos_audience_daily_gate`), so parallel pulls can't pass
+  20 (`race_audience_cap.sh`: exactly 20 logged).
+- **The planner's context** (`exos_ads_campaign_context`): owner / manager only (42501 otherwise),
+  booleans for which ad credentials are connected, never a secret or a credential's ids, and no map
+  pin for a secret / TBA location.
+- **New store providers** `ads_x`, `ads_meta_api`, `ads_reddit_api` are managed: the generic
+  Integrations save / remove refuse them, only the service role decrypts them
+  (`exos_integration_secret`). Their connect flows are not built.
+- **OAuth 1.0a** (`_shared/oauth1.ts`): the X keys are only ever in the signed `Authorization`
+  header, which GatedHttp redacts; every key is also in its `secrets`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

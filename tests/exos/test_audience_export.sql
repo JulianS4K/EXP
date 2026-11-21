@@ -15,9 +15,18 @@
 --   A5 each export is logged (org, event, who, rows); owner / manager read
 --      the log, a scanner doesn't
 --   A6 throttles: 3 a minute per org, 20 a day per org
+--   A7 a stranger's phone proof and an organizer's correction make no "yes"
+--   A8 an account confirmed at sign-up with no confirmation mail makes no
+--      "yes"; a provider-verified Google email or an answered mail does; an
+--      open dispute doesn't
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
+-- The fixture accounts below answered a confirmation mail, which counts only
+-- while the operator says Supabase Auth's "Confirm email" is on
+-- (auth_confirm_email_on). These suites model that; AD11 / A8 turn it off.
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('auth_confirm_email_on', 'true')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 -- As in prod: follows (mig 20260520140000, not in this chain) and the
 -- account phone column. Rolled back with the rest.
 CREATE TABLE IF NOT EXISTS public.exos_org_follows (
@@ -27,6 +36,11 @@ CREATE TABLE IF NOT EXISTS public.exos_org_follows (
   PRIMARY KEY (follower_uid, org_id)
 );
 ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone text;
+-- As in prod: confirmation_sent_at. The fixture accounts answered a
+-- confirmation mail (a minute before their confirmed time), so their email is
+-- verified (mig 20261121190500, T1); A8's instantly-confirmed account sets it NULL.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz;
+ALTER TABLE auth.users ALTER COLUMN confirmation_sent_at SET DEFAULT now() - interval '1 minute';
 
 INSERT INTO auth.users(id,email,email_confirmed_at,phone) VALUES
   ('ae000000-0000-0000-0000-0000000000a0','ae-owner@x.com',now(),NULL),
@@ -81,6 +95,13 @@ INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,b
   ('ae_ba','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001','ae000000-0000-0000-0000-0000000000ba','ae-followdenied@x.com',false,1,2000,'fulfilled','denied',now() - interval '5 days'),
   ('ae_pend','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001',NULL,'pending@x.com',true,1,2000,'pending','granted',now() - interval '5 days'),
   ('ae_oth','ae000000-0000-0000-0000-0000000000e9','ae000000-0000-0000-0000-000000000002',NULL,'otherorg@x.com',true,1,2000,'fulfilled','granted',now() - interval '5 days');
+
+-- The consenting guests proved their address with the email code (only that
+-- makes a guest's "yes" count, mig 20261121190500 B2'; the opted-out guest
+-- too, so the opt-out is what keeps it out).
+INSERT INTO public.exos_order_proofs(org_id,event_id,session_id,email,original_email,status,proven_via,proven_at,expires_at)
+SELECT s.org_id, s.event_id, s.session_id, lower(btrim(s.buyer_email)), lower(btrim(s.buyer_email)), 'proven', 'email_code', now(), now() + interval '1 day'
+  FROM public.exos_checkout_sessions s WHERE s.session_id IN ('ae_g2', 'ae_g9');
 
 CREATE TEMP TABLE ae_h(k text PRIMARY KEY, h text);
 INSERT INTO ae_h VALUES
@@ -241,4 +262,116 @@ EXCEPTION WHEN raise_exception THEN
   RAISE NOTICE 'OK  A6 3 a minute and 20 a day per org';
 END $$;
 RESET ROLE;
+
+-- A7 -------------------------------------------------------------------------
+-- B2' (mig 20261121190500): a stranger's phone proof (R1) and an organizer's
+-- correction (R2) never make a "yes"; an email-code proof does.
+DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audience:%';
+DELETE FROM public.exos_audience_exports WHERE org_id = 'ae000000-0000-0000-0000-000000000001';
+CREATE FUNCTION pg_temp.ae_guest(p_id text, p_email text) RETURNS void LANGUAGE sql AS $$
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,buyer_email,guest,quantity,amount_cents,status,consent_marketing,created_at,proof_token_hash)
+  VALUES (p_id,'ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001',NULL,p_email,true,1,2000,'pending','granted',now() - interval '1 hour',
+          encode(extensions.digest('tok-' || p_id || '-0123456789abcdef', 'sha256'), 'hex'));
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = p_id;
+  SELECT public._exos_proof_open(p_id);
+$$;
+SELECT pg_temp.ae_guest('ae_r1', 'ae-victim@x.com');
+SELECT pg_temp.ae_guest('ae_r2', 'ae-typo@x.com');
+SELECT pg_temp.ae_guest('ae_r3', 'ae-coded@x.com');
+SELECT set_config('app.uid', '', true);
+SET LOCAL ROLE anon;
+DO $$
+BEGIN
+  ASSERT (public.exos_order_proof_send('ae_r1', 'tok-ae_r1-0123456789abcdef', 'sms', '(212) 555-0188') ->> 'ok')::boolean, 'A7 R1: SMS code sent';
+END $$;
+RESET ROLE;
+CREATE TEMP TABLE ae_codes AS
+  SELECT 'sms'::text AS k, (SELECT substring(body from '^([0-9]{6})') FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550188' ORDER BY created_at DESC LIMIT 1) AS c
+  UNION ALL
+  SELECT 'mail', (SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+                   WHERE to_email = 'ae-coded@x.com' AND template = 'rsvp-code' ORDER BY created_at DESC, id DESC LIMIT 1);
+GRANT SELECT ON ae_codes TO anon;
+SET LOCAL ROLE anon;
+DO $$
+BEGIN
+  ASSERT (public.exos_order_proof_verify('ae_r1', 'tok-ae_r1-0123456789abcdef', (SELECT c FROM pg_temp.ae_codes WHERE k = 'sms')) ->> 'ok')::boolean, 'A7 R1: proven by phone';
+  ASSERT (public.exos_order_proof_verify('ae_r3', 'tok-ae_r3-0123456789abcdef', (SELECT c FROM pg_temp.ae_codes WHERE k = 'mail')) ->> 'ok')::boolean, 'A7: proven by email code';
+END $$;
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.uid', 'ae000000-0000-0000-0000-0000000000a0', true);
+SELECT public.exos_order_proof_resend('ae_r2', 'ae-right@x.com');
+CREATE TEMP TABLE ae_raw7 ON COMMIT DROP AS SELECT public.exos_org_audience_export('ae000000-0000-0000-0000-000000000001') AS j;
+RESET ROLE;
+DO $$
+DECLARE hs text[];
+BEGIN
+  SELECT array_agg(r ->> 'email_sha256') INTO hs FROM ae_raw7, jsonb_array_elements(ae_raw7.j -> 'rows') r;
+  ASSERT NOT (encode(sha256(convert_to('ae-victim@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R1: a stranger''s phone proof exported the victim';
+  ASSERT NOT (encode(sha256(convert_to('ae-typo@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R2: the never-proven original address exported';
+  ASSERT NOT (encode(sha256(convert_to('ae-right@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R2: the organizer''s correction exported';
+  ASSERT encode(sha256(convert_to('ae-coded@x.com','UTF8')),'hex') = ANY (hs), 'A7: an email-code proof is exported';
+  ASSERT (SELECT h FROM ae_h WHERE k = 'b1') = ANY (hs) AND (SELECT h FROM ae_h WHERE k = 'g2') = ANY (hs), 'A7: the earlier consenting buyers stay';
+  RAISE NOTICE 'OK  A7 a "yes" needs the person''s own email proof (not a phone proof or an organizer''s correction)';
+END $$;
+
+-- A8 -------------------------------------------------------------------------
+-- T1 (mig 20261121190500): with "Confirm email" off, GoTrue marks a new
+-- account confirmed at sign-up and mails nothing (confirmation_sent_at NULL).
+-- A stranger signs up as the victim's address, buys signed in, ticks "yes":
+-- not exported. A confirmation mail answered, or a Google sign-in whose
+-- provider verified the address, is. An open dispute (needs_response) isn't.
+DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audience:%';
+DELETE FROM public.exos_audience_exports WHERE org_id = 'ae000000-0000-0000-0000-000000000001';
+CREATE TABLE IF NOT EXISTS auth.identities (user_id uuid);
+ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS provider text, ADD COLUMN IF NOT EXISTS identity_data jsonb;
+INSERT INTO auth.users(id,email,email_confirmed_at,confirmation_sent_at) VALUES
+  ('ae000000-0000-0000-0000-0000000000d1','ae-t1victim@x.com',now(),NULL),
+  ('ae000000-0000-0000-0000-0000000000d2','ae-t1google@x.com',now(),NULL),
+  ('ae000000-0000-0000-0000-0000000000d3','ae-t1mailed@x.com',now(),now() - interval '1 hour'),
+  ('ae000000-0000-0000-0000-0000000000d4','ae-t2open@x.com',now(),now() - interval '1 hour');
+INSERT INTO auth.identities(user_id,provider,identity_data) VALUES
+  ('ae000000-0000-0000-0000-0000000000d2','google','{"email":"ae-t1google@x.com","email_verified":true}');
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,buyer_email,guest,quantity,amount_cents,status,consent_marketing,created_at) VALUES
+  ('ae_t1v','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001','ae000000-0000-0000-0000-0000000000d1','ae-t1victim@x.com',false,1,2000,'pending','granted',now() - interval '1 hour'),
+  ('ae_t1g','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001','ae000000-0000-0000-0000-0000000000d2','ae-t1google@x.com',false,1,2000,'pending','granted',now() - interval '1 hour'),
+  ('ae_t1m','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001','ae000000-0000-0000-0000-0000000000d3','ae-t1mailed@x.com',false,1,2000,'pending','granted',now() - interval '1 hour'),
+  ('ae_t2o','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001','ae000000-0000-0000-0000-0000000000d4','ae-t2open@x.com',false,1,2000,'pending','granted',now() - interval '1 hour');
+UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id IN ('ae_t1v', 'ae_t1g', 'ae_t1m', 'ae_t2o');
+UPDATE public.exos_checkout_sessions SET dispute_status = 'needs_response' WHERE session_id = 'ae_t2o';
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.uid', 'ae000000-0000-0000-0000-0000000000a0', true);
+CREATE TEMP TABLE ae_raw8 ON COMMIT DROP AS SELECT public.exos_org_audience_export('ae000000-0000-0000-0000-000000000001') AS j;
+RESET ROLE;
+DO $$
+DECLARE hs text[];
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_order_proofs WHERE session_id IN ('ae_t1v', 'ae_t1g', 'ae_t1m')), 'A8: set up with no proof row (rule b)';
+  SELECT array_agg(r ->> 'email_sha256') INTO hs FROM ae_raw8, jsonb_array_elements(ae_raw8.j -> 'rows') r;
+  ASSERT NOT (encode(sha256(convert_to('ae-t1victim@x.com','UTF8')),'hex') = ANY (hs)),
+    'A8 T1: an instantly-confirmed account (no confirmation mail) exported the victim';
+  ASSERT encode(sha256(convert_to('ae-t1google@x.com','UTF8')),'hex') = ANY (hs), 'A8: a provider-verified Google sign-in is exported';
+  ASSERT encode(sha256(convert_to('ae-t1mailed@x.com','UTF8')),'hex') = ANY (hs), 'A8: an answered confirmation mail is exported';
+  ASSERT NOT (encode(sha256(convert_to('ae-t2open@x.com','UTF8')),'hex') = ANY (hs)), 'A8 T2: an order with an open dispute exported';
+  RAISE NOTICE 'OK  A8 a verified email only (not email_confirmed_at alone); open disputes out';
+END $$;
+-- A8b: with auth_confirm_email_on off (the default, prod today), the
+-- answered mail no longer counts (an email change could have swapped the
+-- address without a mail); the Google-verified sign-in still does.
+UPDATE public.exos_platform_settings SET value = 'false' WHERE key = 'auth_confirm_email_on';
+DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audience:%';
+DELETE FROM public.exos_audience_exports WHERE org_id = 'ae000000-0000-0000-0000-000000000001';
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.uid', 'ae000000-0000-0000-0000-0000000000a0', true);
+CREATE TEMP TABLE ae_raw8b ON COMMIT DROP AS SELECT public.exos_org_audience_export('ae000000-0000-0000-0000-000000000001') AS j;
+RESET ROLE;
+DO $$
+DECLARE hs text[];
+BEGIN
+  SELECT array_agg(r ->> 'email_sha256') INTO hs FROM ae_raw8b, jsonb_array_elements(ae_raw8b.j -> 'rows') r;
+  ASSERT NOT (encode(sha256(convert_to('ae-t1mailed@x.com','UTF8')),'hex') = ANY (coalesce(hs, '{}'))),
+    'A8b: with auth_confirm_email_on off, an answered confirmation mail was exported';
+  ASSERT encode(sha256(convert_to('ae-t1google@x.com','UTF8')),'hex') = ANY (coalesce(hs, '{}')), 'A8b: a Google-verified sign-in is still exported';
+  RAISE NOTICE 'OK  A8b the confirmation branch counts only with auth_confirm_email_on; OAuth-verified still does';
+END $$;
 ROLLBACK;

@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ConversionRow, type Credential, normalizeEmail, normalizeEmailGoogle, normalizePhone,
+  type ConversionRow, type Credential, normalizeEmail, normalizeEmailGoogle, normalizeEmailReddit, normalizePhone,
   redactRequest, sha256Hex, eventSourceUrl, tooOld,
 } from '../../supabase/functions/_shared/conversions/common.ts';
 import { buildMeta, metaFbc, META_GRAPH_VERSION } from '../../supabase/functions/_shared/conversions/meta.ts';
 import { buildTikTok } from '../../supabase/functions/_shared/conversions/tiktok.ts';
 import { buildGa4 } from '../../supabase/functions/_shared/conversions/ga4.ts';
-import { buildReddit } from '../../supabase/functions/_shared/conversions/reddit.ts';
+import { buildReddit, REDDIT_TRACKING_TYPE, redditBatches } from '../../supabase/functions/_shared/conversions/reddit.ts';
 import { buildSnap } from '../../supabase/functions/_shared/conversions/snap.ts';
 import { buildGoogleAds } from '../../supabase/functions/_shared/conversions/googleAds.ts';
 import { buildConversionRequest, plannedOnly, scrubSecret, sendConversion } from '../../supabase/functions/_shared/conversions/send.ts';
@@ -167,8 +167,23 @@ describe('Reddit, Snap, Google Ads', () => {
     expect(r.request.url).toBe('https://ads-api.reddit.com/api/v3/pixels/a2_abc123/conversion_events');
     expect(r.request.headers.Authorization).toBe('Bearer SECRET-token-123');
     const ev = (r.request.body as any).data.events[0];
-    expect(ev).toMatchObject({ click_id: 'rdt-1', action_source: 'WEBSITE', type: { tracking_type: 'Purchase' } });
+    // The v3 enum is UPPER_SNAKE (the browser pixel's PascalCase names are a different API).
+    expect(ev).toMatchObject({ click_id: 'rdt-1', action_source: 'WEBSITE', type: { tracking_type: 'PURCHASE' } });
     expect(ev.metadata).toMatchObject({ conversion_id: 'cs_test_abc123', value: 50, currency: 'USD', item_count: 2 });
+    // A row queued before mig 20261121190500 has no em_reddit: em is sent.
+    expect(ev.user.email).toBe(await sha256Hex('ae-buyer@x.com'));
+  });
+  it('Reddit: the Reddit-normalized email hash (no +tag, no dots in the local part) when the row has it', async () => {
+    const emR = await sha256Hex(normalizeEmailReddit(' A.E-Buyer+promo@X.com ')!);
+    expect(normalizeEmailReddit(' A.E-Buyer+promo@X.com ')).toBe('ae-buyer@x.com');
+    expect(normalizeEmailReddit('first.last@example.org')).toBe('firstlast@example.org');
+    const r = buildReddit(await row({ platform: 'reddit' }, { em: await sha256Hex('a.e-buyer+promo@x.com'), em_reddit: emR }),
+      cred({ pixel_id: 'a2_abc123' }), CTX);
+    if (!r.ok) throw new Error((r as { skip: string }).skip);
+    expect((r.request.body as any).data.events[0].user.email).toBe(emR);
+    expect(REDDIT_TRACKING_TYPE.PageVisit).toBe('PAGE_VISIT');
+    expect(REDDIT_TRACKING_TYPE.AddToCart).toBe('ADD_TO_CART');
+    expect(redditBatches(Array.from({ length: 1001 }, (_, i) => i)).map((b) => b.length)).toEqual([1000, 1]);
   });
   it('Snap: PURCHASE with ScCid, validate endpoint in test mode', async () => {
     const pix = '0f0e0d0c-0b0a-4908-8706-050403020100';

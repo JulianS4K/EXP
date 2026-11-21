@@ -1,6 +1,6 @@
 // Server-side ad conversions: shared types and helpers for the per-platform
 // request builders (meta.ts, tiktok.ts, ga4.ts, reddit.ts, snap.ts,
-// googleAds.ts) and the exos-conversions-drain send loop (send.ts).
+// googleAds.ts, x.ts) and the exos-conversions-drain send loop (send.ts).
 //
 // The builders are pure: a claimed outbox row (exos_marketing_conversions,
 // mig 20260930100000) + the org's credential in, a request (url, headers,
@@ -16,8 +16,8 @@
 
 import type { AdIds } from "../adIds.ts";
 
-export type Platform = "meta" | "tiktok" | "ga4" | "google_ads" | "reddit" | "snap";
-export const PLATFORMS: readonly Platform[] = ["meta", "tiktok", "ga4", "google_ads", "reddit", "snap"];
+export type Platform = "meta" | "tiktok" | "ga4" | "google_ads" | "reddit" | "snap" | "x";
+export const PLATFORMS: readonly Platform[] = ["meta", "tiktok", "ga4", "google_ads", "reddit", "snap", "x"];
 
 export type ConversionEventName = "Purchase" | "Refund";
 
@@ -28,6 +28,8 @@ export interface ConversionPayload {
   em?: string;
   /** Google's normalization (gmail dots dropped), for GA4 / Google Ads. */
   em_google?: string;
+  /** Reddit's normalization (+tag and local-part dots dropped), for Reddit (mig 20261121190500). */
+  em_reddit?: string;
   /** sha256 of the E.164 phone (not collected today; kept for later). */
   ph?: string;
   user_agent?: string;
@@ -86,6 +88,8 @@ export const ALLOWED_HOSTS: ReadonlySet<string> = new Set([
   "ads-api.reddit.com",
   "tr.snapchat.com",
   "datamanager.googleapis.com",
+  // X Conversions API (x.ts); sent only by the x_ads adapter through GatedHttp.
+  "ads-api.x.com",
   // Google's OAuth token endpoint: the drain swaps each org's Google Ads
   // refresh token for an access token here (googleOAuth.ts).
   "oauth2.googleapis.com",
@@ -104,6 +108,8 @@ export const MAX_AGE_MS: Record<Platform, number> = {
   google_ads: 90 * DAY,
   reddit: 7 * DAY,
   snap: 7 * DAY,
+  // X: held to 7 days (its own window is unverified).
+  x: 7 * DAY,
 };
 
 /** Null when the row is fresh enough for the platform, else the skip reason. */
@@ -141,7 +147,7 @@ export const hashOrUndefined = (v: unknown): string | undefined =>
 // ---- normalization + hashing (parity with the SQL helpers) --------------
 // The shared builder (_shared/hashedIds.ts, channel core mig 20261121162400);
 // re-exported so the builders and their tests keep importing from here.
-export { normalizeEmail, normalizeEmailGoogle, normalizePhone, sha256Hex } from "../hashedIds.ts";
+export { normalizeEmail, normalizeEmailGoogle, normalizeEmailReddit, normalizePhone, sha256Hex } from "../hashedIds.ts";
 
 // ---- redaction -----------------------------------------------------------
 

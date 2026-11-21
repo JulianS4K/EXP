@@ -19,7 +19,8 @@
 //   attendees_per_event  allocation over `threshold`              (Meetup)
 //   active_events        upcoming events already at `threshold`   (AllEvents)
 //   usage                a counted metric over a rolling window   (Luma, LinkedIn,
-//                        pretix, Ticket Tailor, Eventbrite) read from
+//                        pretix, Ticket Tailor, Eventbrite, the Reddit Ads
+//                        API's per-minute rates) read from
 //                        exos_channel_usage (usage.ts)
 // Actions: block refuses with the reason; cap trims (maxUnits) or makes the
 // caller chunk (chunkToBudget); warn lets it through and records the warning.
@@ -27,7 +28,7 @@
 // the LOWER bound applies (Meetup Starter, Luma's new-calendar 15).
 
 export type LimitAction = "block" | "warn" | "cap";
-export type LimitWindow = "day" | "week" | "year";
+export type LimitWindow = "minute" | "quarter_hour" | "day" | "week" | "year";
 export type LimitScope = "event" | "tier" | "org" | "account" | "calendar";
 export type LimitKind =
   | "free_event" | "zero_price" | "free_must_be_public" | "attendees_per_event" | "active_events" | "usage";
@@ -81,6 +82,11 @@ const resale = (platform: string, label: string): LimitRule => ({
   kind: "zero_price",
   reason: `${label} is a resale marketplace: a $0 ticket type is never offered there (StubHub International bans free events).`,
   source: BRIEF(),
+});
+
+const redditRate = (id: string, rule: string, threshold: number, window: LimitWindow, metric: string, reason: string): LimitRule => ({
+  id, platform: "reddit", rule, scope: "account", threshold, window, action: "cap", kind: "usage", metric, reason,
+  source: BRIEF("operator brief 2026-11-21 (ads phase): Reddit Ads API v3 rate limits; the unit of the audience limit (requests) unverified"),
 });
 
 /** One data table per platform. */
@@ -201,6 +207,22 @@ export const PLATFORM_LIMITS: Readonly<Record<string, readonly LimitRule[]>> = {
     reason: "Eventbrite appears to allow about 250 emails a day (unconfirmed: from search only).",
     source: BRIEF("operator brief 2026-11-21: from search only, unverified"),
   }],
+  // Reddit Ads API v3 rate limits (ads phase, mig 20261121190500): per
+  // account, rolling. GatedHttp counts a request against the metric its
+  // caller names (usage): reddit_ads writes "writes" (an audience upload
+  // counts "audience_uploads" instead), reads "reads", targeting look-ups
+  // "targeting". A cap trims or defers the request; nothing is sent here
+  // while the ads adapters are dry runs.
+  reddit: [
+    redditRate("reddit_writes", "200 write requests a minute", 200, "minute", "writes",
+      "Reddit's Ads API takes 200 write requests a minute per account: the rest wait for the next minute."),
+    redditRate("reddit_reads", "400 read requests a minute", 400, "minute", "reads",
+      "Reddit's Ads API takes 400 read requests a minute per account: the rest wait for the next minute."),
+    redditRate("reddit_targeting", "100 targeting requests a minute", 100, "minute", "targeting",
+      "Reddit's Ads API takes 100 targeting look-ups a minute per account: the rest wait for the next minute."),
+    redditRate("reddit_audience_uploads", "3,000 audience uploads per 15 minutes", 3000, "quarter_hour", "audience_uploads",
+      "Reddit takes 3,000 custom-audience uploads per 15 minutes per account: the rest of the list waits for the next window."),
+  ],
   google_events: [{
     id: "google_free_public",
     platform: "google_events",
@@ -224,7 +246,7 @@ export function allRules(): LimitRule[] {
   return Object.values(PLATFORM_LIMITS).flat();
 }
 
-export const WINDOW_SECONDS: Record<LimitWindow, number> = { day: 86_400, week: 7 * 86_400, year: 365 * 86_400 };
+export const WINDOW_SECONDS: Record<LimitWindow, number> = { minute: 60, quarter_hour: 900, day: 86_400, week: 7 * 86_400, year: 365 * 86_400 };
 export function windowSeconds(w: LimitWindow | null | undefined): number {
   return w ? WINDOW_SECONDS[w] : 0;
 }
@@ -383,7 +405,9 @@ export function chunkToBudget<T>(items: readonly T[], remaining: number, maxPerC
   return { chunks, deferred: items.slice(take.length) };
 }
 
-const WINDOW_WORD: Record<LimitWindow, string> = { day: "today", week: "this week", year: "this year" };
+const WINDOW_WORD: Record<LimitWindow, string> = {
+  minute: "this minute", quarter_hour: "in these 15 minutes", day: "today", week: "this week", year: "this year",
+};
 
 /** "would use 4 of 15 sends this week (10 used, 2 planned)". */
 export function meterLine(m: LimitMeter): string {

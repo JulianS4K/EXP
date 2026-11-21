@@ -85,12 +85,12 @@ jobs:
           done
           exit $fail
 
-      - name: Deno tests (ssrf, ticket backends, channels, channel core (GatedHttp, limits, adapters), discord, sms, posh, group pages, social gate, waiting room join + checkout, MCP OAuth discovery, upstream retries, posh buckets, partner keys, exos-api token write resource)
+      - name: Deno tests (ssrf, ticket backends, channels, channel core (GatedHttp, limits, adapters), ads (dry run), discord, sms, posh, group pages, social gate, waiting room join + checkout, MCP OAuth discovery, upstream retries, posh buckets, partner keys, exos-api token write resource)
         # --allow-read: groupGate_test.ts reads exos-checkout's source to check the
         # group-pay-off gate comes before any DB claim or Stripe call.
         # socialGate_test.ts reads exos-match's source to check the social-off gate
         # comes before the JWT, the body and any RPC on /run.
-        run: deno test --node-modules-dir=none --allow-read=supabase/functions/exos-checkout,supabase/functions/exos-match,supabase/functions/exos-api supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/channels/discord_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts supabase/functions/_shared/socialGate_test.ts supabase/functions/_shared/wroomJoin_test.ts supabase/functions/_shared/wroomCheckout_test.ts supabase/functions/_shared/mcp/discovery_test.ts supabase/functions/_shared/retry_test.ts supabase/functions/_shared/posh/bucket_test.ts supabase/functions/_shared/partners/sales_test.ts supabase/functions/exos-api/tokenWrite_test.ts supabase/functions/_shared/channels/gatedHttp_test.ts supabase/functions/_shared/channels/limits_test.ts supabase/functions/_shared/channels/adapter_test.ts
+        run: deno test --node-modules-dir=none --allow-read=supabase/functions/exos-checkout,supabase/functions/exos-match,supabase/functions/exos-api supabase/functions/_shared/ssrf_test.ts supabase/functions/_shared/backends/backends_test.ts supabase/functions/_shared/backends/luma_test.ts supabase/functions/_shared/channels/channels_test.ts supabase/functions/_shared/channels/discord_test.ts supabase/functions/_shared/sms/sms_test.ts supabase/functions/_shared/posh/payload_test.ts supabase/functions/_shared/groupPages_test.ts supabase/functions/_shared/groupGate_test.ts supabase/functions/_shared/socialGate_test.ts supabase/functions/_shared/wroomJoin_test.ts supabase/functions/_shared/wroomCheckout_test.ts supabase/functions/_shared/mcp/discovery_test.ts supabase/functions/_shared/retry_test.ts supabase/functions/_shared/posh/bucket_test.ts supabase/functions/_shared/partners/sales_test.ts supabase/functions/exos-api/tokenWrite_test.ts supabase/functions/_shared/channels/gatedHttp_test.ts supabase/functions/_shared/channels/limits_test.ts supabase/functions/_shared/channels/adapter_test.ts supabase/functions/_shared/ads/ads_test.ts
 
   smoke:
     name: Browser smoke (mocked Supabase)
@@ -176,10 +176,10 @@ jobs:
       # locally: money journal, journal payouts, group pay, org audit, and the
       # end-to-end races with the simulation's invariants, the channel promise. Each cleans up after
       # itself. The other race_*.sh stay by hand (see their headers).
-      - name: Exos race scripts (journal, group pay, audit, end-to-end, API idempotency, channel promise)
+      - name: Exos race scripts (journal, group pay, audit, end-to-end, API idempotency, channel promise, audience cap)
         run: |
           set -e
-          for r in race_money_journal race_journal_payouts race_group_pay race_org_audit race_full race_idem race_channel_promise; do
+          for r in race_money_journal race_journal_payouts race_group_pay race_org_audit race_full race_idem race_channel_promise race_audience_cap; do
             echo "::group::$r"
             bash "tests/exos/$r.sh" exos_p0_test
             echo "::endgroup::"

@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { Eye } from 'lucide-react';
 import {
-  channelLabel, fetchPlannedWrites, fetchUsageSummary, groupPlanned, payloadText, usageMeters,
+  channelLabel, fetchPlannedWrites, fetchUsageSummary, groupPlanned, payloadText, stepLabel, usageMeters,
   type ChannelAuditRow, type UsageSummaryRow,
 } from '../lib/channelAudit';
 
@@ -77,7 +77,7 @@ export default function ChannelAuditPanel({ orgId }: { orgId: string }) {
                   <div className="flex flex-wrap items-center gap-2 text-[11px]">
                     <span className="font-mono font-bold text-slate-900">{r.method}</span>
                     <span className="font-mono text-slate-700 break-all">{r.path}</span>
-                    <span className="text-slate-500">{r.op}</span>
+                    <span className="text-slate-500">{stepLabel(r.op)}</span>
                     <span className="text-slate-500 ml-auto">{when(r.at)}</span>
                   </div>
                   {r.error && <p className="text-[11px] text-rose-800">{ERROR_TEXT[r.error] ?? r.error}</p>}

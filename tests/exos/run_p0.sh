@@ -295,7 +295,8 @@ for m in \
   20261118120000_exos_waiting_room \
   20261119130000_exos_mcp_writes \
   20261121100000_exos_channel_risks \
-  20261121162400_exos_channel_core; do
+  20261121162400_exos_channel_core \
+  20261121190500_exos_ads; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -550,7 +551,8 @@ for m in \
          20261118120000_exos_waiting_room \
          20261119130000_exos_mcp_writes \
          20261121100000_exos_channel_risks \
-         20261121162400_exos_channel_core; do
+         20261121162400_exos_channel_core \
+         20261121190500_exos_ads; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -560,7 +562,10 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_id
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121100000_exos_channel_risks
 # The same for the channel core migration (its three counted patches on the
 # integration functions; Applier review of #137).
-PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121162400_exos_channel_core
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121162400_exos_channel_core 20261121190500_exos_ads
+# The same for the ads migration (its two counted patches: exos_org_audience_export,
+# exos_delete_my_account; Applier review of #138).
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_passes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
@@ -718,5 +723,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp_write
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_risks.sql"
 # claude/exos-channel-core (mig 20261121162400): the shared channel core: one credential store (only the service role decrypts through exos_integration_secret; owner / manager save through the shared write, audited, never read back; managed providers refused by the generic save / remove; DICE / Eventbrite / ad / Discord connects copied into the store by triggers, reconnects and disconnects followed; the backfill copies older rows, re-run safe; reads fall back to the old tables while a copy is missing; distribution moved to Vault with a stub left), the channel audit (scrubbed on write, owner / manager of the org read, no client writes), platform usage counters (live under the threshold, planned apart and deduped, rolling day / week / year, the summary's roles)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_core.sql"
+# claude/exos-ads (mig 20261121190500): the ads phase, dry run only: Reddit's email hash (parity constants with hashedIds.ts) on Reddit outbox rows only, X conversions queued from the store (ads_x on, consent granted, paid) and nowhere else, the new managed providers (refused by the generic save, read only by the service role), the planner's context (owner / manager, booleans only, no hidden venue pin), the audience source (service role only; hashes only; a "yes" only from a paid / issued order, not lost to a dispute, whose email the person proved (an email code, or their own confirmed account; never an SMS proof or an organizer's correction), a "no" from anywhere, the latest counted choice winning, by email and by account, a "no" on a tie; a fully refunded buyer's fan row out; mail / list opt-outs, discarded, deleted and banned out; event scope; logged; 3 a minute and 20 a day shared with the CSV export), the same consent rules in exos_org_audience_export, account deletion (fan rows and their tags, every guest checkout under the email, pending too), the Reddit hash's edges (race: race_audience_cap.sh, CI)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_ads.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

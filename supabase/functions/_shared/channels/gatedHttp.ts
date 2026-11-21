@@ -29,7 +29,9 @@
 // much fits: the adapter chunks with chunkToBudget), a warning goes through
 // and is recorded on the step. A counted request spends the counter when
 // live (an atomic reserve; given back on a 4xx) and is recorded as planned
-// usage, once per identical request, in a dry run.
+// usage, once per identical request, in a dry run. A read given `usage` (a
+// per-minute read rate, Reddit) is checked and counted the same way before
+// it goes out.
 
 import { CHANNEL_RETRY, nextWait, realSleep, type RetryPolicy } from "../retry.ts";
 import { writesLive } from "./model.ts";
@@ -77,9 +79,15 @@ export interface RequestOptions {
   body?: unknown;
   op?: string;
   headers?: Record<string, string>;
-  /** A counted request (limits.ts metric): n units of it. */
+  /** A counted request (limits.ts metric): n units of it. A read is counted too when given (a rate limit). */
   usage?: { metric: string; n: number; scopeKey?: string };
   facts?: LimitFacts;
+  /**
+   * Recorded in the audit step instead of `body` (still redacted): a bulk
+   * upload of hashed identifiers is summarized there, never stored. The
+   * request sent (and the planned-usage dedupe) uses `body`.
+   */
+  auditBody?: unknown;
 }
 
 export interface GatedResponse {
@@ -388,13 +396,40 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
     assertNoSecretsInUrl(base + path, secrets);
     const d = decideLive({ ...o, base }, method, path);
     const op = ro.op ?? (d.read ? "read" : "write");
-    const reqRecord = { headers: redactHeaders(headers, secrets), ...(ro.body !== undefined ? { body: redact(ro.body, secrets) } : {}) };
+    const recorded = ro.auditBody !== undefined ? ro.auditBody : ro.body;
+    const reqRecord = { headers: redactHeaders(headers, secrets), ...(recorded !== undefined ? { body: redact(recorded, secrets) } : {}) };
 
     if (d.read) {
+      let readReservation: string | undefined;
+      if (ro.usage) {
+        const scope = ro.usage.scopeKey ?? o.limits?.scopeKey ?? "";
+        const rf = { ...(o.limits?.facts ?? {}), ...(ro.facts ?? {}) };
+        const rv = evaluateLimits(platform, rf, await readUsage(ro.usage.metric, scope), ro.usage);
+        if (rv.blocks.length || !rv.allowed) {
+          const error = rv.blocks.length ? "LIMIT_BLOCKED" : "LIMIT_CAPPED";
+          record({ op, method, path, live: false, request: reqRecord, ok: false, error,
+                   warnings: [...rv.blocks, ...rv.caps].map((h) => ({ ruleId: h.ruleId, action: h.action, reason: h.reason })) });
+          return { ok: false, status: 0, body: null, error, live: false, planned: false, limit: rv };
+        }
+        const rr = o.limits?.counter ? rulesFor(platform).find((r) => r.kind === "usage" && r.metric === ro.usage!.metric) : undefined;
+        if (o.limits?.counter && rr) {
+          const res = await o.limits.counter.reserve({
+            platform, scopeKey: scope, metric: ro.usage.metric, n: ro.usage.n, windowSeconds: windowSeconds(rr.window),
+            threshold: rr.action !== "warn" ? thresholdFor(rr, rf) : null, live: true,
+          });
+          if (!res.ok) {
+            record({ op, method, path, live: false, request: reqRecord, ok: false, error: "LIMIT_CAPPED" });
+            return { ok: false, status: 0, body: null, error: "LIMIT_CAPPED", live: false, planned: false,
+                     limit: { ...rv, allowed: false, maxUnits: res.remaining ?? 0 } };
+          }
+          readReservation = res.id;
+        }
+      }
       for (let attempt = 1; ; attempt++) {
         const r = await once(method, path, headers, undefined);
         const wait = r.ok || r.error === "REFUSED" || r.error === "REDIRECT" ? null : nextWait(attempt, r.status, r.error, r.retryAfter, policy);
         if (wait === null) {
+          if (!r.ok && readReservation && r.status >= 400 && r.status < 500 && r.status !== 429) await o.limits!.counter!.release(readReservation);
           record({ op, method, path, live: true, request: reqRecord, response: summarize(r.status, r.body, r.bytes),
                    status: r.status, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
           return { ok: r.ok, status: r.status, body: r.body, error: r.error, live: true, planned: false, headers: r.headers };
