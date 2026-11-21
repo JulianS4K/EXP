@@ -605,6 +605,15 @@ BEGIN
   r := public.exos_mcp_publish_approve(rid);
   ASSERT r ->> 'status' = 'changed' AND (SELECT status FROM public.exos_events WHERE id = e) = 'draft', 'P a changed event isn''t published: ' || r::text;
   UPDATE public.exos_ticket_tiers SET price = 0 WHERE event_id = e;
+  -- An add-on added after the preview also changes the digest (info 2).
+  PERFORM set_config('app.uid', '', true);
+  st := public.exos_mcp_event_state(org, e);
+  rid := (public.exos_mcp_publish_request(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, e, st ->> 'digest') ->> 'request_id')::uuid;
+  INSERT INTO public.exos_event_addons (event_id, name, price) VALUES (e, 'P VIP parking', 250);
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  r := public.exos_mcp_publish_approve(rid);
+  ASSERT r ->> 'status' = 'changed' AND (SELECT status FROM public.exos_events WHERE id = e) = 'draft', 'P an added add-on isn''t published: ' || r::text;
+  DELETE FROM public.exos_event_addons WHERE event_id = e;
   -- A fresh request, approved by the person: published.
   PERFORM set_config('app.uid', '', true);
   st := public.exos_mcp_event_state(org, e);

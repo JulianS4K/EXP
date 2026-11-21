@@ -22,6 +22,7 @@ import { pageEnvelope, type Page } from "../_shared/api/paging.ts";
 import { type Claim, refundClaim } from "../_shared/refundRun.ts";
 import { createPayPalClient, paypalConfig } from "../_shared/paypal/client.ts";
 import { attachAnswers, attachAnswersPage } from "./questions.ts"; // exos: checkout questions
+import { tokenWriteArgs } from "./tokenWrite.ts"; // claude/exos-mcp-writes
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SESSION_RE = /^[A-Za-z0-9_-]{1,255}$/;
@@ -78,8 +79,10 @@ export interface CoreCtx {
   credKind?: "api_key" | "pat" | "oauth";
   tokenHash?: string;
   tokenOrg?: string | null;
-  /** An OAuth token's resource, which SQL holds to this API's canonical URL. */
-  tokenResource?: string | null;
+  /** This API's own canonical URL (exosResources().api): the resource the call
+   * reached. SQL refuses an OAuth token whose resource isn't exactly this. Never
+   * the token's own claimed resource, which would make that check a tautology. */
+  callerResource?: string | null;
 }
 
 /** The route ids this module answers. */
@@ -434,11 +437,7 @@ async function write(c: CoreCtx, action: string, target: string | null, args: Re
   // A user token (only USER_TOKEN_CORE_WRITES get this far): the token, never a key id.
   if (c.credKind === "pat" || c.credKind === "oauth") {
     if (!c.tokenHash) throw new CoreError(403, "this write needs an organization API key (sk_live_…)");
-    return await rpc(c.sb, "exos_api_write", {
-      p_key_id: null, p_action: action, p_target: target, p_args: args, p_idempotency_key: c.idempotencyKey,
-      p_token_hash: c.tokenHash, p_token_kind: c.credKind, p_token_org: c.tokenOrg ?? null,
-      p_source: "api", p_token_resource: c.credKind === "oauth" ? c.tokenResource ?? null : null,
-    });
+    return await rpc(c.sb, "exos_api_write", tokenWriteArgs(c, action, target, args));
   }
   // An org API key: the same five arguments as before.
   return await rpc(c.sb, "exos_api_write", {
