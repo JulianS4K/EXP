@@ -5,8 +5,8 @@
 // Desktop, Claude Code, the Messages API MCP connector) and ChatGPT
 // (connectors / developer mode, the Responses API `mcp` tool).
 //
-// Only tools are served (no resources or prompts), all read-only. No Deno or
-// Node APIs, so vitest imports it too. Spec: modelcontextprotocol.io.
+// Only tools are served (no resources or prompts). No Deno or Node APIs, so
+// vitest imports it too. Spec: modelcontextprotocol.io.
 
 import { hasScope, type Scope } from '../api/scopes.ts';
 
@@ -54,6 +54,15 @@ export interface ToolContext {
    * covers it (_shared/api/scopes.ts hasScope). Unset only in tests.
    */
   scopes?: readonly string[];
+  /**
+   * The credential, for the write tools (mig 20261119130000): its kind and id
+   * (an API key's id, a personal token's id, an OAuth grant's id) and, for a
+   * user token, the SHA-256 hex of the bearer, which the SQL re-resolves on
+   * every write. Unset without a credential.
+   */
+  credKind?: 'api_key' | 'pat' | 'oauth';
+  credId?: string;
+  bearerHash?: string | null;
 }
 
 export interface ToolDefinition {
@@ -170,7 +179,7 @@ export async function handleMessage(
         return { jsonrpc: '2.0', id, result: toolResult({ error: 'this tool needs an Exos organizer API key' }, true) };
       }
       if (!toolAllowed(tool, ctx)) {
-        return { jsonrpc: '2.0', id, result: toolResult({ error: `this API key lacks the ${tool.scope} scope` }, true) };
+        return { jsonrpc: '2.0', id, result: toolResult({ error: `this credential lacks the ${tool.scope} scope` }, true) };
       }
       const args = params.arguments;
       if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {

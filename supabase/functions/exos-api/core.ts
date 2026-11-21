@@ -70,6 +70,14 @@ export interface CoreCtx {
   idempotencyKey: string | null;
   /** exos: checkout questions — may this credential read order-scope answers? (default: no) */
   orderAnswers?: () => Promise<boolean>;
+  /**
+   * claude/exos-mcp-writes (mig 20261119130000): the credential's kind. A
+   * personal or OAuth token writes as its own user: exos_api_write gets the
+   * token's hash (and X-Exos-Org) instead of a key id and re-resolves it.
+   */
+  credKind?: "api_key" | "pat" | "oauth";
+  tokenHash?: string;
+  tokenOrg?: string | null;
 }
 
 /** The route ids this module answers. */
@@ -421,6 +429,15 @@ async function createRefund(c: CoreCtx, sessionId: string): Promise<Answer> {
 
 /** One exos_api_write call. */
 async function write(c: CoreCtx, action: string, target: string | null, args: Record<string, unknown>): Promise<unknown> {
+  // A user token (only USER_TOKEN_CORE_WRITES get this far): the token, never a key id.
+  if (c.credKind === "pat" || c.credKind === "oauth") {
+    if (!c.tokenHash) throw new CoreError(403, "this write needs an organization API key (sk_live_…)");
+    return await rpc(c.sb, "exos_api_write", {
+      p_key_id: null, p_action: action, p_target: target, p_args: args, p_idempotency_key: c.idempotencyKey,
+      p_token_hash: c.tokenHash, p_token_kind: c.credKind, p_token_org: c.tokenOrg ?? null,
+    });
+  }
+  // An org API key: the same five arguments as before.
   return await rpc(c.sb, "exos_api_write", {
     p_key_id: c.keyId, p_action: action, p_target: target, p_args: args, p_idempotency_key: c.idempotencyKey,
   });

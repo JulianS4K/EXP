@@ -11,6 +11,10 @@
 //   POST /register     RFC 7591 dynamic registration, only with
 //                      EXOS_OAUTH_DCR=on (off by default: 404)
 //   GET  /.well-known/oauth-authorization-server   RFC 8414 metadata
+//   GET  /.well-known/openid-configuration         the same document, where
+//                      MCP clients look for an issuer with a path (the MCP
+//                      auth spec's third discovery URL, "path appended"); Exos
+//                      issues no ID tokens, so it is OAuth metadata only
 //
 // Client authentication: HTTP Basic or client_secret_post for confidential
 // apps; public apps send client_id only and must use PKCE. Bodies are
@@ -49,7 +53,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^.*?\/exos-oauth(?=\/|$)/, "").replace(/\/+$/, "") || "/";
 
-  if (req.method === "GET" && path === "/.well-known/oauth-authorization-server") return json(metadata(), 200);
+  if (req.method === "GET" && (path === "/.well-known/oauth-authorization-server" || path === "/.well-known/openid-configuration")) {
+    return json(metadata(), 200);
+  }
   if (req.method === "GET" && path === "/authorize") return authorize(url);
 
   if (req.method !== "POST" || !["/token", "/revoke", "/introspect", "/register"].includes(path)) {

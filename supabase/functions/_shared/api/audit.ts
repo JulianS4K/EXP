@@ -24,7 +24,8 @@ export const AUDIT_GROUP_NAMES = Object.keys(AUDIT_GROUPS) as AuditGroup[];
 export const AUDIT_ACTOR_KINDS = ['user', 'api_key', 'oauth_app', 'service', 'cron'] as const;
 export type AuditActorKind = (typeof AUDIT_ACTOR_KINDS)[number];
 
-export const AUDIT_SOURCES = ['dashboard', 'api', 'door', 'pos', 'webhook', 'system'] as const;
+// 'mcp': a write an AI assistant made through exos-mcp (mig 20261119130000).
+export const AUDIT_SOURCES = ['dashboard', 'api', 'door', 'pos', 'webhook', 'system', 'mcp'] as const;
 export type AuditSource = (typeof AUDIT_SOURCES)[number];
 
 /** The group an action (`group.verb`) belongs to; 'other' for one we don't know. */

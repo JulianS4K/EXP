@@ -133,9 +133,9 @@ $$;
 DO $$
 DECLARE f text;
 BEGIN
-  IF NOT has_function_privilege('service_role', 'public.exos_api_write(uuid,text,text,jsonb,text)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.exos_api_write(uuid,text,text,jsonb,text)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.exos_api_write(uuid,text,text,jsonb,text)', 'EXECUTE') THEN
+  IF NOT has_function_privilege('service_role', 'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'C1 FAIL: exos_api_write grants';
   END IF;
   FOREACH f IN ARRAY ARRAY['public._exos_api_has_scope(text[],text)', 'public._exos_api_action_scope(text)',

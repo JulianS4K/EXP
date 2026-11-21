@@ -292,7 +292,8 @@ for m in \
   20261117190000_exos_social_off \
   20261118100000_exos_drop_list \
   20261118110000_exos_own_cron_helpers \
-  20261118120000_exos_waiting_room; do
+  20261118120000_exos_waiting_room \
+  20261119130000_exos_mcp_writes; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -544,7 +545,8 @@ for m in \
          20261117190000_exos_social_off \
          20261118100000_exos_drop_list \
          20261118110000_exos_own_cron_helpers \
-         20261118120000_exos_waiting_room; do
+         20261118120000_exos_waiting_room \
+         20261119130000_exos_mcp_writes; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -699,5 +701,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_drop_list
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_own_cron_helpers.sql"
 # claude/exos-waiting-room (mig 20261118120000): the on-sale waiting room: shape, roles + audit, the window, random places at mint, bounded batches, idle 3 / 30 minutes, the gate first in five bodies (holds, free claim, phone RSVP, referral reward) with check-only require, one turn one order (attach / take-over / bind / spend, XWR02 / XWR03, a late fulfilment still spends, a phone RSVP spends only when confirmed, a retried claim), seats for established accounts outside the cap (new accounts queue as guests), one turn per account, strict network shares and Turnstile (scaled under a ceiling), the live-line cap, the on-sale pin and early types, close / re-enable, cached polls, no PII (races: race_waiting_room.sh; scale: scale_waiting_room.sh; by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_waiting_room.sql"
+# claude/exos-mcp-writes (mig 20261119130000): event writes from AI assistants: exos_api_write takes a personal / OAuth token (re-resolved in SQL with the live role, only event.create / ticket_type.create / event.publish; every other action still needs a key), the credential and source in the write log, per-credential Idempotency-Keys, confirm tokens (single use, 10 minutes, bound to credential, tool and exact args; reused / expired / changed / another credential refused), the hourly org cap, the MCP write log + org audit (source mcp), drafts invisible until published, 150 free tier / 151 standard, another org refused, revoked / demoted / removed refused
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp_writes.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

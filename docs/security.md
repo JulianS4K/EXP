@@ -1074,6 +1074,59 @@ to review:
   IP share one `unknown` network bucket (with Turnstile on they get 503 instead); rate windows are clock minutes
   (`exos_rate_hit`), so a burst across a minute boundary can get up to twice the per-minute number.
 
+### User-token writes and MCP writes (mig 20261119130000)
+
+**A new authority:** a personal access token or an OAuth access token can now **write**, as its own user, three
+core actions: `event.create`, `ticket_type.create`, `event.publish` (`POST /v1/events`,
+`POST /v1/events/:id/ticket-types`, `POST /v1/events/:id/publish`, and the MCP tools `create_event_draft`,
+`add_ticket_type`, `publish_event`). Until now a user token could write only the platform routes; every core
+write needed an org API key. Nothing new is granted to anon or authenticated (H3 unchanged). Points to review:
+
+- **One resolution, in the write's transaction.** `exos_api_write` (service role only) now takes either a key id or
+  a token's SHA-256 (`p_token_hash` + `p_token_kind` pat / oauth, and `p_token_org` for `X-Exos-Org`); both at once
+  is 22023. With a token it calls `exos_api_token_auth_org`, the same function every API and MCP request is
+  authenticated with: not revoked or expired, for OAuth a live grant and an undeleted app, the user an active,
+  enabled member, the token's consented scopes narrowed to the role **now** (and the org's role settings). Any
+  failure is 42501, before anything is read or written. The function then sets the transaction's JWT claims to
+  that user, exactly as it does for a key's creator, so the dashboard's checks (`exos_has_org_role`,
+  `exos_publish_event`) decide; every target is still pinned to the org first (another org's id is P0002). A
+  demotion, a removal, a disable, a revoked token or grant, or a deleted app stops the next write.
+- **Allowlisted actions only.** `_exos_api_user_token_actions()` lists the three; any other action with a token is
+  42501 in SQL, and exos-api refuses the other routes before SQL (`userTokenMayCall`, `USER_TOKEN_CORE_WRITES`;
+  vitest keeps the two lists equal and checks every other write route still refuses a user token).
+- **Built from the live body.** The widened function is made from `pg_get_functiondef` of the current one (rule 4)
+  with nine counted text replacements (signature, declarations, the credential branch around the unchanged key
+  block, the idempotency claim and replay, the two request keys, the log row); a count that doesn't match stops the
+  migration. The five-argument function is dropped (two overloads would be ambiguous to PostgREST). REST calls with
+  a key send the same five arguments as before.
+- **Records.** `exos_api_writes` gains `credential_kind`, `credential_id` (a key's id, a personal token's id, an OAuth
+  grant's id) and `source` (`api` / `mcp`); old rows are backfilled from `api_key_id`, and a BEFORE INSERT trigger
+  fills them for the other writers. Idempotency-Keys are unique per credential (new index), so one credential can
+  never replay another's answer; the refund nonce / comp request key use the credential id (a key's is its id, as
+  before).
+- **MCP confirmations.** A write tool's first call stores a confirmation (`exos_mcp_confirms`: RLS on, no client
+  grant; SHA-256 of 32 random bytes; the credential, tool, action, target and `_exos_api_request_hash` of the exact
+  args; 10 minutes). `exos_mcp_write` takes it under a row lock: another credential's, unknown, used or expired is
+  refused without saying more; different args burn it. It re-checks the credential (`_exos_mcp_credential`: the
+  key live and its creator a member, or the token re-resolved with the same id), counts the org's MCP writes in the
+  last hour under an advisory lock (20, `mcp_writes_per_hour`), spends the token, and runs `exos_api_write` with
+  source `mcp` in a subtransaction, so a failed write rolls back alone and is still logged. At most 30 open
+  confirmations per credential (54000).
+- **Audit.** `exos_mcp_writes` (RLS: owner / manager of the org; SELECT only) and an `exos_org_audit` row
+  `mcp.write` (entity `mcp_write`, source `mcp`). `mcp` is a new org-audit source (CHECK and `_exos_audit_actor`);
+  exos-mcp's PostgREST calls send `X-Exos-Source: mcp` with the actor headers, believed on service-role requests
+  only, as before.
+- **Reads for previews.** `exos_mcp_event_state` (the event, its ticket types, its publish blockers) and
+  `exos_mcp_fee_outcome` (the free tier) take the org and answer NULL for another org's event; service role only.
+- **OAuth audience.** exos-mcp refuses an OAuth token whose `resource` (RFC 8707) is set and isn't one of its own
+  URLs. DCR stays off unless `EXOS_OAUTH_DCR=on`; self-registered apps are marked unverified on the consent screen,
+  which lists write scopes apart from read scopes, each one untickable.
+- **Prompt injection.** A write needs a token the server issued for that exact write, so text an assistant reads
+  can't make one valid; the server instructions say to send it only after the person explicitly agreed to the
+  preview, and to treat people's and organizers' text as content.
+- Tests: `tests/exos/test_mcp_writes.sql` (M1-M17), `src/lib/mcp/mcpWrites.test.ts`,
+  `supabase/functions/_shared/mcp/discovery_test.ts`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

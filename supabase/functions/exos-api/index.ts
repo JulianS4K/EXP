@@ -300,6 +300,8 @@ interface Ctx {
   idempotencyKey: string | null;
   /** SHA-256 hex of the bearer token: /v1/me re-resolves it in SQL (exos_api_me). */
   tokenHash: string;
+  /** X-Exos-Org, when a personal token names another of its user's orgs. */
+  switchOrg: string | null;
 }
 
 // claude/exos-org-audit: `headers` name the credential to the org audit log
@@ -402,9 +404,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       "www-authenticate": `Bearer error="insufficient_scope", scope="${match.route.scope}"`,
     });
   }
-  // Personal and OAuth tokens (#74) may call every GET and the platform routes.
-  // Every other write records or checks an org API key id (exos_api_write,
-  // booking, offers, listing keys), so it needs one.
+  // Personal and OAuth tokens (#74) may call every GET, the platform routes and
+  // three core writes as their own user (USER_TOKEN_CORE_WRITES, mig
+  // 20261119130000). Every other write records or checks an org API key id
+  // (exos_api_write, booking, offers, listing keys), so it needs one.
   if (
     !ME_ROUTE_IDS.has(match.route.id) && !userTokenMayCall(cred.kind, method, match.route.id) &&
     !USER_TOKEN_WRITES.has(match.route.id)
@@ -428,6 +431,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         : {},
       idempotencyKey: method === "GET" ? null : idempotencyKey(req),
       tokenHash,
+      switchOrg,
     };
     const out = await handle(match.route, ctx);
     if (out instanceof Response) return out; // PDFs and CSV exports
@@ -653,6 +657,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
     return await handleCore(route, {
       sb, orgId, keyId: c.key.id, params: c.params, q: c.q, page, body: c.body, idempotencyKey: c.idempotencyKey,
       orderAnswers: () => canReadOrderAnswers(sb, orgId, c.cred), // exos: checkout questions
+      // claude/exos-mcp-writes (mig 20261119130000): a user token's core writes
+      // (USER_TOKEN_CORE_WRITES) go to exos_api_write with the token's hash.
+      credKind: c.cred.kind, tokenHash: c.tokenHash, tokenOrg: c.switchOrg,
     });
   }
   // Membership products, memberships, imported attendees (mig 20261102100000).

@@ -138,7 +138,7 @@ describe('organizer tools follow the key scopes', () => {
     expect(names).not.toContain('door_status');
     expect(names).not.toContain('marketplace_attention');
     const res = await call('event_sales', { event_id: EV.id }, narrow);
-    expect(res).toMatchObject({ isError: true, structuredContent: { error: 'this API key lacks the orders:read scope' } });
+    expect(res).toMatchObject({ isError: true, structuredContent: { error: 'this credential lacks the orders:read scope' } });
   });
 
   it('a legacy read key keeps every organizer tool', async () => {
