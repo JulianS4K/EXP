@@ -867,6 +867,14 @@ export async function setTicketAttendee(ticketId: string, name: string): Promise
   return (data as string | null) ?? null;
 }
 
+/** A static-code ticket's holder gets a new code (mig 20261121153000,
+ *  exos_ticket_static_reissue): a new secret, so the old code, its PDF and
+ *  any wallet code stop working at the door. */
+export async function reissueStaticCode(ticketId: string): Promise<void> {
+  const { error } = await supabase.rpc('exos_ticket_static_reissue', { p_ticket_id: ticketId });
+  if (error) throw error;
+}
+
 export async function claimFreeTickets(input: {
   eventId: string;
   tierId: string;

@@ -3,14 +3,17 @@
 // S- code (no countdown, no 24-hour lock) and the PDF download; a rotating
 // ticket keeps the 30-second countdown and offers no PDF.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { staticCode } from '../../supabase/functions/_shared/staticCodes.ts';
 
 const UID = '0b5e1c2a-0000-4000-8000-0000000000c1';
 const TID = '0b5e1c2a-0000-4000-8000-000000000001';
 
-const h = vi.hoisted(() => ({ ticket: null as Record<string, unknown> | null, event: null as Record<string, unknown> | null }));
+const h = vi.hoisted(() => ({
+  ticket: null as Record<string, unknown> | null, event: null as Record<string, unknown> | null,
+  reissue: null as unknown as import('vitest').Mock<(id: string) => Promise<void>>,
+}));
 
 vi.mock('../lib/supabase', () => ({ supabase: {} }));
 vi.mock('../context/AuthContext', () => ({
@@ -22,6 +25,7 @@ vi.mock('../lib/tickets', () => ({
   getTicket: vi.fn(async () => ({ ...h.ticket, event: h.event })),
   listMyTicketsForEvent: vi.fn(async () => [h.ticket]),
   setTicketAttendee: vi.fn(),
+  reissueStaticCode: (id: string) => h.reissue(id),
   syncServerClock: vi.fn(async () => undefined),
 }));
 vi.mock('../lib/passCache', () => ({ loadPasses: () => null, savePasses: () => undefined }));
@@ -67,6 +71,10 @@ function renderPass() {
 }
 
 beforeEach(() => {
+  h.reissue = vi.fn(async (_id: string) => {
+    // The server gave the ticket a new secret.
+    h.ticket = { ...h.ticket, barcodeSecret: 'sek-new' };
+  });
   vi.stubGlobal('matchMedia', (q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
 });
 afterEach(() => {
@@ -87,12 +95,28 @@ describe('TicketDetail: static-code tickets', () => {
     expect(screen.getByText(/This code doesn't change/)).toBeTruthy();
   });
 
+  it('a leaked code: "get a new one" asks first, then shows the new code', async () => {
+    setUp('static', 72);
+    renderPass();
+    const old = await staticCode(TID, UID, 'sek-vector');
+    expect(await screen.findByLabelText('Entry code')).toHaveProperty('textContent', old);
+    vi.stubGlobal('confirm', () => false);
+    fireEvent.click(screen.getByRole('button', { name: /Get a new one/ }));
+    expect(h.reissue).not.toHaveBeenCalled();
+    vi.stubGlobal('confirm', () => true);
+    fireEvent.click(screen.getByRole('button', { name: /Get a new one/ }));
+    await waitFor(() => expect(h.reissue).toHaveBeenCalledWith(TID));
+    const fresh = await staticCode(TID, UID, 'sek-new');
+    await waitFor(() => expect(screen.getByLabelText('Entry code').textContent).toBe(fresh));
+  });
+
   it('a rotating ticket keeps the countdown and has no PDF', async () => {
     setUp('rotating', 2);
     renderPass();
     await waitFor(() => expect(screen.getByRole('timer')).toBeTruthy());
     expect(screen.queryByLabelText('Entry code')).toBeNull();
     expect(screen.queryByRole('button', { name: /Download PDF/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Get a new one/ })).toBeNull();
   });
 
   it('a rotating ticket days out is still locked', async () => {

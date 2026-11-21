@@ -13,6 +13,9 @@ import { FREE_TIER_MAX_CAPACITY, isFreeTier } from '../../supabase/functions/_sh
 /** The ticket page's line under a static code. */
 export const STATIC_CODE_NOTE = "This code doesn't change, so you can print it or save the PDF. It lets one person in: the first scan wins, so keep it to yourself.";
 
+/** The confirm before a new static code (exos_ticket_static_reissue). */
+export const STATIC_REISSUE_CONFIRM = 'Get a new code for this ticket? The current code, its PDF and any printout or screenshot of it stop working at the door.';
+
 export function isStaticTicket(t: Pick<Ticket, 'codeMode'> | null | undefined): boolean {
   return t?.codeMode === 'static';
 }

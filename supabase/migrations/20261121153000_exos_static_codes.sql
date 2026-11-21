@@ -11,20 +11,23 @@
 -- This is the generic "static-code" door mode: nothing here says "free tier"
 -- except the rule that picks the mode at issuance, so the BYO marketplace's
 -- allocated PDF tickets can be issued static too (code_mode = 'static' on
--- the insert).
+-- the insert, with exos.static_code_ok = 'on' set for its transaction).
 --
 -- 1. The mode is per ticket, fixed at issuance (exos_tickets.code_mode,
 --    'static' | 'rotating'). Tickets that exist before this migration are
 --    'rotating' (their behaviour doesn't change), and so is a row written
 --    with triggers off (the column default). Every other new ticket gets
 --    _exos_ticket_code_mode(event) from the BEFORE INSERT trigger
---    exos_tickets_code_mode, unless the insert asks for 'static' (kept):
+--    exos_tickets_code_mode. An insert that asks for 'static' is kept only
+--    on the static-code path (the transaction sets exos.static_code_ok =
+--    'on'; nothing does yet), else refused where the rule says rotating:
 --    'static' while the event is the free
 --    tier by the fee's own rule (exos_event_is_free_tier: bounded, and
 --    max(max capacity, sold) at or under exos_free_tier_max_capacity()),
 --    counting this ticket (the event's live tickets + 1 must also be at or
 --    under the cutoff, so a path that counts the sale after inserting still
---    crosses on the ticket that crosses). The mode never changes after
+--    crosses on the ticket that crosses), under a per-event advisory lock so
+--    two orders at the boundary can't both take the last static place. The mode never changes after
 --    (exos_tickets_code_mode_lock). So when an event grows past the cutoff,
 --    tickets issued after that rotate and the earlier ones stay static.
 -- 2. The code: S-{ticket}:{32 base32 chars}, the first 160 bits of
@@ -49,13 +52,20 @@
 --    + static_code; Apple barcode, Google static barcode); the partner /
 --    RSVP ticket link page shows it too (exos_ticket_link_view + code_mode).
 -- 5. The PDF in the email: a 'ticket-issued' mail is linked, when it is
---    queued, to the recipient's static tickets issued in the last 10 minutes
---    that no mail carries yet (exos_mail_ticket_pdfs, trigger
---    exos_mail_ticket_pdfs_link). exos-mail-drain asks
+--    queued, to the static tickets its own transaction issued or handed over
+--    to that address (buyer_email; updated_at = now()) that no mail carries
+--    yet (exos_mail_ticket_pdfs, trigger exos_mail_ticket_pdfs_link). The PDF
+--    has the first 20; the mail says the rest are in My Tickets.
+--    exos-mail-drain asks
 --    exos_mail_ticket_pdf_rows (service role) for the ones still live with
 --    the same holder, draws the PDF (_shared/print/tickets.ts) and attaches
 --    it. The two mails that said "screenshots won't scan" (phone RSVP,
 --    partner reservation) say the right thing for static tickets.
+-- 6. A leaked code: exos_ticket_static_reissue (the holder) and
+--    exos_wallet_reissue (patched) give a static ticket a new secret, so a
+--    new code. And the box office's email hand-over to an account now
+--    rotates the secret like every other change of holder: it didn't, so the
+--    selling scanner could still make the buyer's T- codes (live in prod).
 --
 -- Touches:  W: TABLE exos_tickets (+ code_mode, CHECK, column grant, index,
 --              TRIGGERs exos_tickets_code_mode / exos_tickets_code_mode_lock)
@@ -64,7 +74,7 @@
 --           C: FUNCTION _exos_base32, _exos_static_code, _exos_static_code_canon,
 --              _exos_static_code_check, _exos_ticket_code_mode,
 --              exos_tg_ticket_code_mode, exos_tg_mail_ticket_pdfs,
---              exos_mail_ticket_pdf_rows
+--              exos_mail_ticket_pdf_rows, exos_ticket_static_reissue
 --           W: FUNCTION (patched in place, marker-checked; the Applier checks
 --              each anchor against prod's pg_get_functiondef first):
 --                exos_check_in_ticket(uuid, text, text, text, uuid, text, timestamptz, text, uuid, text)
@@ -74,6 +84,18 @@
 --                exos_ticket_link_view(uuid, text)                    (2 patches)
 --                exos_phone_rsvp_verify(uuid, text, text)
 --                _exos_partner_reservation_complete(uuid, uuid, text, jsonb, text)
+--                exos_wallet_reissue(uuid)
+--                _exos_pos_deliver_email(uuid, uuid, text, boolean)    (a fix live in prod: see 6)
+--              Anchors (the text each patch searches for, once):
+--                check-in x2: "ELSIF v_signed AND upper(left(btrim(p_barcode_payload), 2)) = 'W-' THEN"
+--                _exos_door_keys: "IF v_print IS NOT NULL THEN ... RETURN v_out;" (the last 4 lines)
+--                _exos_wallet_payload: "'google_pattern', 'W-' || t.id"
+--                exos_ticket_link_view: its SELECT ... attendee_name line; "'code', CASE WHEN v_state = 'valid'"
+--                exos_phone_rsvp_verify / _exos_partner_reservation_complete: the
+--                  "Its QR code changes every 30 seconds" sentence of the mail
+--                exos_wallet_reissue: "IF v_epoch IS NULL THEN ... 'no-pass' ... END IF;"
+--                _exos_pos_deliver_email: "UPDATE public.exos_tickets SET owner_id = v_rcpt,
+--                  buyer_id = v_rcpt, buyer_email = v_email / WHERE id = ANY (v_ids) AND owner_id = o.rung_by;"
 -- Pre-reqs: every exos migration before this one.
 -- Re-run safe: marker-checked patches (pg_temp.exos_patch_n), CREATE OR
 -- REPLACE, IF NOT EXISTS. D4 authors; not applied.
@@ -106,28 +128,44 @@ END $$;
 -- the trigger below decides for every other new ticket.
 ALTER TABLE public.exos_tickets ADD COLUMN IF NOT EXISTS code_mode text NOT NULL DEFAULT 'rotating';
 ALTER TABLE public.exos_tickets ALTER COLUMN code_mode SET DEFAULT 'rotating';
+-- The CHECK is added NOT VALID (no scan under the ACCESS EXCLUSIVE lock), then
+-- validated (a scan under SHARE UPDATE EXCLUSIVE: reads and writes go on).
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exos_tickets_code_mode_chk') THEN
-    ALTER TABLE public.exos_tickets ADD CONSTRAINT exos_tickets_code_mode_chk CHECK (code_mode IN ('static', 'rotating'));
+    ALTER TABLE public.exos_tickets ADD CONSTRAINT exos_tickets_code_mode_chk CHECK (code_mode IN ('static', 'rotating')) NOT VALID;
   END IF;
 END $$;
+ALTER TABLE public.exos_tickets VALIDATE CONSTRAINT exos_tickets_code_mode_chk;
 COMMENT ON COLUMN public.exos_tickets.code_mode IS
   'How the ticket''s door code works, fixed at issuance: static (one S- code, printable; the free tier) or rotating (T- HMAC, 30 s). mig 20261121153000.';
 GRANT SELECT (code_mode) ON public.exos_tickets TO authenticated;
--- The mail link below looks for a recipient's fresh static tickets.
-CREATE INDEX IF NOT EXISTS exos_tickets_static_recent_idx ON public.exos_tickets (created_at)
+-- The mail link below looks for the static tickets its own transaction
+-- issued or handed over (updated_at = now()). Partial: static tickets only.
+-- On a big exos_tickets: run the ADD COLUMN above on its own, then build this
+-- index CONCURRENTLY (outside a transaction, same name), then apply: this
+-- line skips it (scripts/rollout-prod.sh).
+CREATE INDEX IF NOT EXISTS exos_tickets_static_touched_idx ON public.exos_tickets (updated_at)
   WHERE code_mode = 'static';
 
 -- The mode a ticket of this event gets if issued now: the fee's free-tier
--- rule (exos_event_is_free_tier), with this ticket counted.
+-- rule (exos_event_is_free_tier), with this ticket counted. VOLATILE, so each
+-- statement sees what committed before it. A free-tier event's issues take a
+-- per-event advisory lock (held to commit) before counting, so two orders at
+-- the boundary can't both see room for one more static ticket; events over
+-- the cutoff never take it.
 CREATE OR REPLACE FUNCTION public._exos_ticket_code_mode(p_event_id uuid)
-RETURNS text LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+RETURNS text LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   v_cut  int := public.exos_free_tier_max_capacity();
   v_live int;
 BEGIN
   IF p_event_id IS NULL OR NOT coalesce(public.exos_event_is_free_tier(p_event_id), false) THEN
+    RETURN 'rotating';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_code_mode:' || p_event_id::text, 0));
+  -- Again under the lock: another order may have crossed while we waited.
+  IF NOT coalesce(public.exos_event_is_free_tier(p_event_id), false) THEN
     RETURN 'rotating';
   END IF;
   SELECT count(*) INTO v_live
@@ -143,9 +181,19 @@ CREATE OR REPLACE FUNCTION public.exos_tg_ticket_code_mode()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    -- 'static' asked for (a marketplace's PDF allocation) is kept; anything
-    -- else, the column default included, is the rule's answer.
-    IF NEW.code_mode IS DISTINCT FROM 'static' THEN
+    -- 'static' asked for is kept only on the static-code path (a marketplace's
+    -- PDF allocation), which sets exos.static_code_ok = 'on' for its own
+    -- transaction. Nothing sets it yet. Anything else, the column default
+    -- included, is the rule's answer, and 'static' asked for where the rule
+    -- says rotating is refused.
+    IF NEW.code_mode = 'static' AND coalesce(current_setting('exos.static_code_ok', true), '') = 'on' THEN
+      RETURN NEW;
+    END IF;
+    IF NEW.code_mode = 'static' THEN
+      IF public._exos_ticket_code_mode(NEW.event_id) <> 'static' THEN
+        RAISE EXCEPTION 'static codes are for free-tier events (or the static-code path)' USING ERRCODE = '42501';
+      END IF;
+    ELSE
       NEW.code_mode := public._exos_ticket_code_mode(NEW.event_id);
     END IF;
   ELSIF NEW.code_mode IS DISTINCT FROM OLD.code_mode THEN
@@ -275,6 +323,68 @@ $n$  /* exos: static codes */ -- mig 20261121153000.
   END IF;
   RETURN v_out;$n$, 1);
 
+-- -- A new code when one leaked: a new secret ----------------------------------
+-- The static code is derived from the secret and the holder, so a new secret
+-- is a new code (and new T- / W- codes, and voids a live print code: the
+-- triggers on barcode_secret). Chosen over adding the wallet epoch to the MAC:
+-- the app, the email's PDF and the door roster all derive the code from the
+-- secret, and a holder without a wallet pass needs a way too.
+-- The holder only, a static-mode ticket, active and not in a transfer; 3 a
+-- minute per holder.
+CREATE OR REPLACE FUNCTION public.exos_ticket_static_reissue(p_ticket_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE t public.exos_tickets%ROWTYPE;
+BEGIN
+  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not authenticated' USING ERRCODE = '42501'; END IF;
+  IF NOT public.exos_rate_hit('static_reissue:' || auth.uid()::text, 3) THEN
+    RAISE EXCEPTION 'too many new codes, try again in a minute' USING ERRCODE = '54000';
+  END IF;
+  SELECT * INTO t FROM public.exos_tickets WHERE id = p_ticket_id FOR UPDATE;
+  IF t.id IS NULL OR t.owner_id IS DISTINCT FROM auth.uid() THEN
+    RAISE EXCEPTION 'ticket not found' USING ERRCODE = 'P0002';
+  END IF;
+  IF t.code_mode <> 'static' THEN
+    RAISE EXCEPTION 'this ticket''s code already changes every 30 seconds' USING ERRCODE = '22023';
+  END IF;
+  IF t.status <> 'active' OR t.pending_transfer_id IS NOT NULL THEN
+    RAISE EXCEPTION 'only an active ticket that isn''t being transferred gets a new code' USING ERRCODE = '55000';
+  END IF;
+  UPDATE public.exos_tickets SET barcode_secret = gen_random_uuid()::text, last_reissue_at = now() WHERE id = t.id;
+  RETURN jsonb_build_object('ok', true, 'ticket_id', t.id);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_ticket_static_reissue(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.exos_ticket_static_reissue(uuid) TO authenticated, service_role;
+
+-- "My pass was screenshotted" (exos_wallet_reissue) bumps the pass epoch,
+-- which a static code doesn't carry: for a static-mode ticket it also gives
+-- the ticket a new secret, so the pass's new code is a new S- code.
+SELECT pg_temp.exos_patch_n(
+  'public.exos_wallet_reissue(uuid)',
+  '/* exos: static codes */',
+$o$  IF v_epoch IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'no-pass');
+  END IF;$o$,
+$n$  IF v_epoch IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'reason', 'no-pass');
+  END IF;
+  /* exos: static codes */ -- mig 20261121153000: a new S- code too.
+  UPDATE public.exos_tickets SET barcode_secret = gen_random_uuid()::text, last_reissue_at = now()
+   WHERE id = p_ticket_id AND owner_id = v_uid AND code_mode = 'static';$n$, 1);
+
+-- The box office's email hand-over to a confirmed account moved the ticket
+-- to the buyer without a new secret, so the seller, who could read it while
+-- holding the ticket, could still make the buyer's codes (every other change
+-- of holder rotates it: exos_claim_transfer, exos_phone_rsvp_claim). Fixed
+-- for every ticket, rotating too.
+SELECT pg_temp.exos_patch_n(
+  'public._exos_pos_deliver_email(uuid, uuid, text, boolean)',
+  '/* exos: pos deliver rotates */',
+$o$    UPDATE public.exos_tickets SET owner_id = v_rcpt, buyer_id = v_rcpt, buyer_email = v_email
+     WHERE id = ANY (v_ids) AND owner_id = o.rung_by;$o$,
+$n$    UPDATE public.exos_tickets SET owner_id = v_rcpt, buyer_id = v_rcpt, buyer_email = v_email,
+           barcode_secret = gen_random_uuid()::text /* exos: pos deliver rotates */ -- mig 20261121153000
+     WHERE id = ANY (v_ids) AND owner_id = o.rung_by;$n$, 1);
+
 -- ===========================================================================
 -- 4. Wallet passes and the ticket link page
 -- ===========================================================================
@@ -346,24 +456,25 @@ GRANT ALL ON public.exos_mail_ticket_pdfs TO service_role;
 COMMENT ON TABLE public.exos_mail_ticket_pdfs IS
   'Static-code tickets a ticket-issued mail carries as a PDF (linked when the mail is queued; the drain re-checks they are live with the same holder). Service role only. mig 20261121153000.';
 
--- At queue time: the recipient's static tickets (bought with that address,
--- or held by its account) issued in the last 10 minutes that no mail
--- carries yet. Every ticket-issued path (checkout, comps, issue to email,
--- box office, partner, RSVP, the app's own "ticket ready") gets it.
+-- At queue time: the static tickets this mail's own transaction issued or
+-- handed over (updated_at = now(), the transaction's start) to this address
+-- (buyer_email), that no mail carries yet. That is the order the mail is
+-- about: checkout, comps, issue to email, the box office hand-over, partner,
+-- RSVP. Never matched by the holder's account email, so a ticket the org
+-- owner holds for a guest (partner, RSVP) never lands in the owner's mail,
+-- and an order's tickets past the PDF's 20 pages never ride on a later mail.
 CREATE OR REPLACE FUNCTION public.exos_tg_mail_ticket_pdfs()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
   INSERT INTO public.exos_mail_ticket_pdfs (mail_id, ticket_id, owner_id)
   SELECT NEW.id, t.id, t.owner_id
     FROM public.exos_tickets t
-    LEFT JOIN auth.users u ON u.id = t.owner_id
-   WHERE t.code_mode = 'static' AND t.status = 'active' AND t.owner_id IS NOT NULL
-     AND t.pending_transfer_id IS NULL
-     AND t.created_at >= now() - interval '10 minutes'
-     AND (lower(t.buyer_email) = lower(NEW.to_email) OR lower(u.email) = lower(NEW.to_email))
+   WHERE t.code_mode = 'static' AND t.updated_at = now()
+     AND t.status = 'active' AND t.owner_id IS NOT NULL AND t.pending_transfer_id IS NULL
+     AND lower(t.buyer_email) = lower(NEW.to_email)
      AND NOT EXISTS (SELECT 1 FROM public.exos_mail_ticket_pdfs p WHERE p.ticket_id = t.id)
    ORDER BY t.created_at, t.id
-   LIMIT 20
+   LIMIT 500
   ON CONFLICT DO NOTHING;
   RETURN NULL;
 END $$;
@@ -384,14 +495,15 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
            'event_name', e.name, 'starts_at', e.starts_at, 'doors_at', e.doors_at, 'timezone', e.timezone,
            'occurs_at_local', e.occurs_at_local, 'venue_name', e.venue_name, 'venue_location', e.venue_location,
            'tier_name', coalesce(t.tier_name, tr.name),
-           'attendee_name', coalesce(nullif(btrim(t.attendee_name), ''), nullif(btrim(p.display_name), '')),
+           -- The name the holder (or the checkout) put on the ticket, never the
+           -- holding account's: partner / RSVP tickets are held by the org owner.
+           'attendee_name', nullif(btrim(t.attendee_name), ''),
            'seat_label', t.seat_label, 'org_name', o.name, 'order_ref', t.order_ref)
     FROM public.exos_mail_ticket_pdfs l
     JOIN public.exos_tickets t ON t.id = l.ticket_id
     JOIN public.exos_events e ON e.id = t.event_id
     JOIN public.exos_orgs o ON o.id = e.org_id
     LEFT JOIN public.exos_ticket_tiers tr ON tr.id = t.tier_id
-    LEFT JOIN public.exos_profiles p ON p.id = t.owner_id
    WHERE l.mail_id = ANY (coalesce(p_mail_ids, '{}'))
      AND t.code_mode = 'static' AND t.status = 'active' AND t.owner_id = l.owner_id
      AND t.pending_transfer_id IS NULL AND coalesce(t.barcode_secret, '') <> ''

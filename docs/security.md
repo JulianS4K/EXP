@@ -276,6 +276,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_org_pending_members`, `exos_org_member_approve`, `exos_org_member_reject`, `exos_set_invite_approval` (mig 20261104200000) | OK | Invite approval. List: owner / manager of the org (returns claimers' account emails to them only). Approve / reject: an owner, or a manager for finance / content / scanner (`_exos_member_decider`, no client grant), never for oneself. The switch: owner. A pending member is `disabled`, so no `exos_has_org_role` check passes; trigger `_exos_tg_membership_approval` refuses clients (`current_user` authenticated / anon) changing the approval columns or enabling a pending row |
 | `exos_pos_recount_drawer` (mig 20261104200000) | OK | Owner / manager of the drawer's org (door staff close drawers but don't recount), a closed drawer, 7 days, 3 recounts, a reason, no final settlement; the replaced count goes to `exos_pos_drawer_recounts` (RLS owner / manager / finance read, no client writes) |
 | `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
+| `exos_ticket_static_reissue` (mig 20261121153000) | OK | The holder of a static-mode ticket only (anyone else `P0002`), active and not in a transfer, 3 a minute per holder: a new barcode secret, so a new static code (the old one, its PDF and its other codes die) |
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
 | `exos_pos_kiosk_configure`, `exos_pos_kiosk_enter`, `exos_pos_kiosk_end` and the kiosk cores (mig 20261113191000) | OK | Kiosk mode ("Kiosk mode" below). The three RPCs: owner / manager of the device's org only (`_exos_member_role`; anyone else, a platform admin included, `P0002`), rate-limited. Every `_exos_pos_kiosk_*` core is service role only (`exos-pos`, with the kiosk credential): each resolves the credential first, then reaches the card walk-up cores as the member who started the kiosk |
@@ -1228,7 +1229,8 @@ Exos adopted.
 
 ### Static door codes (mig 20261121153000)
 
-Nothing new is callable by anon or authenticated (H3 unchanged). `_exos_base32`, `_exos_static_code`,
+Nothing new is callable by anon (H3 unchanged). One new authenticated RPC, `exos_ticket_static_reissue` (the holder
+of a static-mode ticket only; anyone else `P0002`; 3 a minute per holder). `_exos_base32`, `_exos_static_code`,
 `_exos_static_code_canon`, `_exos_static_code_check`, `_exos_ticket_code_mode` and `exos_mail_ticket_pdf_rows` are
 service role only; the two trigger functions have no client EXECUTE. `exos_tickets.code_mode` is readable by
 `authenticated` (column grant) and never writable by a client; the mode is locked after issuance.
@@ -1238,21 +1240,40 @@ service role only; the two trigger functions have no client EXECUTE. `exos_ticke
   'static:{ticket}:{owner}'))[160 bits]}`: whoever can read the ticket's secret (its holder and buyer through the
   gated view, the server) can make it, exactly as they can make the rotating code. The `static:` prefix keeps the MAC
   apart from every other one made with the secret.
+- **Every change of holder rotates the secret.** The claim (`exos_claim_transfer`), the phone-RSVP claim and, from
+  this migration, the box office's email hand-over to a confirmed account (`_exos_pos_deliver_email`, patched).
+  Before it, that hand-over moved the ticket without a new secret: a scanner who sold the walk-up ticket could read
+  the secret while holding it and still make the buyer's `T-` codes afterwards (live in prod for rotating tickets;
+  with a static code it would have been permanent and printable). Test: `test_pos_walkup.sql` X1
+  (x1_pos_deliver_no_rotate).
+- **A leaked code can be replaced.** The holder's `exos_ticket_static_reissue` and `exos_wallet_reissue` (patched, for
+  a static-mode ticket) give the ticket a new secret, so the old `S-` code, its PDF, and its `T-` / `W-` codes stop
+  working and a live print code is voided (`secret-rotated`). A new secret was chosen over putting the wallet epoch
+  in the MAC: the app, the email PDF and the roster all derive the code from the secret, and a holder without a pass
+  needs a way too (ST10).
 - **A leaked roster can't mint.** The door keys get `s`, its SHA-256, for static-mode tickets only; the roster never
   carries the code or the secret (ST6).
 - **Paid tier keeps its property.** `_exos_static_code_check` refuses an `S-` code unless the ticket's `code_mode` is
   `static`, the code names this ticket, and it is the current holder's (ST4). A static ticket still accepts `T-`.
-- **Single use** is the existing atomic status flip (ST4, `race_static_codes.sh` in CI); offline duplicates resolve on
-  upload (ST7). Transfer (new owner + rotated secret) and refund (voided) kill the code (ST5).
-- **Email.** The drain reads the codes through `exos_mail_ticket_pdf_rows` only for tickets linked when the mail was
-  queued and still held by the same holder; a transfer between queue and send drops the page (ST9). Codes are never
+  An insert can ask for `static` only on the static-code path (`exos.static_code_ok = 'on'` for its transaction;
+  nothing sets it yet): elsewhere it is refused (`42501`) where the rule says rotating (ST2). The rule takes a
+  per-event advisory lock before counting, so two orders can't both take the last static place
+  (`race_static_codes.sh` race 2).
+- **Single use** is the existing atomic status flip (ST4, `race_static_codes.sh` race 1, CI); offline duplicates
+  resolve on upload (ST7). Transfer (new owner + rotated secret) and refund (voided) kill the code (ST5).
+- **Email.** A mail carries only the static tickets its own transaction issued or handed over to that address
+  (`buyer_email`, `updated_at = now()`), never matched by the holding account's email (an org owner holds partner /
+  RSVP guests' tickets: those go to the guest, never in the owner's mail). The drain reads the codes through
+  `exos_mail_ticket_pdf_rows` only for tickets still held by the same holder; a transfer between queue and send drops
+  the page. The PDF names `attendee_name` only, never the holding account's profile name (ST9). Codes are never
   written to `exos_mail`.
-- **Patched bodies** (counted marker patches, check against prod first): `exos_check_in_ticket` (both),
-  `_exos_door_keys`, `_exos_wallet_payload`, `exos_ticket_link_view` (2), `exos_phone_rsvp_verify`,
-  `_exos_partner_reservation_complete`. `exos_ticket_link_view` now also answers `code_mode`, and the static code for
-  a static ticket (same key check as before).
-- Tests: `tests/exos/test_static_codes.sql` (ST1-ST9), `tests/exos/race_static_codes.sh`, `src/lib/staticCodes.test.ts`,
-  `supabase/functions/_shared/staticCodes_test.ts`.
+- **Patched bodies** (counted marker patches, check each anchor against prod first; the migration header lists
+  them): `exos_check_in_ticket` (both), `_exos_door_keys`, `_exos_wallet_payload`, `exos_ticket_link_view` (2),
+  `exos_phone_rsvp_verify`, `_exos_partner_reservation_complete`, `exos_wallet_reissue`, `_exos_pos_deliver_email`.
+  `exos_ticket_link_view` now also answers `code_mode`, and the static code for a static ticket (same key check as
+  before).
+- Tests: `tests/exos/test_static_codes.sql` (ST1-ST10), `tests/exos/test_pos_walkup.sql` X1,
+  `tests/exos/race_static_codes.sh` (CI), `src/lib/staticCodes.test.ts`, `supabase/functions/_shared/staticCodes_test.ts`.
 
 ### Search path
 

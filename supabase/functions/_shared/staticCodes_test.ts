@@ -58,10 +58,16 @@ Deno.test("mail attachment: base64 PDF of the live static rows, a note, nothing 
   assertStringIncludes(a.note, "first scan wins");
   assertEquals(staticTicketAttachment([]), null);
   assertEquals(staticTicketAttachment([row({ print_code: "T-x:y:1:z" })]), null);
-  // Escaped event name; capped page count.
+  assertStringIncludes(a.note, "Your ticket is attached");
+  assertEquals([a.attached, a.omitted], [1, 0]);
+  // Escaped event name; capped page count, and the mail says where the rest are.
   const many = staticTicketAttachment(Array.from({ length: MAX_PDF_TICKETS + 5 }, () => row({ event_name: "<b>Show</b>" })));
   assertStringIncludes(many!.note, "&lt;b&gt;Show&lt;/b&gt;");
   assertEquals((text(fromBase64(many!.attachment.content)).match(/\/Type \/Page /g) ?? []).length, MAX_PDF_TICKETS);
+  assertEquals([many!.attached, many!.omitted], [MAX_PDF_TICKETS, 5]);
+  assertStringIncludes(many!.note, `The first ${MAX_PDF_TICKETS} of your ${MAX_PDF_TICKETS + 5} tickets`);
+  assertStringIncludes(many!.note, "download the rest in My Tickets");
+  assert(!many!.note.includes("Your tickets are attached"));
 });
 
 const payload = (over: Partial<WalletPayload> = {}): WalletPayload => ({

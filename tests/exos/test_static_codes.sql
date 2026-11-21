@@ -8,7 +8,8 @@
 --        static, cutoff + 1 rotates (over the cap, a cap over the cutoff,
 --        or sold past it), exos_mint_tickets issues static,
 --        an event that grows past the cutoff keeps its earlier tickets static
---        and rotates the later ones, an explicit mode is kept, and the mode
+--        and rotates the later ones, an explicit 'static' is kept only on the
+--        static-code path (refused on a paid event without it), and the mode
 --        never changes after
 --   ST3  the code: the SQL derivation equals _shared/staticCodes.ts on one
 --        vector, canonical case, base32 vectors (RFC 4648)
@@ -26,10 +27,16 @@
 --        wins, the second is a 'used' conflict in the scan report
 --   ST8  wallet payload (static_code for a static ticket only) and the ticket
 --        link page (code_mode, the S- code)
---   ST9  the PDF in the email: a ticket-issued mail links the recipient's
---        fresh static tickets once (not rotating, not old, not another
---        mail's), the drain rows carry the code and the page fields, a
+--   ST9  the PDF in the email: a ticket-issued mail links the static tickets
+--        its own transaction issued to that address once (not rotating, not
+--        an earlier transaction's, not another mail's, never by the holding
+--        account's email: an org owner's guest tickets stay out of the
+--        owner's mail), the whole order (the PDF has 20), the drain rows carry
+--        the code and the page fields but never the holding account's name, a
 --        transfer drops it; the RSVP / partner mails' copy is patched
+--   ST10 a leaked code: the holder's exos_ticket_static_reissue and
+--        exos_wallet_reissue give a new secret (the old S- code refused, the
+--        new one works); only the holder, only static, rate-limited
 -- Self-contained (BEGIN / ROLLBACK), prefix b5c. The free-tier setting is
 -- removed inside the transaction, so the cutoff is the shipped default.
 -- Two scans of one static code at once: tests/exos/race_static_codes.sh (CI).
@@ -186,15 +193,29 @@ BEGIN
   v_t := (public.exos_mint_tickets(v_e, v_tier, 1, 'b5c-mint-2', 10, NULL))[1];
   ASSERT pg_temp.mode(v_t) = 'rotating', 'ST2: after growth rotates';
   ASSERT (SELECT bool_and(code_mode = 'static') FROM public.exos_tickets WHERE id = ANY (v_ids)), 'ST2: growth keeps earlier static';
-  -- An explicit mode (the BYO marketplace's allocated PDF tickets) is kept.
-  ASSERT pg_temp.mode(pg_temp.issue(pg_temp.ev('02'), NULL, 'static')) = 'static', 'ST2: explicit static kept';
+  -- An explicit 'static' (the BYO marketplace's allocated PDF tickets) is kept
+  -- only on the static-code path (exos.static_code_ok for the transaction);
+  -- without it, refused on a paid event and simply the rule on a free one.
+  PERFORM set_config('exos.static_code_ok', 'on', true);
+  ASSERT pg_temp.mode(pg_temp.issue(pg_temp.ev('02'), NULL, 'static')) = 'static', 'ST2: explicit static kept on the path';
+  PERFORM set_config('exos.static_code_ok', '', true);
+  ASSERT pg_temp.st(format('SELECT pg_temp.issue(%L, NULL, %L)', pg_temp.ev('02'), 'static')) = '42501',
+    'ST2: explicit static refused on a paid event';
+  PERFORM set_config('exos.static_code_ok', 'yes', true);
+  ASSERT pg_temp.st(format('SELECT pg_temp.issue(%L, NULL, %L)', pg_temp.ev('02'), 'static')) = '42501',
+    'ST2: only ''on'' opens the path';
+  PERFORM set_config('exos.static_code_ok', '', true);
+  ASSERT pg_temp.mode(pg_temp.issue(pg_temp.mkevent('11', 5), NULL, 'static')) = 'static', 'ST2: explicit on a free event';
+  -- The rule runs VOLATILE under a per-event lock (two orders at the boundary: race_static_codes.sh).
+  ASSERT (SELECT provolatile FROM pg_proc WHERE oid = 'public._exos_ticket_code_mode(uuid)'::regprocedure) = 'v',
+    'ST2: the rule sees each statement''s commits';
   -- And the mode never changes after issuance.
   ASSERT pg_temp.st(format('UPDATE public.exos_tickets SET code_mode = %L WHERE id = %L', 'rotating', v_first)) = '55000',
     'ST2: mode locked';
   ASSERT pg_temp.st(format('UPDATE public.exos_tickets SET code_mode = %L WHERE id = %L', 'bogus', v_first)) IN ('55000', '23514'),
     'ST2: bad mode';
   INSERT INTO b5 VALUES ('static', v_first), ('rotating', v_t);
-  RAISE NOTICE 'OK ST2 mode at issuance: cutoff % static, % rotating, sold past rotating, mint static, growth keeps earlier static, explicit kept, locked', v_cut, v_cut + 1;
+  RAISE NOTICE 'OK ST2 mode at issuance: cutoff % static, % rotating, sold past rotating, mint static, growth keeps earlier static, explicit static only on its path, locked', v_cut, v_cut + 1;
 END $$;
 
 -- ── ST3 ─────────────────────────────────────────────────────────────────────
@@ -364,9 +385,12 @@ DECLARE
   a uuid := pg_temp.issue(v_e, pg_temp.u('c3')); b uuid := pg_temp.issue(v_e, pg_temp.u('c3'));
   old uuid := pg_temp.issue(v_e, pg_temp.u('c3'));
   rot uuid := pg_temp.issue(pg_temp.ev('02'), pg_temp.u('c3'));
-  m1 uuid; m2 uuid; r jsonb; v_tr uuid;
+  m1 uuid; m2 uuid; r jsonb; v_tr uuid; g uuid; i int;
 BEGIN
-  UPDATE public.exos_tickets SET created_at = now() - interval '1 hour' WHERE id = old;
+  -- Issued in an earlier transaction (triggers off, so updated_at stays as set).
+  SET LOCAL session_replication_role = replica;
+  UPDATE public.exos_tickets SET created_at = now() - interval '1 hour', updated_at = now() - interval '1 hour' WHERE id = old;
+  SET LOCAL session_replication_role = origin;
   INSERT INTO public.exos_mail (template, to_email, subject, html, status)
   VALUES ('ticket-issued', 'b5c-buyer@x.com', 'Your tickets', '<p>ready</p>', 'pending') RETURNING id INTO m1;
   ASSERT (SELECT array_agg(ticket_id ORDER BY ticket_id) FROM public.exos_mail_ticket_pdfs WHERE mail_id = m1)
@@ -391,11 +415,72 @@ BEGIN
   PERFORM public.exos_test_claim(v_tr);
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail_ticket_pdf_rows(ARRAY[m1]) x WHERE x.ticket ->> 'ticket_id' = b::text), 'ST9: transferred';
   ASSERT (SELECT count(*) FROM public.exos_mail_ticket_pdf_rows(ARRAY[m1])) = 1, 'ST9: one left';
+  -- A partner / RSVP ticket: held by the org owner for a guest. The guest's
+  -- mail carries it, with no name rather than the owner's; the owner's own
+  -- mail never does.
+  INSERT INTO public.exos_profiles (id, display_name) VALUES (pg_temp.u('a1'), 'Org Owner Name')
+  ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name;
+  g := pg_temp.issue(v_e, pg_temp.u('a1'));
+  UPDATE public.exos_tickets SET buyer_email = 'b5c-guest@x.com', attendee_name = NULL WHERE id = g;
+  INSERT INTO public.exos_mail (template, to_email, subject, html, status)
+  VALUES ('ticket-issued', 'b5c-owner@x.com', 'Your own', '<p>x</p>', 'pending') RETURNING id INTO m2;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail_ticket_pdfs WHERE mail_id = m2 AND ticket_id = g), 'ST9: not in the owner''s mail';
+  INSERT INTO public.exos_mail (template, to_email, subject, html, status)
+  VALUES ('ticket-issued', 'b5c-guest@x.com', 'Your ticket', '<p>x</p>', 'pending') RETURNING id INTO m2;
+  SELECT ticket INTO r FROM public.exos_mail_ticket_pdf_rows(ARRAY[m2]) WHERE ticket ->> 'ticket_id' = g::text;
+  ASSERT r IS NOT NULL AND r ->> 'attendee_name' IS NULL AND position('Org Owner' IN r::text) = 0, 'ST9: no owner name ' || r::text;
+  -- An order of 25: all linked to its own mail (the PDF has 20, the mail says
+  -- where the rest are); a later mail to the same address carries none.
+  FOR i IN 1 .. 25 LOOP PERFORM pg_temp.issue(v_e, pg_temp.u('c2')); END LOOP;
+  INSERT INTO public.exos_mail (template, to_email, subject, html, status)
+  VALUES ('ticket-issued', 'b5c-friend@x.com', 'Your 25', '<p>x</p>', 'pending') RETURNING id INTO m2;
+  ASSERT (SELECT count(*) FROM public.exos_mail_ticket_pdf_rows(ARRAY[m2])) >= 25, 'ST9: the whole order';
+  INSERT INTO public.exos_mail (template, to_email, subject, html, status)
+  VALUES ('ticket-issued', 'b5c-friend@x.com', 'Later', '<p>x</p>', 'pending') RETURNING id INTO m1;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mail_ticket_pdfs WHERE mail_id = m1), 'ST9: none ride on a later mail';
   -- The two mails that promised a rotating code know about static ones.
   ASSERT position('/* exos: static codes */' IN pg_get_functiondef('public.exos_phone_rsvp_verify(uuid,text,text)'::regprocedure)) > 0
      AND position('/* exos: static codes */' IN pg_get_functiondef('public._exos_partner_reservation_complete(uuid,uuid,text,jsonb,text)'::regprocedure)) > 0,
     'ST9: copy patched';
-  RAISE NOTICE 'OK ST9 the PDF: linked once at queue time, fresh static tickets only, drain rows, transfer drops it, copy patched';
+  RAISE NOTICE 'OK ST9 the PDF: linked once to its own transaction''s tickets, buyer email only (never the owner''s), no owner name, the whole order, drain rows, transfer drops it, copy patched';
+END $$;
+
+-- ── ST10 ────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+  v_e uuid := pg_temp.mkevent('12', 20);
+  a uuid := pg_temp.issue(v_e); b uuid := pg_temp.issue(v_e);
+  rot uuid := pg_temp.issue(pg_temp.ev('02'));
+  v_old text; v_old_b text; i int; v_st text;
+BEGIN
+  v_old := pg_temp.scode(a);
+  PERFORM pg_temp.act(pg_temp.u('c2'));
+  ASSERT pg_temp.st(format('SELECT public.exos_ticket_static_reissue(%L)', a)) = 'P0002', 'ST10: not the holder';
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  ASSERT pg_temp.st(format('SELECT public.exos_ticket_static_reissue(%L)', rot)) = '22023', 'ST10: a rotating ticket';
+  ASSERT (public.exos_ticket_static_reissue(a) ->> 'ok')::boolean, 'ST10: reissued';
+  ASSERT pg_temp.scode(a) <> v_old, 'ST10: a new code';
+  ASSERT pg_temp.scan(a, v_old) ->> 'reason' = 'barcode-rejected', 'ST10: the old code is refused';
+  -- The wallet's "my pass was screenshotted" does the same for a static ticket.
+  v_old_b := pg_temp.scode(b);
+  INSERT INTO public.exos_wallet_passes (serial_number, ticket_id, owner_id)
+  SELECT 'exw' || md5(t.id::text || 'st10'), t.id, t.owner_id FROM public.exos_tickets t WHERE t.id = b;
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  ASSERT (public.exos_wallet_reissue(b) ->> 'ok')::boolean, 'ST10: wallet reissue';
+  ASSERT pg_temp.scan(b, v_old_b) ->> 'reason' = 'barcode-rejected', 'ST10: the old code after a wallet reissue';
+  ASSERT public._exos_wallet_payload('exw' || md5(b::text || 'st10')) ->> 'static_code' = pg_temp.scode(b), 'ST10: the pass has the new one';
+  ASSERT pg_temp.scan(b, pg_temp.scode(b)) ->> 'reason' = 'checked-in', 'ST10: the new code works';
+  ASSERT pg_temp.scan(a, pg_temp.scode(a)) ->> 'reason' = 'checked-in', 'ST10: the reissued one works';
+  -- Used now: no new code for it. And at most 3 a minute per holder.
+  PERFORM pg_temp.act(pg_temp.u('c1'));
+  ASSERT pg_temp.st(format('SELECT public.exos_ticket_static_reissue(%L)', a)) = '55000', 'ST10: used';
+  FOR i IN 1 .. 3 LOOP
+    v_st := pg_temp.st(format('SELECT public.exos_ticket_static_reissue(%L)', pg_temp.issue(v_e)));
+  END LOOP;
+  ASSERT v_st = '54000', 'ST10: rate limit ' || v_st;
+  ASSERT NOT has_function_privilege('anon', 'public.exos_ticket_static_reissue(uuid)', 'EXECUTE')
+     AND has_function_privilege('authenticated', 'public.exos_ticket_static_reissue(uuid)', 'EXECUTE'), 'ST10: grants';
+  RAISE NOTICE 'OK ST10 a leaked code: holder reissue and wallet reissue give a new code; holder only, static only, rate-limited';
 END $$;
 
 ROLLBACK;

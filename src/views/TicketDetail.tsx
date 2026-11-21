@@ -2,7 +2,7 @@ import TicketLocation from '../components/TicketLocation';
 import TicketAccessNeeds from '../components/TicketAccessNeeds';
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { getTicket, listMyTicketsForEvent, setTicketAttendee, syncServerClock } from '../lib/tickets';
+import { getTicket, listMyTicketsForEvent, reissueStaticCode, setTicketAttendee, syncServerClock } from '../lib/tickets';
 import { loadPasses, savePasses } from '../lib/passCache';
 import RefundAskCard from '../components/RefundAskCard';
 import AddonPassesCard from '../components/AddonPassesCard';
@@ -36,7 +36,7 @@ import { useT } from '../context/LanguageContext';
 import TicketSeats from '../components/seating/TicketSeats';
 import TicketPrintedNotice from '../components/TicketPrintedNotice';
 import StaticTicketPdfButton from '../components/StaticTicketPdfButton';
-import { isStaticTicket, STATIC_CODE_NOTE, staticTicketCode } from '../lib/staticTickets';
+import { isStaticTicket, STATIC_CODE_NOTE, STATIC_REISSUE_CONFIRM, staticCodeUsable, staticTicketCode } from '../lib/staticTickets';
 
 export default function TicketDetail() {
   const motionGate = useMotionGate();
@@ -59,6 +59,9 @@ export default function TicketDetail() {
   const [showShare, setShowShare] = useState(false);
   // Attendee-name editor (mig 20260911060000): who this pass is FOR.
   const [nameDraft, setNameDraft] = useState<string | null>(null);
+  // Bumped after a new static code (re-reads the ticket and its new secret).
+  const [reloadKey, setReloadKey] = useState(0);
+  const [reissuing, setReissuing] = useState(false);
   const [savingName, setSavingName] = useState(false);
   // The editor is per-pass: paging the carousel while it is open must not
   // stamp the draft onto the next ticket (audit finding, PR #975).
@@ -158,7 +161,7 @@ export default function TicketDetail() {
       }
     }
     fetchData();
-  }, [id, user]);
+  }, [id, user, reloadKey]);
 
   // Depend on the current ticket's PRIMITIVE fields, not the whole array, so a
   // refetch that replaces `tickets` with equal-id objects doesn't re-run this
@@ -461,8 +464,32 @@ export default function TicketDetail() {
                    event={event}
                    viewerId={user?.uid}
                    holder={user?.displayName || null}
-                   className="mb-6 flex flex-col items-center"
+                   className="mb-3 flex flex-col items-center"
                  />
+                 {staticCodeUsable(currentTicket, user?.uid) && (
+                   <div className="mb-6 flex justify-center">
+                     <button
+                       type="button"
+                       disabled={reissuing}
+                       onClick={async () => {
+                         if (!window.confirm(STATIC_REISSUE_CONFIRM)) return;
+                         setReissuing(true);
+                         try {
+                           await reissueStaticCode(currentTicket.id);
+                           toast({ kind: 'success', message: 'New code ready. The old one and its PDF no longer work.' });
+                           setReloadKey((k) => k + 1);
+                         } catch (e) {
+                           toast({ kind: 'error', message: (e as Error)?.message || 'No new code. Try again.' });
+                         } finally {
+                           setReissuing(false);
+                         }
+                       }}
+                       className="type text-[11px] uppercase tracking-widest text-white/60 hover:text-brand-primary underline disabled:opacity-40"
+                     >
+                       Code shared or lost? Get a new one
+                     </button>
+                   </div>
+                 )}
 
                  {tickets.length > 1 && (
                    <div className="flex justify-between items-center my-8 pb-8 border-b border-white/5">
