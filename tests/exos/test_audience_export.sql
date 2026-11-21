@@ -82,6 +82,13 @@ INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,b
   ('ae_pend','ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001',NULL,'pending@x.com',true,1,2000,'pending','granted',now() - interval '5 days'),
   ('ae_oth','ae000000-0000-0000-0000-0000000000e9','ae000000-0000-0000-0000-000000000002',NULL,'otherorg@x.com',true,1,2000,'fulfilled','granted',now() - interval '5 days');
 
+-- The consenting guests proved their address with the email code (only that
+-- makes a guest's "yes" count, mig 20261121190500 B2'; the opted-out guest
+-- too, so the opt-out is what keeps it out).
+INSERT INTO public.exos_order_proofs(org_id,event_id,session_id,email,original_email,status,proven_via,proven_at,expires_at)
+SELECT s.org_id, s.event_id, s.session_id, lower(btrim(s.buyer_email)), lower(btrim(s.buyer_email)), 'proven', 'email_code', now(), now() + interval '1 day'
+  FROM public.exos_checkout_sessions s WHERE s.session_id IN ('ae_g2', 'ae_g9');
+
 CREATE TEMP TABLE ae_h(k text PRIMARY KEY, h text);
 INSERT INTO ae_h VALUES
   ('b1',  encode(sha256(convert_to('ae-b1@x.com','UTF8')),'hex')),
@@ -241,4 +248,56 @@ EXCEPTION WHEN raise_exception THEN
   RAISE NOTICE 'OK  A6 3 a minute and 20 a day per org';
 END $$;
 RESET ROLE;
+
+-- A7 -------------------------------------------------------------------------
+-- B2' (mig 20261121190500): a stranger's phone proof (R1) and an organizer's
+-- correction (R2) never make a "yes"; an email-code proof does.
+DELETE FROM public.exos_rate_windows WHERE bucket LIKE 'audience:%';
+DELETE FROM public.exos_audience_exports WHERE org_id = 'ae000000-0000-0000-0000-000000000001';
+CREATE FUNCTION pg_temp.ae_guest(p_id text, p_email text) RETURNS void LANGUAGE sql AS $$
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,buyer_email,guest,quantity,amount_cents,status,consent_marketing,created_at,proof_token_hash)
+  VALUES (p_id,'ae000000-0000-0000-0000-0000000000e1','ae000000-0000-0000-0000-000000000001',NULL,p_email,true,1,2000,'pending','granted',now() - interval '1 hour',
+          encode(extensions.digest('tok-' || p_id || '-0123456789abcdef', 'sha256'), 'hex'));
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = p_id;
+  SELECT public._exos_proof_open(p_id);
+$$;
+SELECT pg_temp.ae_guest('ae_r1', 'ae-victim@x.com');
+SELECT pg_temp.ae_guest('ae_r2', 'ae-typo@x.com');
+SELECT pg_temp.ae_guest('ae_r3', 'ae-coded@x.com');
+SELECT set_config('app.uid', '', true);
+SET LOCAL ROLE anon;
+DO $$
+BEGIN
+  ASSERT (public.exos_order_proof_send('ae_r1', 'tok-ae_r1-0123456789abcdef', 'sms', '(212) 555-0188') ->> 'ok')::boolean, 'A7 R1: SMS code sent';
+END $$;
+RESET ROLE;
+CREATE TEMP TABLE ae_codes AS
+  SELECT 'sms'::text AS k, (SELECT substring(body from '^([0-9]{6})') FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550188' ORDER BY created_at DESC LIMIT 1) AS c
+  UNION ALL
+  SELECT 'mail', (SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') FROM public.exos_mail
+                   WHERE to_email = 'ae-coded@x.com' AND template = 'rsvp-code' ORDER BY created_at DESC, id DESC LIMIT 1);
+GRANT SELECT ON ae_codes TO anon;
+SET LOCAL ROLE anon;
+DO $$
+BEGIN
+  ASSERT (public.exos_order_proof_verify('ae_r1', 'tok-ae_r1-0123456789abcdef', (SELECT c FROM pg_temp.ae_codes WHERE k = 'sms')) ->> 'ok')::boolean, 'A7 R1: proven by phone';
+  ASSERT (public.exos_order_proof_verify('ae_r3', 'tok-ae_r3-0123456789abcdef', (SELECT c FROM pg_temp.ae_codes WHERE k = 'mail')) ->> 'ok')::boolean, 'A7: proven by email code';
+END $$;
+RESET ROLE;
+SET LOCAL ROLE authenticated;
+SELECT set_config('app.uid', 'ae000000-0000-0000-0000-0000000000a0', true);
+SELECT public.exos_order_proof_resend('ae_r2', 'ae-right@x.com');
+CREATE TEMP TABLE ae_raw7 ON COMMIT DROP AS SELECT public.exos_org_audience_export('ae000000-0000-0000-0000-000000000001') AS j;
+RESET ROLE;
+DO $$
+DECLARE hs text[];
+BEGIN
+  SELECT array_agg(r ->> 'email_sha256') INTO hs FROM ae_raw7, jsonb_array_elements(ae_raw7.j -> 'rows') r;
+  ASSERT NOT (encode(sha256(convert_to('ae-victim@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R1: a stranger''s phone proof exported the victim';
+  ASSERT NOT (encode(sha256(convert_to('ae-typo@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R2: the never-proven original address exported';
+  ASSERT NOT (encode(sha256(convert_to('ae-right@x.com','UTF8')),'hex') = ANY (hs)), 'A7 R2: the organizer''s correction exported';
+  ASSERT encode(sha256(convert_to('ae-coded@x.com','UTF8')),'hex') = ANY (hs), 'A7: an email-code proof is exported';
+  ASSERT (SELECT h FROM ae_h WHERE k = 'b1') = ANY (hs) AND (SELECT h FROM ae_h WHERE k = 'g2') = ANY (hs), 'A7: the earlier consenting buyers stay';
+  RAISE NOTICE 'OK  A7 a "yes" needs the person''s own email proof (not a phone proof or an organizer''s correction)';
+END $$;
 ROLLBACK;

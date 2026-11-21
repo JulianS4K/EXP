@@ -4,7 +4,8 @@
 //
 // Input: exos_ads_audience_source's rows (service role), already limited in
 // SQL to people who granted ADVERTISING consent on a paid / issued order
-// whose email was proven (the latest counted choice wins; mail and list
+// whose email they proved themselves, by email code or their own confirmed
+// account (never an SMS proof; the latest counted choice wins; mail and list
 // opt-outs, discarded, deleted and banned left out), and already HASHED in
 // SQL (review of #138, S4: no raw email or phone leaves Postgres). Each row
 // carries the forms hashedIds.ts names (em, em_google, em_reddit, ph,
