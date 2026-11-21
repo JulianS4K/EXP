@@ -433,6 +433,7 @@ BEGIN
                           WHEN public.exos_tier_is_table(t.id) THEN 'table ticket type'
                           WHEN coalesce(t.price, 0) <= 0 THEN 'a $0 ticket type is never offered on a resale marketplace' END,
              'planned_listing', dl.planned_listing,
+             'listed_snapshot', dl.listed_snapshot,
              'listed', dl.listed_snapshot IS NOT NULL OR dl.external_listing_id IS NOT NULL)
            ORDER BY t.sort_order, t.id), '[]'::jsonb),
            coalesce(max(CASE WHEN coalesce(t.capacity, 0) > 0 THEN round(ceil(coalesce(dl.sold_qty, 0) * 10000.0 / t.capacity) / 100.0, 2) END), 0)

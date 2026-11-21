@@ -39,7 +39,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 ```
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
-public feeds): `stripe-webhook`, `exos-ads`, `exos-social`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
+public feeds): `stripe-webhook`, `exos-ads`, `exos-social`, `exos-byo`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
 `exos-commerce`, `exos-conversions-drain`, `exos-discord`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
 `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
 `exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,

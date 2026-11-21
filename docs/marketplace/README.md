@@ -220,6 +220,49 @@ and where its code lives today.
 - The first path on the core is a read: pretix's credential test in
   `exos-integrations` (`adapters/pretix.ts`).
 
+## Your own marketplace accounts (BYO, mig `20261121214500`)
+
+An organizer can sell a share of each ticket type on **StubHub, SeatGeek, Vivid Seats or Ticket Evolution with
+their own seller account**, instead of (not as well as) the Exos network. Operator decisions, 2026-11-21:
+
+- **Static PDF tickets and no Exos fee, at any event size** ("150 or sellers own accounts", "Both"). A sale on
+  the organizer's own account is priced at 0 bps (kept, docs/fees.md "Own marketplace accounts"); its money goes
+  from the marketplace to the organizer, so it is **off Exos's books** (no marketplace receivable, nothing paid
+  out). Its tickets are static codes. Exos checkout on the same event still follows the capacity rule.
+- **% allocations.** Per marketplace, a share of each ticket type's capacity: `floor(capacity x % / 100)`, at
+  least 1 above 0. A $0 ticket type is never offered (limits.ts, block); a table ticket type or one without a
+  capacity is skipped. The share can change at any time, never below what that marketplace already sold (the
+  smallest % allowed is shown and in the error); every change is audited (`event.byo_allocation`); no cooldown.
+- **One account per marketplace per event.** Not on a marketplace ticked under Distribution (the Exos network
+  sells it there), and not while the network still holds seats, sold or is live on it. The Exos network's own
+  gates (the S4K route, ticked under Distribution, the resale capacity rule) don't apply to the organizer's own
+  account, so a free-tier event can sell there; the $0 rule does. The auto split never shares an own-account
+  marketplace.
+
+How it is built (one model, one planner, one transport):
+
+- **The same allocation row.** `exos_byo_set_allocation(event, channel, pct)` (owner / manager) records the % in
+  `exos_byo_allocations` and sets each ticket type through `exos_set_channel_allocation` (its locks and free-seat
+  check), so the seats are set aside from Exos checkout and a marketplace sale takes them out of the allocation
+  exactly as for the network. Each row's `account` is `'own'` (the trigger keeps it in step; a row that has sold,
+  holds seats or is live can't change account). `exos_byo_allocations_view(event)` is what the panel reads.
+- **The same plan.** exos-distribute plans the allocation's listings as for every marketplace (`planned_listing`).
+  `exos-byo` (`/plan`) replays that plan on the channel core with the org's credential from the store (providers
+  `stubhub`, `seatgeek`, `vivid`, `tevo`, Org settings -> Integrations): `adapters/byoMarketplace.ts`, adapter ids
+  `byo_<channel>` (so `EXOS_BYO_<CHANNEL>_WRITES`, apart from the network's flags). Creates use each listing's
+  planned request; StubHub / SeatGeek updates PATCH the changed fields by our external id; deletes and delists
+  are sync.ts `planDelist`. A Vivid Seats or Ticket Evolution live-listing change is warned, not built yet.
+- **Dry run, pinned.** `BYO_WRITES_PINNED_OFF` hands GatedHttp an org switch of false, and exos-byo gives it a
+  fetch that refuses every call: nothing reaches a marketplace, not even a read. The requests (secrets redacted)
+  are in `exos_channel_audit` ("What we'd send") and in the panel's preview. Going live needs the pin removed in a
+  reviewed change AND a CLAUDE.md write exception per marketplace in Julian's words.
+- **Not yet:** reading the organizer's own sales from their seller account (a sale reaching
+  `exos_record_marketplace_order` with the own-account listing is handled as above; polling the org's credential
+  is the next step); Gametime (an FTP inventory file of the whole account), TickPick (no listing plan) and
+  GoTickets (no org credential); Vivid Seats / Ticket Evolution listing updates.
+- Edit event -> **Your own marketplace accounts** (`ByoMarketplacePanel`). Tests: `tests/exos/test_byo_marketplaces.sql`
+  (BY1-BY12), `tests/exos/race_byo_allocations.sh`, `_shared/byo/byo_test.ts`, `ByoMarketplacePanel.test.tsx`.
+
 ## How StubHub ties into Exos
 
 ### One sync for every marketplace (mig `20260927030000`)

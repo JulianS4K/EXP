@@ -1432,6 +1432,26 @@ Nothing new is callable by anon (H3 unchanged), and nothing is sent to a platfor
 - **Limits** (`limits.ts`): a cap now trims only a request in its own metric, so one platform's budgets
   (Meetup's attendees and GraphQL points) don't trim each other.
 
+### Own marketplace accounts, dry run only (mig 20261121214500)
+
+Nothing new is callable by anon, and nothing is sent to a marketplace (operator 2026-11-21: "For the APIs build and
+keep read only till build is complete"). Tests: `tests/exos/test_byo_marketplaces.sql` (BY1-BY12),
+`race_byo_allocations.sh`, `_shared/byo/byo_test.ts`; docs/marketplace/README.md "Your own marketplace accounts".
+
+- **RPCs, role-checked inside.** `exos_byo_set_allocation` and `exos_byo_allocations_view`: authenticated only, owner /
+  manager of the event's org (42501 otherwise). `exos_byo_allocations` has RLS on and no client grants; the helpers
+  (`_exos_byo_channel`, `_exos_byo_listing`, `_exos_byo_ticket`) and the account trigger are internal. The view shows
+  whether the org's credential exists, never a secret or a credential id.
+- **Money stays right.** An own-account sale is priced at 0 bps and posts nothing to the journal, so payouts never pay
+  out money Exos didn't receive; a sale matched later to an own-account listing is re-priced at 0, and matched back to
+  a network listing at the network's rate. The account follows `exos_byo_allocations`, and a row that has sold, holds
+  seats or is live can't change account (55000), so a past sale's account can't be flipped to change its fee.
+- **Every write behind GatedHttp.** Each `byo_<channel>` adapter lists exactly its listing writes (StubHub POST /
+  PATCH / DELETE by our `ex...` external id only; SeatGeek PUT / PATCH by our id and the bulk delete; Vivid Seats
+  create / delete; Ticket Evolution inventory create / delete by numeric id); order, sale and broker-listing paths are
+  refused. `exos-byo` pins the org's switch off (`BYO_WRITES_PINNED_OFF`) and hands GatedHttp a fetch that refuses
+  every call. The org's credential goes in headers only and is redacted from every step.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

@@ -117,6 +117,13 @@ What each kind of sale charges after the rate moves (and when an event leaves th
   `_shared/recurringDonation.ts` (bundled by exos-commerce, exos-api and stripe-webhook). Leave it unset or 200: set to
   300, those three would charge 3% while SQL, the MCP tools and the SPA say 2%.
 
+## Own marketplace accounts (mig 20261121214500)
+
+A sale on the organizer's OWN marketplace seller account (docs/marketplace/README.md "Your own marketplace accounts")
+pays **no Exos fee, at any event size** (operator 2026-11-21): `exos_tg_marketplace_fee` prices it at 0 bps and keeps
+that, and `exos_journal_post_marketplace` posts nothing for it (the money goes from the marketplace to the organizer).
+Exos checkout sales on the same event still pay what `exos_event_fee_bps` says.
+
 ## Not covered yet
 
 - **Partner API, box office (POS).** `exos-api` returns a tier's base `price` (not an all-in price), and the door

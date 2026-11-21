@@ -29,6 +29,7 @@ import ChannelsPanel from '../components/ChannelsPanel';
 import DiscordEventPanel from '../components/DiscordEventPanel';
 import BoostEventPanel from '../components/BoostEventPanel';
 import PostListPanel from '../components/PostListPanel';
+import ByoMarketplacePanel from '../components/ByoMarketplacePanel';
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
@@ -1911,6 +1912,8 @@ export default function EditEvent() {
         {eventId && <BoostEventPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Post / list this event: Instagram, TikTok, Meetup, LinkedIn, Google Business Profile, planned only (dry run, mig 20261121203000). */}
         {eventId && <PostListPanel eventId={eventId} orgId={eventData.orgId} />}
+        {/* Your own marketplace accounts: % per marketplace, static PDF codes, no Exos fee; listings planned only (dry run, mig 20261121214500). */}
+        {eventId && <ByoMarketplacePanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
         {eventId && <LastCallPanel eventId={eventId} />}
         {/* Posh: a capped tier fed by Posh's webhooks (mig 20261029150000). */}
