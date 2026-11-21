@@ -16,7 +16,7 @@
 --      party size); going back over needs a new opt-in
 --   T7 settings: the cutoff and the opt-in rule are operator rows; bad values
 --      fall back; the old resale_min_capacity key is gone
---   T8 the fee: 0 on the free tier (free_tier_fee_bps), 3% over it after the
+--   T8 the fee: 0 on the free tier (free_tier_fee_bps), 2% over it after the
 --      free months; marketplace sale and POS settlement use the event's rate
 --   T8b a bypass voucher selling past 149 ends the free tier (fee terms say
 --       paid, sold + the order's quantity counted); resale then needs the opt-in
@@ -270,7 +270,7 @@ BEGIN
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 0 AND public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 0, 'T8: free months';
   UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day' WHERE org_id = 'c9000000-0000-0000-0000-000000000001';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 0, 'T8: free tier 0';
-  ASSERT public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 300, 'T8: 150 pays 3%';
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 200, 'T8: 150 pays 2%';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e4'), now()) = 0, 'T8: 100 + a closed type is free tier';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_fee_bps', '50');
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 50, 'T8: the free tier''s rate is a setting';
@@ -289,11 +289,11 @@ BEGIN
   INSERT INTO public.exos_marketplace_orders (channel, external_order_id, event_id, org_id, quantity, proceeds, sold_at, sale_status)
   VALUES ('stubhub', 'c9-2', pg_temp.u('e2'), 'c9000000-0000-0000-0000-000000000001', 2, 100, now(), 'confirmed') RETURNING id INTO o;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
-  ASSERT m.exos_fee = 3, 'T8: marketplace 3% over the cutoff';
+  ASSERT m.exos_fee = 2, 'T8: marketplace 2% over the cutoff';
   -- Box office.
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e1')) ->> 'fee_bps')::int = 0, 'T8: POS free tier';
-  ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e2')) ->> 'fee_bps')::int = 300, 'T8: POS 3%';
+  ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e2')) ->> 'fee_bps')::int = 200, 'T8: POS 2%';
 END $$;
 
 -- T8b. Selling past the cap ends the free tier: capped at 149, 147 sold, a
@@ -321,7 +321,7 @@ BEGIN
   ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: no longer the free tier';
   j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 1);
   ASSERT NOT (j ->> 'free_tier')::boolean AND (j ->> 'max_capacity')::int = 149 AND (j ->> 'sold')::int = 152, 'T8b: terms ' || j::text;
-  ASSERT public.exos_event_fee_bps(pg_temp.u('e6'), now()) = 300, 'T8b: 3% from here on';
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e6'), now()) = 200, 'T8b: 2% from here on';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: resale still needs the opt-in';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   PERFORM pg_temp.optin('e6');

@@ -5,7 +5,8 @@
 --      price x qty - proceeds
 --   F2 a later re-plan at a new price doesn't rewrite a past sale
 --   F3 exos_marketplace_fee_rates: the realized rate per store; service role only
---   F4 the Exos fee: 3% of the payout, and the organizer's net (40.00 -> 38.80)
+--   F4 the Exos fee: 2% of the payout (mig 20261121133000; 3% before), and the
+--      organizer's net (40.00 -> 39.20)
 --   F5 the first 6 months are free: a new org gets fee_free_until = signup +
 --      6 months; a sale inside it pays no Exos fee; members can read the
 --      date, nobody but the server can change it
@@ -70,17 +71,17 @@ BEGIN
   END IF;
   RAISE NOTICE 'F3 PASS: realized rate per store, service role only';
 
-  -- F4: 80.01 paid -> Exos 2.40 (2.4003), organizer 77.61; 42.75 -> 1.28 (1.2825), 41.47.
+  -- F4: 80.01 paid -> Exos 1.60 (1.6002), organizer 78.41; 42.75 -> 0.86 (0.855, half up), 41.89.
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-1';
-  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.61 THEN
+  IF m.exos_fee IS DISTINCT FROM 1.60 OR m.organizer_net IS DISTINCT FROM 78.41 THEN
     RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-2';
-  IF m.exos_fee IS DISTINCT FROM 1.28 OR m.organizer_net IS DISTINCT FROM 41.47 THEN
+  IF m.exos_fee IS DISTINCT FROM 0.86 OR m.organizer_net IS DISTINCT FROM 41.89 THEN
     RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
-  IF public.exos_platform_fee_bps() <> 300 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
-  RAISE NOTICE 'F4 PASS: Exos takes 3%% of every marketplace payout';
+  IF public.exos_platform_fee_bps() <> 200 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
+  RAISE NOTICE 'F4 PASS: Exos takes 2%% of every marketplace payout';
 
   -- F5: back inside the free months, a new sale pays no Exos fee.
   UPDATE public.exos_org_billing SET fee_free_until = now() + interval '1 day' WHERE org_id = '7e000000-0000-0000-0000-000000000001';
@@ -89,7 +90,7 @@ BEGIN
   IF m.exos_fee IS DISTINCT FROM 0 OR m.organizer_net IS DISTINCT FROM 42.75 THEN
     RAISE EXCEPTION 'F5 FAIL: free months charged: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
-  IF public.exos_org_fee_bps('7e000000-0000-0000-0000-000000000001', now() + interval '2 days') <> 300 THEN
+  IF public.exos_org_fee_bps('7e000000-0000-0000-0000-000000000001', now() + interval '2 days') <> 200 THEN
     RAISE EXCEPTION 'F5 FAIL: rate after the free months';
   END IF;
   -- A new org gets six months from signup.

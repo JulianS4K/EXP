@@ -1,12 +1,15 @@
 -- ============================================================================
--- Migration 20261121133000 — Exos: the free tier is UNDER 150 (149 or less);
--- 150 or more is paid
+-- Migration 20261121133000 — Exos pricing, operator 2026-11-21: the free tier
+-- is UNDER 150 (149 or less), 150 or more is paid; the Exos fee is 2%
 -- ============================================================================
 -- Touches:  P: exos_free_tier_max_capacity()   (default 150 -> 149)
 --              _exos_discovery_free_tier_max() (default 150 -> 149)
---           C: COMMENT ON TABLE exos_platform_settings (the default it names)
--- Pre-reqs: 20261029090000, 20261029130000
+--              exos_platform_fee_bps()         (SELECT 300 -> SELECT 200)
+--           C: COMMENT ON TABLE exos_platform_settings (the default it names),
+--              COMMENT ON COLUMN exos_checkout_sessions.exos_fee_cents (the rate)
+-- Pre-reqs: 20260929062000, 20261029090000, 20261029130000
 --
+-- A. The free tier.
 -- Operator 2026-11-21: "No 150 venue cap or more is paid". Until now the free
 -- tier was a max capacity of 150 or less (free_tier_max_capacity, default
 -- 150, read as an inclusive maximum). Now under 150 is free and 150 or more
@@ -30,12 +33,31 @@
 -- free), and it can now be opted in to resale. No consent is revoked (the
 -- rule only revokes when the capacity drops to the cutoff or below).
 --
+-- B. The Exos fee: 2% (200 bps), down from 3%.
+-- Operator 2026-11-21: "2% for now". exos_platform_fee_bps() is the one SQL
+-- rate (IMMUTABLE, no settings row reads it; prod had no fee setting row on
+-- 2026-11-21, checked read-only); every reader goes through it:
+-- exos_org_fee_bps (0 in the free months) -> exos_event_fee_bps (0 on the
+-- free tier) -> exos_tg_marketplace_fee (exos_marketplace_orders.exos_fee),
+-- exos_pos_settlement_summary and _exos_pos_card_begin (POS card sales),
+-- _exos_feed_lines (S4K), and exos_send_mail_followups (fee-free-ending
+-- mail). TS mirror: EXOS_FEE_BPS = 200 (_shared/platformFee.ts), used by
+-- exos-checkout, exos-commerce, POS and recurring gifts; EXOS_PLATFORM_FEE_BPS
+-- (env) must stay unset or 200. Rows already written keep the fee they were
+-- charged (checkout sessions record fee_bps; marketplace exos_fee is set at
+-- insert). Every marketplace sale is Managed (Exos's channel accounts) and
+-- takes the same 2%. A BYO sale (the organizer's own marketplace account,
+-- not built) would take 0: it would branch in exos_tg_marketplace_fee before
+-- exos_event_fee_bps.
+--
 -- Applier's prod anchor check (supabase/README.md rule 4), read-only:
 --   select pg_get_functiondef('public.exos_free_tier_max_capacity()'::regprocedure);
 --     must contain once:  _exos_setting_int('free_tier_max_capacity', 150, -1, 999999)
 --   select pg_get_functiondef('public._exos_discovery_free_tier_max()'::regprocedure);
 --     must contain once:  WHERE key = 'free_tier_max_capacity'), 150)
--- Both matched prod on 2026-11-21 (read-only). Each patch is a counted text
+--   select pg_get_functiondef('public.exos_platform_fee_bps()'::regprocedure);
+--     must contain once:  SELECT 300
+-- All three matched prod on 2026-11-21 (read-only). Each patch is a counted text
 -- replacement on pg_get_functiondef and is skipped when its end state is
 -- already present, so the migration is re-run safe. Prod apply needs
 -- operator OK.
@@ -73,6 +95,13 @@ SELECT pg_temp.exos_patch_n('public._exos_discovery_free_tier_max()',
   $o$WHERE key = 'free_tier_max_capacity'), 150)$o$,
   $n$WHERE key = 'free_tier_max_capacity'), 149)$n$, 1);
 
+-- B. The Exos fee: 2%. The body is " SELECT 300 " on one line; the marker is
+-- the new body, so a re-run skips it.
+SELECT pg_temp.exos_patch_n('public.exos_platform_fee_bps()',
+  $m$$function$ SELECT 200 $function$$m$,
+  $o$ SELECT 300 $o$,
+  $n$ SELECT 200 $n$, 1);
+
 -- The settings table's comment names the default.
 DO $$
 DECLARE v text := obj_description('public.exos_platform_settings'::regclass, 'pg_class');
@@ -83,6 +112,18 @@ BEGIN
   END IF;
 END $$;
 
--- ROLLBACK (manual): the same two patches the other way (149 -> 150), and the
--- comment back to 'free_tier_max_capacity (150)'. Or, without a migration, the
--- operator can set exos_platform_settings free_tier_max_capacity = 150.
+-- The checkout column's comment names the rate.
+DO $$
+DECLARE v text := col_description('public.exos_checkout_sessions'::regclass,
+  (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.exos_checkout_sessions'::regclass AND attname = 'exos_fee_cents')::int);
+BEGIN
+  IF v IS NOT NULL AND position('(3%;' in v) > 0 THEN
+    EXECUTE format('COMMENT ON COLUMN public.exos_checkout_sessions.exos_fee_cents IS %L',
+      replace(v, '(3%;', '(the session''s fee_bps: 3% before mig 20261121133000, 2% after;'));
+  END IF;
+END $$;
+
+-- ROLLBACK (manual): the same three patches the other way (149 -> 150,
+-- SELECT 200 -> SELECT 300), and the comment back to
+-- 'free_tier_max_capacity (150)'. The cutoff alone can also go back without a
+-- migration: exos_platform_settings free_tier_max_capacity = 150.

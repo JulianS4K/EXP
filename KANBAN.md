@@ -63,7 +63,7 @@
 3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
 4. Supabase Auth redirect allowlist: add `/bridge/**`.
 5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee? (the fee itself is settled:
-   3% net, card processing passed through, first 6 months free, free tier under 150, 150 or more paid), commission base; the
+   2% net (was 3%; operator 2026-11-21 "2% for now"), card processing passed through, first 6 months free, free tier under 150, 150 or more paid), commission base; the
    channels "something else" write scope; whether unsold S4K seats come back to Exos before doors.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
 7. Ship a new `/bridge` bundle to Terminal-2 (only matters while `EXOS_ORIGIN` is unset).

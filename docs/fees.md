@@ -2,7 +2,7 @@
 
 Organizers and venues can add their own fees: "$2 facility fee per ticket", "3% service charge", "$1.50 per order".
 Each fee is either **passed on** (the buyer pays it, inside the all-in price) or **absorbed** (the organizer pays it out
-of revenue). This is not the Exos platform fee (3%, paid by the organizer, `_shared/platformFee.ts`), which is unchanged.
+of revenue). This is not the Exos platform fee (2%, paid by the organizer, `_shared/platformFee.ts`), which is unchanged by these.
 
 - **Code:** `supabase/functions/_shared/fees.ts` (the maths; `src/lib/fees.ts` is an identical copy),
   `_shared/pricing.ts` / `src/lib/pricing.ts` (`allInCents` / `allInPrice` fold the fees in),

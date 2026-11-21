@@ -1,18 +1,26 @@
-// The Exos fee: 3% of every transaction, net to Exos after card processing,
-// paid by the organizer (operator, 2026-09-28).
+// The Exos fee: 2% of every transaction, net to Exos after card processing,
+// paid by the organizer (operator, 2026-09-28 at 3%; 2026-11-21: "2% for
+// now", mig 20261121133000).
 //
-//   Exos checkout      3% of the order total (all-in, tax included) plus
+//   Exos checkout      2% of the order total (all-in, tax included) plus
 //                      Stripe's card fee, as the Stripe application fee on
 //                      the organizer's payout. With destination charges the
 //                      platform pays Stripe, so the application fee carries
 //                      Stripe's fee through to the organizer and Exos keeps
-//                      3%. Stripe's fee is estimated at its standard US card
+//                      2%. Stripe's fee is estimated at its standard US card
 //                      rate (2.9% + 30c; EXOS_STRIPE_FEE_BPS /
 //                      EXOS_STRIPE_FEE_FIXED_CENTS override).
-//   marketplace sale   3% of what the marketplace pays (the payout, after
+//   marketplace sale   2% of what the marketplace pays (the payout, after
 //                      its own seller fee): exos_marketplace_orders.exos_fee
-//                      (mig 20260929062000). The marketplace charged the
-//                      card, so there's no Stripe fee and 3% is net already.
+//                      (mig 20260929062000, trigger exos_tg_marketplace_fee
+//                      -> exos_event_fee_bps -> exos_platform_fee_bps). The
+//                      marketplace charged the card, so there's no Stripe fee
+//                      and 2% is net already. Every marketplace sale today
+//                      is a Managed one (Exos's own channel accounts) and
+//                      takes this same rate. HOOK (not built): a BYO sale
+//                      (the organizer's own marketplace account) would take
+//                      0; it would branch in exos_tg_marketplace_fee, before
+//                      exos_event_fee_bps, and here. BYO doesn't exist yet.
 //
 // The first 6 months are free (operator, 2026-09-28): no Exos fee until the
 // org's exos_org_billing.fee_free_until (signup + 6 months). Card processing
@@ -23,9 +31,11 @@
 // below). No commission.
 //
 // Buyers never pay an Exos fee. Rounded to the cent, half up. The SQL side reads the same rate from
-// exos_platform_fee_bps(); change both together.
+// exos_platform_fee_bps(); change both together. EXOS_PLATFORM_FEE_BPS (env)
+// overrides it at checkout and commerce; keep it unset or equal to this.
 
-export const EXOS_FEE_BPS = 300;
+/** The one Exos rate (Exos checkout, POS card sales, commerce, marketplace payouts): 2% (operator 2026-11-21). */
+export const EXOS_FEE_BPS = 200;
 
 /** How long a new org pays no Exos fee (exos_org_billing.fee_free_until = signup + this). */
 export const FEE_FREE_MONTHS = 6;
@@ -112,7 +122,7 @@ export function exosFeeBpsForEvent(opts: {
   return bps;
 }
 
-/** The Exos fee on a transaction of `amountCents`: 3%, to the cent, half up (4000 -> 120, 2150 -> 65). */
+/** The Exos fee on a transaction of `amountCents`: 2%, to the cent, half up (4000 -> 80, 2150 -> 43). */
 export function exosFeeCents(amountCents: number, bps: number = EXOS_FEE_BPS): number {
   if (!Number.isFinite(amountCents) || amountCents <= 0 || !Number.isFinite(bps) || bps <= 0) return 0;
   return Math.floor((Math.round(amountCents) * bps + 5000) / 10000);
@@ -147,9 +157,9 @@ export function stripeFeeCents(amountCents: number, card: CardFee = STRIPE_CARD_
 }
 
 /**
- * The Stripe application fee on an Exos checkout: 3% for Exos plus Stripe's
+ * The Stripe application fee on an Exos checkout: 2% for Exos plus Stripe's
  * card fee, which the platform pays under destination charges. Never more
- * than the order. 4000 -> 120 + 146 = 266 (the organizer gets 37.34).
+ * than the order. 4000 -> 80 + 146 = 226 (the organizer gets 37.74).
  */
 export function checkoutApplicationFeeCents(
   amountCents: number,
@@ -172,7 +182,7 @@ export function isFeeFreeAt(feeFreeUntil: string | null | undefined, now: Date):
  *
  *   applicationFeeCents  exactly checkoutApplicationFeeCents (what Stripe is told)
  *   cardFeeEstCents      the Stripe card-fee part (estimate at `card` rates)
- *   exosFeeCents         the rest: Exos's 3% (0 in the fee-free window)
+ *   exosFeeCents         the rest: Exos's 2% (0 in the fee-free window)
  *
  * The parts always add up to the application fee. On a tiny order where the
  * cap (never more than the order) bites, the card fee is covered first and

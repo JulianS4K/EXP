@@ -18,12 +18,12 @@
 //
 // Required secrets: STRIPE_SECRET_KEY, SUPABASE_URL, SUPABASE_ANON_KEY,
 // SUPABASE_SERVICE_ROLE_KEY, EXOS_REDIRECT_ORIGINS (origins success/cancel URLs
-// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 300 = 3%, _shared/platformFee.ts),
+// may point at; see _shared/redirects.ts). Optional: EXOS_PLATFORM_FEE_BPS (default 200 = 2%, _shared/platformFee.ts),
 // EXOS_GUEST_IP_SALT (salt for the hashed guest IP; defaults to a server secret).
 // Needs mig 20260924223000 (promoter_id / attribution columns) applied first.
 //
-// Fee: 3% of every transaction net after Stripe, from the organizer
-// (operator, 2026-09-28): the application fee is 3% + Stripe's card fee.
+// Fee: 2% of every transaction net after Stripe, from the organizer
+// (operator, 2026-09-28; 2% since 2026-11-21): the application fee is 2% + Stripe's card fee.
 // Free tier (max capacity under 150, operator 2026-10-29 / 2026-11-21): no Exos fee,
 // only the card fee (exos_event_fee_terms + exosFeeBpsForEvent).
 // TODO(operator) before go-live: confirm the charge model (destination vs
@@ -773,9 +773,9 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
     ...(donationCampaign ? { donation_cents: donationCents, donation_campaign_id: donationCampaign.id } : {}),
     ...(member ? { membership_id: member.membership_id, member_discount_percent: member.discount_percent } : {}),
   };
-  // The Exos fee: 3% net after Stripe, from the organizer's share. The
+  // The Exos fee: 2% net after Stripe, from the organizer's share. The
   // platform pays Stripe's card fee under destination charges, so the
-  // application fee is 3% plus that fee (_shared/platformFee.ts).
+  // application fee is 2% plus that fee (_shared/platformFee.ts).
   // No Exos fee during the org's first 6 months (exos_org_billing); card processing still applies.
   const { data: billing } = await sb.from("exos_org_billing").select("fee_free_until").eq("org_id", ev.org_id).maybeSingle();
   const feeFreeUntil = (billing as { fee_free_until?: string } | null)?.fee_free_until;

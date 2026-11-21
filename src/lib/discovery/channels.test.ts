@@ -21,7 +21,7 @@ const MIGRATION = readFileSync(
   new URL('../../../supabase/migrations/20261029130000_exos_discovery_publishing.sql', import.meta.url), 'utf8');
 // The free tier's default since 2026-11-21 (under 150 is free).
 const FREE_TIER_PATCH = readFileSync(
-  new URL('../../../supabase/migrations/20261121133000_exos_free_tier_149.sql', import.meta.url), 'utf8');
+  new URL('../../../supabase/migrations/20261121133000_exos_pricing_149_2pct.sql', import.meta.url), 'utf8');
 // Later migrations that seed more channels (posh_link: 20261104150000).
 const SEEDS = [MIGRATION, readFileSync(
   new URL('../../../supabase/migrations/20261104150000_exos_posh_link_channel.sql', import.meta.url), 'utf8')];

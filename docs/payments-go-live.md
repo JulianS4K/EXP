@@ -42,13 +42,15 @@ the details with counsel.)
       Settings → Payment method domains (test and live). `public/embed.js` already gives its iframe
       `allow="payment"`, which wallets inside a venue's page need. Check on a real iPhone (Safari)
       and an Android phone (Chrome) with a card saved in the wallet.
-- [x] Platform fee decided (operator, 2026-09-28): **Exos keeps 3% of every transaction, after
-      Stripe, paid by the organizer.** On an Exos checkout the application fee is 3% + Stripe's card
+- [x] Platform fee decided (operator, 2026-09-28 at 3%; 2026-11-21: "2% for now", mig
+      `20261121133000`): **Exos keeps 2% of every transaction, after Stripe, paid by the
+      organizer.** On an Exos checkout the application fee is 2% + Stripe's card
       fee, because with destination charges the platform pays Stripe (`checkoutApplicationFeeCents`,
-      `_shared/platformFee.ts`). A 40.00 order: 1.20 + 1.46 = 2.66, so the organizer gets 37.34. On a
-      marketplace sale Exos takes 3% of the payout (`exos_fee`, SQL `exos_platform_fee_bps()`), with no
-      card fee because the marketplace charged the card. `EXOS_PLATFORM_FEE_BPS` overrides the 3% at
-      checkout; keep it equal to `EXOS_FEE_BPS` and the SQL function.
+      `_shared/platformFee.ts`). A 40.00 order: 0.80 + 1.46 = 2.26, so the organizer gets 37.74. On a
+      marketplace sale Exos takes 2% of the payout (`exos_fee`, SQL `exos_platform_fee_bps()`), with no
+      card fee because the marketplace charged the card. POS card sales and commerce take the same
+      rate. `EXOS_PLATFORM_FEE_BPS` overrides the 2% at checkout; keep it unset or equal to
+      `EXOS_FEE_BPS` (200) and the SQL function.
 - [x] **First 6 months free** (operator, 2026-09-28): no Exos fee until
       `exos_org_billing.fee_free_until`, which is signup + 6 months (orgs that exist when mig
       `20260929062000` is applied get 6 months from then). Checkout still passes Stripe's card fee
@@ -57,7 +59,7 @@ the details with counsel.)
 - [ ] **Confirm Stripe's rate.** Checkout estimates Stripe's fee at standard US card pricing
       (2.9% + 30¢; set `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` if the account has a
       negotiated rate). International and some premium cards cost Stripe more, and on those Exos keeps
-      slightly less than 3%. Since mig `20260929131000` each order records the split at checkout
+      slightly less than 2%. Since mig `20260929131000` each order records the split at checkout
       (`exos_checkout_sessions.application_fee_cents` = `exos_fee_cents` + `card_fee_est_cents`) and,
       after fulfilment, Stripe's actual fee from the charge's balance transaction
       (`exos_order_payments.stripe_fee_cents`, `net_cents`, `transfer_id`). Compare them in
@@ -78,7 +80,7 @@ the details with counsel.)
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the connected-accounts endpoint (step 3). Without it organizers never become `chargesEnabled` |
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
-| `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 300 (3%, `_shared/platformFee.ts`) |
+| `EXOS_PLATFORM_FEE_BPS` | exos-checkout, exos-commerce | Optional, default 200 (2%, `_shared/platformFee.ts`); leave unset or 200 |
 | `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` | exos-checkout | Optional, default 290 / 30: Stripe's card fee, added to the application fee |
 | `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |
 | `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |

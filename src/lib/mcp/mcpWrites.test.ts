@@ -252,7 +252,7 @@ describe('the confirm_token flow', () => {
 describe('the fee line (free tier: under 150, operator 2026-11-21)', () => {
   it('149 is the free tier, 150 the standard fee (the coded default, FREE_TIER_MAX_CAPACITY = 149)', () => {
     expect(expectedFeeStatement(149)).toBe('This event will be on the free tier: no Exos fee (capacity 149; the free tier is 149 or less).');
-    expect(expectedFeeStatement(150)).toMatch(/^With a capacity of 150 \(over the free tier's 149\), the standard Exos fee: 3% of each order/);
+    expect(expectedFeeStatement(150)).toMatch(/^With a capacity of 150 \(over the free tier's 149\), the standard Exos fee: 2% of each order/);
     // The server's number (exos_event_fee_terms) is what the line states.
     expect(feeStatement({ free_tier: false, max_capacity: 150, free_tier_max_capacity: 149 }, 150)).toMatch(/can sell 150 tickets, over the free tier \(149 or less\), so the standard Exos fee/);
     expect(feeStatement({ free_tier: true, max_capacity: 150, free_tier_max_capacity: 150 }, 150)).toBe('This event is on the free tier: no Exos fee (150 tickets or less).');

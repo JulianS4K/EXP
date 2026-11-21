@@ -18,51 +18,54 @@ import {
 } from '../../supabase/functions/_shared/platformFee.ts';
 import { netEqualListCents, payoutCents } from './marketplace';
 
-describe('the Exos fee: 3% of every transaction, paid by the organizer', () => {
-  it('is 3%, to the cent, half up', () => {
-    expect(EXOS_FEE_BPS).toBe(300);
-    expect(exosFeeCents(4000)).toBe(120);
-    expect(exosFeeCents(2150)).toBe(65); // 64.5 rounds up
-    expect(exosFeeCents(8001)).toBe(240); // 240.03
+describe('the Exos fee: 2% of every transaction, paid by the organizer (operator 2026-11-21: "2% for now")', () => {
+  it('is 2%, to the cent, half up', () => {
+    expect(EXOS_FEE_BPS).toBe(200);
+    expect(exosFeeCents(4000)).toBe(80);
+    expect(exosFeeCents(2150)).toBe(43);
+    expect(exosFeeCents(2175)).toBe(44); // 43.5 rounds up
+    expect(exosFeeCents(8001)).toBe(160); // 160.02
     expect(exosFeeCents(0)).toBe(0);
-    expect(organizerNetCents(4000)).toBe(3880);
+    expect(organizerNetCents(4000)).toBe(3920);
+    // The old 3% is still a rate the functions take (a recorded session's fee_bps).
+    expect(exosFeeCents(4000, 300)).toBe(120);
   });
 
-  it('on an Exos checkout, carries Stripe\'s card fee so Exos nets 3%', () => {
+  it('on an Exos checkout, carries Stripe\'s card fee so Exos nets 2%', () => {
     expect(STRIPE_CARD_FEE).toEqual({ bps: 290, fixedCents: 30 });
     expect(stripeFeeCents(4000)).toBe(146); // 1.16 + 0.30
-    expect(checkoutApplicationFeeCents(4000)).toBe(266); // organizer gets 37.34
+    expect(checkoutApplicationFeeCents(4000)).toBe(226); // 0.80 + 1.46: organizer gets 37.74
     for (const amount of [500, 2000, 4000, 12345, 100000]) {
       const appFee = checkoutApplicationFeeCents(amount);
-      expect(appFee - stripeFeeCents(amount), `${amount}`).toBe(exosFeeCents(amount)); // Exos keeps exactly 3%
+      expect(appFee - stripeFeeCents(amount), `${amount}`).toBe(exosFeeCents(amount)); // Exos keeps exactly 2%
     }
     expect(checkoutApplicationFeeCents(0)).toBe(0); // free orders: no fee, no charge
     expect(checkoutApplicationFeeCents(20)).toBe(20); // never more than the order
-    expect(checkoutApplicationFeeCents(4000, { card: { bps: 0, fixedCents: 0 } })).toBe(120);
+    expect(checkoutApplicationFeeCents(4000, { card: { bps: 0, fixedCents: 0 } })).toBe(80);
   });
 
   it('is free for the first 6 months (card processing still applies at checkout)', () => {
     expect(FEE_FREE_MONTHS).toBe(6);
     const now = new Date('2026-12-01T00:00:00Z');
     expect(exosFeeBpsAt('2027-04-01T00:00:00Z', now)).toBe(0);
-    expect(exosFeeBpsAt('2026-11-30T00:00:00Z', now)).toBe(300);
-    expect(exosFeeBpsAt(null, now)).toBe(300);
-    expect(exosFeeBpsAt('not a date', now)).toBe(300);
+    expect(exosFeeBpsAt('2026-11-30T00:00:00Z', now)).toBe(200);
+    expect(exosFeeBpsAt(null, now)).toBe(200);
+    expect(exosFeeBpsAt('not a date', now)).toBe(200);
     // Free months: the application fee is just Stripe's card fee, so Exos nets 0 and loses nothing.
     expect(checkoutApplicationFeeCents(4000, { bps: exosFeeBpsAt('2027-04-01T00:00:00Z', now) })).toBe(146);
   });
 
-  it('on a marketplace sale, 3% of the payout is already net (the marketplace charged the card)', () => {
+  it('on a marketplace sale, 2% of the payout is already net (the marketplace charged the card)', () => {
     for (const ch of ['seatgeek', 'evo', 'vivid'] as const) {
       const payout = payoutCents(ch, netEqualListCents(ch, 4000), 1);
-      expect(organizerNetCents(payout), ch).toBe(3880);
+      expect(organizerNetCents(payout), ch).toBe(3920);
     }
   });
 });
 
 describe('checkoutFeeSplit: the application fee, broken down for the order record', () => {
-  it('splits a 40.00 order into 1.20 Exos + 1.46 card fee = 2.66', () => {
-    expect(checkoutFeeSplit(4000)).toEqual({ applicationFeeCents: 266, exosFeeCents: 120, cardFeeEstCents: 146, feeBps: 300 });
+  it('splits a 40.00 order into 0.80 Exos + 1.46 card fee = 2.26', () => {
+    expect(checkoutFeeSplit(4000)).toEqual({ applicationFeeCents: 226, exosFeeCents: 80, cardFeeEstCents: 146, feeBps: 200 });
   });
 
   it('is card fee only in the fee-free window', () => {
@@ -72,7 +75,7 @@ describe('checkoutFeeSplit: the application fee, broken down for the order recor
   it('always matches what Stripe is told, and the parts add up', () => {
     const cards = [STRIPE_CARD_FEE, { bps: 340, fixedCents: 30 }, { bps: 0, fixedCents: 0 }];
     for (const amount of [0, 1, 25, 30, 31, 99, 100, 1005, 4000, 10094, 123457, 999999]) {
-      for (const bps of [0, 150, 300, 1000]) {
+      for (const bps of [0, 150, 200, 300, 1000]) {
         for (const card of cards) {
           const s = checkoutFeeSplit(amount, { bps, card });
           expect(s.applicationFeeCents).toBe(checkoutApplicationFeeCents(amount, { bps, card }));
@@ -85,9 +88,9 @@ describe('checkoutFeeSplit: the application fee, broken down for the order recor
   });
 
   it('covers the card fee first when the order cap bites', () => {
-    // 0.31: 3% = 1c, card = 1c + 30c = 31c -> capped at 31, all of it card fee.
-    expect(checkoutFeeSplit(31)).toEqual({ applicationFeeCents: 31, exosFeeCents: 0, cardFeeEstCents: 31, feeBps: 300 });
-    expect(checkoutFeeSplit(20)).toEqual({ applicationFeeCents: 20, exosFeeCents: 0, cardFeeEstCents: 20, feeBps: 300 });
+    // 0.31: 2% = 1c, card = 1c + 30c = 31c -> capped at 31, all of it card fee.
+    expect(checkoutFeeSplit(31)).toEqual({ applicationFeeCents: 31, exosFeeCents: 0, cardFeeEstCents: 31, feeBps: 200 });
+    expect(checkoutFeeSplit(20)).toEqual({ applicationFeeCents: 20, exosFeeCents: 0, cardFeeEstCents: 20, feeBps: 200 });
   });
 
   it('knows the fee-free window', () => {
@@ -120,19 +123,19 @@ describe('the free tier: max capacity under 150 pays no Exos fee (operator, 2026
 
   it('150 is paid and 149 is free (operator 2026-11-21: "150 venue cap or more is paid")', () => {
     expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now })).toBe(0);
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(200);
   });
 
-  it('charges 0 on the free tier and 3% over it, after the free months', () => {
+  it('charges 0 on the free tier and 2% over it, after the free months', () => {
     expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now })).toBe(0);
-    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(300);
-    expect(exosFeeBpsForEvent({ maxCapacity: null, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now })).toBe(200);
+    expect(exosFeeBpsForEvent({ maxCapacity: null, feeFreeUntil: past, now })).toBe(200);
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: future, now })).toBe(0);
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, bps: 250 })).toBe(250);
   });
 
   it('takes the operator\'s numbers', () => {
-    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierMaxCapacity: 100 })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierMaxCapacity: 100 })).toBe(200);
     expect(exosFeeBpsForEvent({ maxCapacity: 150, feeFreeUntil: past, now, freeTierMaxCapacity: 150 })).toBe(0);
     expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: past, now, freeTierFeeBps: 50 })).toBe(50);
     expect(exosFeeBpsForEvent({ maxCapacity: 149, feeFreeUntil: future, now, freeTierFeeBps: 50 })).toBe(0);
@@ -146,12 +149,12 @@ describe('the free tier: max capacity under 150 pays no Exos fee (operator, 2026
     const at = (sold: number, qty: number) =>
       exosFeeBpsForEvent({ maxCapacity: 149, soldCount: sold, orderAdmissions: qty, feeFreeUntil: past, now });
     expect(at(145, 4)).toBe(0); // 149: still free
-    expect(at(146, 4)).toBe(300); // 150: this order pays
-    expect(at(150, 1)).toBe(300); // already past: every later order pays
+    expect(at(146, 4)).toBe(200); // 150: this order pays
+    expect(at(150, 1)).toBe(200); // already past: every later order pays
     expect(at(148, 1)).toBe(0);
-    expect(at(149, 1)).toBe(300);
+    expect(at(149, 1)).toBe(200);
     // A table order counts its party size (the server sends admissions).
-    expect(exosFeeBpsForEvent({ maxCapacity: 149, soldCount: 139, orderAdmissions: 2 * 6, feeFreeUntil: past, now })).toBe(300);
+    expect(exosFeeBpsForEvent({ maxCapacity: 149, soldCount: 139, orderAdmissions: 2 * 6, feeFreeUntil: past, now })).toBe(200);
     // Free months still win.
     expect(exosFeeBpsForEvent({ maxCapacity: 149, soldCount: 400, orderAdmissions: 1, feeFreeUntil: future, now })).toBe(0);
   });

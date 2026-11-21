@@ -1251,7 +1251,7 @@ Nothing new is callable by anon (H3 unchanged); tests in
 
 ### Search path
 
-`exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function
+`exos_platform_fee_bps()` (a plain `SELECT 300`, `SELECT 200` since mig 20261121133000) was the one Exos function
 without a pinned `search_path`; it now has `public, pg_temp`. The one other
 unpinned Exos routine, `exos_run_channel_splits_each`, can't be pinned (see
 "Hygiene 2026-11-09").

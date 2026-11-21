@@ -65,14 +65,15 @@ export const PRODUCT_FACTS: ProductFact[] = [
   {
     id: 'organizer-pricing', audience: 'organizer', status: 'at_launch',
     claim: pricingClaim(),
-    code: ['supabase/functions/_shared/platformFee.ts', 'supabase/functions/exos-checkout/index.ts'],
+    code: ['supabase/functions/_shared/platformFee.ts', 'supabase/functions/exos-checkout/index.ts',
+      'supabase/migrations/20261121133000_exos_pricing_149_2pct.sql'],
     note: 'Paid checkout needs the Stripe secrets (docs/payments-go-live.md).',
   },
   {
     id: 'free-tier', audience: 'organizer', status: 'at_launch',
     claim: `Events with a capacity under ${FREE_TIER_MAX_CAPACITY + 1} never pay an Exos fee, only card processing.`,
     code: ['supabase/functions/_shared/platformFee.ts', 'supabase/migrations/20261029090000_exos_free_tier_resale_consent.sql',
-      'supabase/migrations/20261121133000_exos_free_tier_149.sql'],
+      'supabase/migrations/20261121133000_exos_pricing_149_2pct.sql'],
   },
 
   // ---- Selling ------------------------------------------------------------

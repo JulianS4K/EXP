@@ -34,7 +34,7 @@ invite keeps their current role until it's approved (mig `20261104200000`).
 
 **Connect Stripe** opens Stripe's onboarding for a **Standard** connected account (Express only if the
 server sets `EXOS_CONNECT_ACCOUNT_TYPE=express`). Payouts go straight to the organizer's account; the
-platform keeps its fee: 3% of each sale, nothing in your first 6 months, and nothing at all on free-tier
+platform keeps its fee: 2% of each sale, nothing in your first 6 months, and nothing at all on free-tier
 events (max capacity under 150; 150 or more pays the fee). Details under **All-in pricing** below; your own fees on top
 (facility fees and the like) are in `docs/fees.md`. The button appears only once payments are
 switched on platform-wide (`docs/payments-go-live.md`). Until then, **free events work fully and
@@ -56,9 +56,9 @@ paid events can't be sold.**
   office) leaves the free tier: the order that takes it to 150 and every one after pay the normal
   fee. Events of 150 or more: your
   first 6 months are free: no Exos fee, only card processing on Exos sales. After that, Exos
-  takes 3% of every sale from your payout, and card processing is yours, as with any card sale:
-  a 40.00 ticket sold on Exos pays you 37.34 (3% plus Stripe's 2.9% + 30¢). On a marketplace the
-  card was charged there, so a 40.00 ticket pays you 38.80 (marketplace prices are raised to cover
+  takes 2% of every sale from your payout (3% before 2026-11-21), and card processing is yours, as with any card sale:
+  a 40.00 ticket sold on Exos pays you 37.74 (0.80, 2%, plus Stripe's 2.9% + 30¢, 1.46). On a marketplace the
+  card was charged there, so a 40.00 ticket pays you 39.20 (marketplace prices are raised to cover
   their own seller fee).
 - **Scheduled prices** (early-bird → regular → last-minute). Buyers are charged the price that's
   live when they check out, which is the one the storefront shows.
