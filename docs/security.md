@@ -1258,7 +1258,11 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   (`_exos_cred_backfill`, re-run safe; prod had none on 2026-11-21).
 - **`exos_org_secrets.distribution` first.** It was plain jsonb (Lysted / Automatiq seller ids), readable by owner
   and finance. A BEFORE trigger now moves every written value to Vault (provider `lysted`) and leaves a stub
-  `{in_vault, enabled}`; a stub written back keeps the stored secret, NULL removes it. Nothing server-side read it.
+  `{in_vault, enabled}`; a stub written back keeps the stored secret, NULL removes it, and deleting the row (or the
+  org) drops it too. Nothing server-side read it.
+- **No secret outlives its row.** Every `exos_org_integrations` delete (a remove, a failed copy, an org delete's
+  cascade) drops its Vault secret (AFTER DELETE trigger), and `_exos_integration_drop` always drops the Vault copy
+  by id and name, even when the row is already gone.
 - **The write.** `exos_save_integration` (owner / manager; returns the last four characters, never the secret)
   writes through `_exos_integration_put`, the same core the copies use, and logs `integration.save` /
   `integration.remove` to the org audit log: the provider, whether a new credential was given and the setting
@@ -1272,18 +1276,26 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   out only with the org's switch AND `EXOS_<ID>_WRITES=on` AND the adapter's method + path allowlist (reusing
   `writesLive` from `model.ts`); all default off. A write off the allowlist throws whatever the switches. A dry run
   sends nothing, records the exact payload and returns a stand-in. Reads are retried under `_shared/retry.ts`; a
-  write is sent once unless its rule is marked idempotent; an SSRF guard's refusal is never retried. Credentials go
-  in headers only: a URL holding a secret value (raw or URL-encoded) or a credential-named query parameter is
-  refused before anything is sent. Every request is an audit step with credential headers, secret-named keys and
-  every secret value redacted.
+  write is sent once unless its rule is marked idempotent; an SSRF guard's refusal and a redirect are never
+  retried. A path is plain or refused before anything is sent: no `.` / `..` / empty segment, no backslash, and no
+  percent-encoded dot, slash or backslash (`%2e%2e` would resolve as `..`); the allowlist is matched on the path
+  the URL really resolves to under the base (`resolvedPath`), never on the raw text. Credentials go in headers
+  only: a URL holding a secret value (raw or URL-encoded) or a query parameter named like a credential (by
+  pattern: `*token*`, `*secret*`, `*signature*`, `api_key`, `access_key`, `X-Amz-*`, ...; paging cursors such as
+  `pageToken` excepted) is refused. Every request is an audit step with credential headers (any name with token,
+  secret, key, auth, signature, cookie, password or session), secret-named keys (`SECRET_KEY`: also `key`,
+  `private_key`, `access_key`, `pass`, `pwd`, `jwt`) and every secret value redacted. Redaction is best effort:
+  adapters still send credentials only in headers.
 - **`exos_channel_audit`**: RLS, SELECT for owner / manager of the row's org (finance, scanners and other orgs read
   nothing), no client writes. Only `exos_channel_audit_record` (service role) writes: it drops query values from
-  the path, scrubs secret-named keys and auth-looking strings again, caps sizes, skips a malformed step without
-  raising, and keeps 30 days. GatedHttp's database sink writes every write step and a read only when asked (the
+  the path (a fragment and bare parameters too, names kept), scrubs secret-named keys (the same `SECRET_KEY`
+  pattern) and, in every string, the error and the warnings, auth schemes with their value, JWTs, known token
+  prefixes and secret-named query values; caps sizes, skips a malformed step without raising, and keeps 30 days
+  for every org (each write trims a batch; `exos_channel_retention_sweep`, service role, is for a daily cron). GatedHttp's database sink writes every write step and a read only when asked (the
   credential test). The organizer sees the planned writes as **What we'd send** (Org settings).
 - **Limits** (`_shared/channels/limits.ts`, the single table) and **`exos_channel_usage`**: RLS on, no client grant;
   `exos_channel_usage_reserve` (service role) takes a per-key advisory lock, so two passes can't both spend the
-  last of a budget; planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
+  last of a budget, and refuses anything but READ COMMITTED (a REPEATABLE READ snapshot would sum stale rows); planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
   owner / manager only (42501 otherwise).
 
 ### The ads phase, dry run only (mig 20261121190500)
