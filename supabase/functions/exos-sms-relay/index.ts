@@ -9,6 +9,14 @@
 // are always recorded (compliance doesn't wait for the switch). US A2P 10DLC
 // registration of the pool numbers comes before turning it on.
 //
+// Paused (operator 2026-11-17, mig 20261117190000; _shared/socialGate.ts):
+// while the social_features_enabled setting is off the relay STOPS in SQL: no
+// new opt-in (XSOFF), nothing relayed or queued, queued relay / confirmation
+// texts skipped at the claim, and a member's text answered "group texts are
+// paused" (once a day; inbound action 'paused'). Keyword answers (STOP,
+// STOPALL, START, HELP) still go out. Nothing changes here: the claim only
+// hands out what may be sent, and sends stay a dry run without EXOS_SMS_RELAY.
+//
 // Routes:
 //   POST /cron               X-Cron-Secret. Claims due texts and sends them.
 //   POST /inbound/twilio     Twilio inbound webhook; X-Twilio-Signature checked with

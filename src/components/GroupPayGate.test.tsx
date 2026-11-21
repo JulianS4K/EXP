@@ -55,8 +55,9 @@ describe('group pay is off in a default build', () => {
       const { container, unmount } = at(path);
       expect(screen.getByRole('heading', { name: GROUP_PAY_OFF_TEXT })).toBeTruthy();
       expect(container.textContent).not.toMatch(/seat view|host view/);
-      // v1 is still offered.
-      expect(container.textContent).toContain('Split with friends');
+      // Split with friends (v1) is paused too (mig 20261117190000): the page points to My Tickets instead.
+      expect(container.textContent).toContain('from My Tickets');
+      expect(container.textContent).not.toMatch(/split with friends/i);
       unmount();
     }
   });
@@ -65,7 +66,7 @@ describe('group pay is off in a default build', () => {
     const app = readFileSync(resolve(__dirname, '../App.tsx'), 'utf8');
     expect(app).toContain('<Route path="/group-pay/seat/:token" element={<GroupPayGate><GroupPaySeat /></GroupPayGate>} />');
     expect(app).toContain('<Route path="/group-pay/:groupId" element={<GroupPayGate><GroupPayHost /></GroupPayGate>} />');
-    // v1 stays as it is.
+    // v1 keeps its route (its own pause is inside the view, mig 20261117190000).
     expect(app).toContain('<Route path="/split/:sessionId" element={<SplitWithFriends />} />');
   });
 });

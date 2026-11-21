@@ -7,6 +7,12 @@
 // claim email, never touches the money, and keeps a paid / not-paid
 // checklist the host ticks. Send mode: tickets now (default) or once marked
 // paid.
+//
+// Paused (operator 2026-11-17, mig 20261117190000): unless the build sets
+// VITE_EXOS_SOCIAL=on, an order with no split shows "not available" and no
+// friends can be added; an order that already has a split keeps its
+// checklist (ticking paid still sends an 'on_paid' ticket, nudges still
+// count), so no friend is left without their ticket.
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -19,6 +25,8 @@ import {
   totalShares, type SplitState,
 } from '../lib/split';
 import { formatCurrency, publicUrl } from '../lib/utils';
+import { socialEnabled } from '../lib/socialFlag';
+import { SocialUnavailable } from '../components/SocialGate';
 
 interface FriendDraft { name: string; email: string; phone: string; amount: string }
 
@@ -67,9 +75,13 @@ export default function SplitWithFriends() {
     return friendShares(state.amountCents, state.quantity, already + friends.length).slice(already);
   }, [state, friends.length]);
 
-  if (!user) return <Shell><p className="text-slate-500">Sign in with the account that bought the tickets.</p></Shell>;
-  if (loadErr) return <Shell><p className="text-red-600 font-bold">{loadErr}</p></Shell>;
-  if (!state) return <Shell><p className="text-slate-500">Loading…</p></Shell>;
+  const on = socialEnabled();
+  const heading = on || state?.split ? 'Split with friends' : 'Your order';
+  if (!user) return <Shell title={heading}><p className="text-slate-500">Sign in with the account that bought the tickets.</p></Shell>;
+  if (loadErr) return <Shell title={heading}><p className="text-red-600 font-bold">{loadErr}</p></Shell>;
+  if (!state) return <Shell title={heading}><p className="text-slate-500">Loading…</p></Shell>;
+  // Paused: only a split that already exists is shown.
+  if (!on && !state.split) return <SocialUnavailable feature="split" />;
 
   const cur = state.currency;
   const money = (c: number) => formatCurrency(c / 100, cur);
@@ -113,7 +125,7 @@ export default function SplitWithFriends() {
   };
 
   return (
-    <Shell>
+    <Shell title={heading}>
       <p className="text-slate-500 text-sm mb-6">
         {title}: {state.quantity} tickets, {money(state.amountCents)} paid. Friends pay you back directly; Exos never handles that money.
       </p>
@@ -159,7 +171,13 @@ export default function SplitWithFriends() {
         </section>
       )}
 
-      {free.length > 0 && (
+      {!on && (
+        <p className="text-slate-500 text-sm" data-testid="split-paused">
+          Adding friends to a split is paused. To send another ticket, use Transfer on My Tickets.
+        </p>
+      )}
+
+      {on && free.length > 0 && (
         <section>
           <h2 className={`${label} mb-3`}>{state.shares.length ? 'Add more friends' : 'Split it'}</h2>
           <div className="grid grid-cols-2 gap-3 mb-4">
@@ -203,13 +221,13 @@ export default function SplitWithFriends() {
   );
 }
 
-function Shell({ children }: { children: ReactNode }) {
+function Shell({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="max-w-xl mx-auto px-4 py-12">
       <Link to="/my-tickets" className="inline-flex items-center gap-2 text-slate-500 text-sm font-bold mb-6">
         <ArrowLeft className="w-4 h-4" /> My Tickets
       </Link>
-      <h1 className="text-2xl font-black text-slate-900 mb-2">Split with friends</h1>
+      <h1 className="text-2xl font-black text-slate-900 mb-2">{title}</h1>
       {children}
     </div>
   );

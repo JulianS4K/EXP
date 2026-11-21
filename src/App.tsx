@@ -11,6 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import PwaShell from './components/PwaShell';
 import ConsentBanner from './components/ConsentBanner';
 import GroupPayGate from './components/GroupPayGate';
+import SocialGate from './components/SocialGate';
 import { isPixelRoute, leavePixelScope } from './lib/pixels';
 import { kioskRedirect, kioskStorage, readKioskCredential } from './lib/kiosk';
 
@@ -213,6 +214,8 @@ export default function App() {
                     <Route path="/checkout" element={<CheckoutLink />} />
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
+                    {/* Split with friends is paused (mig 20261117190000): the view shows "not available" unless the
+                        order already has a split (its pay-back checklist still works) or VITE_EXOS_SOCIAL=on. */}
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
                     {/* Group pay v2 is paused (mig 20261111120000): "not available" unless VITE_EXOS_GROUP_PAY=on. */}
                     <Route path="/group-pay/seat/:token" element={<GroupPayGate><GroupPaySeat /></GroupPayGate>} />
@@ -290,9 +293,10 @@ export default function App() {
                     <Route path="/orgs/:orgId/booking-requests" element={<OrgInbound />} />
                     <Route path="/orgs/:orgId/venue-requests" element={<OrgVenueRequests />} />
                     <Route path="/orgs/:orgId/orders" element={<OrgOrders />} />
-                    <Route path="/orgs/:orgId/groups" element={<OrgGroups />} />
-                    <Route path="/groups" element={<MyGroups />} />
-                    <Route path="/groups/:groupId" element={<GroupChat />} />
+                    {/* Group chats are paused (mig 20261117190000): "not available" unless VITE_EXOS_SOCIAL=on. */}
+                    <Route path="/orgs/:orgId/groups" element={<SocialGate feature="chat"><OrgGroups /></SocialGate>} />
+                    <Route path="/groups" element={<SocialGate feature="chat"><MyGroups /></SocialGate>} />
+                    <Route path="/groups/:groupId" element={<SocialGate feature="chat"><GroupChat /></SocialGate>} />
                     {/* Onboarding flow for new organizers (Sprint 6). */}
                     <Route path="/onboarding" element={<OrganizerOnboarding />} />
                     <Route path="/invite/:token" element={<ClaimInvite />} />

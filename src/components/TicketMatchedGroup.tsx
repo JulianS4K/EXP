@@ -3,6 +3,12 @@
 // "you're in a group of N", revealed at reveal time with the spot, the time
 // and the others' first names. After meeting: "would meet again" (shown only
 // when mutual), report and block. Renders nothing for an ordinary ticket.
+//
+// Paused (operator 2026-11-17, mig 20261117190000): no ticket type becomes
+// matched any more, so this only ever shows for a type sold as matched seats
+// before the pause. Unless the build sets VITE_EXOS_SOCIAL=on it keeps what the
+// holder bought (when groups form, their spot, time and table, report and
+// block) and drops the extras: the quiz and "meet again".
 
 import { useCallback, useEffect, useState } from 'react';
 import { Flag, Heart, MapPin, Users, Ban } from 'lucide-react';
@@ -12,6 +18,7 @@ import {
 import { answersBody, answersFromRow, type QuizAnswers } from '../lib/matchedSeats';
 import MatchedQuiz from './MatchedQuiz';
 import { useToast } from '../context/ToastContext';
+import { socialEnabled } from '../lib/socialFlag';
 
 function when(ms: number | null): string {
   if (!ms) return 'before the event';
@@ -52,6 +59,7 @@ export default function TicketMatchedGroup({ ticketId }: { ticketId: string }) {
   }, [g, load]);
 
   if (!g || g.state === 'not_matched' || g.state === 'not_holder') return null;
+  const on = socialEnabled();
 
   const run = async (fn: () => Promise<unknown>, ok?: string) => {
     setBusy(true);
@@ -77,7 +85,7 @@ export default function TicketMatchedGroup({ ticketId }: { ticketId: string }) {
           <p className="type text-sm text-white/70">
             Groups form {when(g.matchAt)}. Where you meet and who you're with is revealed {when(g.revealAt)}.
           </p>
-          {g.quizEnabled && answers && (
+          {on && g.quizEnabled && answers && (
             <>
               <MatchedQuiz value={answers} onChange={setAnswers} tags={g.quizTags} languages={g.quizLanguages} disabled={busy} />
               <div className="flex gap-3">
@@ -135,12 +143,14 @@ export default function TicketMatchedGroup({ ticketId }: { ticketId: string }) {
                 </span>
                 {!m.isMe && g.afterEvent && (
                   <span className="flex items-center gap-3">
-                    <button type="button" disabled={busy} aria-pressed={m.picked}
-                      title="Would meet again (they only see it if they pick you too)"
-                      className={`flex items-center gap-1 text-xs ${m.picked ? 'text-brand-primary' : 'text-white/50'}`}
-                      onClick={() => void run(() => pickMember(ticketId, m.id, !m.picked))}>
-                      <Heart className="w-3.5 h-3.5" aria-hidden="true" /> Meet again
-                    </button>
+                    {on && (
+                      <button type="button" disabled={busy} aria-pressed={m.picked}
+                        title="Would meet again (they only see it if they pick you too)"
+                        className={`flex items-center gap-1 text-xs ${m.picked ? 'text-brand-primary' : 'text-white/50'}`}
+                        onClick={() => void run(() => pickMember(ticketId, m.id, !m.picked))}>
+                        <Heart className="w-3.5 h-3.5" aria-hidden="true" /> Meet again
+                      </button>
+                    )}
                     <button type="button" disabled={busy} className="flex items-center gap-1 text-xs text-white/50"
                       onClick={() => { setReporting(m.id); setReason('safety'); setDetails(''); }}>
                       <Flag className="w-3.5 h-3.5" aria-hidden="true" /> Report
@@ -157,7 +167,7 @@ export default function TicketMatchedGroup({ ticketId }: { ticketId: string }) {
               </li>
             ))}
           </ul>
-          {!g.afterEvent && (
+          {on && !g.afterEvent && (
             <p className="type text-[11px] text-white/40">After you've met you can say who you'd meet again; only mutual picks are shown.</p>
           )}
           {reporting && (

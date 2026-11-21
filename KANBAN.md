@@ -1,5 +1,7 @@
 # Kanban Board / Product Roadmap
 
+**Focus (operator 2026-11-17): core ticket selling, promotion, distribution. Paused: social/friends features (group buy, matched seats, group chat/relay), event tokens (#121, parked), Spanish (#120, parked), Communities (#75, closed), Ticket Evolution exchange resale on Exos (EVO build, off: Exos stays a primary platform; see Channels below).**
+
 ## Prod state vs this repo (updated 2026-11-05)
 
 - **2026-11-05 rollout (from branch `ccr-3d973f5c-eulhen`, ahead of main):** `scripts/rollout-prod.sh` applied all
@@ -248,7 +250,8 @@ pass revenue reconciles to Stripe.
    days of keys per ticket, never its barcode secret; the secret view answers only the holder, buyer and admins.
 2. ✅ **Online events follow-ups** (built 2026-10-19, mig `20261019110000`, not applied): an online event's wallet
    pass carries no location (no geofence); org and venue calendar feeds leave out `noindex` events.
-3. **Group buy v1:** host pays, friends get claim links plus a pay-back link.
+3. **Group buy v1:** host pays, friends get claim links plus a pay-back link. ⏸ **Paused (operator 2026-11-17)**: no new
+   split (mig `20261117190000_exos_social_off`, branch `claude/exos-focus-core`); existing splits keep their checklist.
 4. **Money:** minimal double-entry journal; sales-tax report; order rows for free claims and comps.
 5. ✅ **Reachable by crawlers and AI** (built 2026-10-08, **off until launch**: `EXOS_AI_DISCOVERY=on` on `exos-web`,
    `docs/hosting.md` "AI discovery"): AI crawlers / fetchers treated as link crawlers, plain-HTML event pages for
@@ -557,8 +560,10 @@ How we build it (techniques):
     themselves from My Tickets or the link (payer only, auto-approved, through `exos-refund`); marketplace
     buyers go to the marketplace. Organizer sees requests and money returned next to the refund panel
     (`docs/organizer-guide.md` "Changing the date").
-- 🟡 **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
-  change); unaffected. **v2: PAUSED (operator 2026-11-09): dormant behind `group_pay_enabled` + `EXOS_GROUP_PAY`;
+- ⏸ **Group buy / split pay.** v1: host pays, friends get claim links plus a pay-back link (no hold, no Stripe
+  change); **PAUSED (operator 2026-11-17)** with matched seats and group chat / the relay: one switch,
+  `social_features_enabled` + `VITE_EXOS_SOCIAL` (+ `EXOS_SOCIAL` on exos-match), all off; new starts refuse with
+  `XSOFF`, existing records keep working (mig `20261117190000_exos_social_off`, branch `claude/exos-focus-core`). **v2: PAUSED (operator 2026-11-09): dormant behind `group_pay_enabled` + `EXOS_GROUP_PAY`;
   no further work** (mig `20261111120000_exos_group_pay_off`, branch `claude/exos-group-pay-off`: every entry point
   refuses by default, the UI also needs `VITE_EXOS_GROUP_PAY=on`; tables, functions and tests kept, the tests turn
   the switch on for themselves). **v2 built 2026-11-09** (mig `20261108120000_exos_group_pay`, branch `claude/exos-group-pay`; not on prod):
@@ -748,6 +753,22 @@ distribution of Exos's own inventory, not resale.
   physical delivery and bulk inventory update / delete are forbidden. **Open with TEvo**: the signature scheme,
   whether order ticket groups echo `remote_id`, event search, webhook / Order Integration payloads,
   transfer_source values (`docs/marketplace/tevo/README.md`). Events are linked to TEvo by staff until then.
+- ⛔ **Ticket Evolution exchange resale, buyer side ("EVO build")** (operator 2026-11-17: **off**; Exos stays a primary
+  platform and does not resell other events' inventory; not started, no branch; the plan below is kept for reference). Exos as a resale site on the TEvo exchange, per TEvo's guide "Building a Ticket Resale Website
+  or App Using the Ticket Evolution API" (victorylive Confluence, API space, page 354910253): show **all** exchange
+  inventory next to Exos events, then sell it.
+  - **Browse (reads only, no authorization needed):** new GET-only edge function `exos-exchange` (`/v9/events`,
+    `/v9/searches/suggestions`, `/v9/events/:id`, `/v9/listings?event_id=`, `/v9/configurations/:id`), dark unless
+    `EXOS_EXCHANGE=on`; SPA `/exchange` + `/exchange/event/:id` behind `VITE_EXOS_EXCHANGE`; all-in estimate =
+    `retail_price` + platform `exchange_markup_bps` (default 0), never `wholesale_price` or seller identity; honor
+    `splits`; short TTL cache + rate limits. Port Terminal-2's proven signing (`X-Signature` over
+    `"GET api.ticketevolution.com<path>?<sorted query>"`, `?` always present; versioned Accept header) into the
+    existing `_shared/marketplace/tevo/transport`.
+  - **Checkout (writes, needs written operator authorization first):** `POST /v9/clients` (+ email / address /
+    phone), `/v9/tax_quotes`, `/v9/orders`. No holds exist on TEvo, so the order is placed at payment. Open
+    decisions: payment (Exos charges on Stripe then buys with the brokerage's evopay, or TEvo's Braintree gateway,
+    or TEvo affiliate/hosted), which account (S4K brokerage 1768 or a new Exos office), TEvo credentials for Exos,
+    and auto-matching Exos events to TEvo events (operator: not yet).
 
 ## All-in pricing (operator decision 2026-09-24)
 
@@ -1499,7 +1520,7 @@ indie-cap + secondary-market positioning.
 
 ## Post-launch (operator, 2026-09-26)
 
-- `[x]` **Group buy: split with friends (Venmo, restaurant-style).** Built 2026-10-30 (mig 20261031220000, `/split/:sessionId`). A friend needs an email (the transfer mails the claim link); the text goes from the host's phone (`sms:` link).
+- `[x]` **Group buy: split with friends (Venmo, restaurant-style).** ⏸ Paused (operator 2026-11-17, mig `20261117190000`). Built 2026-10-30 (mig 20261031220000, `/split/:sessionId`). A friend needs an email (the transfer mails the claim link); the text goes from the host's phone (`sms:` link).
   - The host buys every ticket in one normal checkout: no holds, no Stripe changes, no inventory risk.
   - After purchase, a "Split with friends" screen: add friends by name or phone, even or custom amounts.
   - Each friend gets one text: their ticket (existing transfer claim link, so it's in their own account)
@@ -1552,7 +1573,7 @@ indie-cap + secondary-market positioning.
 - **Algorithmic discovery (Suggested for You)** — recommendation
   engine seeded by Music DNA + browsing/purchase history. Blocked
   on the music identity work.
-- **Friends & social graph** — find friends, sync contacts, see
+- ⏸ **Friends & social graph** (paused, operator 2026-11-17: social features are out of focus) — find friends, sync contacts, see
   what events friends are attending, form groups.
 - **Advanced social marketing hub** — auto-publish to
   Instagram / Facebook, track ad ROI, generate AI copy.

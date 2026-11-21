@@ -1,5 +1,21 @@
 # Matched seats
 
+> **Paused (operator 2026-11-17).** Exos is focusing on ticket selling,
+> promotion and distribution, so matched seats are hidden, code kept
+> (mig `20261117190000_exos_social_off`, `docs/security.md`). No ticket type
+> can become matched: `exos_match_set_config` answers `XSOFF` for a type with
+> no config while the `social_features_enabled` platform setting is off (the
+> default), the event report shows the panel only for a type matched before
+> the pause (without **Sell as matched seats**, **Match now** or
+> **Reshuffle**; `exos-match` `/run` needs `EXOS_SOCIAL=on`), and without
+> `VITE_EXOS_SOCIAL=on` the event page and the ticket drop the quiz and
+> "meet again". A type matched before the pause still works end to end: the
+> event page says it is matched, the cron groups its holders at the cutoff,
+> reveal goes out, staff can review, refund leftovers and read reports, and
+> holders can report and block. Turning it back on: the setter
+> `exos_set_social_features_enabled(true, '<reason>')`, `VITE_EXOS_SOCIAL=on`
+> and `EXOS_SOCIAL=on`.
+
 Buyers buy a seat, not a known table. At a cutoff Exos groups the holders
 into tables or crews, staff review and adjust, and shortly before the event
 each member learns where to go, when, and the other members' first names.

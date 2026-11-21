@@ -5,6 +5,7 @@ import { chromium, devices } from 'playwright';
 import { readFileSync } from 'node:fs';
 import { handle, EV, TIER2, ADDON, TOKEN, ORG, UID, TICKET, ORG_ROW, EVENT_ROW, ownerTables, tables as baseTables, NEIGHBORHOOD_PAGE } from './mock.mjs';
 import { KIOSK_CRED, kioskPos } from './mock.mjs'; // claude/exos-kiosk
+import { TIER } from './mock.mjs'; // claude/exos-focus-core
 const BASE = process.env.SMOKE_BASE || 'http://localhost:4174/bridge';
 // Group pay v2 is paused (mig 20261111120000): its steps run against a build
 // with VITE_EXOS_GROUP_PAY=on (tests/smoke/run.sh); BASE is the default build.
@@ -1568,10 +1569,86 @@ await run('group pay off (default build): no "Pay separately" on the event page,
   for (const path of ['/group-pay/seat/' + SEAT_TOKEN, '/group-pay/c7e00000-0000-4000-8000-000000000001']) {
     await page.goto(BASE + path);
     await page.getByRole('heading', { name: "Group pay isn't available" }).waitFor({ timeout: 8000 });
-    await expectText(page, 'Split with friends');
+    await expectText(page, 'from My Tickets');
   }
   assert(!log.some((l) => /exos_group_/.test(l)), 'nothing asked of the server: ' + log.filter((l) => /exos_group_/.test(l)).join(', '));
 }, { signedIn: true });
+// ── Social / "friends" features paused (operator 2026-11-17, mig 20261117190000,
+// claude/exos-focus-core): the default build (no VITE_EXOS_SOCIAL) shows none of
+// their entry points, and their links say "not available". What exists keeps
+// working: an order already split keeps its pay-back checklist. ──
+const SPLIT_ORDER = 'cs_smoke_split_1';
+const splitTicket = (n) => ({
+  id: `77777777-7777-4777-8777-77777777777${n}`, event_id: EV, org_id: ORG, tier_id: TIER, tier_name: 'GA', buyer_id: UID, owner_id: UID,
+  status: 'active', price_paid: 20, order_ref: SPLIT_ORDER, channel_source: 'direct', promoter_id: null, pending_transfer_id: null,
+  transfer_id: null, voided_at: null, voided_by: null, voided_reason: null, released_at: null, check_in_at: null, last_reissue_at: null,
+  created_at: '2026-09-20T12:00:00Z', updated_at: '2026-09-20T12:00:00Z', attendee_name: null, event: EVENT_ROW,
+});
+const splitState = (split) => ({
+  session_id: SPLIT_ORDER, event_id: EV, amount_cents: 4000, quantity: 2, currency: 'usd', split,
+  tickets: [{ ticket_id: splitTicket(1).id, tier_name: 'GA', status: 'active', mine: true, pending_transfer: !!split },
+            { ticket_id: splitTicket(2).id, tier_name: 'GA', status: 'active', mine: true, pending_transfer: false }],
+  shares: split ? [{ id: 'sh1', ticket_id: splitTicket(1).id, name: 'Fran', email: 'fran@example.com', phone: null, amount_cents: 2000,
+    paid: false, paid_at: null, nudge_count: 0, nudged_at: null, transfer_id: null, transfer_status: null, claim_path: null }] : [],
+});
+const socialMock = (splits) => ownerMock({
+  tables: {
+    exos_tickets: [splitTicket(1), splitTicket(2)],
+    exos_ticket_barcode_secrets: [], exos_transfers: [], exos_event_saves: [],
+    exos_group_splits: splits.map((sid) => ({ session_id: sid, host_uid: UID })),
+  },
+  rpcs: {
+    exos_my_reschedule_offers: () => [],
+    exos_split_get: () => splitState(splits.length ? { venmo_handle: 'host', cashapp_tag: null, send_mode: 'on_paid', note: null, created_at: '2026-11-01T12:00:00Z' } : null),
+    // A ticket type sold as matched seats before the pause.
+    exos_match_public: () => [{ tier_id: TIER, group_min: 4, group_target: 6, group_max: 8, quiz_enabled: true, quiz_tags: ['jazz'],
+      quiz_languages: ['en'], match_at: null, reveal_at: null, spot_count: 1, status: 'open' }],
+  },
+});
+await run('social off (default build): no split, quiz or group chat entry points; their links say "not available"', async (page, log) => {
+  await page.goto(BASE + '/my-tickets');
+  await expectText(page, 'Fall Party');
+  await waitFor(seen(log, 'GET exos_group_splits'), 'the existing-split lookup');
+  await page.waitForTimeout(300);
+  assert(await page.getByTestId('split-link').count() === 0 && !/split with friends/i.test(await page.locator('body').innerText()),
+    'no split link for an order with no split');
+  await page.goto(BASE + '/event/' + EV);
+  await expectText(page, 'A matched seat');
+  assert(!/Help us seat you well|optional quiz/i.test(await page.locator('body').innerText()), 'no matched-seats quiz');
+  for (const path of ['/groups', '/groups/c3000000-0000-4000-8000-000000000001', '/orgs/' + ORG + '/groups']) {
+    await page.goto(BASE + path);
+    await page.getByRole('heading', { name: "Group chat isn't available" }).waitFor({ timeout: 8000 });
+  }
+  await page.goto(BASE + '/split/' + SPLIT_ORDER);
+  await page.getByRole('heading', { name: "Split with friends isn't available" }).waitFor({ timeout: 8000 });
+  assert(!log.some((l) => /rpc exos_(group_|my_groups|org_groups|split_save)/.test(l)),
+    'nothing asked of the chat or a new split: ' + log.filter((l) => /rpc exos_(group_|my_groups|org_groups|split_save)/.test(l)).join(', '));
+}, { signedIn: true, mock: socialMock([]) });
+await run('social off: an order already split keeps its pay-back link and checklist, with no way to add friends', async (page) => {
+  await page.goto(BASE + '/my-tickets');
+  const link = page.getByTestId('split-link');
+  await link.waitFor({ timeout: 8000 });
+  assert((await link.innerText()).trim() === 'FRIENDS PAYING YOU BACK', 'label: ' + await link.innerText());
+  await link.click();
+  await expectText(page, "Who's paid");
+  await expectText(page, 'Fran');
+  await page.getByTestId('split-paused').waitFor({ timeout: 8000 });
+  assert(!/Add a friend|Add more friends|Split it/.test(await page.locator('body').innerText()), 'no add-friends form');
+}, { signedIn: true, mock: socialMock([SPLIT_ORDER]) });
+await run('social off: the event report has no matched-seats panel when no ticket type is matched', async (page, log) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '?tab=door');
+  await waitFor(seen(log, 'rpc exos_match_staff_view'), 'the matched-seats lookup', 10000);
+  await page.waitForTimeout(500);
+  assert(await page.getByTestId('matched-seats-panel').count() === 1, 'the panel is mounted (to look for an existing matched type)');
+  assert(!(await page.getByTestId('matched-seats-panel').isVisible()), 'the panel is hidden');
+  assert(!/Sell as matched seats|Matched seats/.test(await page.locator('body').innerText()), 'no way to start matched seats');
+}, { signedIn: true, mock: ownerMock({ ...reportMock,
+  tables: { ...reportMock.tables, exos_ticket_tiers: [{ id: TIER, event_id: EV, name: 'GA', description: '', price: 20, capacity: 100, sold: 0,
+    ticket_type: 'paid', sort_order: 0, visibility: 'public', sales_start: null, sales_end: null, price_schedule: null }] },
+  rpcs: { ...reportMock.rpcs,
+    exos_match_staff_view: () => ({ __status: 403, __body: { code: '42501', message: 'not a matched ticket type' } }),
+    exos_event_tables: () => [],
+  } }) });
 const GROUP = 'c7e00000-0000-4000-8000-000000000001';
 const inMinutes = (m) => new Date(Date.now() + m * 60_000).toISOString();
 const seatView = (over = {}) => ({

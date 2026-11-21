@@ -1,5 +1,22 @@
 # Group chat and the masked SMS relay
 
+> **Paused (operator 2026-11-17).** Exos is focusing on ticket selling,
+> promotion and distribution, so group chats and the relay are hidden, code
+> kept (mig `20261117190000_exos_social_off`, `docs/security.md`). While the
+> `social_features_enabled` platform setting is off (the default),
+> `exos_group_create`, `exos_group_join` (for a new member),
+> `exos_group_add_member` and `exos_group_sms_opt_in` answer `XSOFF`, and the
+> **relay stops**: nothing is queued for other members, queued relay and
+> confirmation texts are skipped at the claim, and a member's text is
+> answered "group texts are paused" at most once a day. STOP / STOPALL /
+> START / HELP keep their answers. Without `VITE_EXOS_SOCIAL=on`, `/groups`,
+> `/groups/:id` and `/orgs/:orgId/groups` show "Group chat isn't available".
+> Stopping (rather than relaying until each event ends) was chosen because
+> the relay never went live (no `EXOS_SMS_RELAY`, no 10DLC registration), the
+> chat and its moderation screens are hidden while paused, and every text
+> costs money. Turning it back on: `exos_set_social_features_enabled(true,
+> '<reason>')` and `VITE_EXOS_SOCIAL=on`; consents already given resume.
+
 Social groups (matched tables, community chats, event attendee chats) each get
 an in-app chat and, for every member, a masked phone number they can text the
 group from. Nobody sees anyone else's real number. Phone numbers or Instagram

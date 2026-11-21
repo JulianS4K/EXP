@@ -4,7 +4,8 @@
 // the event page's start button and the /group-pay routes are only built in
 // with VITE_EXOS_GROUP_PAY=on (unset = off). The server refuses on its own
 // either way (EXOS_GROUP_PAY on exos-checkout, the group_pay_enabled platform
-// setting in SQL). "Split with friends" (v1, /split/:sessionId) is not affected.
+// setting in SQL). "Split with friends" (v1, /split/:sessionId) has its own
+// pause since 2026-11-17 (lib/socialFlag.ts, mig 20261117190000).
 
 export const GROUP_PAY_OFF_TEXT = "Group pay isn't available";
 
