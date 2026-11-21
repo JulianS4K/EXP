@@ -139,41 +139,9 @@ export const hashOrUndefined = (v: unknown): string | undefined =>
   typeof v === "string" && HEX64.test(v) ? v : undefined;
 
 // ---- normalization + hashing (parity with the SQL helpers) --------------
-
-/** Trimmed, lower-cased email, or null. Same as SQL _exos_email_sha256's input. */
-export function normalizeEmail(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const e = raw.trim().toLowerCase();
-  return e && e.includes("@") ? e : null;
-}
-
-/** Google's rule: also drop dots in the local part of gmail.com / googlemail.com. */
-export function normalizeEmailGoogle(raw: unknown): string | null {
-  const e = normalizeEmail(raw);
-  if (!e) return null;
-  const at = e.lastIndexOf("@");
-  const local = e.slice(0, at), domain = e.slice(at + 1);
-  return domain === "gmail.com" || domain === "googlemail.com" ? `${local.replace(/\./g, "")}@${domain}` : e;
-}
-
-/**
- * E.164 digits with a leading +, or null. Numbers without a country code are
- * assumed US/Canada (10 digits -> +1). Meta and Snap want it without the +
- * (normalizePhone(…, false)).
- */
-export function normalizePhone(raw: unknown, withPlus = true): string | null {
-  if (typeof raw !== "string") return null;
-  let d = raw.replace(/[^0-9]/g, "");
-  if (raw.trim().startsWith("00")) d = d.slice(2);
-  if (d.length === 10 && !raw.trim().startsWith("+")) d = "1" + d;
-  if (d.length < 8 || d.length > 15) return null;
-  return withPlus ? `+${d}` : d;
-}
-
-export async function sha256Hex(s: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-}
+// The shared builder (_shared/hashedIds.ts, channel core mig 20261121162400);
+// re-exported so the builders and their tests keep importing from here.
+export { normalizeEmail, normalizeEmailGoogle, normalizePhone, sha256Hex } from "../hashedIds.ts";
 
 // ---- redaction -----------------------------------------------------------
 

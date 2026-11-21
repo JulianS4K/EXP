@@ -49,6 +49,7 @@ import OrgConnectedApps from '../components/OrgConnectedApps';
 import RoleApiScopesPanel from '../components/RoleApiScopesPanel';
 import PartnerPresalePanel from '../components/PartnerPresalePanel';
 import DiscordPanel from '../components/DiscordPanel';
+import ChannelAuditPanel from '../components/ChannelAuditPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -651,6 +652,9 @@ export default function OrgSettings() {
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager' || activeRole === 'finance') && (
               <IntegrationsPanel orgId={org.id} canEdit={isAdmin || activeRole === 'owner' || activeRole === 'manager'} />
             )}
+
+            {/* What we'd send: the channel core's planned (dry-run) writes and limit usage (mig 20261121162400). Owner / manager; hidden when empty. */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <ChannelAuditPanel orgId={org.id} />}
 
             {/* Discord: announcements + scheduled events in the org's own server (mig 20261113194000). Owner / manager; hidden until switched on. */}
             {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <DiscordPanel orgId={org.id} />}

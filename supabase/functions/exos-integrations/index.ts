@@ -11,6 +11,9 @@
 // (guardedFetch: checked right before each one is sent, not once per pass);
 // redirects are not followed. Reads that get a 429 / 5xx are tried again
 // (_shared/retry.ts; Retry-After honoured). Secrets never leave the server.
+// Credentials come from the one store (exos_integration_secret, mig
+// 20261121162400); pretix's /test runs on the channel core (the pretix
+// adapter through GatedHttp, recorded in exos_channel_audit).
 //
 // Routes (POST JSON, under /functions/v1/exos-integrations):
 //   /test  {org, provider}           owner / manager / finance: checks the saved
@@ -37,6 +40,12 @@ import { hiEventsAttendeesPage, hiEventsList } from "../_shared/backends/hievent
 import { testProvider } from "../_shared/backends/providers.ts";
 import { lumaEvent, lumaGuestsPage } from "../_shared/backends/luma.ts";
 import { corsHeaders, json } from "../_shared/spaHttp.ts";
+import { loadCredential } from "../_shared/channels/credentials.ts";
+import { createGatedHttp } from "../_shared/channels/gatedHttp.ts";
+import { rpcAuditSink } from "../_shared/channels/audit.ts";
+import { getAdapter, type OrgCredential } from "../_shared/channels/adapter.ts";
+import { ensureRegistry } from "../_shared/channels/registry.ts";
+import { pretixBase } from "../_shared/channels/adapters/pretix.ts";
 
 // Luma is plugged in but off until the operator sets EXOS_LUMA_ENABLED=on: no Luma API call is made.
 const lumaOn = () => Deno.env.get("EXOS_LUMA_ENABLED") === "on";
@@ -88,11 +97,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!(list.data as { provider: string }[]).some((r) => r.provider === provider)) {
         return json({ error: "Save the integration first." }, 404, cors);
       }
-      const cfg = await sb.rpc("exos_integration_config", { p_org_id: org, p_provider: provider });
-      if (cfg.error || !cfg.data) return json({ error: "Not found." }, 404, cors);
-      const c = cfg.data as { config: Record<string, unknown>; secret: string | null };
+      // The one credential store (mig 20261121162400): exos_integration_secret.
+      const cred = await loadCredential((fn, args) => sb.rpc(fn, args), org, provider).catch(() => null);
+      if (!cred) return json({ error: "Not found." }, 404, cors);
       if (provider === "luma" && !lumaOn()) return json({ ok: null, account_name: null, error: LUMA_OFF }, 200, cors);
-      const res = await testProvider(orgFetch, provider, c.config ?? {}, c.secret ?? null, (u) => urlIsBlocked(u));
+      const res = provider === "pretix"
+        ? await testOnCore(sb, org, cred)
+        : await testProvider(orgFetch, provider, cred.config, cred.secret, (u) => urlIsBlocked(u));
       if (res.ok !== null) {
         await sb.rpc("exos_integration_mark", {
           p_org_id: org, p_provider: provider, p_ok: res.ok, p_error: res.error ?? null, p_account_name: res.name ?? null,
@@ -185,9 +196,34 @@ async function txtRecords(name: string): Promise<string[]> {
 
 interface Claimed { event_id: string; org_id: string; provider: string; external_ref: string; sync_cursor: string | null; lease_id: string }
 
+// The org's settings and secret, from the one credential store
+// (exos_integration_secret, mig 20261121162400). Null: not connected.
 async function providerConfig(sb: SupabaseClient, org: string, provider: string) {
-  const { data } = await sb.rpc("exos_integration_config", { p_org_id: org, p_provider: provider });
-  return data as { config: Record<string, unknown>; secret: string | null } | null;
+  const c = await loadCredential((fn, args) => sb.rpc(fn, args), org, provider).catch(() => null);
+  return c ? { config: c.config, secret: c.secret } : null;
+}
+
+// pretix's credential test on the channel core: the pretix adapter's read
+// through GatedHttp (read only: no write allowlist; the token in the
+// Authorization header, redacted; SSRF-checked on every try; one audit row
+// in exos_channel_audit).
+async function testOnCore(sb: SupabaseClient, org: string, cred: OrgCredential) {
+  ensureRegistry();
+  const adapter = getAdapter("pretix");
+  const base = pretixBase(cred.config);
+  if (!adapter?.testCredential) return { ok: null };
+  if (!base) return { ok: false, error: "The pretix address must be an https URL." };
+  if (await urlIsBlocked(base)) return { ok: false, error: "That pretix address isn't reachable from Exos." };
+  const audit = rpcAuditSink((fn, args) => sb.rpc(fn, args), org, { reads: true });
+  const http = createGatedHttp({
+    channel: "pretix", base, fetch: guardedFetch(fetch), env: (k) => Deno.env.get(k), orgWritesEnabled: cred.writesEnabled,
+    writes: adapter.writes ?? [], secrets: [cred.secret], audit,
+  });
+  try {
+    return await adapter.testCredential({ orgId: org, creds: cred, http, audit });
+  } finally {
+    await audit.flush?.();
+  }
 }
 
 async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: string): Promise<{ ok: boolean; id?: string; name?: string; error?: string }> {
