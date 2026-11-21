@@ -26,6 +26,9 @@
 --   R10 squatting: another org's UNVERIFIED id blocks no one; once the owner
 --      verifies it (a live pass, or a read proving it), the squatter's pass and
 --      mark refuse it; "another org's" and "not on this account" get one answer
+--   R11 a re-link clears a verification (Eventbrite door link, Luma backend
+--      link once a pretix one); pretix never verifies; the backfill only takes
+--      mirrors in step
 --   (the migration's re-apply is checked by reapply_check.sh in run_p0)
 -- Self-contained (ce1 prefix), rolled back.
 -- ============================================================================
@@ -457,7 +460,11 @@ BEGIN
          'state', 'synced', 'external_id', '881401', 'hash', 'h',
          'tickets', jsonb_build_array(jsonb_build_object('tier_id', pg_temp.u('d9'), 'external_ticket_id', '9401', 'name', 'GA'))));
   SELECT * INTO m FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e9') AND provider = 'eventbrite';
-  ASSERT j ->> 'state' = 'error' AND j ->> 'conflict' LIKE '%881401%another Exos event%', 'R7: a conflict ' || j::text;
+  -- Another org's: the words of an event not on this account (no oracle).
+  ASSERT j ->> 'state' = 'error' AND j ->> 'conflict' = 'Eventbrite: that event wasn''t found on this account', 'R7: a conflict ' || j::text;
+  ASSERT (SELECT last_error FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e9') AND provider = 'eventbrite')
+         = 'Eventbrite: that event wasn''t found on this account', 'R7: shown as the pass shows it: '
+         || coalesce((SELECT last_error FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e9') AND provider = 'eventbrite'), 'null');
   ASSERT m.external_id IS NULL, 'R7: not kept';
   ASSERT NOT (m.external_meta ? 'pending_create') AND m.external_meta ? 'conflict', 'R7: pending cleared, the sync stops';
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e9'))
@@ -467,7 +474,9 @@ BEGIN
   SELECT * INTO c FROM public.exos_channel_claim(5, pg_temp.u('e9')) x WHERE x.provider = 'eventbrite';
   UPDATE public.exos_channel_mirrors SET external_id = '881501' WHERE event_id = pg_temp.u('e7') AND provider = 'eventbrite';
   j := public.exos_channel_mark(pg_temp.u('e9'), 'eventbrite', c.lease_id, c.change_seq, '{"state":"synced","external_id":"881501"}');
-  ASSERT j ->> 'state' = 'error' AND j ->> 'conflict' LIKE '%881501%', 'R7: same org: a conflict, not 23505 ' || j::text;
+  ASSERT j ->> 'state' = 'error' AND j ->> 'conflict' LIKE '%881501%another Exos event%', 'R7: same org: says so, not 23505 ' || j::text;
+  ASSERT (SELECT last_error FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e9') AND provider = 'eventbrite')
+         LIKE 'conflict: Eventbrite event 881501 already belongs to another Exos event%', 'R7: same org: shown';
   -- Lease renewal: refused without the lease; with it, extended and the venue noted on a pending create.
   ASSERT NOT public.exos_channel_lease_renew(pg_temp.u('e9'), 'eventbrite', gen_random_uuid()), 'R7: renew needs the lease';
   -- And exos_channel_set can't link it either.
@@ -559,6 +568,50 @@ SELECT set_config('ce1.luma_same', pg_temp.refused($$SELECT public.exos_backend_
 RESET ROLE;
 SELECT pg_temp.act(NULL);
 DO $$ BEGIN ASSERT current_setting('ce1.luma_same')::boolean, 'R10: the same answer (Luma)'; END $$;
+
+-- R11: a verification belongs to its id. A re-link clears it; pretix proves nothing.
+DO $$
+BEGIN
+  -- (a) Eventbrite: e3's door link to its own 880001, verified; then re-pointed at
+  -- someone's public 990001 (readable with any token): not verified.
+  PERFORM public.exos_eventbrite_link(pg_temp.u('e3'), pg_temp.u('a1'), '880001', 'Ours');
+  ASSERT public.exos_channel_link_verified(pg_temp.u('e3'), 'eventbrite', '880001'), 'R11a: verified';
+  PERFORM public.exos_eventbrite_link(pg_temp.u('e3'), pg_temp.u('a1'), '990001', 'Theirs');
+  ASSERT (SELECT verified_at FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('e3')) IS NULL, 'R11a: re-link clears it';
+  ASSERT NOT ('990001' = ANY (public.exos_channel_external_taken(pg_temp.u('ec'), 'eventbrite', ARRAY['990001']))), 'R11a: blocks no other org';
+  PERFORM public.exos_eventbrite_link(pg_temp.u('e3'), pg_temp.u('a1'), '990001', 'Theirs again');   -- same id: unchanged
+  -- (b) Luma via pretix: a pretix link is never verified (its address is the org's own).
+  ASSERT NOT public.exos_channel_link_verified(pg_temp.u('e3'), 'pretix', 'onpretix'), 'R11b: pretix proves nothing';
+  -- Even one marked verified before this rule: re-pointed at a Luma event, it isn't.
+  UPDATE public.exos_backend_links SET verified_at = now() WHERE event_id = pg_temp.u('e3');
+END $$;
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
+SELECT public.exos_backend_link(pg_temp.u('e3'), 'luma', 'evt-yshow123');
+RESET ROLE;
+SELECT pg_temp.act(NULL);
+DO $$
+BEGIN
+  ASSERT (SELECT provider = 'luma' AND verified_at IS NULL FROM public.exos_backend_links WHERE event_id = pg_temp.u('e3')), 'R11b: arrives unverified';
+  ASSERT NOT ('evt-yshow123' = ANY (public.exos_channel_external_taken(pg_temp.u('ec'), 'luma', ARRAY['evt-yshow123']))), 'R11b: blocks no other org';
+  -- mark's own verification of a new id in the same update is kept.
+  ASSERT (SELECT external_verified_at IS NOT NULL FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('ed') AND provider = 'eventbrite'),
+         'R11: mark''s verification kept';
+  -- Backfill: a mirror whose synced_at predates its current id (status not synced) isn't verified.
+  INSERT INTO public.exos_channel_mirrors (event_id, provider, org_id, mode, external_id, status, synced_at, last_hash)
+  VALUES (pg_temp.u('e6'), 'eventbrite', 'ce100000-0000-0000-0000-000000000001', 'link', '881701', 'error', now() - interval '1 day', 'h'),
+         (pg_temp.u('e7'), 'luma', 'ce100000-0000-0000-0000-000000000001', 'link', 'evt-ce1back', 'synced', now() - interval '1 day', 'h');
+END $$;
+SET client_min_messages = warning;
+\ir ../../supabase/migrations/20261121100000_exos_channel_risks.sql
+RESET client_min_messages;
+DO $$
+BEGIN
+  ASSERT (SELECT external_verified_at FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e6') AND provider = 'eventbrite') IS NULL,
+         'R11: backfill skips a mirror not in step';
+  ASSERT (SELECT external_verified_at IS NOT NULL FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('e7') AND provider = 'luma'),
+         'R11: backfill verifies a synced one';
+END $$;
 
 -- Grants: the new functions are the service role's only.
 DO $$

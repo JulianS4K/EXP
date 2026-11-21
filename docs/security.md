@@ -1217,12 +1217,20 @@ Exos adopted.
   404 text, checkRef's Luma text, same status) and never at `exos_channel_set`, so no org learns about another's
   events. `exos_channel_set` and the link functions take the event lock, then the `exos_channel_ext:` id lock (mark:
   the mirror row, then the id). `exos_channel_remove` waits for a pass that holds the lease.
+- **Third review.** A verification belongs to its id: a BEFORE UPDATE trigger on the mirrors, door links and backend
+  links clears it whenever the external id (or provider) changes in an update that doesn't set it, so re-pointing a
+  verified link at someone's public event doesn't carry it over. Only Eventbrite events of one of the token's
+  organizations (`ebOwnsEvent`, the token's organizations paged up to 5) and Luma events the key's calendar manages
+  are verified; never pretix / hi.events. exos-eventbrite-sync /link and a linked mirror's first pass require that
+  ownership before anything else (another organizer's public event gets the not-found answer and no write, dry run
+  or live). mark's cross-org conflict uses the same not-on-account words. The backfill takes only mirrors in step
+  (`status = 'synced'` with a hash).
 - **Notes, by design.** The first capacity of a class Exos creates is floored at 1 (Eventbrite refuses 0) and is
   computed outside the promise lock: the next apply corrects it. `exos_created` starts false on existing rows
   (fail-safe: they get no price update). The Posh network bucket trusts the platform's address headers
   (cf-connecting-ip, else x-real-ip, else the last X-Forwarded-For hop: `_shared/guest.ts clientIp`); with none,
   unknown tokens share one bucket.
-- Tests: `tests/exos/test_channel_risks.sql` (R1-R10), `tests/exos/race_channel_promise.sh` (CI, 4 races), `tests/exos/reapply_check.sh`,
+- Tests: `tests/exos/test_channel_risks.sql` (R1-R11), `tests/exos/race_channel_promise.sh` (CI, 4 races), `tests/exos/reapply_check.sh`,
   `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
   `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
 
