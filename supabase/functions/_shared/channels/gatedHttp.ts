@@ -197,17 +197,25 @@ export const SECRET_HEADER = /(authorization|auth|cookie|token|secret|key|signat
  */
 export const SECRET_KEY = /(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)/i;
 /**
- * A body field named just "key" is a secret unless its value is a short
- * targeting key: an ad platform's geo key ("US", "US:10001") or a numeric id
- * ("2490299"). Anything else under "key" (an API key, "K-LEAK") is redacted.
- * _exos_channel_audit_scrub applies the same rule in SQL.
+ * A body field named just "key" is always a secret, except inside a geo
+ * targeting list (GEO_CONTAINER: the array or object it sits in is named zips,
+ * regions, cities, ...), where an ad platform's location key is kept when it
+ * is a geo key ("US", "US:10001", "CA:M5V 2T6") or an integer id of at most 10
+ * digits (a JSON integer or a digit string). Anything else under "key" (an API
+ * key, a PIN or a card number outside a geo list, "US:<40-char secret>") is
+ * redacted. _exos_channel_audit_scrub applies the same rule in SQL (its
+ * p_container argument).
  */
 export const BARE_KEY = /^key$/i;
-export const TARGETING_KEY = /^([A-Z]{2}(:[A-Za-z0-9 ._-]{1,40})?|[0-9]{1,12})$/;
-export function secretEntry(k: string, v: unknown): boolean {
+export const GEO_CONTAINER =
+  /^(zips|zip_codes|postal_codes|regions|cities|countries|country_groups|geo_locations|geolocations|locations|custom_locations|dmas|metros|neighborhoods|subcities|places|electoral_districts)$/i;
+export const GEO_KEY = /^([A-Z]{2}(:[A-Za-z0-9 -]{1,12})?|[0-9]{1,10})$/;
+export function secretEntry(k: string, v: unknown, container?: string | null): boolean {
   if (SECRET_KEY.test(k)) return true;
   if (!BARE_KEY.test(k)) return false;
-  return !(typeof v === "number" || (typeof v === "string" && TARGETING_KEY.test(v)));
+  if (!container || !GEO_CONTAINER.test(container)) return true;
+  if (typeof v === "number") return !(Number.isSafeInteger(v) && v >= 0 && v < 1e10);
+  return !(typeof v === "string" && GEO_KEY.test(v));
 }
 /** Query parameter names refused in a URL: by pattern (api_token, access_key, X-Amz-Signature, ...), not a fixed list. */
 export const SECRET_QUERY = /(token|secret|passw|pwd|signature|credential|jwt|^sig$|^auth$|^key$|apikey|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?key|^x-amz-)/i;
@@ -228,17 +236,21 @@ function scrubString(s: string, secrets: string[]): string {
   return out;
 }
 
-/** A deep copy with secret values and secret-named keys redacted. */
-export function redact(value: unknown, secrets: readonly (string | null | undefined)[] = [], depth = 0): unknown {
+/**
+ * A deep copy with secret values and secret-named keys redacted. `container`
+ * is the name of the key the value sits under (an array passes its own name
+ * to its elements), for secretEntry's geo-list exception.
+ */
+export function redact(value: unknown, secrets: readonly (string | null | undefined)[] = [], depth = 0, container: string | null = null): unknown {
   const secs = usable(secrets);
   if (value === null || value === undefined) return value;
   if (depth > 12) return "[too deep]";
   if (typeof value === "string") return scrubString(value, secs);
-  if (Array.isArray(value)) return value.map((v) => redact(v, secs, depth + 1));
+  if (Array.isArray(value)) return value.map((v) => redact(v, secs, depth + 1, container));
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = secretEntry(k, v) ? REDACTED : redact(v, secs, depth + 1);
+      out[k] = secretEntry(k, v, container) ? REDACTED : redact(v, secs, depth + 1, k);
     }
     return out;
   }

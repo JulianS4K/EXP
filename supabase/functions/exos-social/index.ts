@@ -12,9 +12,16 @@
 // What would be sent is recorded in exos_channel_audit (the organizer's
 // "What we'd send", Org settings) and returned here.
 //
-// Route (POST JSON, under /functions/v1/exos-social), owner / manager (the
+// Routes (POST JSON, under /functions/v1/exos-social), owner / manager (the
 // context RPC checks the caller's role first):
-//   /plan  {org, event, platforms?: [instagram, tiktok, meetup, linkedin, google_business]}
+//   /plan     {org, event, platforms?: [instagram, tiktok, meetup, linkedin, google_business],
+//              tiktok?: {privacyLevel, allowComment, allowDuet, allowStitch, autoAddMusic,
+//                        disclose, consent}, meetupDraftId?}
+//             never sends; each platform's plan carries `confirm`
+//   /publish  {org, event, platform, confirm, tiktok?, meetupDraftId?}: one
+//             platform, only with the confirm of a plan whose requests haven't
+//             changed. While the build pin is in it answers 409 "pinned" and
+//             sends nothing (_shared/social/run.ts publishSocial).
 // Deploy with --no-verify-jwt (CORS preflight; the JWT is checked here).
 //
 // Env: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY,
@@ -25,7 +32,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { redactError } from "../_shared/log.ts";
 import { corsHeaders, json } from "../_shared/spaHttp.ts";
-import { planSocial, SOCIAL_PLATFORMS, type RunDeps } from "../_shared/social/run.ts";
+import { planSocial, publishSocial, SOCIAL_PLATFORMS, type RunDeps } from "../_shared/social/run.ts";
+import { parseTikTokChoices } from "../_shared/channels/adapters/tiktok.ts";
 import type { SocialEventInput, SocialPlatform } from "../_shared/social/postKit.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -41,7 +49,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const cors = corsHeaders(req.headers.get("origin"), "POST, OPTIONS");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
-  if (route !== "plan") return json({ error: "not found" }, 404, cors);
+  if (route !== "plan" && route !== "publish") return json({ error: "not found" }, 404, cors);
 
   const auth = req.headers.get("Authorization") ?? "";
   if (!/^Bearer\s+\S+/.test(auth)) return json({ error: "sign in first" }, 401, cors);
@@ -55,7 +63,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const event = String(body?.event ?? "");
   if (!UUID.test(org)) return json({ error: "missing or bad org" }, 400, cors);
   if (!UUID.test(event)) return json({ error: "pick an event" }, 400, cors);
-  const asked = Array.isArray(body?.platforms) ? body.platforms.map(String) : SOCIAL_PLATFORMS;
+  const asked = route === "publish" ? [String(body?.platform ?? "")]
+    : Array.isArray(body?.platforms) ? body.platforms.map(String) : SOCIAL_PLATFORMS;
   const platforms = SOCIAL_PLATFORMS.filter((p) => asked.includes(p)) as SocialPlatform[];
   if (!platforms.length) return json({ error: `one of ${SOCIAL_PLATFORMS.join(", ")}` }, 400, cors);
 
@@ -76,8 +85,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
     fetch: noNetwork,
     appBase: (Deno.env.get("EXOS_APP_BASE_URL") ?? "").replace(/\/+$/, ""),
   };
+  const meetupDraftId = typeof body?.meetupDraftId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(body.meetupDraftId) ? body.meetupDraftId : null;
+  const planReq = {
+    event: context.event, venueOrg: context.org?.venue_org === true, platforms,
+    tiktok: parseTikTokChoices(body?.tiktok), meetupDraftId,
+  };
   try {
-    const out = await planSocial(deps, { event: context.event, venueOrg: context.org?.venue_org === true, platforms });
+    if (route === "publish") {
+      const confirm = typeof body?.confirm === "string" ? body.confirm : "";
+      const out = await publishSocial(deps, { ...planReq, platform: platforms[0], confirm });
+      if (out.published === false) {
+        const msg = out.reason === "pinned" ? "Publishing is switched off in this build: nothing was sent."
+          : out.reason === "changed" ? "The plan changed since you reviewed it: plan it again and check it."
+          : out.reason === "stopped" ? (out.plan.result.stopped ?? "This plan can't be published.")
+          : "Review the plan first (no confirm).";
+        return json({ dry_run: true, published: false, reason: out.reason, error: msg, plan: out.plan }, 409, cors);
+      }
+      return json({ dry_run: false, published: true, plan: out.plan, result: out.result }, 200, cors);
+    }
+    const out = await planSocial(deps, planReq);
     return json({ dry_run: true, connected: context.connected, ...out }, 200, cors);
   } catch (err) {
     console.error("exos-social: plan failed", redactError(err));

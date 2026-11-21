@@ -341,8 +341,11 @@ recorded]`), never stored.
 **Who is on an audience.** `exos_ads_audience_source` (service role) returns the org's buyers with a
 fulfilled (or partly refunded) order who granted **advertising** consent at checkout, and its fans
 whose latest advertising choice there (by email or account) is granted on an order that wasn't fully
-refunded. A "yes" counts only from a paid or issued order whose email was proven (or never needed
-proof): a stranger can type anyone's email into a guest checkout. A "no" counts from any checkout,
+refunded. A "yes" counts only from a paid or issued order, not lost to a dispute, whose email the
+person proved: the email code for that very address, or their own confirmed account with the same
+address. A stranger can type anyone's email into a guest checkout and prove their own phone, so an
+SMS proof never makes a "yes", and nor does an organizer's correction of the address. Guest orders
+from before proofs (Nov 2026) don't count as a "yes". A "no" counts from any checkout,
 the latest counted choice wins, and at the same moment a "no" wins. Anyone unsubscribed from
 marketing mail, off the org's email list, discarded, deleted or banned is left out. Joining the org's
 list or following it is not advertising consent. The rows are hashes only, built in SQL (`em`,

@@ -650,8 +650,12 @@ GRANT EXECUTE ON FUNCTION public._exos_channel_audit_path(text) TO authenticated
 
 -- Secret-named keys and auth-looking strings out, at any depth (the edge
 -- function redacts first; this is the second pass). The key pattern is
--- gatedHttp.ts SECRET_KEY.
-CREATE OR REPLACE FUNCTION public._exos_channel_audit_scrub(p jsonb, p_depth integer DEFAULT 0)
+-- gatedHttp.ts SECRET_KEY; p_container is the name of the key the value sits
+-- under (an array passes its own name to its elements), for the geo-list
+-- exception on a bare "key" (gatedHttp.ts secretEntry / GEO_CONTAINER / GEO_KEY).
+-- An earlier draft of this migration had a two-argument version.
+DROP FUNCTION IF EXISTS public._exos_channel_audit_scrub(jsonb, integer);
+CREATE OR REPLACE FUNCTION public._exos_channel_audit_scrub(p jsonb, p_depth integer DEFAULT 0, p_container text DEFAULT NULL)
 RETURNS jsonb LANGUAGE plpgsql IMMUTABLE
 SET search_path = public, pg_temp
 AS $$
@@ -667,17 +671,20 @@ BEGIN
       RETURN coalesce((SELECT jsonb_object_agg(e.k, CASE
                  WHEN e.k ~* '(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)'
                    THEN to_jsonb('[redacted]'::text)
-                 -- A bare "key" is a secret unless it is a short targeting key
-                 -- (geo "US" / "US:10001", a numeric id), as gatedHttp.ts secretEntry.
+                 -- A bare "key" is a secret except a geo key inside a geo list
+                 -- (gatedHttp.ts secretEntry): "US", "US:10001", or an integer
+                 -- id of at most 10 digits (JSON integer or digit string).
                  WHEN e.k ~* '^key$'
-                      AND NOT (jsonb_typeof(e.v) = 'number'
-                               OR (jsonb_typeof(e.v) = 'string'
-                                   AND (e.v #>> '{}') ~ '^([A-Z]{2}(:[A-Za-z0-9 ._-]{1,40})?|[0-9]{1,12})$'))
+                      AND NOT (coalesce(p_container, '') ~* '^(zips|zip_codes|postal_codes|regions|cities|countries|country_groups|geo_locations|geolocations|locations|custom_locations|dmas|metros|neighborhoods|subcities|places|electoral_districts)$'
+                               AND ((jsonb_typeof(e.v) = 'number'
+                                     AND (e.v #>> '{}') ~ '^[0-9]{1,10}$')
+                                    OR (jsonb_typeof(e.v) = 'string'
+                                        AND (e.v #>> '{}') ~ '^([A-Z]{2}(:[A-Za-z0-9 -]{1,12})?|[0-9]{1,10})$')))
                    THEN to_jsonb('[redacted]'::text)
-                 ELSE public._exos_channel_audit_scrub(e.v, p_depth + 1) END)
+                 ELSE public._exos_channel_audit_scrub(e.v, p_depth + 1, e.k) END)
                FROM jsonb_each(p) e(k, v)), '{}'::jsonb);
     WHEN 'array' THEN
-      RETURN coalesce((SELECT jsonb_agg(public._exos_channel_audit_scrub(a.v, p_depth + 1) ORDER BY a.o)
+      RETURN coalesce((SELECT jsonb_agg(public._exos_channel_audit_scrub(a.v, p_depth + 1, p_container) ORDER BY a.o)
                FROM jsonb_array_elements(p) WITH ORDINALITY a(v, o)), '[]'::jsonb);
     WHEN 'string' THEN
       RETURN to_jsonb(public._exos_channel_audit_scrub_text(p #>> '{}'));
@@ -685,8 +692,8 @@ BEGIN
       RETURN p;
   END CASE;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_channel_audit_scrub(jsonb, integer) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public._exos_channel_audit_scrub(jsonb, integer) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public._exos_channel_audit_scrub(jsonb, integer, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._exos_channel_audit_scrub(jsonb, integer, text) TO authenticated, service_role;
 
 -- Service role: up to 50 steps [{channel, op, method, path, live, request,
 -- response, status, ok, error, warnings, event_id}]; a malformed step is

@@ -10,9 +10,12 @@
 import { supabase } from './supabase';
 import { PLATFORM_LABEL, SOCIAL_PLATFORMS, type PlatformPost, type SocialPlatform } from '../../supabase/functions/_shared/social/postKit.ts';
 import { familyOf, VENDOR_APPS } from '../../supabase/functions/_shared/social/apps.ts';
+import {
+  TIKTOK_DISCLOSE, tiktokDeclaration, tiktokDiscloseLabel, type TikTokChoices, type TikTokCreatorView,
+} from '../../supabase/functions/_shared/channels/adapters/tiktok.ts';
 
-export { PLATFORM_LABEL, SOCIAL_PLATFORMS };
-export type { PlatformPost, SocialPlatform };
+export { PLATFORM_LABEL, SOCIAL_PLATFORMS, TIKTOK_DISCLOSE, tiktokDeclaration, tiktokDiscloseLabel };
+export type { PlatformPost, SocialPlatform, TikTokChoices, TikTokCreatorView };
 
 /** The store provider each platform's credential lives under. */
 export const PLATFORM_PROVIDER: Record<SocialPlatform, string> = {
@@ -27,7 +30,7 @@ export const PLATFORM_PROVIDER: Record<SocialPlatform, string> = {
 export const PLATFORM_ACTION: Record<SocialPlatform, string> = {
   instagram: 'Post to your Instagram professional account',
   tiktok: 'Photo post on your TikTok (Direct Post)',
-  meetup: 'List it in your Meetup Pro group (draft, then published)',
+  meetup: 'List it in your Meetup Pro group (a draft first; publishing it is a separate step)',
   linkedin: 'An event on your LinkedIn organization page',
   google_business: 'An event post on your venue\'s Google Business Profile',
 };
@@ -41,7 +44,6 @@ export interface SocialContext {
     meetup_pro_network: boolean;
     linkedin_org_page: boolean;
     gbp_verified_days: number | null;
-    gbp_own_connection: boolean;
   };
 }
 
@@ -50,13 +52,17 @@ export interface SocialStepView { op: string; method: string; path: string; live
 export interface SocialPlatformPlan {
   platform: SocialPlatform;
   label: string;
-  status: { connected: boolean; provider: string; dryRun: boolean; app: string | null; connect: 'built' | 'stub'; via?: string };
+  status: { connected: boolean; provider: string; dryRun: boolean; app: string | null; connect: 'built' | 'stub' };
   post: PlatformPost;
   result: {
     channel: string; connected: boolean; planned: boolean; ids: Record<string, string>; warnings: string[]; stopped?: string;
     steps: Array<{ op: string; method: string; path: string; planned: boolean; ok: boolean; error?: string }>;
+    /** TikTok: what the creator may choose, and what the plan still needs from them. */
+    tiktok?: TikTokCreatorView;
   };
   steps: SocialStepView[];
+  /** The plan's confirm digest (null: stopped or nothing to send). A publish needs it. */
+  confirm: string | null;
 }
 
 export interface SocialPlanResponse {
@@ -82,7 +88,7 @@ export function platformStatus(ctx: SocialContext | null, p: SocialPlatform): { 
   if (p === 'google_business' && ctx) {
     if (!ctx.org.venue_org) notes.push('For organizations that run their own venue.');
     if (f && (f.gbp_verified_days === null || f.gbp_verified_days < 60)) notes.push('Needs a Business Profile verified 60+ days ago.');
-    if (connected && f && !f.gbp_own_connection) notes.push('Uses your Google connection (it must also allow Business Profile).');
+    notes.push('Connects on its own (Business Profile access only), separate from Google Ads.');
   }
   return { word: connected ? 'connected' : 'not_connected', notes };
 }
@@ -111,19 +117,48 @@ export async function loadSocialContext(orgId: string, eventId: string): Promise
   return data as SocialContext;
 }
 
-export async function planSocialPosts(orgId: string, eventId: string, platforms: SocialPlatform[]): Promise<SocialPlanResponse> {
+/** What the TikTok controls must still be set to before a post could be built (panel-side check). */
+export function tiktokMissing(c: TikTokChoices): string[] {
+  const out: string[] = [];
+  if (!c.privacyLevel) out.push('who can see the post');
+  if (!c.disclose) out.push('whether it promotes a brand');
+  if (c.consent !== true) out.push("agreeing to TikTok's terms");
+  return out;
+}
+
+export interface PlanOptions { tiktok?: TikTokChoices; meetupDraftId?: string | null }
+
+async function socialCall(route: 'plan' | 'publish', body: Record<string, unknown>): Promise<{ ok: boolean; status: number; out: any }> {
   const url = (env.VITE_SUPABASE_URL ?? '').replace(/\/+$/, '');
   if (!url) throw new Error('Post planning isn\'t configured here.');
   const { data } = await supabase.auth.getSession();
   const jwt = data.session?.access_token;
   if (!jwt) throw new Error('Sign in first.');
   const anon = env.VITE_SUPABASE_ANON_KEY ?? '';
-  const res = await fetch(`${url}/functions/v1/exos-social/plan`, {
+  const res = await fetch(`${url}/functions/v1/exos-social/${route}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', Authorization: `Bearer ${jwt}`, ...(anon ? { apikey: anon } : {}) },
-    body: JSON.stringify({ org: orgId, event: eventId, platforms }),
+    body: JSON.stringify(body),
   });
-  const out = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(typeof out?.error === 'string' ? out.error : `Planning failed (${res.status}).`);
+  return { ok: res.ok, status: res.status, out: await res.json().catch(() => null) };
+}
+
+export async function planSocialPosts(orgId: string, eventId: string, platforms: SocialPlatform[], opts: PlanOptions = {}): Promise<SocialPlanResponse> {
+  const { ok, status, out } = await socialCall('plan', {
+    org: orgId, event: eventId, platforms, tiktok: opts.tiktok ?? {}, ...(opts.meetupDraftId ? { meetupDraftId: opts.meetupDraftId } : {}),
+  });
+  if (!ok) throw new Error(typeof out?.error === 'string' ? out.error : `Planning failed (${status}).`);
   return out as SocialPlanResponse;
+}
+
+export interface PublishAnswer { published: boolean; reason?: string; message: string }
+
+/** Publish one reviewed plan (its confirm). While publishing is switched off, the answer says so and nothing is sent. */
+export async function publishSocialPost(orgId: string, eventId: string, platform: SocialPlatform, confirm: string, opts: PlanOptions = {}): Promise<PublishAnswer> {
+  const { ok, status, out } = await socialCall('publish', {
+    org: orgId, event: eventId, platform, confirm, tiktok: opts.tiktok ?? {}, ...(opts.meetupDraftId ? { meetupDraftId: opts.meetupDraftId } : {}),
+  });
+  if (ok && out?.published === true) return { published: true, message: 'Sent.' };
+  if (status === 409) return { published: false, reason: out?.reason, message: typeof out?.error === 'string' ? out.error : 'Not sent.' };
+  throw new Error(typeof out?.error === 'string' ? out.error : `Publishing failed (${status}).`);
 }

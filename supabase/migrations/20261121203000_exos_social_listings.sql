@@ -33,8 +33,9 @@
 --    OAuth token; config group_urlname, pro_network, plan), linkedin (a
 --    LinkedIn token for the org's organization page; config organization_id)
 --    and google_business (config account_id, location_id, verified_at; the
---    secret is the Google connection's refresh token, borrowed from
---    ads_google_ads until its own connect flow exists).
+--    secret is Business Profile's OWN refresh token, from its own sign-in on
+--    the Google client with business.manage alone: never the Google Ads
+--    connection's, which never carries that scope; _shared/social/apps.ts).
 -- 2. THE POST KIT'S READ. exos_social_post_context: owner / manager of the
 --    org (42501 otherwise; 22023 for another org's event). The event as the
 --    discovery listings read it (_exos_discovery_event_json: the feed columns
@@ -42,8 +43,8 @@
 --    location loses its venue name and address here, so they can't reach a
 --    post. venue_org: the org owns a venue (exos_venues, relationship
 --    'owned'; Google Business Profile posts are for venue orgs only).
---    connected: one boolean per social provider (google_business: its own
---    secret or the Google connection's). facts: the Meetup plan word and
+--    connected: one boolean per social provider, each its own credential
+--    only (google_business never counts the Google Ads connection). facts: the Meetup plan word and
 --    whether a Pro network is set, whether a LinkedIn organization page is
 --    set, the days since the Business Profile was verified. No secret, no
 --    account id, no buyer.
@@ -142,14 +143,12 @@ BEGIN
       'tiktok_publish', public._exos_ads_connected(p_org_id, 'tiktok_publish'),
       'meetup', public._exos_ads_connected(p_org_id, 'meetup'),
       'linkedin', public._exos_ads_connected(p_org_id, 'linkedin'),
-      'google_business', public._exos_ads_connected(p_org_id, 'google_business')
-                         OR public._exos_ads_connected(p_org_id, 'ads_google_ads')),
+      'google_business', public._exos_ads_connected(p_org_id, 'google_business')),
     'facts', jsonb_build_object(
       'meetup_plan', CASE WHEN lower(v_meet ->> 'plan') IN ('starter', 'standard', 'pro') THEN lower(v_meet ->> 'plan') END,
       'meetup_pro_network', coalesce(v_meet ->> 'pro_network', '') <> '',
       'linkedin_org_page', coalesce(v_li ->> 'organization_id', '') ~ '^[0-9]{1,20}$',
-      'gbp_verified_days', v_days,
-      'gbp_own_connection', public._exos_ads_connected(p_org_id, 'google_business')));
+      'gbp_verified_days', v_days));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_social_post_context(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_social_post_context(uuid, uuid) TO authenticated, service_role;

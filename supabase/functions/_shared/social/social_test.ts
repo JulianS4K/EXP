@@ -7,8 +7,8 @@
 // a stub, and the dry-run tests count that it was never called.
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "jsr:@std/assert@1";
 import { adTextProblems, composePost, composePostKit, contactInfoProblems, SECRET_VENUE_LINE, SOCIAL_PLATFORMS, type SocialEventInput } from "./postKit.ts";
-import { planSocial, SOCIAL_WRITES_PINNED_OFF, type RunDeps } from "./run.ts";
-import { appConfigured, familyOf, VENDOR_APPS } from "./apps.ts";
+import { confirmDigest, planSocial, publishSocial, SOCIAL_WRITES_PINNED_OFF, type RunDeps } from "./run.ts";
+import { appConfigured, familyOf, scopesFor, VENDOR_APPS } from "./apps.ts";
 import { bodyAllowed, createGatedHttp, GatedHttpRefused, type WriteRule } from "../channels/gatedHttp.ts";
 import { memoryAuditSink } from "../channels/audit.ts";
 import { memoryUsageCounter, type UsageCounter } from "../channels/usage.ts";
@@ -16,7 +16,10 @@ import { evaluateLimits, rulesFor } from "../channels/limits.ts";
 import { adapterProblems, type ChannelAdapter, type ChannelCtx, type OrgCredential } from "../channels/adapter.ts";
 import { ADAPTERS, ensureRegistry } from "../channels/registry.ts";
 import { instagramAdapter, instagramHttp, INSTAGRAM_WRITES } from "../channels/adapters/instagram.ts";
-import { TIKTOK_SELF_ONLY_WARNING, tiktokHttp, tiktokPrivacy, tiktokPublish, TIKTOK_WRITES } from "../channels/adapters/tiktok.ts";
+import {
+  parseTikTokChoices, tiktokDeclaration, tiktokDiscloseLabel, TIKTOK_SELF_ONLY_WARNING, tiktokHttp, tiktokPrivacyOptions, tiktokPublish, TIKTOK_WRITES,
+  type TikTokChoices,
+} from "../channels/adapters/tiktok.ts";
 import {
   MEETUP_CREATE_EVENT, MEETUP_EDIT_EVENT, meetupAdapter, meetupBodyAllowed, meetupDuration, meetupHttp, meetupLocal, MEETUP_WRITES,
 } from "../channels/adapters/meetup.ts";
@@ -229,50 +232,99 @@ Deno.test("Instagram: 100 posts a day; the 101st is capped, nothing sent", async
   assertEquals(rulesFor("instagram")[0].threshold, 100);
 });
 
-Deno.test("TikTok: Direct Post is SELF_ONLY until the app is audited; the init counted; nothing sent", async () => {
+const TT_OK: TikTokChoices = { privacyLevel: "SELF_ONLY", disclose: "your_brand", consent: true };
+
+Deno.test("TikTok: the creator chooses; no privacy default; interactions off unless allowed; nothing sent", async () => {
   const c = cred("tiktok_publish", { open_id: "open-1" });
+  // No choices: the plan asks for them and builds no init payload.
+  const bare = ctxFor(tiktokHttp(c), c);
+  const r0 = await tiktokPublish(false)(bare.ctx, { id: EVENT.id }, post("tiktok"));
+  assertEquals(bare.seen.calls, 0);
+  assertEquals(r0.steps.map((s) => s.path), ["/v2/post/publish/creator_info/query/"], "creator_info only: no init without the creator's choices");
+  assertEquals(r0.tiktok!.needs, ["privacy_level", "disclose", "consent"]);
+  assertEquals(r0.tiktok!.privacyOptions, ["SELF_ONLY"]);
+  assertStringIncludes(r0.stopped!, "who can see the post");
+  assert(r0.warnings.includes(TIKTOK_SELF_ONLY_WARNING));
+  // Chosen: the init carries exactly the creator's choices.
   const { ctx, seen, audit } = ctxFor(tiktokHttp(c), c);
-  const r = await tiktokPublish(false)(ctx, { id: EVENT.id }, post("tiktok")) as any;
+  const r = await tiktokPublish(false, TT_OK)(ctx, { id: EVENT.id }, post("tiktok"));
   assertEquals(seen.calls, 0);
-  assert(r.warnings.includes(TIKTOK_SELF_ONLY_WARNING));
-  assertEquals(r.steps.map((s: any) => s.path), ["/v2/post/publish/creator_info/query/", "/v2/post/publish/content/init/"]);
+  assertEquals(r.steps.map((s) => s.path), ["/v2/post/publish/creator_info/query/", "/v2/post/publish/content/init/"]);
   const init = audit.steps[1].request!.body as any;
   assertEquals([init.post_info.privacy_level, init.post_mode, init.media_type, init.source_info.source],
     ["SELF_ONLY", "DIRECT_POST", "PHOTO", "PULL_FROM_URL"]);
+  assertEquals([init.post_info.disable_comment, init.post_info.auto_add_music], [true, false], "comments off, no music unless chosen");
+  assertEquals([init.post_info.brand_organic_toggle, init.post_info.brand_content_toggle], [true, false]);
   assertEquals(init.source_info.photo_images, ["https://img.example/post.jpg"]);
-  const audited = await tiktokPublish(true)(ctxFor(tiktokHttp(c), c).ctx, { id: EVENT.id }, post("tiktok")) as any;
-  assert(!audited.warnings.includes(TIKTOK_SELF_ONLY_WARNING));
-  assertEquals(tiktokPrivacy(true, ["SELF_ONLY", "PUBLIC_TO_EVERYONE"]), "PUBLIC_TO_EVERYONE");
-  assertEquals(tiktokPrivacy(false, ["PUBLIC_TO_EVERYONE"]), "SELF_ONLY");
-  assertEquals(tiktokPrivacy(true, ["SELF_ONLY"]), "SELF_ONLY", "the dry-run stand-in offers SELF_ONLY only");
-  const video = await tiktokPublish(false)(ctxFor(tiktokHttp(c), c).ctx, { id: EVENT.id }, { ...post("tiktok"), videoUrl: "https://v.example/a.mp4" }) as any;
+  // Allowed by the creator, but disabled in their TikTok settings: stays off.
+  const allow = { ...TT_OK, allowComment: true, autoAddMusic: true };
+  const ok = ctxFor(tiktokHttp(c), c);
+  await tiktokPublish(false, allow)(ok.ctx, { id: EVENT.id }, post("tiktok"));
+  assertEquals([(ok.audit.steps[1].request!.body as any).post_info.disable_comment, (ok.audit.steps[1].request!.body as any).post_info.auto_add_music], [false, true]);
+  const off = { ...tiktokHttp(c), standIn: () => ({ data: { privacy_level_options: ["SELF_ONLY"], comment_disabled: true, duet_disabled: true, stitch_disabled: true } }) };
+  const dis = ctxFor(off, c);
+  const video = await tiktokPublish(false, { ...allow, allowDuet: true, allowStitch: true })(dis.ctx, { id: EVENT.id }, { ...post("tiktok"), videoUrl: "https://v.example/a.mp4" });
   assertEquals(video.steps[1].path, "/v2/post/publish/video/init/");
+  const vi = (dis.audit.steps[1].request!.body as any).post_info;
+  assertEquals([vi.disable_comment, vi.disable_duet, vi.disable_stitch, "auto_add_music" in vi], [true, true, true, false],
+    "the creator's TikTok settings win; video posts carry no auto_add_music");
+  // A level TikTok doesn't offer, or a private branded post: refused, no init.
+  const bad = await tiktokPublish(false, { ...TT_OK, privacyLevel: "PUBLIC_TO_EVERYONE" })(ctxFor(tiktokHttp(c), c).ctx, { id: EVENT.id }, post("tiktok"));
+  assertStringIncludes(bad.stopped!, "doesn't offer PUBLIC_TO_EVERYONE");
+  assertEquals(bad.steps.length, 1);
+  const branded = await tiktokPublish(false, { ...TT_OK, disclose: "branded_content" })(ctxFor(tiktokHttp(c), c).ctx, { id: EVENT.id }, post("tiktok"));
+  assertStringIncludes(branded.stopped!, "can't be private");
+  // Audited: the creator's options pass through; still the creator picks.
+  assertEquals(tiktokPrivacyOptions(true, ["SELF_ONLY", "PUBLIC_TO_EVERYONE"]), ["SELF_ONLY", "PUBLIC_TO_EVERYONE"]);
+  assertEquals(tiktokPrivacyOptions(false, ["PUBLIC_TO_EVERYONE", "SELF_ONLY"]), ["SELF_ONLY"]);
+  const audited = await tiktokPublish(true)(ctxFor(tiktokHttp(c), c).ctx, { id: EVENT.id }, post("tiktok"));
+  assert(!audited.warnings.includes(TIKTOK_SELF_ONLY_WARNING));
+  assert(audited.tiktok!.needs.includes("privacy_level"), "audited or not, no default level");
+  // The declaration and labels the panel shows.
+  assertStringIncludes(tiktokDeclaration("none"), "Music Usage Confirmation");
+  assertStringIncludes(tiktokDeclaration("branded_content"), "Branded Content Policy");
+  assertEquals([tiktokDiscloseLabel("your_brand"), tiktokDiscloseLabel("branded_content"), tiktokDiscloseLabel("none")],
+    ["Promotional content", "Paid partnership", null]);
+  // The request parser keeps known keys and types only.
+  assertEquals(parseTikTokChoices({ privacyLevel: "SELF_ONLY", disclose: "bogus", consent: "yes", allowComment: 1, extra: true }),
+    { privacyLevel: "SELF_ONLY", allowComment: undefined, allowDuet: undefined, allowStitch: undefined, autoAddMusic: undefined, disclose: null, consent: false });
+  assertEquals(parseTikTokChoices(null).privacyLevel, null);
 });
 
 Deno.test("TikTok: 6 inits a minute; the 7th is capped", async () => {
   const c = cred("tiktok_publish", { open_id: "open-1" });
   const counter = memoryUsageCounter(() => NOW.getTime());
   for (let i = 0; i < 6; i++) await counter.reserve({ platform: "tiktok", scopeKey: "open-1", metric: "inits", n: 1, windowSeconds: 60, threshold: 6, live: true });
-  const r = await tiktokPublish(false)(ctxFor(tiktokHttp(c), c, { counter }).ctx, { id: EVENT.id }, post("tiktok")) as any;
+  const r = await tiktokPublish(false, TT_OK)(ctxFor(tiktokHttp(c), c, { counter }).ctx, { id: EVENT.id }, post("tiktok")) as any;
   assertEquals(r.steps[1].error, "LIMIT_CAPPED");
 });
 
-Deno.test("Meetup: createEvent as a DRAFT then editEvent to PUBLISHED; Starter caps the RSVPs at 10; points counted", async () => {
+Deno.test("Meetup: a pass creates the DRAFT only; publishing it is its own pass; Starter caps the RSVPs at 10; points counted", async () => {
   const c = cred("meetup", { group_urlname: "social-hall-nyc", plan: "starter", pro_network: "exos-pro" });
   const counter = memoryUsageCounter(() => NOW.getTime());
   const { ctx, seen, audit } = ctxFor(meetupHttp(c), c, { counter });
   const r = await meetupAdapter.upsertEvent!(ctx, { id: EVENT.id }, { post: post("meetup"), attendees: 120 }) as any;
   assertEquals(seen.calls, 0);
-  assertEquals(r.steps.map((s: any) => s.op), ["event.create_draft", "event.publish"]);
-  const [create, publish] = audit.steps.map((s) => s.request!.body as any);
+  assertEquals(r.steps.map((s: any) => s.op), ["event.create_draft"], "never published in the pass that creates it");
+  const [create] = audit.steps.map((s) => s.request!.body as any);
   assertEquals(create.query, MEETUP_CREATE_EVENT);
   assertEquals([create.variables.input.publishStatus, create.variables.input.groupUrlname, create.variables.input.rsvpSettings],
     ["DRAFT", "social-hall-nyc", { rsvpLimit: 10 }]);
   assertEquals([create.variables.input.startDateTime, create.variables.input.duration], ["2026-12-03T21:00", "PT3H30M"]);
-  assertEquals(publish.variables.input, { eventId: "planned_meetup_event", publishStatus: "PUBLISHED" });
+  assertEquals(r.ids.event, "planned_meetup_event");
   assert(r.warnings.some((w: string) => w.includes("10 attendees")));
+  assert(r.warnings.some((w: string) => w.includes("separate step")));
+  // The publish pass: only the edit, on the reviewed draft's real id.
+  const p2 = ctxFor(meetupHttp(c), c, { counter });
+  const pub = await meetupAdapter.upsertEvent!(p2.ctx, { id: EVENT.id }, { post: post("meetup"), publishDraftId: "312345" }) as any;
+  assertEquals(pub.steps.map((s: any) => s.op), ["event.publish"]);
+  assertEquals((p2.audit.steps[0].request!.body as any).variables.input, { eventId: "312345", publishStatus: "PUBLISHED" });
+  for (const bad of ["planned_meetup_event", "../x", ""]) {
+    const b = await meetupAdapter.upsertEvent!(ctxFor(meetupHttp(c), c).ctx, { id: EVENT.id }, { publishDraftId: bad }) as any;
+    assertEquals([b.steps.length, b.stopped], [0, "That isn't a Meetup draft id."], bad);
+  }
   const used = await counter.read({ platform: "meetup", scopeKey: "social-hall-nyc", metric: "points", windowSeconds: 60 });
-  assertEquals(used, { live: 0, planned: 20 }, "two mutations planned at 10 points each");
+  assertEquals(used, { live: 0, planned: 20 }, "two mutations planned at 10 points each (one per pass)");
   // Pro: no cap.
   const pro = cred("meetup", { group_urlname: "g", plan: "pro", pro_network: "exos-pro" });
   const rp = await meetupAdapter.upsertEvent!(ctxFor(meetupHttp(pro), pro).ctx, { id: EVENT.id }, { post: post("meetup"), attendees: 120 }) as any;
@@ -379,24 +431,74 @@ Deno.test("the pass: pinned off, every platform planned from one kit, nothing se
     tiktok_publish: row("tiktok_publish", { open_id: "o1" }),
     meetup: row("meetup", { group_urlname: "g", plan: "starter", pro_network: "p" }),
     linkedin: row("linkedin", { organization_id: "5551234" }),
-    google_business: row("google_business", { account_id: "1", location_id: "2", verified_at: "2026-01-01" }, null),
+    google_business: row("google_business", { account_id: "1", location_id: "2", verified_at: "2026-01-01" }, "gbp-refresh"),
     ads_google_ads: row("ads_google_ads", { customer_id: "1234567890" }, "google-refresh"),
   });
-  const out = await planSocial(d, { event: EVENT, venueOrg: true });
+  const out = await planSocial(d, { event: EVENT, venueOrg: true, tiktok: TT_OK });
   assertEquals(d.fetchCalls(), 0, "no request reaches a platform");
   assertEquals(out.platforms.map((p) => p.platform), [...SOCIAL_PLATFORMS]);
   for (const p of out.platforms) {
     assert(p.status.dryRun && p.status.connected, p.platform);
     assert(p.steps.length > 0 && p.steps.every((s) => !s.live), `${p.platform}: every step a plan`);
-    assert(!JSON.stringify(p).includes(SECRET) && !JSON.stringify(p).includes("google-refresh"), `${p.platform}: no secret`);
+    assert(!JSON.stringify(p).includes(SECRET) && !JSON.stringify(p).includes("google-refresh") && !JSON.stringify(p).includes("gbp-refresh"), `${p.platform}: no secret`);
+    assert(/^[0-9a-f]{64}$/.test(p.confirm ?? ""), `${p.platform}: a confirm digest for its plan`);
   }
   const gbp = out.platforms.find((p) => p.platform === "google_business")!;
-  assertEquals(gbp.status.via, "ads_google_ads", "Business Profile borrows the Google connection");
   assertEquals(gbp.status.app, "google");
+  assert(!("via" in gbp.status), "no borrowed secret");
   assertEquals(out.platforms.find((p) => p.platform === "instagram")!.status.app, "meta");
   const tt = out.platforms.find((p) => p.platform === "tiktok")!;
   assert(!tt.result.warnings.includes(TIKTOK_SELF_ONLY_WARNING), "EXOS_TIKTOK_APP_AUDITED=on drops the warning");
-  assertEquals((tt.steps[1].body as any).post_info.privacy_level, "SELF_ONLY", "still private: creator_info is a stand-in");
+  assertEquals((tt.steps[1].body as any).post_info.privacy_level, "SELF_ONLY", "the creator's choice (the stand-in offers SELF_ONLY only)");
+});
+
+Deno.test("the pass: Business Profile reads only its own credential, never the Google Ads one", async () => {
+  const d = deps({}, {
+    google_business: row("google_business", { account_id: "1", location_id: "2", verified_at: "2026-01-01" }, null),
+    ads_google_ads: row("ads_google_ads", { customer_id: "1234567890" }, "google-refresh"),
+  });
+  const reads: string[] = [];
+  const rpc = d.rpc;
+  d.rpc = (fn, args) => { if (fn === "exos_integration_secret") reads.push(String(args.p_provider)); return rpc(fn, args); };
+  const out = await planSocial(d, { event: EVENT, venueOrg: true, platforms: ["google_business"] });
+  const gbp = out.platforms[0];
+  assert(!gbp.status.connected, "the Google Ads secret doesn't connect Business Profile");
+  assertEquals(reads, ["google_business"], "only its own provider is read");
+  assert(!JSON.stringify(gbp).includes("google-refresh"));
+  assertEquals(d.fetchCalls(), 0);
+});
+
+Deno.test("publish: only with the confirm of an unchanged plan; pinned off, nothing sent; a plan never sends", async () => {
+  const creds = {
+    linkedin: row("linkedin", { organization_id: "5551234" }),
+    meetup: row("meetup", { group_urlname: "g", plan: "pro", pro_network: "p" }),
+    google_business: row("google_business", { account_id: "1", location_id: "2", verified_at: "2026-01-01" }, "gbp-refresh"),
+  };
+  const d = deps({}, creds);
+  const plan = await planSocial(d, { event: EVENT, venueOrg: true, platforms: ["linkedin", "meetup", "google_business"] });
+  for (const p of plan.platforms) {
+    const confirm = p.confirm!;
+    assertEquals(confirm, await confirmDigest("org-1", EVENT.id, p.platform, p.steps), `${p.platform}: the digest is of its steps`);
+    const ok = await publishSocial(d, { event: EVENT, venueOrg: true, platform: p.platform, confirm });
+    assertEquals([ok.published, (ok as any).reason], [false, "pinned"], `${p.platform}: pinned off`);
+    const none = await publishSocial(d, { event: EVENT, venueOrg: true, platform: p.platform, confirm: "" });
+    assertEquals((none as any).reason, "no_confirm");
+    const other = await publishSocial(d, { event: EVENT, venueOrg: true, platform: p.platform, confirm: "0".repeat(64) });
+    assertEquals((other as any).reason, "changed", `${p.platform}: another plan's digest`);
+    const moved = await publishSocial(d, { event: { ...EVENT, name: "Post Night (moved)" }, venueOrg: true, platform: p.platform, confirm });
+    assertEquals((moved as any).reason, "changed", `${p.platform}: the payload changed since the review`);
+  }
+  // Meetup: the create's confirm doesn't publish a draft (a different plan).
+  const meet = plan.platforms.find((p) => p.platform === "meetup")!;
+  const pubPlan = await planSocial(d, { event: EVENT, venueOrg: true, platforms: ["meetup"], meetupDraftId: "312345" });
+  assertEquals(pubPlan.platforms[0].steps.map((s) => s.op), ["event.publish"]);
+  assert(pubPlan.platforms[0].confirm !== meet.confirm);
+  assertEquals((await publishSocial(d, { event: EVENT, venueOrg: true, platform: "meetup", meetupDraftId: "312345", confirm: meet.confirm! }) as any).reason, "changed");
+  // A stopped plan has no confirm.
+  const tt = await planSocial(d, { event: EVENT, venueOrg: true, platforms: ["tiktok"] });
+  assertEquals(tt.platforms[0].confirm, null);
+  assertEquals((await publishSocial(d, { event: EVENT, venueOrg: true, platform: "tiktok", confirm: "a".repeat(64) }) as any).reason, "stopped");
+  assertEquals(d.fetchCalls(), 0, "no request ever reaches a platform");
 });
 
 Deno.test("the pass: nothing connected plans with placeholders and says so; one platform only", async () => {
@@ -419,8 +521,14 @@ Deno.test("one OAuth app per vendor family; every social provider has exactly on
   assertEquals(["google_business", "ads_google_ads"].map(familyOf), ["google", "google"]);
   assertEquals(["linkedin", "tiktok_publish", "meetup", "nope"].map(familyOf), ["linkedin", "tiktok", "meetup", null]);
   assert(Object.values(VENDOR_APPS).every((a) => a.connect === "stub"), "no connect flow built in this phase");
-  assert(VENDOR_APPS.meta.scopes.includes("instagram_content_publish"));
-  assert(VENDOR_APPS.google.scopes.includes("https://www.googleapis.com/auth/business.manage"));
+  // One grant per product: Instagram publishing never asks for ads, Ads never carries Business Profile.
+  assert(scopesFor("ig_publish").includes("instagram_content_publish"));
+  for (const s of ["ads_management", "ads_read", "business_management"]) assert(!scopesFor("ig_publish").includes(s), `ig_publish: no ${s}`);
+  assert(scopesFor("ads_meta_api").includes("ads_management") && !scopesFor("ads_meta_api").includes("instagram_content_publish"));
+  assertEquals(scopesFor("google_business"), ["https://www.googleapis.com/auth/business.manage"]);
+  assert(!scopesFor("ads_google_ads").some((s) => s.includes("business.manage")), "the Ads grant never carries Business Profile");
+  assertEquals(scopesFor("nope"), []);
+  for (const a of Object.values(VENDOR_APPS)) assertEquals(a.providers, a.products.map((p) => p.provider));
   assertEquals(VENDOR_APPS.google.env.id, "GOOGLE_OAUTH_CLIENT_ID", "the existing Google client");
   assertEquals([appConfigured("tiktok", () => " "), appConfigured("tiktok", () => "abc")], [false, true]);
 });

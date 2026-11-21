@@ -11,6 +11,12 @@
 //   createEvent(input: {groupUrlname, title, description, startDateTime, duration,
 //                       publishStatus: DRAFT, rsvpSettings: {rsvpLimit}})   -> event.id
 //   editEvent(input: {eventId, publishStatus: PUBLISHED})                   the draft goes live
+//
+// TWO PASSES, NEVER ONE (Applier review of #139): upsertEvent either creates
+// the DRAFT, or (given publishDraftId, a draft the organizer has reviewed on
+// Meetup) publishes that draft. A create and its publish are never in the
+// same pass, so nothing reaches Meetup's public listing without a second,
+// confirmed step (exos-social /publish, _shared/social/run.ts).
 //   editEvent(input: {eventId, rsvpSettings: {rsvpLimit}})                  the allocation (list)
 //
 // LIMITS (limits.ts "meetup"): 500 GraphQL points per 60 seconds per account
@@ -133,10 +139,26 @@ async function gql(ctx: ChannelCtx, res: AdsResult, op: string, query: string, i
 
 const eventIdOf = (b: any, field: string) => b?.data?.[field]?.event?.id;
 
-/** createEvent as a DRAFT, then editEvent to PUBLISHED. link: {post, attendees, externalId?}. */
+/** Meetup's own event ids (the publish pass takes one). */
+export const MEETUP_EVENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * One pass: createEvent as a DRAFT, or, given publishDraftId, editEvent that
+ * draft to PUBLISHED. Never both. link: {post, attendees, publishDraftId?}.
+ */
 async function upsertEvent(ctx: ChannelCtx, _ev: ExosEvent, link: unknown): Promise<AdsResult> {
-  const l = (link ?? {}) as { post?: PlatformPost; attendees?: number | null; externalId?: string | null };
+  const l = (link ?? {}) as { post?: PlatformPost; attendees?: number | null; publishDraftId?: string | null };
   const res = newResult("meetup", ctx);
+  if (l.publishDraftId !== undefined && l.publishDraftId !== null) {
+    if (typeof l.publishDraftId !== "string" || !MEETUP_EVENT_ID.test(l.publishDraftId) || l.publishDraftId.startsWith("planned_")) {
+      res.stopped = "That isn't a Meetup draft id.";
+      return res;
+    }
+    const pub = await gql(ctx, res, "event.publish", MEETUP_EDIT_EVENT, { eventId: l.publishDraftId, publishStatus: "PUBLISHED" }, null);
+    res.ids.event = l.publishDraftId;
+    if (!pub.ok) res.stopped = pub.error ?? "not published";
+    return res;
+  }
   const post = l.post;
   if (!post) { res.stopped = "nothing to list"; return res; }
   const group = cfgOr(ctx.creds.config, "group_urlname", /^[A-Za-z0-9-]{1,80}$/, "group");
@@ -165,8 +187,7 @@ async function upsertEvent(ctx: ChannelCtx, _ev: ExosEvent, link: unknown): Prom
   const id = createdId(c, (b) => eventIdOf(b, "createEvent"));
   if (!id) { res.stopped = c.error ?? "the draft wasn't created"; return res; }
   res.ids.event = id;
-  const pub = await gql(ctx, res, "event.publish", MEETUP_EDIT_EVENT, { eventId: id, publishStatus: "PUBLISHED" }, attendees);
-  if (!pub.ok) res.stopped = pub.error ?? "not published";
+  res.warnings.push("Meetup keeps it as a draft: check it on Meetup, then publish it from Exos as a separate step.");
   return res;
 }
 
@@ -174,7 +195,7 @@ async function upsertEvent(ctx: ChannelCtx, _ev: ExosEvent, link: unknown): Prom
 async function planListings(ctx: ChannelCtx, alloc: unknown, _prev: unknown): Promise<AdsResult> {
   const a = (alloc ?? {}) as { eventId?: string; attendees?: number };
   const res = newResult("meetup", ctx);
-  const eventId = typeof a.eventId === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(a.eventId) ? a.eventId : plannedId("meetup_event");
+  const eventId = typeof a.eventId === "string" && MEETUP_EVENT_ID.test(a.eventId) ? a.eventId : plannedId("meetup_event");
   const attendees = typeof a.attendees === "number" && a.attendees >= 0 ? Math.floor(a.attendees) : null;
   const rsvp = meetupRsvpLimit(ctx, attendees);
   if (rsvp.note) res.warnings.push(rsvp.note);
