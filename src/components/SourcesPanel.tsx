@@ -72,6 +72,7 @@ const DIMENSIONS: { key: SourceDimension; label: string }[] = [
   { key: 'all', label: 'Everything' },
   { key: 'source', label: 'Source / medium' },
   { key: 'campaign', label: 'Campaign' },
+  { key: 'content', label: 'Placement / ad' },
   { key: 'promoter', label: 'Promoter' },
   { key: 'platform', label: 'Ad platform' },
   { key: 'assistant', label: 'AI assistant' },
@@ -139,7 +140,7 @@ export default function SourcesPanel({ event, canView }: { event: Event; canView
         </div>
       </div>
       <p className="text-xs text-slate-400 mb-4">
-        Paid orders by UTM tags, promoter code and the ad platform the buyer clicked through from.
+        Paid orders by UTM tags (placement = utm_content, e.g. a poster's QR code), promoter code and the ad platform the buyer clicked through from.
         {summary.orders > 0 && ` ${summary.attributedOrders} of ${summary.orders} order${summary.orders === 1 ? '' : 's'} have a source.`}
         {' '}Gross is before refunds. Free claims aren’t included.
       </p>

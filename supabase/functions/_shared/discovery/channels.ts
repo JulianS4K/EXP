@@ -21,7 +21,16 @@
 // means the channel's own help or submission page was found at that URL;
 // false means only the channel's site is known.
 //
+// Genres (2026-11-21): each channel lists the event categories it suits
+// (MarketCategory, derived by marketCategory). The organizer's Discovery
+// listings show the channels for the event's category first and hide the
+// rest behind "Show all channels". GENRE_CHANNELS below is the one place the
+// mapping lives; the operator can change it there.
+//
 // Pure: no Deno or Supabase imports.
+
+import type { MarketCategory } from '../marketplace/eventStandard.ts';
+import { regionApplies, type CityConfig } from './cities.ts';
 
 export type DiscoveryKind = 'feed' | 'api' | 'manual';
 
@@ -43,10 +52,18 @@ export interface DiscoveryChannel {
   liveMeans?: string;
   /** Manual channels: the steps to submit, shown under "How to submit". */
   steps?: readonly string[];
+  /** Manual channels with no known way to submit (no URL): shown as "How to submit: unknown". */
+  howToSubmit?: 'unknown';
+  /** The event categories this channel suits, from GENRE_CHANNELS ('all' = every event). */
+  genres: readonly MarketCategory[] | 'all';
+  /** Narrower than the category: e.g. Resident Advisor lists electronic music only. */
+  subgenre?: string;
   notes: string;
 }
 
-export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
+type ChannelSpec = Omit<DiscoveryChannel, 'genres'>;
+
+const CHANNEL_SPECS: readonly ChannelSpec[] = [
   // ── feeds (status computed) ────────────────────────────────────────
   {
     id: 'google_events', name: 'Google Search & Maps (events feed)', kind: 'feed', region: 'global',
@@ -84,7 +101,7 @@ export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
   },
   {
     id: 'resident_advisor', name: 'Resident Advisor (RA)', kind: 'manual', region: 'global',
-    submissionUrl: 'https://support.ra.co/article/12-submitting-events', verified: true, submitter: 'organizer',
+    submissionUrl: 'https://support.ra.co/article/12-submitting-events', verified: true, submitter: 'organizer', subgenre: 'electronic',
     notes: "Electronic music. Submitted from a promoter account (RA Pro); RA reviews each event. Check whether RA accepts an outside ticket link for the event or wants tickets on RA.",
   },
   {
@@ -94,18 +111,13 @@ export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
   },
   {
     id: 'edmtrain', name: 'Edmtrain', kind: 'manual', region: 'US',
-    submissionUrl: 'https://edmtrain.com', verified: false, submitter: 'operator',
+    submissionUrl: 'https://edmtrain.com', verified: false, submitter: 'operator', subgenre: 'electronic',
     notes: "Electronic music. The Edmtrain API is read-only (event and location listings with a client key); it takes no submissions. The site has \"Add Event\" (sign-in) and \"Promote Your Event\" links.",
   },
   {
     id: 'meetup', name: 'Meetup', kind: 'manual', region: 'global',
     submissionUrl: 'https://www.meetup.com', verified: false, submitter: 'organizer',
     notes: "Events live in the organizer's own Meetup group, so the organizer posts it. Meetup's GraphQL API has createEvent, but only for a group organizer with Meetup Pro and an approved OAuth client, and it would be a new third-party write: an operator decision, not built.",
-  },
-  {
-    id: 'songkick', name: 'Songkick', kind: 'manual', region: 'global',
-    submissionUrl: 'https://support.songkick.com/hc/en-us/articles/360011925897', verified: true, submitter: 'organizer',
-    notes: 'Promoters and venues use "Add an event" in the site footer (signed in); artists use Tourbox. Unconfirmed reports that Songkick is shutting down: check before spending time on it.',
   },
   {
     id: 'bandsintown', name: 'Bandsintown', kind: 'manual', region: 'global',
@@ -129,9 +141,127 @@ export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
     ],
     notes: "Your event gets a Posh page; Get Tickets sends fans to your Exos ticket link, and they buy on Exos. Free to list. Posh counts page views and ticket-link clicks on its side: enter them here to see views -> clicks -> Exos orders. Exos never writes to Posh. Not for events you sell on Posh.",
   },
+  // ── added 2026-11-21 (promotion: genre-aware channels) ─────────────
+  // Checked 2026-11-21: The Skint's form and AllEvents' publishing page were
+  // read on the sites; Spotify's help page was found by search. Fever's free
+  // listing (its "0% Commission Link") is only described in Fever's terms; no
+  // public page for it was found, so the link is Fever's business site.
+  // Nonsense NYC: no submission method found, so no link.
+  {
+    id: 'the_skint', name: 'The Skint', kind: 'manual', region: 'NYC',
+    submissionUrl: 'https://theskint.com/submit-an-event/', verified: true, submitter: 'operator',
+    notes: 'Free and cheap NYC events, hand-picked daily. A web form (date, time, price, RSVP, description, event link, contact). Curated: a submission is not a guarantee. Paid placements are a separate form.',
+  },
+  {
+    id: 'allevents', name: 'AllEvents', kind: 'manual', region: 'global',
+    submissionUrl: 'https://allevents.in/pages/publish-events', verified: true, submitter: 'organizer',
+    notes: 'Free to post (sign in, set up a brand page, then "Post Event"). Post it with your Exos ticket link; AllEvents also sells tickets, which you don\'t need.',
+  },
+  {
+    id: 'fever', name: 'Fever (free listing)', kind: 'manual', region: 'global',
+    submissionUrl: 'https://business.feverup.com', verified: false, submitter: 'organizer',
+    notes: "Fever's terms describe a free listing through its 0% Commission Link (fees only when tickets sell on Fever). No public page for it was found: ask Fever's organizer team through the business site's contact form, and list with your Exos ticket link.",
+  },
+  {
+    id: 'nonsense_nyc', name: 'Nonsense NYC', kind: 'manual', region: 'NYC',
+    submissionUrl: null, verified: false, submitter: 'operator', howToSubmit: 'unknown',
+    notes: 'A weekly email of underground and odd NYC events, art and parties. How to submit is unknown: no form or address was found. It prefers plain-text details over a Partiful link. Record what worked here if you get a listing.',
+  },
+  {
+    id: 'spotify', name: 'Spotify concerts', kind: 'manual', region: 'global',
+    submissionUrl: 'https://support.spotify.com/artists/article/concerts', verified: true, submitter: 'organizer',
+    notes: "Spotify lists concerts from its ticketing partners (Ticketmaster, AXS, ...). Exos isn't one, so each artist adds the date in Bandsintown, which Spotify reads; it shows on the artist's Spotify profile within about a day.",
+  },
+  {
+    // Operator 2026-11-21 ("Also partiful"). No public API, and Partiful's
+    // terms bar scraping and bots: nothing is automated or read. The
+    // organizer makes an invite page on their own account with the Partiful
+    // kit (src/lib/discovery/partiful.ts) and points guests to Exos checkout.
+    id: 'partiful', name: 'Partiful', kind: 'manual', region: 'NYC',
+    submissionUrl: 'https://partiful.com', verified: false, submitter: 'organizer',
+    steps: [
+      'Create the event on your own Partiful account (partiful.com or the app).',
+      'Fill it in from the Partiful kit below: title, date and time, venue, description, cover image.',
+      'Put the Exos ticket link from the kit in the description and the event link, so guests buy on Exos.',
+      'Share the Partiful link or invite guests, then mark it live here with the Partiful event link.',
+    ],
+    notes: 'The invite and RSVP page for a party crowd; tickets stay on Exos. Free events take unlimited guests by link; in-app invites are capped at 1,000 per event. Nothing is sent to or read from Partiful.',
+  },
+  // Lowest priority: reports that Songkick is winding down.
+  {
+    id: 'songkick', name: 'Songkick', kind: 'manual', region: 'global',
+    submissionUrl: 'https://support.songkick.com/hc/en-us/articles/360011925897', verified: true, submitter: 'organizer',
+    notes: 'Promoters and venues use "Add an event" in the site footer (signed in); artists use Tourbox. Unconfirmed reports that Songkick is shutting down: check before spending time on it.',
+  },
 ];
 
+// The default category -> channel mapping, best first (operator 2026-11-21;
+// change it here). 'all' channels suit every event (the feeds, and the
+// general calendars and listing sites). Festivals suit every channel, Fever
+// first. Sports and other have no channels of their own beyond 'all' and
+// AllEvents.
+const EVERY = CHANNEL_SPECS.map((c) => c.id);
+export const GENRE_CHANNELS: Readonly<Record<MarketCategory | 'all', readonly string[]>> = {
+  all: ['google_events', 'calendar_ics', 'ad_catalog', 'cityspark', 'posh_link'],
+  concerts: ['bandsintown', 'spotify', 'donyc', 'oh_my_rockness', 'songkick'],
+  nightlife: ['resident_advisor', 'edmtrain', 'nonsense_nyc', 'partiful'],
+  comedy: ['timeout_nyc', 'the_skint', 'donyc'],
+  theater: ['timeout_nyc'],
+  festivals: ['fever', ...EVERY.filter((id) => id !== 'fever')],
+  food_drink: ['timeout_nyc', 'the_skint', 'fever'],
+  community: ['meetup', 'allevents', 'the_skint', 'partiful'],
+  business: ['meetup', 'allevents', 'the_skint'],
+  sports: [],
+  other: ['allevents'],
+};
+
+const CATEGORY_KEYS = Object.keys(GENRE_CHANNELS).filter((k) => k !== 'all') as MarketCategory[];
+
+function genresOf(id: string): readonly MarketCategory[] | 'all' {
+  if (GENRE_CHANNELS.all.includes(id)) return 'all';
+  return CATEGORY_KEYS.filter((k) => GENRE_CHANNELS[k].includes(id));
+}
+
+export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = CHANNEL_SPECS.map((c) => ({ ...c, genres: genresOf(c.id) }));
+
 const BY_ID = new Map(DISCOVERY_CHANNELS.map((c) => [c.id, c]));
+
+/** Does this channel suit an event of this category? */
+export function suitsCategory(c: Pick<DiscoveryChannel, 'genres'>, category: MarketCategory): boolean {
+  return c.genres === 'all' || c.genres.includes(category);
+}
+
+/**
+ * Order channels for an event's category and city: the category's own
+ * channels in GENRE_CHANNELS order, then the all-genre ones (catalog order),
+ * then (only with showAll) the rest in catalog order. With `city` (the
+ * event's, from cities.ts; null = not a configured city), a city-only channel
+ * (DoNYC, region 'NYC') fits only events in that city, so other events fall
+ * back to the channels with no city region. A channel the event already has
+ * a record on (`keep`) is never hidden.
+ */
+export function rankChannels<T extends { id: string }>(
+  items: readonly T[], category: MarketCategory,
+  opts: { showAll?: boolean; keep?: (item: T) => boolean; city?: CityConfig | null; us?: boolean } = {},
+): Array<T & { fits: boolean }> {
+  const own = GENRE_CHANNELS[category];
+  const catalog = new Map(EVERY.map((id, i) => [id, i]));
+  const score = (id: string): number => {
+    const i = own.indexOf(id);
+    if (i >= 0) return i;
+    if (GENRE_CHANNELS.all.includes(id)) return 1000 + (catalog.get(id) ?? 999);
+    return 2000 + (catalog.get(id) ?? 999);
+  };
+  return items
+    .map((it) => {
+      const c = BY_ID.get(it.id);
+      const inCity = !c || opts.city === undefined || regionApplies(c.region, opts.city, opts.us ?? true);
+      return { ...it, fits: (c ? suitsCategory(c, category) : true) && inCity };
+    })
+    .filter((it) => opts.showAll || it.fits || (opts.keep?.(it) ?? false))
+    .sort((a, b) => score(a.id) - score(b.id));
+}
+
 
 export function discoveryChannel(id: string): DiscoveryChannel | undefined {
   return BY_ID.get(id);

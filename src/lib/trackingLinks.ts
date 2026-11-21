@@ -8,41 +8,52 @@
 // they carry a voucher code, and a code needs the buyer to sign in, so a plain
 // tracking link stays code-free and works for guest checkout.
 //
-// The keys here are exactly what _exos_channel_key maps to itself, so a link
-// made here lands on its own row in the report.
+// Each link's source + medium is what _exos_channel_key maps to the channel's
+// key, so a link made here lands on its own row in the report. The tags
+// follow the one Exos scheme (_shared/marketing/utm.ts): organic_social,
+// email, print, paid_social, paid_search, ...
+
+import { adTags, tagUrl, type AdPlatform, type UtmMedium } from '../../supabase/functions/_shared/marketing/utm.ts';
 
 export interface TrackingChannel {
+  /** The channel report row this link lands on (_exos_channel_key of source + medium). */
   key: string;
   label: string;
-  /** utm_medium, GA4 convention (social / email / cpc / referral / offline). */
-  medium: string;
+  /** utm_source: the platform or place. */
+  source: string;
+  /** utm_medium, the Exos scheme (_shared/marketing/utm.ts). */
+  medium: UtmMedium;
+  /** Paid links: the ad platform whose macros fill campaign / content. */
+  ad?: AdPlatform;
 }
 
 export const TRACKING_CHANNELS: readonly TrackingChannel[] = [
-  { key: 'instagram', label: 'Instagram', medium: 'social' },
-  { key: 'facebook', label: 'Facebook', medium: 'social' },
-  { key: 'tiktok', label: 'TikTok', medium: 'social' },
-  { key: 'x', label: 'X / Twitter', medium: 'social' },
-  { key: 'email', label: 'Email', medium: 'email' },
-  { key: 'sms', label: 'Text message', medium: 'sms' },
-  { key: 'whatsapp', label: 'WhatsApp', medium: 'messaging' },
-  { key: 'partner', label: 'Partner sites', medium: 'referral' },
-  { key: 'flyer', label: 'Flyer / QR code', medium: 'offline' },
-  { key: 'meta-ads', label: 'Paid: Meta', medium: 'cpc' },
-  { key: 'google-ads', label: 'Paid: Google', medium: 'cpc' },
+  { key: 'instagram', label: 'Instagram', source: 'instagram', medium: 'organic_social' },
+  { key: 'facebook', label: 'Facebook', source: 'facebook', medium: 'organic_social' },
+  { key: 'tiktok', label: 'TikTok', source: 'tiktok', medium: 'organic_social' },
+  { key: 'x', label: 'X / Twitter', source: 'x', medium: 'organic_social' },
+  { key: 'email', label: 'Email', source: 'email', medium: 'email' },
+  { key: 'sms', label: 'Text message', source: 'sms', medium: 'sms' },
+  { key: 'whatsapp', label: 'WhatsApp', source: 'whatsapp', medium: 'messaging' },
+  { key: 'partner', label: 'Partner sites', source: 'partner', medium: 'referral' },
+  // Partiful: the organizer's invite page sends guests to Exos (referral; no API, nothing read).
+  { key: 'partiful', label: 'Partiful', source: 'partiful', medium: 'referral' },
+  { key: 'flyer', label: 'Flyer / QR code', source: 'qr', medium: 'print' },
+  { key: 'meta-ads', label: 'Paid: Meta', source: 'meta', medium: 'paid_social', ad: 'meta' },
+  { key: 'google-ads', label: 'Paid: Google', source: 'google', medium: 'paid_search', ad: 'google' },
 ];
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
 
-/** The event URL tagged for one channel (any query the base already has is kept). */
+/**
+ * The event URL tagged for one channel (any query the base already has is
+ * kept). Paid links carry the ad platform's macros: its ad in utm_content,
+ * and its campaign unless the organizer named one.
+ */
 export function trackingUrl(base: string, ch: TrackingChannel, campaign?: string): string {
-  const u = new URL(base);
-  u.searchParams.set('utm_source', ch.key);
-  u.searchParams.set('utm_medium', ch.medium);
   const c = campaign ? slug(campaign) : '';
-  if (c) u.searchParams.set('utm_campaign', c);
-  else u.searchParams.delete('utm_campaign');
-  return u.toString();
+  const tags = ch.ad ? adTags(ch.ad, c || null) : { source: ch.source, medium: ch.medium, campaign: c || null };
+  return tagUrl(base, tags);
 }
 
 /** One link per channel. */

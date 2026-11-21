@@ -142,6 +142,20 @@ describe('buildCatalog', () => {
     expect(it0.expirationDate).toBe('2026-11-07T03:00:00-05:00');
   });
 
+  it('files the newer categories under their own product type and custom label', () => {
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{ category: 'Food', genres: ['Tasting'] }, 'Food & Drink'],
+      [{ category: 'Tech', genres: ['Meetup'] }, 'Community'],
+      [{ category: 'Tech', genres: ['Conference'] }, 'Business'],
+      [{ category: 'Tech', genres: ['AI'] }, 'Events'],
+    ];
+    for (const [over, label] of cases) {
+      const it0 = build([ev(over)], [tier()]).items[0];
+      expect(it0.productType).toBe(`Event Tickets > ${label}`);
+      expect(it0.customLabels[3]).toBe(label.toLowerCase());
+    }
+  });
+
   it('writes a description when the event has none', () => {
     const { items } = build([ev({ description: null })], [tier()]);
     expect(items[0].description).toBe('Late Night Jazz at Blue Room, Brooklyn, 2026-11-06. Tickets on Exos.');
@@ -211,7 +225,7 @@ describe('RSS (Google Merchant Center)', () => {
     expect(xml).toContain('<g:availability>in_stock</g:availability>');
     expect(xml).toContain('<g:price>21.78 USD</g:price>');
     expect(xml).toContain('<g:identifier_exists>no</g:identifier_exists>');
-    expect(xml).toContain('utm_source=google&amp;utm_medium=paid_social&amp;utm_campaign=catalog');
+    expect(xml).toContain('utm_source=google&amp;utm_medium=paid_search&amp;utm_campaign=catalog');
     expect(xml).toContain('<g:additional_image_link>https://img.example.com/b.jpg</g:additional_image_link>');
   });
 

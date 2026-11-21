@@ -11,8 +11,24 @@ import { useToast } from '../context/ToastContext';
 import { discoveryRows, type DiscoveryEvent, type DiscoveryRow } from '../lib/discovery/channels';
 import { POSH_LINK_CHANNEL, poshLinkEligibility, type PoshLinkEligibility } from '../lib/discovery/poshLink';
 import PoshLinkPanel from './PoshLinkPanel';
+import PartifulKitPanel from './PartifulKitPanel';
+import { PARTIFUL_CHANNEL } from '../lib/discovery/partiful';
 import { eventChannels, queueListing, setListingStatus, withdrawListing } from '../lib/discovery/api';
-import { STATUS_LABEL, canQueue, hasManualSlot, takesSlot, type ChannelStatus } from '../../supabase/functions/_shared/discovery/channels.ts';
+import { STATUS_LABEL, canQueue, hasManualSlot, rankChannels, takesSlot, type ChannelStatus } from '../../supabase/functions/_shared/discovery/channels.ts';
+import { MARKET_CATEGORY_LABEL, marketCategory } from '../../supabase/functions/_shared/marketplace/eventStandard.ts';
+import { cityOf, inUS } from '../../supabase/functions/_shared/discovery/cities.ts';
+import { channelLimits, hiddenByLimit, limitFacts, type LimitFacts } from '../../supabase/functions/_shared/discovery/limits.ts';
+
+/** The channel's limits for this event (plan caps, eligibility), one line each. */
+function LimitNotes({ id, facts }: { id: string; facts: LimitFacts }) {
+  const rows = channelLimits(id, facts);
+  if (rows.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5">
+      {rows.map((l) => <li key={l.id} className="text-xs text-amber-300">Limit: {l.reason}</li>)}
+    </ul>
+  );
+}
 
 const TONE: Record<ChannelStatus, string> = {
   live: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -37,6 +53,7 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
   const [failed, setFailed] = useState(false);
   const [event, setEvent] = useState<DiscoveryEvent | null>(null);
   const [posh, setPosh] = useState<PoshLinkEligibility>(poshLinkEligibility(null));
+  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(() => {
     eventChannels(eventId)
@@ -75,7 +92,18 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
   };
 
   const feeds = (rows ?? []).filter((r) => r.kind === 'feed');
-  const manual = (rows ?? []).filter((r) => r.kind !== 'feed');
+  // Manual channels for the event's category first (GENRE_CHANNELS); the rest
+  // only with "Show all channels". A channel with a record is always shown.
+  const category = marketCategory({ category: event?.category ?? null, genres: event?.genres ?? null, name: event?.name ?? '' });
+  // City-only channels (DoNYC: region NYC) fit events in that city (cities.ts).
+  const city = cityOf(event?.venue_address);
+  const us = inUS(event?.venue_address);
+  // Channel limits (limits.ts): a 'block' row takes the channel off unless the event already uses it.
+  const facts = limitFacts({ noindex: event?.noindex ?? null, tiers: event?.tiers ?? [] });
+  const used = (r: DiscoveryRow) => r.status !== 'not_submitted';
+  const allManual = (rows ?? []).filter((r) => r.kind !== 'feed' && (used(r) || !hiddenByLimit(r.id, facts)));
+  const manual = rankChannels<DiscoveryRow>(allManual, category, { showAll, keep: used, city, us });
+  const hidden = allManual.length - rankChannels<DiscoveryRow>(allManual, category, { keep: used, city, us }).length;
 
   return (
     <section className="bg-[#111] p-6 border border-white/10 mb-6 text-white">
@@ -103,13 +131,24 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                     {r.status === 'live' ? `Live: ${r.info?.liveMeans ?? 'in the feed'}.` : `Not listed: ${r.reason}.`}
                   </p>
                   {r.info?.notes && <p className="text-white/40 text-xs mt-0.5">{r.info.notes}</p>}
+                  <LimitNotes id={r.id} facts={facts} />
                 </div>
                 <StatusPill status={r.status} />
               </li>
             ))}
           </ul>
 
-          <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-2">Calendars and listings sites</h3>
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+            <h3 className="text-[10px] font-black text-white/40 uppercase tracking-widest">
+              Calendars and listings sites <span className="normal-case tracking-normal font-bold text-white/60">· suggested for {MARKET_CATEGORY_LABEL[category]}{city ? ` in ${city.name}` : ''}</span>
+            </h3>
+            {hidden > 0 && (
+              <button type="button" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}
+                className="text-xs font-bold text-brand-primary underline underline-offset-2">
+                {showAll ? `Only ${MARKET_CATEGORY_LABEL[category]} channels` : `Show all channels (${hidden} more)`}
+              </button>
+            )}
+          </div>
           {cap.cap != null && (
             <p className="text-xs text-white/50 mb-2">
               Free tier: up to {cap.cap} listing sites per event ({cap.used} used). Withdraw a queued one to pick another.
@@ -123,13 +162,19 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                   <div className="min-w-0">
                     <p className="font-bold">
                       {r.name} <span className="text-white/40 font-normal text-xs">{r.region}</span>
+                      {r.info?.subgenre && <span className="text-white/40 font-normal text-xs"> · {r.info.subgenre} only</span>}
+                      {!r.fits && <span className="text-amber-300 font-normal text-xs"> · not a usual fit for this event</span>}
                     </p>
                     {r.info?.notes && <p className="text-white/50 text-xs mt-0.5 max-w-prose">{r.info.notes}</p>}
+                    <LimitNotes id={r.id} facts={facts} />
                     {r.submissionUrl && (
                       <a href={r.submissionUrl} target="_blank" rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs text-brand-primary font-bold mt-1">
                         How to submit <ExternalLink size={11} />{!r.verified && <span className="text-white/40 font-normal">(not verified)</span>}
                       </a>
+                    )}
+                    {!r.submissionUrl && r.info?.howToSubmit === 'unknown' && (
+                      <p className="text-xs text-white/50 mt-1">How to submit: unknown</p>
                     )}
                     {r.status === 'live' && r.liveUrl && (
                       <p className="text-xs mt-1"><a href={r.liveUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-400 font-bold">View listing</a></p>
@@ -171,6 +216,7 @@ export default function DiscoveryListingsPanel({ eventId }: { eventId: string })
                 {r.id === POSH_LINK_CHANNEL && (
                   <PoshLinkPanel eventId={eventId} event={event} row={r} eligibility={posh} canEdit={canEdit} />
                 )}
+                {r.id === PARTIFUL_CHANNEL && <PartifulKitPanel event={event} row={r} />}
               </li>
             ))}
           </ul>

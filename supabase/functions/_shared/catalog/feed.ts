@@ -14,9 +14,10 @@
 //     the lowest upcoming (presale) tier, else the lowest of all.
 //   * availability: in stock (a tier on sale with seats left), preorder (a
 //     tier opens later, with its availability_date), else out of stock.
-//   * link: the event page, tagged utm_source=<platform>&utm_medium=paid_social
-//     &utm_campaign=catalog&utm_content=<event id>, so catalog sales show up in
-//     attribution.
+//   * link: the event page, tagged utm_source=<platform>&utm_medium=<paid_social
+//     for Meta / TikTok, paid_search for Google>&utm_campaign=catalog
+//     &utm_content=<event id> (the scheme in _shared/marketing/utm.ts), so
+//     catalog sales show up in attribution.
 //   * image_link: the cover image, else the first gallery image; extra gallery
 //     images go in additional_image_link. An event with no image is left out
 //     (every platform requires one).
@@ -39,6 +40,7 @@
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
 import { parseUnitFees, type UnitFee } from '../fees.ts';
 import { marketCategory, marketTitle, type MarketCategory } from '../marketplace/eventStandard.ts';
+import { paidMedium } from '../marketing/utm.ts';
 import { mdToPlain } from '../richText.ts';
 import { eventPageUrl, zonedIso } from '../googleEvents/feed.ts';
 import { isLinkOut, linkOutGone, linkOutSoldOut, platformLabel, priceRange, trackedBuyUrl, type WhereToBuy } from '../eventImport/linkOut.ts';
@@ -159,7 +161,8 @@ const text = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
 
 const CATEGORY_LABEL: Record<MarketCategory, string> = {
   concerts: 'Concerts', nightlife: 'Nightlife', comedy: 'Comedy', theater: 'Theater',
-  sports: 'Sports', festivals: 'Festivals', other: 'Events',
+  sports: 'Sports', festivals: 'Festivals', food_drink: 'Food & Drink', community: 'Community',
+  business: 'Business', other: 'Events',
 };
 
 /** https URLs only, at most 2,000 chars (what the platforms fetch). */
@@ -182,7 +185,7 @@ export function formatPrice(cents: number, currency: string): string {
 
 /** The event page, tagged for the platform the ad ran on. */
 export function catalogLink(appBase: string, e: Pick<CatalogEventRow, 'id' | 'slug'>, platform: CatalogPlatform): string {
-  const q = new URLSearchParams({ utm_source: platform, utm_medium: 'paid_social', utm_campaign: 'catalog', utm_content: e.id });
+  const q = new URLSearchParams({ utm_source: platform, utm_medium: paidMedium(platform), utm_campaign: 'catalog', utm_content: e.id });
   return `${eventPageUrl(appBase, { id: e.id, slug: e.slug })}?${q.toString()}`;
 }
 
@@ -333,7 +336,7 @@ export function catalogItem(
 
 /** A link-out event's link: the organizer's checkout, tagged like catalogLink. */
 export function linkOutCatalogLink(w: WhereToBuy & { url: string }, e: Pick<CatalogEventRow, 'id'>, platform: CatalogPlatform): string {
-  return trackedBuyUrl(w, { utm_source: platform, utm_medium: 'paid_social', utm_campaign: 'catalog', utm_content: e.id });
+  return trackedBuyUrl(w, { utm_source: platform, utm_medium: paidMedium(platform), utm_campaign: 'catalog', utm_content: e.id });
 }
 
 /** The org's catalog: items in start order, plus the events left out and why. */

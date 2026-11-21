@@ -504,6 +504,28 @@ await check('event report: waiting room panel', async (page, run) => {
   await run();
 }, { signedIn: true, include: '[data-wroom-panel]', mock: ownerMock({ rpcs: wroomMock({}).rpcs }) });
 
+// claude/exos-promotion (mig 20261121153700): the Promote page's posters and
+// flyers (one QR per placement) and playbook, and the printable QR sheet. Blocking.
+const PLACEMENTS = [
+  { id: 'pl1', event_id: EV, name: 'Poster - Bedford Ave', slug: 'poster-bedford-ave', created_at: '2026-11-21T10:00:00Z' },
+  { id: 'pl2', event_id: EV, name: 'Flyer - Bar X', slug: 'flyer-bar-x', created_at: '2026-11-21T10:05:00Z' },
+];
+const promoMock = ownerMock({ rpcs: { exos_print_placements: () => PLACEMENTS } });
+await check('promote: posters and flyers + playbook', async (page, run) => {
+  await page.goto(BASE + '/dashboard/event/' + EV + '/promote');
+  await page.getByRole('heading', { name: /Posters and flyers/ }).waitFor({ timeout: 8000 });
+  await text(page, 'Flyer - Bar X');
+  await page.getByRole('heading', { name: /Playbook:/ }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, include: '[data-promotion]', mock: promoMock });
+await check('printable QR sheet', async (page, run) => {
+  await page.goto(BASE + '/print/qr/' + EV);
+  await page.getByRole('heading', { level: 1, name: 'Fall Party' }).waitFor({ timeout: 8000 });
+  // The label under the code (the SVG's <title> carries the same text, hidden).
+  await page.locator('li > p', { hasText: 'Poster - Bedford Ave' }).waitFor({ timeout: 8000 });
+  await run();
+}, { signedIn: true, mock: promoMock, device: 'Desktop Chrome' });
+
 await browser.close();
 
 let failed = false;

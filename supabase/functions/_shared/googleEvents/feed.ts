@@ -185,7 +185,7 @@ export interface SchemaOffer {
 
 export interface SchemaEvent {
   '@context': 'https://schema.org';
-  '@type': 'Event' | 'MusicEvent' | 'ComedyEvent' | 'TheaterEvent' | 'SportsEvent' | 'Festival';
+  '@type': 'Event' | 'MusicEvent' | 'ComedyEvent' | 'TheaterEvent' | 'SportsEvent' | 'Festival' | 'FoodEvent' | 'SocialEvent' | 'BusinessEvent';
   '@id': string;
   identifier: string;
   url: string;
@@ -260,12 +260,13 @@ function address(v: unknown): SchemaEvent['location']['address'] {
 
 const SCHEMA_TYPE: Record<MarketCategory, SchemaEvent['@type']> = {
   concerts: 'MusicEvent', nightlife: 'MusicEvent', festivals: 'Festival', comedy: 'ComedyEvent',
-  theater: 'TheaterEvent', sports: 'SportsEvent', other: 'Event',
+  theater: 'TheaterEvent', sports: 'SportsEvent', food_drink: 'FoodEvent', community: 'SocialEvent',
+  business: 'BusinessEvent', other: 'Event',
 };
 
 const GOOGLE_CATEGORY: Record<MarketCategory, GoogleEventCategory> = {
   concerts: 'CONCERT', nightlife: 'CONCERT', festivals: 'CONCERT', comedy: 'THEATRE',
-  theater: 'THEATRE', sports: 'SPORTS', other: 'OTHER',
+  theater: 'THEATRE', sports: 'SPORTS', food_drink: 'OTHER', community: 'OTHER', business: 'OTHER', other: 'OTHER',
 };
 
 export function eventPageUrl(appBase: string, e: Pick<FeedEventRow, 'id' | 'slug'>): string {

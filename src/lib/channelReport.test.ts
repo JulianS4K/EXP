@@ -114,10 +114,28 @@ describe('tracking links', () => {
     expect(new Set(links.map((l) => l.url)).size).toBe(links.length);
     const ig = new URL(trackingUrl('https://exos.example/bridge/event/abc', TRACKING_CHANNELS.find((c) => c.key === 'instagram')!));
     expect(ig.searchParams.get('utm_source')).toBe('instagram');
-    expect(ig.searchParams.get('utm_medium')).toBe('social');
+    expect(ig.searchParams.get('utm_medium')).toBe('organic_social');
     expect(ig.searchParams.get('code')).toBeNull();
     const ads = new URL(trackingUrl('https://exos.example/e/x?ref=abc', TRACKING_CHANNELS.find((c) => c.key === 'meta-ads')!, 'Fall Push!'));
     expect(ads.searchParams.get('utm_campaign')).toBe('fall-push');
     expect(ads.searchParams.get('ref')).toBe('abc');
+  });
+
+  it('follows the one UTM scheme: organic_social, email, print, paid_social, paid_search', () => {
+    const by = Object.fromEntries(trackingLinks('https://exos.example/e/x').map((l) => [l.key, l.url]));
+    const q = (k: string) => new URL(by[k]).searchParams;
+    expect([q('facebook').get('utm_source'), q('facebook').get('utm_medium')]).toEqual(['facebook', 'organic_social']);
+    expect([q('email').get('utm_source'), q('email').get('utm_medium')]).toEqual(['email', 'email']);
+    expect([q('flyer').get('utm_source'), q('flyer').get('utm_medium')]).toEqual(['qr', 'print']);
+    expect([q('partiful').get('utm_source'), q('partiful').get('utm_medium')]).toEqual(['partiful', 'referral']);
+    expect([q('meta-ads').get('utm_source'), q('meta-ads').get('utm_medium')]).toEqual(['meta', 'paid_social']);
+    expect([q('google-ads').get('utm_source'), q('google-ads').get('utm_medium')]).toEqual(['google', 'paid_search']);
+    // Paid links carry the platform's macros, braces left as written so the platform fills them in.
+    expect(by['meta-ads']).toBe('https://exos.example/e/x?utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}');
+    expect(by['google-ads']).toBe('https://exos.example/e/x?utm_source=google&utm_medium=paid_search&utm_campaign={campaignid}&utm_content={creative}');
+    // A named campaign wins over the macro; the ad macro stays in utm_content.
+    const named = new URL(trackingUrl('https://exos.example/e/x', TRACKING_CHANNELS.find((c) => c.key === 'meta-ads')!, 'Fall Push'));
+    expect([named.searchParams.get('utm_campaign'), named.searchParams.get('utm_content')]).toEqual(['fall-push', '{{ad.name}}']);
+    expect(new Set(TRACKING_CHANNELS.map((c) => c.key)).size).toBe(TRACKING_CHANNELS.length);
   });
 });
