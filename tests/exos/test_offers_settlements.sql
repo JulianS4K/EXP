@@ -52,7 +52,10 @@ CREATE TEMP TABLE cf (k text PRIMARY KEY, v text);
 GRANT ALL ON cf TO anon, authenticated, service_role;
 CREATE FUNCTION pg_temp.g(p_k text) RETURNS uuid LANGUAGE sql AS $$ SELECT v::uuid FROM cf WHERE k = p_k $$;
 CREATE FUNCTION pg_temp.gt(p_k text) RETURNS text LANGUAGE sql AS $$ SELECT v FROM cf WHERE k = p_k $$;
-GRANT EXECUTE ON FUNCTION pg_temp.g(text), pg_temp.gt(text) TO anon, authenticated, service_role;
+-- The show date: the 19th of a month at least a month ahead, so the fixtures never go stale.
+CREATE FUNCTION pg_temp.d() RETURNS date LANGUAGE sql AS $$ SELECT (date_trunc('month', current_date + 45) + interval '18 days')::date $$;
+CREATE FUNCTION pg_temp.ds(p_days int DEFAULT 0) RETURNS text LANGUAGE sql AS $$ SELECT to_char(pg_temp.d() + p_days, 'YYYY-MM-DD') $$;
+GRANT EXECUTE ON FUNCTION pg_temp.g(text), pg_temp.gt(text), pg_temp.d(), pg_temp.ds(int) TO anon, authenticated, service_role;
 
 -- A venue the org rents, a hold with rental terms on it, a template.
 INSERT INTO public.exos_venues (id, org_id, name, timezone, capacity, relationship)
@@ -169,7 +172,7 @@ BEGIN
   r := public._exos_hold_create('cf000000-0000-0000-0000-000000000001', 'cf000000-0000-0000-0000-0000000000a1', 'api', NULL,
          jsonb_build_object('title', 'Headliners at Metro', 'artist_ids', jsonb_build_array('cf000000-0000-0000-0000-0000000000f2'),
                             'rental', jsonb_build_object('status', 'confirmed', 'fee', 1500, 'deposit', 500),
-                            'positions', jsonb_build_array(jsonb_build_object('date', '2026-11-19', 'venue_id', 'cf000000-0000-0000-0000-0000000000f1'))));
+                            'positions', jsonb_build_array(jsonb_build_object('date', pg_temp.ds(), 'venue_id', 'cf000000-0000-0000-0000-0000000000f1'))));
   INSERT INTO cf VALUES ('hold', r->>'id');
   INSERT INTO public.exos_offer_templates (id, org_id, name, terms, boilerplate, budget_lines, expires_in_days, sell_through_percent)
   VALUES ('cf000000-0000-0000-0000-0000000000d1', 'cf000000-0000-0000-0000-000000000001', 'Club standard',
@@ -202,7 +205,7 @@ BEGIN
   INSERT INTO cf VALUES ('o1', o), ('b1', b);
   ASSERT r->>'status' = 'draft' AND r->>'artist_name' = 'The Headliners' AND r->>'title' = 'Headliners at Metro',
          'OS3: draft from the hold: ' || r::text;
-  ASSERT r->'dates' = '["2026-11-19"]'::jsonb AND (r->>'venue_id')::uuid = 'cf000000-0000-0000-0000-0000000000f1', 'OS3: dates + venue';
+  ASSERT r->'dates' = jsonb_build_array(pg_temp.ds()) AND (r->>'venue_id')::uuid = 'cf000000-0000-0000-0000-0000000000f1', 'OS3: dates + venue';
   ASSERT r->'terms'->>'deal_type' = 'versus' AND (r->'terms'->>'guarantee_cents')::int = 100000, 'OS3: template terms';
   ASSERT (r->'terms'->'bonuses'->0->>'sold')::int = 400, 'OS3: bonuses sorted by threshold';
   ASSERT r->'agent'->>'email' = 'ann@agency.example', 'OS3: agent email lowercased';
@@ -386,8 +389,8 @@ BEGIN
   ASSERT ok, 'OS4: bad mode';
   -- An import: rows in one group share a budget; a bad row is reported.
   imp := public.exos_offer_import('cf000000-0000-0000-0000-000000000001', 'fall.csv', jsonb_build_array(
-    jsonb_build_object('group', 'fest', 'artist_name', 'Fest One', 'dates', '["2026-12-05"]'::jsonb, 'terms', '{"deal_type":"door","percentage":70}'::jsonb),
-    jsonb_build_object('group', 'fest', 'artist_name', 'Fest Two', 'dates', '["2026-12-05"]'::jsonb),
+    jsonb_build_object('group', 'fest', 'artist_name', 'Fest One', 'dates', jsonb_build_array(to_char(date_trunc('month', pg_temp.d()) + interval '1 month 4 days', 'YYYY-MM-DD')), 'terms', '{"deal_type":"door","percentage":70}'::jsonb),
+    jsonb_build_object('group', 'fest', 'artist_name', 'Fest Two', 'dates', jsonb_build_array(to_char(date_trunc('month', pg_temp.d()) + interval '1 month 4 days', 'YYYY-MM-DD'))),
     jsonb_build_object('artist_name', 'Bad', 'terms', '{"deal_type":"nope"}'::jsonb),
     jsonb_build_object('artist_name', 'Solo', 'budget', '{"capacity":200,"average_price_cents":1500}'::jsonb)));
   ASSERT imp->>'status' = 'partial' AND (imp->>'created_count')::int = 3 AND imp->'errors'->0->>'row' = '3', 'OS4: partial import ' || imp::text;
@@ -401,7 +404,7 @@ DO $$
 DECLARE r jsonb; ev uuid;
 BEGIN
   r := public._exos_hold_convert('cf000000-0000-0000-0000-000000000001', 'cf000000-0000-0000-0000-0000000000a1', 'api', NULL,
-                                 pg_temp.g('hold'), jsonb_build_object('date', '2026-11-19', 'time', '20:00', 'capacity', 500));
+                                 pg_temp.g('hold'), jsonb_build_object('date', pg_temp.ds(), 'time', '20:00', 'capacity', 500));
   ev := (r->>'event_id')::uuid;
   INSERT INTO cf VALUES ('ev', ev);
   ASSERT (SELECT count(*) FROM public.exos_offers WHERE hold_id = pg_temp.g('hold') AND event_id = ev) = 2, 'OS4: offers linked';
@@ -583,7 +586,8 @@ DO $$
 DECLARE p jsonb; ok boolean;
 BEGIN
   PERFORM pg_temp.as_user('cf000000-0000-0000-0000-0000000000a2');
-  p := public.exos_pnl_inputs('cf000000-0000-0000-0000-000000000001', '2026-11-01', '2026-11-30');
+  p := public.exos_pnl_inputs('cf000000-0000-0000-0000-000000000001', date_trunc('month', pg_temp.d())::date,
+                             (date_trunc('month', pg_temp.d()) + interval '1 month - 1 day')::date);
   ASSERT jsonb_array_length(p->'shows') = 1 AND (p->'shows'->0->>'event_id')::uuid = pg_temp.g('ev'), 'OS6: the show in range';
   ASSERT p->'shows'->0->'inputs'->'budget'->>'id' = pg_temp.gt('b1'), 'OS6: forecast budget';
   ok := false;
@@ -591,7 +595,8 @@ BEGIN
   EXCEPTION WHEN invalid_parameter_value THEN ok := true; END;
   ASSERT ok, 'OS6: range over 366 days';
   ok := false;
-  BEGIN PERFORM public.exos_pnl_inputs('cf000000-0000-0000-0000-000000000002', '2026-11-01', '2026-11-30');
+  BEGIN PERFORM public.exos_pnl_inputs('cf000000-0000-0000-0000-000000000002', date_trunc('month', pg_temp.d())::date,
+                                       (date_trunc('month', pg_temp.d()) + interval '1 month - 1 day')::date);
   EXCEPTION WHEN insufficient_privilege THEN ok := true; END;
   ASSERT ok, 'OS6: another org';
   RAISE NOTICE 'OK  OS6 P&L inputs';
@@ -675,7 +680,7 @@ BEGIN
   r := public.exos_ticket_counts_run(25);
   ASSERT (r->>'switched_off')::int = 1 AND NOT (SELECT enabled FROM public.exos_ticket_count_schedules WHERE event_id = ev),
          'OS7: switched off after the show';
-  UPDATE public.exos_events SET starts_at = '2026-11-20T02:00:00Z' WHERE id = ev;
+  UPDATE public.exos_events SET starts_at = (pg_temp.d() + 1)::timestamp + interval '2 hours' WHERE id = ev;
   IF to_regclass('cron.job') IS NOT NULL THEN
     EXECUTE 'SELECT NOT active FROM cron.job WHERE jobname = ''exos-ticket-counts-15min''' INTO STRICT r;
   END IF;
