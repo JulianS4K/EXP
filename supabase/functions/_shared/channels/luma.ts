@@ -14,7 +14,7 @@
 // next pass finds the first one by it (GET entities/lookup) before it creates
 // again.
 import {
-  beginRefused, firstCapacity, type Io, type MirrorEvent, type MirrorTicket, type MirrorTier, pendingCreate, type StepRecord,
+  beginRefused, firstCapacity, type Io, notOnAccount, type MirrorEvent, type MirrorTicket, type MirrorTier, pendingCreate, type StepRecord,
   type SyncHooks, type SyncResult,
 } from "./model.ts";
 
@@ -85,6 +85,13 @@ export async function syncLuma(io: Io, ev: MirrorEvent, payload: any, steps: Ste
   const todo = ev.tiers.filter((t) => !t.skip);
   const names = lumaTicketNames(todo);
   const maps = new Map<string, string>((payload?.maps ?? []).map((m: any) => [String(m.tier_id), String(m.external_ticket_id)]));
+
+  // A linked event not yet synced: this calendar must manage it (same answer
+  // as another org's event, mig 20261121100000).
+  if (id && mirror.status !== "synced") {
+    const r = await io.req("GET", `/v1/events/get?${new URLSearchParams({ event_id: id })}`);
+    if (!r.ok || r.body?.access !== "manage") return { state: "error", error: notOnAccount("luma"), plan: { steps } };
+  }
 
   if (ev.status === "cancelled") {
     if (id && !meta.closed) {

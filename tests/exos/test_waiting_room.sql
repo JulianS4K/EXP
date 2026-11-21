@@ -277,8 +277,13 @@ END $$;
 DO $$
 DECLARE j jsonb; v_front uuid[]; v_adm uuid[]; v_tok text; v_pos int; v_stale uuid;
 BEGIN
-  -- Everyone polled just now.
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE event_id = pg_temp.u('e1');
+  -- Everyone polled just now, and nobody's cached view is from WR3: a real
+  -- one is minutes old by now, but now() doesn't move inside this one
+  -- transaction, so the two places WR3 polled (tokens 1 and 7: a "waiting"
+  -- view from before any admission, a "lobby" view) would otherwise still
+  -- count as fresh for 5 s and answer below with a stale position, depending
+  -- on where their random places fall.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now(), view_at = NULL WHERE event_id = pg_temp.u('e1');
   SELECT array_agg(id ORDER BY order_key, id) INTO v_front
     FROM (SELECT id, order_key FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') ORDER BY order_key, id LIMIT 6) x;
   -- First round: 60 a minute, six seconds' worth = 6, the front of the line.
@@ -313,8 +318,11 @@ BEGIN
   ASSERT j->>'state' = 'waiting' AND (j->>'position')::int = v_pos AND (j->>'ahead')::int = v_pos - 1
      AND (j->>'eta_minutes')::int = ceil(v_pos / 60.0) AND (j->>'admit_per_minute')::int = 60, 'WR4 position: ' || j::text;
   -- A tab not seen for 3 minutes is skipped; back within 30 minutes (room left), it keeps its place.
+  -- (Idle places here also drop their cached view, as a real one's is minutes old: now()
+  -- doesn't move inside this one transaction, so a lobby view cached in WR3 would
+  -- otherwise still count as fresh, depending on which place is at the front.)
   PERFORM pg_temp.as_('postgres');
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes', view_at = NULL
    WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key, id LIMIT 1)
   RETURNING id INTO v_stale;
   PERFORM pg_temp.tick(pg_temp.u('e1'), 1);
@@ -331,7 +339,7 @@ BEGIN
   PERFORM public._exos_wroom_advance(pg_temp.u('e1'));
   ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'admitted', 'WR4 back, it goes next';
   -- Idle 30 minutes: released for good; neither a poll nor a join with the token revives it.
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '31 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '31 minutes', view_at = NULL
    WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key, id LIMIT 1)
   RETURNING id INTO v_stale;
   ASSERT public._exos_wroom_view(pg_temp.u('e1'), v_stale) @> '{"state": "expired", "reason": "idle"}'::jsonb, 'WR4 idle on read';
@@ -350,7 +358,7 @@ BEGIN
   ASSERT (SELECT state FROM public.exos_wroom_entries WHERE id = v_stale) = 'abandoned'
      AND (SELECT count(*) FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'admitted') = 99, 'WR4 never admitted';
   -- The recount marks 30-minute-idle places in batches too.
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '40 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '40 minutes', view_at = NULL
    WHERE id = (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') AND state = 'waiting' ORDER BY order_key DESC, id LIMIT 1)
   RETURNING id INTO v_stale;
   UPDATE public.exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id = pg_temp.u('e1');
@@ -535,7 +543,7 @@ BEGIN
   PERFORM pg_temp.as_('anon', NULL, '2001:db9:1:1::1');
   ASSERT public.exos_wroom_join(pg_temp.u('e2'))->>'state' = 'waiting', 'WR7 another /32 joins';
   PERFORM pg_temp.as_('postgres');
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes', view_at = NULL
    WHERE event_id = pg_temp.u('e2') AND net32_hash = encode(sha256(convert_to(
          (SELECT run_id FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e2'))::text || ':2001:db8::/32', 'UTF8')), 'hex')
      AND state = 'waiting';
@@ -567,7 +575,7 @@ BEGIN
             AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
               OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))), 'WR7 live count exact';
   -- Abandoned places free up: all but 50 waiting go idle (3+ minutes unseen).
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes', view_at = NULL
    WHERE event_id = pg_temp.u('e2') AND state = 'waiting'
      AND id NOT IN (SELECT id FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e2') AND state = 'waiting'
                       AND last_seen_at > now() - interval '3 minutes' ORDER BY id LIMIT 50);
@@ -649,7 +657,7 @@ BEGIN
     'WR7 the passed address decides';
   -- Network shares count the live line: those 1,000 going idle free the address.
   PERFORM pg_temp.as_('postgres');
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes'
+  UPDATE public.exos_wroom_entries SET last_seen_at = now() - interval '4 minutes', view_at = NULL
    WHERE event_id = pg_temp.u('e2') AND net_hash = encode(sha256(convert_to(
          (SELECT run_id FROM public.exos_wroom_settings WHERE event_id = pg_temp.u('e2'))::text || ':100.64.0.3', 'UTF8')), 'hex');
   PERFORM pg_temp.as_('service_role');

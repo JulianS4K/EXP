@@ -247,6 +247,42 @@ export async function readEvent(fetchImpl: Fetch, token: string, id: string): Pr
   return c ? { ok: true, status: r.status, body: c } : { ok: false, status: 502, body: null, error: "bad event" };
 }
 
+/**
+ * Whether the event belongs to one of the token's organizations (a public
+ * event reads with any token, so a read alone proves nothing). GET only.
+ * Marks a door link verified (exos_channel_link_verified, mig 20261121100000).
+ */
+export async function ebOwnsEvent(fetchImpl: Fetch, token: string, id: string): Promise<boolean> {
+  return ebOwns((path, params) => ebGet(fetchImpl, token, path, params), id);
+}
+
+/** At most this many pages of the token's organizations are read. */
+export const EB_ORG_PAGES = 5;
+
+/**
+ * ebOwnsEvent over any GET (the channel sync's Io too): the event's
+ * organization_id, then the token's organizations page by page (continuation,
+ * at most EB_ORG_PAGES).
+ */
+export async function ebOwns(
+  get: (path: string, params?: Record<string, string | undefined>) => Promise<{ ok: boolean; body: any }>, id: string,
+): Promise<boolean> {
+  if (!isEbId(id)) return false;
+  const ev = await get(`/events/${id}/`);
+  const org = ev.ok ? ev.body?.organization_id : null;
+  if (!isEbId(org)) return false;
+  let continuation: string | undefined;
+  for (let page = 0; page < EB_ORG_PAGES; page++) {
+    const r = await get("/users/me/organizations/", continuation ? { continuation } : {});
+    if (!r.ok) return false;
+    if ((r.body?.organizations ?? []).some((o: { id?: string }) => o?.id === org)) return true;
+    const p = r.body?.pagination;
+    if (!p?.has_more_items || typeof p.continuation !== "string" || !p.continuation) return false;
+    continuation = p.continuation;
+  }
+  return false;
+}
+
 export interface EventChoice { id: string; name: string; start: string | null; status: string | null }
 
 function toChoice(e: EbEvent): EventChoice | null {

@@ -554,6 +554,10 @@ for m in \
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
+# A third apply of the channel-risks migration changes nothing: every patch
+# reports "already patched" and every function body keeps its md5 (its
+# markers must be in the text they write; Applier review of #130).
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121100000_exos_channel_risks
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_passes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
