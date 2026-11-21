@@ -4,7 +4,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { corsAllowedOrigins, NATIVE_APP_ORIGINS, parseCorsExtraOrigins } from "./corsOrigins.ts";
 import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "./redirects.ts";
-import { allowedHosts } from "./wroomJoin.ts";
+import { allowedHosts, verifyAnswer } from "./wroomJoin.ts";
 
 const WEB = "https://exos-web.onrender.com";
 const EXTRA = "capacitor://localhost, https://localhost";
@@ -38,6 +38,24 @@ Deno.test("redirect, return-URL and Turnstile checks never see the CORS extras",
   assert(isAllowedRedirect(`${WEB}/bridge/my-tickets`, redirect));
   // The waiting room's Turnstile hostnames.
   assertEquals(allowedHosts((n) => env[n]), ["exos-web.onrender.com"]);
+});
+
+Deno.test("loopback and non-https entries are ignored even when configured", () => {
+  const env: Record<string, string> = {
+    EXOS_REDIRECT_ORIGINS: `${WEB},https://localhost,http://localhost:3000,https://127.0.0.1,https://[::1],https://x.localhost,http://plain.example`,
+    EXOS_APP_URL: "http://localhost:5173/bridge",
+  };
+  const redirect = parseRedirectOrigins(env.EXOS_REDIRECT_ORIGINS);
+  for (const url of ["https://localhost/x", "http://localhost:3000/x", "https://127.0.0.1/x", "https://[::1]/x", "https://x.localhost/x", "http://plain.example/x"]) {
+    assert(!isAllowedRedirect(url, redirect), url);
+  }
+  assert(!isAllowedEmbedReturn("https://localhost/embed/return", redirect));
+  assertEquals(allowedHosts((n) => env[n]), ["exos-web.onrender.com"]);
+  // The worst case: a web view's "localhost" answer, even with localhost on the list.
+  const ok = { success: true, action: "wroom", hostname: "localhost" };
+  assertEquals(verifyAnswer(ok, ["localhost", "exos-web.onrender.com"], () => {}), false);
+  assertEquals(verifyAnswer({ ...ok, hostname: "127.0.0.1" }, ["127.0.0.1"], () => {}), false);
+  assertEquals(verifyAnswer({ ...ok, hostname: "exos-web.onrender.com" }, ["exos-web.onrender.com"], () => {}), true);
 });
 
 Deno.test("no function reads EXOS_CORS_EXTRA_ORIGINS outside a CORS answer", async () => {

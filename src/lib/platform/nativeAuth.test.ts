@@ -49,7 +49,10 @@ describe('signInWithNativeIdToken', () => {
       }),
     };
     const signInWithIdToken = vi.fn(async () => ({ error: null }));
+    const forget = vi.fn(async () => {});
+    adapter.forget = forget;
     expect(await signInWithNativeIdToken({ signInWithIdToken }, adapter, 'apple', crypto)).toBe(true);
+    expect(forget).toHaveBeenCalledWith('apple'); // the identity token isn't left on the device
     const sent = (signInWithIdToken.mock.calls[0] as unknown[])[0] as { provider: string; token: string; nonce: string };
     expect(sent).toMatchObject({ provider: 'apple', token: 'eyJ.id.token' });
     expect(sha(sent.nonce)).toBe(asked);
@@ -61,9 +64,11 @@ describe('signInWithNativeIdToken', () => {
     expect(await signInWithNativeIdToken({ signInWithIdToken }, cancelled, 'google', crypto)).toBe(false);
     expect(signInWithIdToken).not.toHaveBeenCalled();
 
-    const ok: NativeAuthAdapter = { providers: () => ['google'], signIn: async () => ({ idToken: 't', accessToken: 'a' }) };
+    const forget = vi.fn(async () => { throw new Error('plugin gone'); });
+    const ok: NativeAuthAdapter = { providers: () => ['google'], signIn: async () => ({ idToken: 't', accessToken: 'a' }), forget };
     const refused = vi.fn(async () => ({ error: new Error('Unacceptable audience in id_token') }));
     await expect(signInWithNativeIdToken({ signInWithIdToken: refused }, ok, 'google', crypto)).rejects.toThrow(/audience/);
+    expect(forget).toHaveBeenCalledWith('google'); // forgotten on a refusal too; its own failure is swallowed
     expect((refused.mock.calls[0] as unknown[])[0]).toMatchObject({ access_token: 'a' });
 
     const empty: NativeAuthAdapter = { providers: () => ['google'], signIn: async () => ({ idToken: '' }) };

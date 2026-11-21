@@ -7,8 +7,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        excludeDoorDataFromBackup()
         return true
+    }
+
+    /// The door's offline roster and scan queue live in the web view's storage
+    /// (Library/WebKit) and Capacitor Preferences (Library/Preferences). Like
+    /// Android (allowBackup="false"), none of it goes to iCloud / computer
+    /// backups: a restored copy would carry another phone's door data. Run at
+    /// every launch, because the system can recreate these folders.
+    func excludeDoorDataFromBackup() {
+        let fm = FileManager.default
+        guard let library = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else { return }
+        for name in ["WebKit", "Preferences"] {
+            var url = library.appendingPathComponent(name, isDirectory: true)
+            if !fm.fileExists(atPath: url.path) {
+                try? fm.createDirectory(at: url, withIntermediateDirectories: true)
+            }
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

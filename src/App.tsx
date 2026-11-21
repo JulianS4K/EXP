@@ -19,6 +19,11 @@ import { kioskRedirect, kioskStorage, readKioskCredential } from './lib/kiosk';
 // fast. Every other route is split out so we don't ship CreateEvent / the
 // QR scanner / Stripe / etc. on the initial download.
 import Home from './views/Home';
+// The native app's build (vite --mode native) leaves the venue embed out: it
+// is the one page with Stripe's card iframe (docs/pci.md). `import.meta.env.MODE`
+// is a build-time literal, so these views and Stripe.js aren't even bundled.
+const NATIVE_BUILD = import.meta.env.MODE === 'native';
+const NotInApp = () => <Navigate to="/" replace />;
 const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
 const PayPalCheckout = lazy(() => import('./views/PayPalCheckout'));
@@ -40,7 +45,7 @@ const WalletPass = lazy(() => import('./views/WalletPass'));
 const InvoiceView = lazy(() => import('./views/InvoiceView'));
 const TransferTicket = lazy(() => import('./views/TransferTicket'));
 const ClaimTicket = lazy(() => import('./views/ClaimTicket'));
-const EmbedOrg = lazy(() => import('./views/EmbedOrg'));
+const EmbedOrg = NATIVE_BUILD ? NotInApp : lazy(() => import('./views/EmbedOrg'));
 const OrganizerDashboard = lazy(() => import('./views/OrganizerDashboard'));
 const CreateEvent = lazy(() => import('./views/CreateEvent'));
 const OrganizerCheckIn = lazy(() => import('./views/OrganizerCheckIn'));
@@ -72,8 +77,8 @@ const Give = lazy(() => import('./views/Give'));
 const GiftCardBalance = lazy(() => import('./views/GiftCardBalance'));
 const MyMemberships = lazy(() => import('./views/MyMemberships'));
 const ClaimMembership = lazy(() => import('./views/ClaimMembership'));
-const EmbedEvent = lazy(() => import('./views/EmbedEvent'));
-const EmbedReturn = lazy(() => import('./views/EmbedReturn'));
+const EmbedEvent = NATIVE_BUILD ? NotInApp : lazy(() => import('./views/EmbedEvent'));
+const EmbedReturn = NATIVE_BUILD ? NotInApp : lazy(() => import('./views/EmbedReturn'));
 const OrganizerOnboarding = lazy(() => import('./views/OrganizerOnboarding'));
 const ClaimInvite = lazy(() => import('./views/ClaimInvite'));
 const OrganizerEventReport = lazy(() => import('./views/OrganizerEventReport'));
@@ -108,7 +113,7 @@ const OrgMemberships = lazy(() => import('./views/OrgMemberships'));
 // claude/exos-gap-giving: giving tables (mig 20261102110000).
 const OrgGiving = lazy(() => import('./views/OrgGiving'));
 const OrgOrders = lazy(() => import('./views/OrgOrders'));
-const EmbedSignup = lazy(() => import('./views/EmbedSignup'));
+const EmbedSignup = NATIVE_BUILD ? NotInApp : lazy(() => import('./views/EmbedSignup'));
 const SignupConfirm = lazy(() => import('./views/SignupConfirm'));
 const DropLink = lazy(() => import('./views/DropLink')); // claude/exos-drop-list
 const WaitingRoom = lazy(() => import('./views/WaitingRoom')); // claude/exos-waiting-room
@@ -317,13 +322,13 @@ export default function App() {
                     <Route path="/me/memberships" element={<MyMemberships />} />
                     <Route path="/membership/claim" element={<ClaimMembership />} />
                     {/* Embed widget (Sprint 6) — chromeless event card for
-                        venues to iframe on their own site. */}
-                    <Route path="/embed/event/:eventId" element={<EmbedEvent />} />
-                    <Route path="/embed/org/:slug" element={<EmbedOrg />} />
+                        venues to iframe on their own site. Not in the native app. */}
+                    {!NATIVE_BUILD && <Route path="/embed/event/:eventId" element={<EmbedEvent />} />}
+                    {!NATIVE_BUILD && <Route path="/embed/org/:slug" element={<EmbedOrg />} />}
                     {/* Signup form (fans, mig 20261031120000): no payment on this page. */}
-                    <Route path="/embed/signup/:formId" element={<EmbedSignup />} />
+                    {!NATIVE_BUILD && <Route path="/embed/signup/:formId" element={<EmbedSignup />} />}
                     {/* Stripe Embedded Checkout return page, inside the same iframe. */}
-                    <Route path="/embed/return" element={<EmbedReturn />} />
+                    {!NATIVE_BUILD && <Route path="/embed/return" element={<EmbedReturn />} />}
                     <Route path="/privacy" element={<Privacy />} />
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/status" element={<Status />} />

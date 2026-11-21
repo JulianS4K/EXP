@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { buildSpecFiles } from './scripts/api-spec.mjs';
+import { nativeCsp } from './src/lib/platform/nativeCsp';
 
 /**
  * Generates public/api-spec.json and public/openapi.json (the /developers
@@ -57,12 +58,21 @@ function apiSpecPlugin(): Plugin {
  * required: every link that leaves the app (Stripe's return pages, shares,
  * auth mails) is built from it.
  */
-function nativeShellPlugin(): Plugin {
+function nativeShellPlugin(env: Record<string, string>): Plugin {
   let outDir = '';
   return {
     name: 'exos-native-shell',
     configResolved(c) {
       outDir = path.resolve(c.root, c.build.outDir);
+    },
+    // The app's local server sends no headers: the CSP rides in a <meta>,
+    // first in <head> (src/lib/platform/nativeCsp.ts).
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html) {
+        const csp = nativeCsp({ supabaseUrl: env.VITE_SUPABASE_URL, webUrl: env.VITE_EXOS_WEB_URL });
+        return html.replace(/<head>/i, `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}" />`);
+      },
     },
     closeBundle() {
       fs.rmSync(path.join(outDir, 'sw.js'), { force: true });
@@ -72,9 +82,10 @@ function nativeShellPlugin(): Plugin {
 
 export default defineConfig(({ mode }) => {
   const native = mode === 'native';
+  const nativeEnv: Record<string, string> = native ? { ...loadEnv(mode, import.meta.dirname, 'VITE_') } : {};
+  for (const k of ['VITE_EXOS_WEB_URL', 'VITE_SUPABASE_URL']) if (process.env[k]) nativeEnv[k] = process.env[k]!;
   if (native && !process.env.VITEST) {
-    const env = loadEnv(mode, import.meta.dirname, 'VITE_');
-    const webUrl = (process.env.VITE_EXOS_WEB_URL ?? env.VITE_EXOS_WEB_URL ?? '').trim();
+    const webUrl = (nativeEnv.VITE_EXOS_WEB_URL ?? '').trim();
     if (!/^https:\/\/[^/?#\s]+(\/[^?#\s]*)?$/.test(webUrl)) {
       throw new Error('vite --mode native needs VITE_EXOS_WEB_URL: the public web app, e.g. https://exos-web.onrender.com/bridge (docs/native-apps.md).');
     }
@@ -85,7 +96,7 @@ export default defineConfig(({ mode }) => {
     // refs as /bridge/assets/... so they resolve under the prefix. Pair with
     // <BrowserRouter basename="/bridge"> in App.tsx. The native app: '/'.
     base: native ? '/' : '/bridge/',
-    plugins: [apiSpecPlugin(), react(), tailwindcss(), ...(native ? [nativeShellPlugin()] : [])],
+    plugins: [apiSpecPlugin(), react(), tailwindcss(), ...(native ? [nativeShellPlugin(nativeEnv)] : [])],
     test: {
       // .claude/** holds agent worktrees (full copies of the repo): without
       // this, a local `npm test` runs every test once per worktree.

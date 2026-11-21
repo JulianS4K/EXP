@@ -69,6 +69,9 @@ export interface NativeAuthAdapter {
   providers(): NativeIdProvider[];
   /** The OS sign-in sheet; `nonce` is the SHA-256 (hex) of the raw nonce. null = cancelled. */
   signIn(provider: NativeIdProvider, opts: { nonce: string }): Promise<NativeIdToken | null>;
+  /** Drop what the plugin kept of that sign-in (the identity token, in UserDefaults / backups):
+   *  the Supabase session is the app's login from then on. */
+  forget?(provider: NativeIdProvider): Promise<void>;
 }
 
 export interface DoorAdapter {

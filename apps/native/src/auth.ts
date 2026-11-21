@@ -49,6 +49,10 @@ export function socialLoginAdapter(platform: 'ios' | 'android', env: Env): Nativ
 
   return {
     providers: () => [...providers],
+    async forget(provider) {
+      // The plugin keeps the last identity token (UserDefaults on iOS): drop it.
+      await SocialLogin.logout({ provider }).catch(() => {});
+    },
     async signIn(provider, { nonce }) {
       if (!providers.includes(provider)) throw new Error(`${provider} sign-in isn't set up in this build.`);
       await init();

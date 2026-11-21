@@ -1,4 +1,7 @@
-import { loadStripe, Stripe } from '@stripe/stripe-js';
+// /pure: importing this module loads nothing; js.stripe.com is fetched only when
+// loadStripe() runs (the default entry injects the script on import).
+import { loadStripe } from '@stripe/stripe-js/pure';
+import type { Stripe } from '@stripe/stripe-js';
 import { nativeBuildFlags } from './platform/native';
 
 // Stripe lives in its own module so that views which only need helpers like

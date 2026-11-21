@@ -1280,7 +1280,12 @@ the native app's web views (`capacitor://localhost`, `https://localhost`,
 functions below, and nothing is ever redirected or returned there. Never put a
 localhost origin in `EXOS_REDIRECT_ORIGINS`: another app on the device could
 then receive a return URL. The same goes for Supabase Auth's redirect URLs
-(dashboard).
+(dashboard). The code enforces it too: `isAllowedRedirect` /
+`isAllowedEmbedReturn` accept https only and never a loopback host
+(`isLoopbackHost`: localhost, `*.localhost`, 127.x, ::1, 0.0.0.0) even when one
+is configured, and the waiting room's Turnstile host list drops loopback and
+non-https entries and never passes a loopback answer (an app web view reports
+`localhost`), so the native app sends Turnstile rooms to the browser sheet.
 
 Every reader of `EXOS_REDIRECT_ORIGINS` (no SQL, SPA or server code reads either setting):
 

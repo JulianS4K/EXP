@@ -73,13 +73,18 @@ export async function signInWithNativeIdToken(
   const nonce = await newNonce(crypto);
   const got = await adapter.signIn(provider, { nonce: nonce.hashed });
   if (!got) return false;
-  if (!got.idToken) throw new Error(`${provider === 'apple' ? 'Apple' : 'Google'} did not return an ID token.`);
-  const { error } = await auth.signInWithIdToken({
-    provider,
-    token: got.idToken,
-    nonce: nonce.raw,
-    ...(got.accessToken ? { access_token: got.accessToken } : {}),
-  });
-  if (error) throw error;
-  return true;
+  try {
+    if (!got.idToken) throw new Error(`${provider === 'apple' ? 'Apple' : 'Google'} did not return an ID token.`);
+    const { error } = await auth.signInWithIdToken({
+      provider,
+      token: got.idToken,
+      nonce: nonce.raw,
+      ...(got.accessToken ? { access_token: got.accessToken } : {}),
+    });
+    if (error) throw error;
+    return true;
+  } finally {
+    // Used or refused, the provider's token isn't kept on the device.
+    await adapter.forget?.(provider).catch(() => {});
+  }
 }

@@ -14,6 +14,7 @@ import { Preferences } from '@capacitor/preferences';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { registerPlatformAdapters, type DurableStore, type WalletAdapter } from '../../../src/lib/platform/adapters';
 import { appRouteForUrl } from '../../../src/lib/platform/deepLinks';
+import { checkoutTarget, externalUrl } from '../../../src/lib/platform/checkoutTarget';
 import { nativeWebBase } from '../../../src/lib/platform/native';
 import { mlkitScanner } from './scanner';
 import { socialLoginAdapter } from './auth';
@@ -79,15 +80,6 @@ function walletAdapter(platform: 'ios' | 'android'): WalletAdapter {
   };
 }
 
-function isExternalHttps(url: string): boolean {
-  try {
-    const u = new URL(url, window.location.href);
-    return u.protocol === 'https:' && u.origin !== window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
 export function installPlatform(): void {
   if (!Capacitor.isNativePlatform()) return;
   const platform = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android';
@@ -120,24 +112,24 @@ export function installPlatform(): void {
     walletAdd: walletAdapter(platform),
     storage: preferencesStore,
     async openExternal(url) {
-      const abs = new URL(url, webBase ?? window.location.href).toString();
+      const abs = externalUrl(url, webBase);
+      if (!abs) throw new Error('That link can’t be opened.');
       await Browser.open({ url: abs });
     },
     async openCheckout(url, opts) {
+      // https or app-relative only (src/lib/platform/checkoutTarget.ts).
+      const target = checkoutTarget(url, webBase);
+      if (!target) throw new Error('Could not start checkout.');
       // One of our own pages (a free order, a gift card that covered it
       // all): stay in the app, on its own copy of the page.
-      if (webBase && url.startsWith(`${webBase}/`)) {
-        window.location.assign(url.slice(webBase.length));
-        return;
-      }
-      if (!isExternalHttps(url)) {
-        window.location.assign(url);
+      if (target.kind === 'app') {
+        window.location.assign(target.route);
         return;
       }
       // Stripe's hosted Checkout in the browser sheet: Apple Pay / Google Pay
       // work there, and no card field ever loads in the app (docs/pci.md).
       returnTo = opts.returnTo;
-      await Browser.open({ url, presentationStyle: 'fullscreen' });
+      await Browser.open({ url: target.url, presentationStyle: 'fullscreen' });
     },
     nativeAuth: socialLoginAdapter(platform, env),
     door: {

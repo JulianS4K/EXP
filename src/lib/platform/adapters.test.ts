@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { platform, registerPlatformAdapters, resetPlatformAdapters, WEB_ADAPTERS, webDurableStore } from './adapters';
 import { appRouteForUrl, APP_LINK_ROUTES } from './deepLinks';
 import { scanDeduper, scanFeedback } from './scanDedupe';
+import { checkoutTarget, externalUrl } from './checkoutTarget';
 
 afterEach(() => {
   resetPlatformAdapters();
@@ -97,9 +98,11 @@ describe('deep links into the app', () => {
     const { resolve } = await import('node:path');
     const aasa = readFileSync(resolve(__dirname, '../../../apps/native/deep-links/apple-app-site-association.template.json'), 'utf8');
     const manifest = readFileSync(resolve(__dirname, '../../../apps/native/android/app/src/main/AndroidManifest.xml'), 'utf8');
-    for (const r of APP_LINK_ROUTES.filter((x) => x !== '/my-tickets')) {
+    for (const r of APP_LINK_ROUTES) {
       expect(aasa).toContain(`"/${r.replace(/^\//, '').replace(/\/$/, '')}`);
       expect(manifest).toContain(`android:pathPrefix="${r}"`);
+      expect(manifest).toContain(`android:pathPrefix="/bridge${r}"`);
+      expect(aasa).toContain(`"/bridge/${r.replace(/^\//, '').replace(/\/$/, '')}`);
     }
   });
 });
@@ -129,5 +132,29 @@ describe('scan dedupe and feedback', () => {
     expect(scanFeedback('needs-reason')).toBe('attention');
     expect(scanFeedback('searching')).toBeNull();
     expect(scanFeedback('idle')).toBeNull();
+  });
+});
+
+describe('checkout and external targets in the app', () => {
+  const BASE = 'https://exos-web.onrender.com/bridge';
+
+  it('opens our own pages in the app and Stripe in the sheet', () => {
+    expect(checkoutTarget('/my-tickets?claimed=2', BASE)).toEqual({ kind: 'app', route: '/my-tickets?claimed=2' });
+    expect(checkoutTarget(`${BASE}/my-tickets?checkout=success#pt=abc`, BASE)).toEqual({ kind: 'app', route: '/my-tickets?checkout=success#pt=abc' });
+    expect(checkoutTarget('https://checkout.stripe.com/c/pay/cs_test_1#fid', BASE)).toEqual({ kind: 'sheet', url: 'https://checkout.stripe.com/c/pay/cs_test_1#fid' });
+  });
+
+  it('refuses every other scheme or shape', () => {
+    for (const u of ['javascript:alert(1)', 'data:text/html,x', 'http://checkout.stripe.com/x', '//evil.example/x', '/\\evil.example',
+      'https://u:p@checkout.stripe.com/', 'https://localhost/x', 'capacitor://localhost/x', `${BASE}//evil.example`, '', 42]) {
+      expect(checkoutTarget(u, BASE)).toBeNull();
+    }
+  });
+
+  it('openExternal: paths resolve on the web app; https only', () => {
+    expect(externalUrl('/pay/paypal#c=1', BASE)).toBe(`${BASE}/pay/paypal#c=1`);
+    expect(externalUrl(`${BASE}/pay/paypal`, BASE)).toBe(`${BASE}/pay/paypal`);
+    expect(externalUrl('javascript:alert(1)', BASE)).toBeNull();
+    expect(externalUrl('http://pay.example/', BASE)).toBeNull();
   });
 });

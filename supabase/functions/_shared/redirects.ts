@@ -4,8 +4,11 @@
 //
 // Allowed: an exact origin from EXOS_REDIRECT_ORIGINS (comma-separated, e.g.
 // "https://vibepass-storefront-test.onrender.com,https://exos.example"), over
-// https (http only for localhost), with no embedded credentials. No imports,
-// so Deno and EXP's vitest can both load it.
+// https, with no embedded credentials. A loopback host (localhost,
+// *.localhost, 127.x, ::1, 0.0.0.0) is never a target, even when configured:
+// on a phone, another app can listen there (the native app's web view origins
+// are CORS-only, _shared/corsOrigins.ts). Local development returns through an
+// https tunnel. No imports, so Deno and EXP's vitest can both load it.
 
 export function parseRedirectOrigins(raw: string | undefined | null): string[] {
   return (raw ?? "")
@@ -14,13 +17,19 @@ export function parseRedirectOrigins(raw: string | undefined | null): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** localhost, *.localhost, 127.0.0.0/8, ::1 (bracketed or not), 0.0.0.0. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = hostname.trim().toLowerCase().replace(/\.$/, "");
+  return h === "localhost" || h.endsWith(".localhost") || /^127\.\d+\.\d+\.\d+$/.test(h)
+    || h === "::1" || h === "[::1]" || h === "0.0.0.0" || h === "[::]";
+}
+
 export function isAllowedRedirect(url: unknown, allowedOrigins: string[]): boolean {
   if (typeof url !== "string" || url.length > 2048) return false;
   let u: URL;
   try { u = new URL(url); } catch { return false; }
   if (u.username || u.password) return false;
-  const local = u.hostname === "localhost" || u.hostname === "127.0.0.1";
-  if (u.protocol !== "https:" && !(u.protocol === "http:" && local)) return false;
+  if (u.protocol !== "https:" || isLoopbackHost(u.hostname)) return false;
   return allowedOrigins.includes(u.origin);
 }
 

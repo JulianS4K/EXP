@@ -49,7 +49,8 @@ browser" banners.
 | Service worker | registered | none (`sw.js` removed; the app is the offline shell) |
 | Ad pixels | per org, with consent | **off**: no pixel loads, so no App Tracking Transparency prompt. Server-side conversions (`docs/marketing-conversions.md`) still report |
 | Group chat (`/groups`) | behind `VITE_EXOS_SOCIAL` | **always off** (App Store 1.2: user-generated content needs reporting / blocking we don't ship in the app) |
-| Stripe.js (Embedded Checkout) | venue embed only | **refused** (`getStripe` rejects): no card field in the app |
+| Stripe.js (Embedded Checkout) | venue embed only | **not in the bundle**: the `/embed/*` routes and views are left out (`App.tsx` `NATIVE_BUILD`), `lib/stripe.ts` imports `@stripe/stripe-js/pure` (nothing loads on import), and `getStripe` rejects. No card field in the app |
+| Content-Security-Policy | per page, HTTP header (`src/lib/hosting/headers.ts`) | a `<meta http-equiv>` in `index.html` (`src/lib/platform/nativeCsp.ts`): scripts from the app and Google Maps only (no inline script, no Stripe, pixels, PayPal or Turnstile); network to this Supabase project, the web app's origin, Sentry and Maps; frames for the event video only |
 | Links out (Stripe return pages, shares, auth mails) | the page's origin | `VITE_EXOS_WEB_URL` (required; the build fails without it) |
 | Platform installer | `install.web.ts` (no-op) | `apps/native/src/install.ts` (alias `@exos/platform-install`) |
 
@@ -61,13 +62,16 @@ browser" banners.
 | `storage` | localStorage | Capacitor Preferences (UserDefaults / SharedPreferences). The door's scan queue stays in localStorage and is mirrored here; a queue the OS cleared is restored on the next open |
 | `walletAdd` | not handled: `WalletButtons` as before | Google: the save link in the browser sheet. Apple: `ExosWallet.addPass` (the pass bytes from `exos-wallet`, as before) |
 | `openExternal` | new tab | browser sheet (SFSafariViewController / Custom Tabs) |
-| `openCheckout` | same-tab redirect to Stripe | Stripe's hosted Checkout in the browser sheet (Apple Pay / Google Pay work there; they don't in a web view with injected scripts). Closing the sheet comes back to My Tickets. A URL on the web app (free order, gift card) opens the app's own copy instead |
-| `nativeAuth` | `null`: the OAuth redirect | `@capgo/capacitor-social-login` → `supabase.auth.signInWithIdToken` (hashed nonce to Google / Apple, raw nonce to Supabase) |
+| `openCheckout` | same-tab redirect to Stripe | Stripe's hosted page in the browser sheet (Apple Pay / Google Pay work there; they don't in a web view with injected scripts), then back to the page's `returnTo` when it closes. A URL on the web app (free order, gift card) or an app path opens the app's own copy; any other scheme is refused (`checkoutTarget`). Used by ticket checkout, gift cards and passes (`/shop`), donations and the donor portal (`/give`), the membership billing portal and group pay |
+| `nativeAuth` | `null`: the OAuth redirect | `@capgo/capacitor-social-login` → `supabase.auth.signInWithIdToken` (hashed nonce to Google / Apple, raw nonce to Supabase), then the plugin's own copy of the identity token is dropped (`forget`, `SocialLogin.logout`) |
 | `door` | `null` | keep the screen on while the door page is open |
 
-Also: PayPal / Venmo opens the public PayPal page in the browser sheet (its SDK never loads in the app),
-and Universal / App Links to `/door`, `/checkin/…` and `/my-tickets` open that route in the app (only on
-the web app's host or `VITE_EXOS_APP_LINK_HOSTS`; anything else is ignored).
+Also: PayPal / Venmo opens the public PayPal page in the browser sheet (its SDK never loads in the app).
+A **waiting room with its human check on** shows "Join the line in the browser", which opens the public
+event page in the browser sheet: an app web view reports `localhost` to Turnstile, and the server never
+accepts a loopback hostname (`_shared/wroomJoin.ts`), so the place in line and the purchase happen there.
+Universal / App Links to `/door`, `/checkin/…` and `/my-tickets` (and the same under `/bridge`) open that
+route in the app (only on the web app's host or `VITE_EXOS_APP_LINK_HOSTS`; anything else is ignored).
 
 **Sign-in in the app** (`providerPlan`): Google and Apple only through the native sheets that are set up;
 Microsoft never (its redirect would leave the app); email (password or the 6-digit code) always. On iOS,
@@ -79,11 +83,12 @@ redirect through a backend). Magic links and confirmation mails open the web app
 ```bash
 npm ci                                   # the web app (repo root)
 cd apps/native && npm ci                 # the shell (its own lockfile)
+bundle install                           # macOS: CocoaPods + fastlane from the Gemfile (cap sync runs `bundle exec pod install`)
 VITE_EXOS_WEB_URL=https://<web host>/bridge \
 VITE_SUPABASE_URL=… VITE_SUPABASE_ANON_KEY=… \
   npm run sync                           # vite --mode native → www/, then cap sync
 npm run check                            # tsc for the shell
-npx cap open ios                         # macOS + Xcode: cd ios/App && bundle exec pod install first
+npx cap open ios                         # macOS + Xcode (open App.xcworkspace)
 npx cap open android                     # Android Studio
 ```
 
@@ -99,10 +104,16 @@ Build-time settings (Vite env, `.env.native` or the shell; none is a secret):
 | `VITE_EXOS_APP_LINK_HOSTS` | Extra hosts whose door links open the app (the custom domain), comma-separated |
 
 **iOS uses CocoaPods**, not Swift Package Manager: ML Kit has no SPM package. Deployment target 15.5. ML
-Kit's pods don't build for the arm64 simulator: test on a device (or an x86_64 simulator).
+Kit's pods don't build for the arm64 simulator: test on a device (or an x86_64 simulator). The root view
+controller is `ExosBridgeViewController` (`SceneDelegate.swift`), which registers the local `ExosWallet`
+plugin. `Library/WebKit` (the web view's storage) and `Library/Preferences` are excluded from iCloud /
+computer backups at every launch (`AppDelegate.swift`), as on Android.
 
 **Android** targets and compiles against API 36 (`android/variables.gradle`), min API 24. Backups are off
 (`allowBackup="false"`, `data_extraction_rules.xml`): the door's roster and queue must not leave the device.
+Capacitor adds its bridge as a document-start script, which the CSP doesn't cover; a WebView too old for
+that (not updated in years) gets the bridge as an inline script, which the CSP blocks, and the app then
+runs with the web defaults.
 
 **In a desktop browser**, `apps/native/www` runs with the web defaults (Capacitor reports `web`), which is
 handy for checking the bundle.
@@ -111,11 +122,13 @@ handy for checking the bundle.
 
 Checked in this repo's container: `npm ci`, `lint`, `lint:a11y`, vitest, the web build, the native-mode
 build, `npm audit --omit=dev --audit-level=high` (root) and `npm audit` (shell), the browser smoke + axe run,
-`npx cap sync` for both platforms (CocoaPods install skipped), `npx cap doctor` (Android OK), `tsc` for the
+`npx cap sync` (Android complete; iOS copies the bundle and plugin list, then stops at `bundle exec pod install`: no CocoaPods here, and `npx cap sync android` exits 0), `npx cap doctor` (Android OK), `tsc` for the
 shell, and `fastlane lanes` (both lanes parse).
 
 **Not verified (no Xcode, CocoaPods, Android SDK or devices here):** compiling either native project
-(including `ExosWalletPlugin.swift` and the hand-added Xcode project entries), the ML Kit overlay on a
+(including `ExosWalletPlugin.swift`, its registration through `ExosBridgeViewController`, the backup
+exclusion and the hand-added Xcode project entries), the CSP against Capacitor's bridge and Google Maps on a
+device, the waiting room hand-off to the browser sheet, the ML Kit overlay on a
 real camera, haptics, keep-awake, native Google / Apple sign-in against Supabase, the browser-sheet
 checkout and its return, Preferences, App Links / Universal Links, and the fastlane uploads. Do these on
 devices before the first TestFlight / internal build.

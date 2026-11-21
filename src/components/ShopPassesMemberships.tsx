@@ -8,6 +8,8 @@ import {
   buyMembership, buyPass, publicMembershipProducts, publicPassProducts, type MembershipProduct, type PassProduct,
 } from '../lib/commerce';
 import { formatCurrency, publicUrl } from '../lib/utils';
+// Stripe pages: a same-tab redirect on the web, the browser sheet in the app.
+import { platform } from '../lib/platform/adapters';
 
 const per = { month: '/ month', year: '/ year', once: '' } as const;
 
@@ -26,7 +28,7 @@ export default function ShopPassesMemberships({ orgSlug, signedIn }: { orgSlug: 
   const back = publicUrl(`shop/${orgSlug}`);
   const go = async (fn: () => Promise<string>) => {
     setErr(null);
-    try { window.location.href = await fn(); } catch (x: any) { setErr(x?.message || 'Could not start checkout.'); }
+    try { await platform().openCheckout(await fn(), { returnTo: `/shop/${orgSlug}` }); } catch (x: any) { setErr(x?.message || 'Could not start checkout.'); }
   };
 
   if (passes.length === 0 && members.length === 0) return null;

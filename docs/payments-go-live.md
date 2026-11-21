@@ -77,7 +77,7 @@ the details with counsel.)
 | `STRIPE_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the platform endpoint (step 3). Test and live have **different** secrets |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the connected-accounts endpoint (step 3). Without it organizers never become `chargesEnabled` |
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
-| `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
+| `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only; a loopback host (localhost, 127.x, ::1) is ignored even if listed (local testing returns through an https tunnel). Unset means both functions refuse every request |
 | `EXOS_PLATFORM_FEE_BPS` | exos-checkout | Optional, default 300 (3%, `_shared/platformFee.ts`) |
 | `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` | exos-checkout | Optional, default 290 / 30: Stripe's card fee, added to the application fee |
 | `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |

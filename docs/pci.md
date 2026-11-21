@@ -14,6 +14,7 @@ what keeps us eligible for SAQ A as the product grows.
 | Event page → **Cash App Pay** (on Stripe Checkout, mig 20261031220000) | Stripe-hosted page, next to cards | SAQ A, same as cards |
 | Event page → **Pay with Venmo / PayPal** → `/bridge/pay/paypal` | PayPal's JS SDK buttons (PayPal / Venmo log-ins in PayPal's windows; card funding switched off) on a page of its own | No card data on our page. See "PayPal / Venmo" below |
 | Box office (`exos-pos`) | Cash and comp; a card only on a Stripe Terminal reader when `EXOS_POS_CARD=on` (`docs/pos.md` "Card at the door"). The reader reads the card; Exos sends and keeps the PaymentIntent id only | Card-present: the card is read and encrypted inside Stripe's PCI PTS readers; see "Box office cards" |
+| Exos Door app (`apps/native`, `docs/native-apps.md`) | Every Stripe page (Checkout, portals) opens in the system browser sheet. The app's bundle leaves out the venue embed and Stripe.js, and its CSP allows no Stripe host | No card field in the app: SAQ A as the web |
 | Self-serve kiosk (`/kiosk`, mig 20261113191000) | A card on the kiosk's own Stripe Terminal reader only; the page has no card field and no payment script | The web page: SAQ A. The reader: as the box office |
 
 - No Exos code, table, log or email holds a card number, CVC or expiry. Exos keeps Stripe ids

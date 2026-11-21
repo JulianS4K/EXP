@@ -15,6 +15,9 @@ import {
 } from '../lib/waitingRoom';
 import TurnstileWidget from './TurnstileWidget';
 import { useAuth } from '../context/AuthContext';
+import { platform } from '../lib/platform/adapters';
+import { isNativeApp } from '../lib/platform/native';
+import { publicUrl } from '../lib/utils';
 
 function timeIn(d: Date, tz?: string | null): string {
   try {
@@ -25,7 +28,7 @@ function timeIn(d: Date, tz?: string | null): string {
 }
 
 export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = TURNSTILE_SITE_KEY, onChallenge, onSignIn,
-  onEndCheckout, note }: {
+  onEndCheckout, note, browserUrl }: {
   status: RoomStatus; timezone?: string | null; onRejoin: () => void; busy?: boolean;
   siteKey?: string; onChallenge?: (token: string) => void;
   /** 'checking_out' on a Stripe page: cancel it and join again. */
@@ -34,6 +37,9 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = T
   note?: string | null;
   /** Signed out: offered when the guest line is full (an established account gets a place). */
   onSignIn?: () => void;
+  /** The native app: the human check runs on this public page in the browser sheet instead (an app web
+   *  view reports "localhost" to Turnstile, which the server refuses). */
+  browserUrl?: string;
 }) {
   const v = queueView(status, (d) => timeIn(d, timezone));
   const mode = challengeMode(status, siteKey);
@@ -55,7 +61,13 @@ export function WaitingRoomQueue({ status, timezone, onRejoin, busy, siteKey = T
           </div>
         </div>
       )}
-      {mode === 'widget' && onChallenge && <TurnstileWidget siteKey={siteKey} onToken={onChallenge} />}
+      {mode === 'widget' && onChallenge && !browserUrl && <TurnstileWidget siteKey={siteKey} onToken={onChallenge} />}
+      {mode === 'widget' && browserUrl && (
+        <button type="button" onClick={() => void platform().openExternal(browserUrl)}
+          className="disp w-full bg-brand-primary text-black py-3 text-lg tracking-wide">
+          Join the line in the browser
+        </button>
+      )}
       {mode === 'unavailable' && (
         <p className="type text-[12px] text-white/75">This waiting room can't take new places right now. Try again later.</p>
       )}
@@ -192,7 +204,8 @@ export default function WaitingRoomGate({ eventId, timezone, children, siteKey =
     return <WaitingRoomQueue status={status} timezone={timezone} onRejoin={() => void rejoin()} busy={busy}
       siteKey={siteKey} onChallenge={(t) => void challenge(t)}
       onSignIn={uid || status.signedIn ? undefined : openAuthModal}
-      onEndCheckout={() => void endOpenCheckout()} note={note} />;
+      onEndCheckout={() => void endOpenCheckout()} note={note}
+      browserUrl={isNativeApp() ? publicUrl(`event/${eventId}`) : undefined} />;
   }
   return (
     <>
