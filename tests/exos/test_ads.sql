@@ -35,10 +35,29 @@
 --       "@" give no hash
 --   AD9 the throttles: 3 a minute (shared with the export), the daily cap
 --       counts both
+--   AD10 B2': an SMS proof, an organizer's correction, a lost dispute and an
+--       unconfirmed account make no "yes"; an email code does
+--   AD11 T1: an account confirmed at sign-up with no confirmation mail makes
+--       no "yes"; a provider-verified OAuth email or an answered confirmation
+--       mail does. T2: open disputes don't count. T3: an SMS send doesn't
+--       reopen the email code after 5 wrong codes; the phone code still proves
 -- Self-contained (ad1 prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
+-- The fixture accounts below answered a confirmation mail, which counts only
+-- while the operator says Supabase Auth's "Confirm email" is on
+-- (auth_confirm_email_on). These suites model that; AD11 / A8 turn it off.
+INSERT INTO public.exos_platform_settings (key, value) VALUES ('auth_confirm_email_on', 'true')
+  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+
+-- As in prod, auth.users has confirmation_sent_at. The fixture accounts below
+-- answered a confirmation mail (sent a minute before their confirmed time), so
+-- their email counts as verified (_exos_account_email_verified, T1). AD11's
+-- instantly-confirmed account (Confirm email off: no mail sent) sets it NULL.
+-- Rolled back with the rest.
+ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmation_sent_at timestamptz;
+ALTER TABLE auth.users ALTER COLUMN confirmation_sent_at SET DEFAULT now() - interval '1 minute';
 
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('ad100000-0000-0000-0000-0000000000a1','ad1own@x.com',now()),
@@ -144,6 +163,7 @@ BEGIN
     ASSERT NOT has_function_privilege(r, 'public._exos_tg_conversions_reddit_email()', 'EXECUTE'), 'AD1: ' || r || ' runs the Reddit trigger';
     ASSERT NOT has_function_privilege(r, 'public.exos_ads_credential_meta(uuid,text)', 'EXECUTE'), 'AD1: ' || r || ' reads credential meta';
     ASSERT NOT has_function_privilege(r, 'public._exos_consent_grant_ok(text,text)', 'EXECUTE'), 'AD1: ' || r || ' runs the consent check';
+    ASSERT NOT has_function_privilege(r, 'public._exos_account_email_verified(uuid,text)', 'EXECUTE'), 'AD1: ' || r || ' runs the verified-email check';
     ASSERT NOT has_function_privilege(r, 'public._exos_audience_daily_gate(uuid,text)', 'EXECUTE'), 'AD1: ' || r || ' runs the daily gate';
     ASSERT NOT has_function_privilege(r, 'public._exos_email_trim(text)', 'EXECUTE'), 'AD1: ' || r || ' runs the email trim';
   END LOOP;
@@ -656,6 +676,137 @@ BEGIN
   ASSERT NOT ('unconf@x.com' = ANY (e)) AND NOT ('unconf@x.com' = ANY (x)), 'AD10: an unconfirmed account''s "yes" counted';
   ASSERT 'ph5@x.com' = ANY (e) AND 'buyer1@x.com' = ANY (x), 'AD10: confirmed accounts still count';
   RAISE NOTICE 'OK  AD10 a "yes" needs the person''s own email proof: not an SMS proof, an organizer''s correction, a lost dispute or an unconfirmed account';
+END $$;
+
+-- AD11 -----------------------------------------------------------------------
+-- T1: "confirmed" isn't "verified". With Supabase's "Confirm email" off,
+-- GoTrue sets email_confirmed_at at sign-up and sends nothing
+-- (confirmation_sent_at NULL): a stranger signs up as the victim's address,
+-- buys signed in and ticks "yes". Verified means an OAuth identity whose
+-- provider says email_verified, or a confirmation mail sent and answered.
+-- T2: only a dispute payouts treat as settled (NULL, won, warning_closed)
+-- keeps a "yes". T3: an SMS send doesn't reopen the email code's guesses.
+SELECT pg_temp.fresh_minute();
+DELETE FROM public.exos_audience_exports WHERE org_id = pg_temp.org();
+ALTER TABLE auth.identities ADD COLUMN IF NOT EXISTS provider text, ADD COLUMN IF NOT EXISTS identity_data jsonb;
+INSERT INTO auth.users(id,email,email_confirmed_at,confirmation_sent_at) VALUES
+  ('ad100000-0000-0000-0000-0000000000d1','t1-victim@x.com',now(),NULL),            -- instant confirm, no mail: a stranger
+  ('ad100000-0000-0000-0000-0000000000d2','t1-google@x.com',now(),NULL),            -- Google says email_verified (JSON true)
+  ('ad100000-0000-0000-0000-0000000000d3','t1-apple@x.com',now(),NULL),             -- Apple says email_verified ("true")
+  ('ad100000-0000-0000-0000-0000000000d4','t1-unverified@x.com',now(),NULL),        -- Google says NOT verified
+  ('ad100000-0000-0000-0000-0000000000d5','t1-emailprov@x.com',now(),NULL),         -- an 'email' identity says verified: not enough
+  ('ad100000-0000-0000-0000-0000000000d6','t1-mailed@x.com',now(),now() - interval '1 hour'), -- confirmation mail sent and answered
+  ('ad100000-0000-0000-0000-0000000000d7','t1-otheraddr@x.com',now(),NULL),         -- Google verified a different address
+  ('ad100000-0000-0000-0000-0000000000f1','t2-needs@x.com',now(),now() - interval '1 hour'),
+  ('ad100000-0000-0000-0000-0000000000f2','t2-review@x.com',now(),now() - interval '1 hour'),
+  ('ad100000-0000-0000-0000-0000000000f3','t2-won@x.com',now(),now() - interval '1 hour'),
+  ('ad100000-0000-0000-0000-0000000000f4','t2-wclosed@x.com',now(),now() - interval '1 hour');
+INSERT INTO auth.identities(user_id,provider,identity_data) VALUES
+  ('ad100000-0000-0000-0000-0000000000d2','google','{"email":"t1-google@x.com","email_verified":true}'),
+  ('ad100000-0000-0000-0000-0000000000d3','apple','{"email":"T1-Apple@x.com","email_verified":"true"}'),
+  ('ad100000-0000-0000-0000-0000000000d4','google','{"email":"t1-unverified@x.com","email_verified":false}'),
+  ('ad100000-0000-0000-0000-0000000000d5','email','{"email":"t1-emailprov@x.com","email_verified":true}'),
+  ('ad100000-0000-0000-0000-0000000000d7','google','{"email":"someone-else@x.com","email_verified":true}');
+CREATE FUNCTION pg_temp.acct(p_id text, p_uid uuid, p_email text, p_dispute text DEFAULT NULL) RETURNS void LANGUAGE sql AS $$
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at)
+  VALUES (p_id, pg_temp.ev('e1'), pg_temp.org(), p_uid, false, p_email, 1, 2500, 'usd', 'pending', 'granted', now() - interval '1 hour');
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now(), dispute_status = p_dispute WHERE session_id = p_id;
+$$;
+SELECT pg_temp.acct('cs_test_ad1_t1v', 'ad100000-0000-0000-0000-0000000000d1', 't1-victim@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1g', 'ad100000-0000-0000-0000-0000000000d2', 't1-google@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1a', 'ad100000-0000-0000-0000-0000000000d3', 't1-apple@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1u', 'ad100000-0000-0000-0000-0000000000d4', 't1-unverified@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1e', 'ad100000-0000-0000-0000-0000000000d5', 't1-emailprov@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1m', 'ad100000-0000-0000-0000-0000000000d6', 't1-mailed@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t1o', 'ad100000-0000-0000-0000-0000000000d7', 't1-otheraddr@x.com');
+SELECT pg_temp.acct('cs_test_ad1_t2n', 'ad100000-0000-0000-0000-0000000000f1', 't2-needs@x.com', 'needs_response');
+SELECT pg_temp.acct('cs_test_ad1_t2r', 'ad100000-0000-0000-0000-0000000000f2', 't2-review@x.com', 'under_review');
+SELECT pg_temp.acct('cs_test_ad1_t2w', 'ad100000-0000-0000-0000-0000000000f3', 't2-won@x.com', 'won');
+SELECT pg_temp.acct('cs_test_ad1_t2c', 'ad100000-0000-0000-0000-0000000000f4', 't2-wclosed@x.com', 'warning_closed');
+SELECT pg_temp.fresh_minute();
+DO $$
+DECLARE e text[]; x text[]; v text;
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_order_proofs WHERE session_id LIKE 'cs_test_ad1_t1%'),
+    'AD11: set up as signed-in orders with no proof row (rule b)';
+  e := pg_temp.emails(pg_temp.source(NULL));
+  x := pg_temp.xemails(pg_temp.xp());
+  ASSERT NOT ('t1-victim@x.com' = ANY (e)) AND NOT ('t1-victim@x.com' = ANY (x)),
+    'AD11 T1: an instantly-confirmed account (no confirmation mail) made a "yes" (source ' || e::text || ', export ' || x::text || ')';
+  FOREACH v IN ARRAY ARRAY['t1-unverified@x.com', 't1-emailprov@x.com', 't1-otheraddr@x.com', 't2-needs@x.com', 't2-review@x.com'] LOOP
+    ASSERT NOT (v = ANY (e)) AND NOT (v = ANY (x)), 'AD11: ' || v || ' counted';
+  END LOOP;
+  FOREACH v IN ARRAY ARRAY['t1-google@x.com', 't1-apple@x.com', 't1-mailed@x.com', 't2-won@x.com', 't2-wclosed@x.com'] LOOP
+    ASSERT v = ANY (e) AND v = ANY (x), 'AD11: ' || v || ' should count (source ' || e::text || ', export ' || x::text || ')';
+  END LOOP;
+  RAISE NOTICE 'OK  AD11 T1 a verified email only (OAuth verified / confirmation answered), T2 open disputes don''t count';
+END $$;
+-- T3: 5 wrong codes lock the email code; an SMS send to the guesser's own
+-- phone gives the PHONE code 5 tries again, not the email code.
+SELECT pg_temp.guest('cs_test_ad1_t3', 't3-guess@x.com');
+CREATE TEMP TABLE ad_t3 AS
+  SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') AS c FROM public.exos_mail
+   WHERE to_email = 't3-guess@x.com' AND template = 'rsvp-code' ORDER BY created_at DESC, id DESC LIMIT 1;
+GRANT SELECT ON ad_t3 TO anon;
+SELECT pg_temp.act(NULL);
+SET LOCAL ROLE anon;
+DO $$
+DECLARE j jsonb; c text := (SELECT c FROM pg_temp.ad_t3); w text; i int;
+BEGIN
+  ASSERT c ~ '^[0-9]{6}$', 'AD11 T3: the email code was mailed';
+  w := CASE WHEN c = '000000' THEN '111111' ELSE '000000' END;
+  FOR i IN 1..5 LOOP
+    j := public.exos_order_proof_verify('cs_test_ad1_t3', 'tok-cs_test_ad1_t3-0123456789abcdef', w);
+  END LOOP;
+  ASSERT j ->> 'error' = 'locked', 'AD11 T3: 5 wrong codes lock, got ' || j::text;
+  j := public.exos_order_proof_send('cs_test_ad1_t3', 'tok-cs_test_ad1_t3-0123456789abcdef', 'sms', '(212) 555-0199');
+  ASSERT (j ->> 'ok')::boolean, 'AD11 T3: SMS code sent, got ' || j::text;
+  j := public.exos_order_proof_verify('cs_test_ad1_t3', 'tok-cs_test_ad1_t3-0123456789abcdef', c);
+  ASSERT NOT coalesce((j ->> 'ok')::boolean, false),
+    'AD11 T3: after 5 wrong codes, an SMS send let the email code through, got ' || j::text;
+END $$;
+RESET ROLE;
+CREATE TEMP TABLE ad_t3s AS
+  SELECT substring(body from '^([0-9]{6})') AS c FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550199' ORDER BY created_at DESC LIMIT 1;
+GRANT SELECT ON ad_t3s TO anon;
+SET LOCAL ROLE anon;
+DO $$
+DECLARE j jsonb;
+BEGIN
+  j := public.exos_order_proof_verify('cs_test_ad1_t3', 'tok-cs_test_ad1_t3-0123456789abcdef', (SELECT c FROM pg_temp.ad_t3s));
+  ASSERT (j ->> 'ok')::boolean, 'AD11 T3: the phone code still proves on its own budget, got ' || j::text;
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT (SELECT proven_via FROM public.exos_order_proofs WHERE session_id = 'cs_test_ad1_t3') = 'sms', 'AD11 T3: proven by the phone code';
+  RAISE NOTICE 'OK  AD11 T3 an SMS send leaves the email code locked after 5 wrong codes; the phone code still proves';
+END $$;
+-- T1b (security review of ea13aaa): an answered mail proves the address it
+-- went to. While "Confirm email" is off an email change applies at once,
+-- with no mail to the new address, so the confirmation branch counts only
+-- with auth_confirm_email_on. Off (the default, prod today): t1-mailed no
+-- longer counts, nor does an account that answered a mail for its own
+-- address and then switched to the victim's; a Google-verified one still does.
+UPDATE public.exos_platform_settings SET value = 'false' WHERE key = 'auth_confirm_email_on';
+INSERT INTO auth.users(id,email,email_confirmed_at,confirmation_sent_at) VALUES
+  ('ad100000-0000-0000-0000-0000000000d8','t1b-own@x.com',now(),now() - interval '1 hour');
+UPDATE auth.users SET email = 't1b-victim@x.com' WHERE id = 'ad100000-0000-0000-0000-0000000000d8';
+SELECT pg_temp.acct('cs_test_ad1_t1b', 'ad100000-0000-0000-0000-0000000000d8', 't1b-victim@x.com');
+SELECT pg_temp.fresh_minute();
+DO $$
+DECLARE e text[]; x text[];
+BEGIN
+  e := pg_temp.emails(pg_temp.source(NULL));
+  x := pg_temp.xemails(pg_temp.xp());
+  ASSERT NOT ('t1b-victim@x.com' = ANY (e)) AND NOT ('t1b-victim@x.com' = ANY (x)),
+    'AD11 T1b: an answered mail for another address, then an email change, made a "yes" (source ' || e::text || ', export ' || x::text || ')';
+  ASSERT NOT ('t1-mailed@x.com' = ANY (e)) AND NOT ('t1-mailed@x.com' = ANY (x)),
+    'AD11 T1b: with auth_confirm_email_on off, an answered confirmation mail still counted';
+  ASSERT 't1-google@x.com' = ANY (e) AND 't1-google@x.com' = ANY (x),
+    'AD11 T1b: a Google-verified email should count with the setting off';
+  ASSERT public._exos_setting_bool('auth_confirm_email_on', false) IS FALSE, 'AD11 T1b: the setting is off';
+  RAISE NOTICE 'OK  AD11 T1b the confirmation branch counts only with auth_confirm_email_on (default off); OAuth-verified still does';
 END $$;
 
 ROLLBACK;

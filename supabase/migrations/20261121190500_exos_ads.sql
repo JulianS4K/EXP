@@ -25,6 +25,10 @@
 --              _exos_email_trim (no client EXECUTE)
 --           W: FUNCTION exos_org_audience_export (1 counted text patch: the
 --              same consent rules, the atomic daily cap)
+--           W: FUNCTION exos_order_proof_verify (2 counted marker patches)
+--              and _exos_proof_mail_code (1): the email code's own guess
+--              budget (T3); TABLE exos_order_proofs + email_attempts
+--           C: FUNCTION _exos_account_email_verified (T1; no client EXECUTE)
 --           W: FUNCTION exos_delete_my_account (1 counted marker patch: the
 --              person's fan profiles go, their earlier finished guest
 --              orders get the tombstone address)
@@ -94,11 +98,28 @@
 --    exos_org_audience_export, live on prod). Anyone can start a guest
 --    checkout with anyone's email and tick the box, so a "yes" counts only
 --    from an order that was paid or issued (fulfilled, partly or fully
---    refunded), not lost to a dispute, whose email the person proved
+--    refunded), with no open or lost dispute (the payouts set: NULL, 'won'
+--    or 'warning_closed'), whose email the person proved
 --    (_exos_consent_grant_ok, B2'): an email code for that very address, or
---    no proof row and their own confirmed account with the same address. An
---    SMS proof (proves a phone, which a stranger can use on your email) and
---    an organizer's correction (proven_via 'organizer') never make a "yes".
+--    no proof row and their own account with the same address and a
+--    VERIFIED email (_exos_account_email_verified, T1: a Google / Apple
+--    sign-in whose provider says the email is verified, or a confirmation
+--    mail Supabase sent and the person answered). email_confirmed_at alone
+--    isn't proof: with Supabase Auth's "Confirm email" off (prod today),
+--    GoTrue sets it at sign-up and sends nothing, so anyone could sign up as
+--    your address, buy, and tick "yes"; and an answered mail proves only the
+--    address it went to, which an instant email change can swap. So the
+--    confirmation branch counts only with the operator setting
+--    auth_confirm_email_on = true (default false), set once "Confirm email"
+--    (and "Secure email change") are on; until then an email/password
+--    account's "yes" doesn't count, a Google / Apple one does. The ticket-release rule (_exos_uid_email_confirmed /
+--    _exos_proof_open, mig 20261105100000) reads email_confirmed_at the same
+--    way and is NOT changed here: tightening it would make every current
+--    account prove before release, which is Julian's call (docs/security.md).
+--    An SMS proof (proves a phone, which a stranger can use on your email)
+--    and an organizer's correction (proven_via 'organizer') never make a
+--    "yes". An SMS send no longer resets the email code's guesses (T3:
+--    email_attempts, 5 per email code, counted on every wrong code).
 --    Guest orders from before proofs (mig 20261105100000: no proof row, no
 --    account) no longer count as a "yes". A banned account is out while
 --    banned_until is in the future; once a ban expires the account counts
@@ -358,12 +379,75 @@ COMMENT ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) IS
 --     address (an SMS proof proves a phone, not the email: anyone can start a
 --     checkout with your email and prove their own phone; an organizer's
 --     correction ('organizer') proves nothing about either address);
---   * no proof row, and a signed-in account whose email is confirmed, the
---     same address as the checkout's, and not deleted or banned.
+--   * no proof row, and a signed-in account whose email is VERIFIED
+--     (_exos_account_email_verified: an OAuth identity whose provider says
+--     so, or a confirmation mail sent and answered; email_confirmed_at alone
+--     is set at sign-up while "Confirm email" is off), the same address as
+--     the checkout's, and not deleted or banned.
+-- And no open or lost dispute: dispute_status NULL, 'won' or
+-- 'warning_closed', as payouts read it (T2).
 -- A guest order from before proofs existed (mig 20261105100000) has no proof
 -- row and no account: its "yes" no longer counts (it can't be told apart
 -- from a stranger's). A "no" from any checkout still counts (it only ever
 -- takes someone out).
+-- Is this account's email VERIFIED, not just marked confirmed (review of
+-- #138, T1)? True when either
+--   * a Google / Apple / other OAuth identity (not 'email' / 'phone') carries
+--     this address and its provider says email_verified (a JSON boolean or a
+--     string 'true'), or
+--   * Supabase sent a confirmation mail and the person answered it
+--     (confirmation_sent_at set, email_confirmed_at at or after it), AND the
+--     operator has said Supabase Auth's "Confirm email" is on
+--     (exos_platform_settings auth_confirm_email_on = true; default false).
+-- With "Confirm email" off GoTrue sets email_confirmed_at at sign-up and
+-- sends nothing (confirmation_sent_at stays NULL), so that alone proves
+-- nothing. And a mail answered once proves the address it went to, not the
+-- account's address now: while "Confirm email" is off an email change is
+-- applied at once, with no mail to the new address, so an account that
+-- answered a mail for its own address could switch to yours and still pass
+-- (security review of ea13aaa). The confirmation branch is trusted only
+-- while every email change needs a confirmation too, i.e. "Confirm email"
+-- is on (and "Secure email change", which also mails the old address); the
+-- operator sets auth_confirm_email_on only then, and unsets it if Confirm
+-- email is ever turned off. Until then only a provider-verified identity
+-- counts. Columns are read through to_jsonb and auth.identities through a
+-- guarded dynamic query, so a Supabase without either still answers (false).
+CREATE OR REPLACE FUNCTION public._exos_account_email_verified(p_uid uuid, p_email text)
+RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_email text := lower(btrim(coalesce(p_email, '')));
+  v_u     jsonb;
+  v_ok    boolean := false;
+BEGIN
+  IF p_uid IS NULL OR v_email = '' THEN
+    RETURN false;
+  END IF;
+  SELECT to_jsonb(u) INTO v_u FROM auth.users u WHERE u.id = p_uid;
+  IF v_u IS NULL THEN
+    RETURN false;
+  END IF;
+  IF public._exos_setting_bool('auth_confirm_email_on', false)
+     AND (v_u ->> 'confirmation_sent_at') IS NOT NULL AND (v_u ->> 'email_confirmed_at') IS NOT NULL
+     AND (v_u ->> 'email_confirmed_at')::timestamptz >= (v_u ->> 'confirmation_sent_at')::timestamptz
+     AND lower(btrim(coalesce(v_u ->> 'email', ''))) = v_email THEN
+    RETURN true;
+  END IF;
+  IF to_regclass('auth.identities') IS NOT NULL THEN
+    EXECUTE $q$
+      SELECT EXISTS (
+        SELECT 1 FROM auth.identities i
+         WHERE i.user_id = $1
+           AND coalesce(to_jsonb(i) ->> 'provider', 'email') NOT IN ('email', 'phone', 'anonymous')
+           AND lower(btrim(coalesce(to_jsonb(i) -> 'identity_data' ->> 'email', ''))) = $2
+           AND lower(coalesce(to_jsonb(i) -> 'identity_data' ->> 'email_verified', 'false')) = 'true')
+    $q$ INTO v_ok USING p_uid, v_email;
+  END IF;
+  RETURN coalesce(v_ok, false);
+END $$;
+REVOKE ALL ON FUNCTION public._exos_account_email_verified(uuid, text) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public._exos_consent_grant_ok(p_status text, p_session_id text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -375,12 +459,12 @@ AS $$
          LEFT JOIN public.exos_order_proofs p ON p.session_id = s.session_id
          LEFT JOIN auth.users u ON u.id = s.buyer_uid
         WHERE s.session_id = p_session_id
-          AND coalesce(s.dispute_status, '') <> 'lost'
+          AND (s.dispute_status IS NULL OR s.dispute_status IN ('won', 'warning_closed'))
           AND (
                 (p.id IS NOT NULL AND p.status = 'proven' AND p.proven_via = 'email_code'
                  AND p.email = lower(btrim(s.buyer_email)))
              OR (p.id IS NULL AND u.id IS NOT NULL
-                 AND u.email_confirmed_at IS NOT NULL
+                 AND public._exos_account_email_verified(u.id, u.email)
                  AND u.email NOT LIKE 'deleted+%'
                  AND (to_jsonb(u) ->> 'deleted_at') IS NULL
                  AND NOT coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false)
@@ -730,8 +814,38 @@ $n$  /* exos: fans and guest orders (mig 20261121190500) */ -- fan profiles
   -- Close the login for good (the row stays so order history keeps its keys).
 $n$, 1);
 
--- ROLLBACK (manual): restore exos_org_audience_export and exos_delete_my_account
--- from their pg_get_functiondef taken before the apply (or 20260930101000 +
+-- An email code's guesses (review of #138, T3; pre-existing, live): one
+-- code box checks the email code and the SMS code, and every wrong code
+-- counts on exos_order_proofs.attempts (5, then locked). An SMS send resets
+-- attempts to 0 (a new phone code gets its own 5), and that also reopened
+-- the email code to 5 more guesses, one SMS to the guesser's own phone at a
+-- time (about 40 per order). email_attempts counts wrong codes against the
+-- email code only: the SMS send leaves it alone, a new email code
+-- (_exos_proof_mail_code) starts it again, and at 5 the email code stops
+-- matching, so only the phone code (with its own budget) can still prove.
+ALTER TABLE public.exos_order_proofs ADD COLUMN IF NOT EXISTS email_attempts integer NOT NULL DEFAULT 0;
+SELECT pg_temp.exos_patch_n('public.exos_order_proof_verify(text,text,text)',
+  'exos: email code budget, check (mig 20261121190500)',
+$o$  IF p.email_code_hash IS NOT NULL AND p.email_code_hash = public._exos_proof_hash(p.id, 'email', v_code) THEN$o$,
+$n$  IF p.email_code_hash IS NOT NULL AND coalesce(p.email_attempts, 0) < 5 /* exos: email code budget, check (mig 20261121190500) */
+     AND p.email_code_hash = public._exos_proof_hash(p.id, 'email', v_code) THEN$n$, 1);
+SELECT pg_temp.exos_patch_n('public.exos_order_proof_verify(text,text,text)',
+  'exos: email code budget, count (mig 20261121190500)',
+$o$    UPDATE public.exos_order_proofs SET attempts = attempts + 1 WHERE id = p.id;$o$,
+$n$    UPDATE public.exos_order_proofs
+       SET attempts = attempts + 1,
+           email_attempts = email_attempts + 1 /* exos: email code budget, count (mig 20261121190500) */
+     WHERE id = p.id;$n$, 1);
+SELECT pg_temp.exos_patch_n('public._exos_proof_mail_code(uuid)',
+  'exos: email code budget, new code (mig 20261121190500)',
+$o$         email_sends = email_sends + 1, attempts = 0, last_sent_at = now()$o$,
+$n$         email_sends = email_sends + 1, attempts = 0, last_sent_at = now(),
+         email_attempts = 0 /* exos: email code budget, new code (mig 20261121190500) */$n$, 1);
+
+-- ROLLBACK (manual): restore exos_org_audience_export, exos_delete_my_account,
+-- exos_order_proof_verify and _exos_proof_mail_code from their
+-- pg_get_functiondef taken before the apply (the last two: 20261105100000;
+-- exos_order_proofs.email_attempts can stay) (or 20260930101000 +
 -- 20261109100000's audit patch, and the deletion body's latest migrations);
 -- DROP TRIGGER exos_marketing_conversions_reddit_email ON
 -- exos_marketing_conversions; DROP TRIGGER exos_checkout_conversions_x ON
