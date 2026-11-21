@@ -1,0 +1,11 @@
+node_modules/
+# Built by `npm --prefix ../.. run build:native` (vite --mode native).
+www/
+# Fastlane run output.
+fastlane/report.xml
+fastlane/README.md
+fastlane/test_output/
+*.ipa
+*.aab
+*.apk
+*.dSYM.zip

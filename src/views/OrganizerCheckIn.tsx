@@ -120,6 +120,11 @@ import { fetchAddonRoster, fetchDoorEvent, pingServer } from '../lib/door/api';
 // timed entry (mig 20261030150000): "Admit anyway" outside a slot's entry window.
 import { admitOutsideWindow } from '../lib/seriesTimedApi';
 import { entryWindowMessage } from '../lib/slots';
+// The native app (apps/native): its camera, a durable copy of the scan queue,
+// screen kept on. All no-ops on the web (lib/platform/adapters).
+import { platform, type NativeScanSession } from '../lib/platform/adapters';
+import { useNativeDoor } from '../lib/platform/useNativeDoor';
+import { loadPendingQueueRaw, mergeRestored, restorePendingQueueRaw, savePendingQueue } from '../lib/door/pendingStore';
 
 // The cached roster holds every ticket's barcode secret, so it is dropped
 // 24 hours after it was downloaded (REGISTRY_TTL_MS, lib/offlineCheckins).
@@ -134,22 +139,9 @@ const PROBE_MS = 10_000;
 /** Queued offline scans retry this often while any are waiting. */
 const REPLAY_RETRY_MS = 15_000;
 
-function savePending(eventId: string | undefined, queue: QueuedScan[]) {
-  if (!eventId) return;
-  try {
-    localStorage.setItem(`pending_updates_${eventId}`, JSON.stringify(queue));
-  } catch {
-    /* storage full / blocked: the in-memory queue still replays this session */
-  }
-}
-
-function loadPendingRaw(eventId: string): string | null {
-  try {
-    return localStorage.getItem(`pending_updates_${eventId}`);
-  } catch {
-    return null;
-  }
-}
+// pending_updates_{event} in localStorage (mirrored in the native app): lib/door/pendingStore.
+const savePending = savePendingQueue;
+const loadPendingRaw = loadPendingQueueRaw;
 
 const clockTime = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -375,6 +367,10 @@ export default function OrganizerCheckIn() {
   // as scans land (this lane + others).
   const [insideVenue, setInsideVenue] = useState(0);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  // The native app's camera session, when it opened one instead (adapters.scanner).
+  const nativeScanRef = useRef<NativeScanSession | null>(null);
+  const nativeScanGenRef = useRef(0); // bumped by stopScanner: a late native start closes itself
+  useNativeDoor(status);
   // Holds the setTimeout ID for the deferred camera start so stopScanner()
   // can cancel a pending start that hasn't fired yet. Without this, if
   // stopScanner is called within the 50ms window, scannerRef.current is still
@@ -541,6 +537,17 @@ export default function OrganizerCheckIn() {
       const queued = parseQueue(loadPendingRaw(eventId), serverNow());
       setPendingUpdates(queued);
       if (queued.length > 0) savePending(eventId, queued);
+      // Native app: a queue the OS cleared from web storage comes back from
+      // its durable mirror (web: resolves null at once).
+      void restorePendingQueueRaw(eventId).then((raw) => {
+        const restored = raw ? parseQueue(raw, serverNow()) : [];
+        if (cancelled || restored.length === 0) return;
+        setPendingUpdates((prev) => {
+          const merged = mergeRestored(prev, restored);
+          if (merged !== prev) savePending(eventId, merged);
+          return merged;
+        });
+      });
     }
     // Measure this device's clock against the server (offline scans record the
     // corrected time, and the local code check uses it).
@@ -685,6 +692,10 @@ export default function OrganizerCheckIn() {
       clearTimeout(startScannerTimeoutRef.current);
       startScannerTimeoutRef.current = null;
     }
+    nativeScanGenRef.current += 1;
+    const ns = nativeScanRef.current;
+    nativeScanRef.current = null;
+    if (ns) await ns.stop().catch(() => {});
     const s = scannerRef.current;
     scannerRef.current = null;
     if (!s) return;
@@ -711,6 +722,27 @@ export default function OrganizerCheckIn() {
     // 250px qrbox threw on narrow viewports (video < box) — both fixed here.
     startScannerTimeoutRef.current = setTimeout(async () => {
       startScannerTimeoutRef.current = null;
+      // The native app's camera (ML Kit), when there is one; the page's own
+      // scanner below otherwise, or if the native one won't open.
+      const native = platform().scanner;
+      if (native) {
+        const gen = nativeScanGenRef.current;
+        try {
+          const session = await native.start({
+            onCode: (text) => void handleCheckInRef.current(undefined, text, undefined, 'camera'),
+            // The overlay's own "Done" (the page under it is hidden while the camera runs).
+            onClose: () => {
+              void stopScanner();
+              setScanning(false);
+            },
+          });
+          if (gen !== nativeScanGenRef.current) await session.stop().catch(() => {});
+          else nativeScanRef.current = session;
+          return;
+        } catch (err) {
+          console.warn('Native scanner unavailable, using the web camera:', err);
+        }
+      }
       try {
         const { Html5Qrcode } = await import('html5-qrcode');
         const html5Qr = new Html5Qrcode('reader');

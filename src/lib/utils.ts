@@ -2,6 +2,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { getCurrentAppUser } from './auth';
 import type { ToastOptions } from '../context/ToastContext';
+import { nativeWebBase } from './platform/native';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -123,6 +124,9 @@ export function formatCurrency(amount: number, currency = 'USD') {
  * @param path route path, leading slash optional (e.g. `event/123` or `/claim/x`)
  */
 export function publicUrl(path: string): string {
+  // The native app (origin capacitor://localhost) links to the public web app.
+  const webBase = nativeWebBase();
+  if (webBase) return `${webBase}${path.startsWith('/') ? path : `/${path}`}`;
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
   const base = ((import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/');
   const cleanBase = base.endsWith('/') ? base.slice(0, -1) : base; // '/bridge' | ''

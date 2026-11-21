@@ -69,6 +69,7 @@ npm run dev            # Vite HMR at localhost:5173 (hits prod Supabase)
 - [`docs/social.md`](docs/social.md): social integrations for promoters + buyers, built vs. missing
 - [`docs/maps.md`](docs/maps.md): venue geocoding proxy, 30-day pin cache, interactive maps
 - [`docs/native-sharing.md`](docs/native-sharing.md): fan + promoter sharing, and the Stories bridge for the future app
+- [`docs/native-apps.md`](docs/native-apps.md): the Exos Door iOS / Android app (Capacitor shell in `apps/native`), store rules, operator steps
 - [`KANBAN.md`](KANBAN.md): prod state, open findings, roadmap
 
 ## Repository layout

@@ -8,7 +8,9 @@
 // Also: the return-path sanitizer used by /auth/callback and /reset-password.
 // Only same-origin, app-relative paths are ever followed (no open redirect).
 
-type Env = { VITE_APP_URL?: string; BASE_URL?: string };
+import { nativeWebBase } from './platform/native';
+
+type Env = { VITE_APP_URL?: string; BASE_URL?: string; MODE?: string; VITE_EXOS_WEB_URL?: string };
 
 function viteEnv(): Env {
   return ((import.meta as { env?: Env }).env ?? {}) as Env;
@@ -31,6 +33,10 @@ export function appBaseUrl(
   opts: { origin?: string | null; env?: Env } = {},
 ): string {
   const env = opts.env ?? viteEnv();
+  // The native app: mails and redirects go to the public web app, never to
+  // the app's own capacitor://localhost or https://localhost origin.
+  const webBase = opts.origin === undefined ? nativeWebBase(env) : null;
+  if (webBase) return webBase;
   const base = normalizeBase(env.BASE_URL);
   const origin =
     opts.origin !== undefined ? opts.origin : typeof window !== 'undefined' ? window.location.origin : null;

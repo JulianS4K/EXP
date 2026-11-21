@@ -18,6 +18,10 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      // The native build points this at apps/native/src/install.ts (vite.config.ts).
+      "@exos/platform-install": [
+        "./src/lib/platform/install.web.ts"
       ]
     },
     "allowImportingTsExtensions": true,
@@ -38,6 +42,8 @@
     "sim.ts",
     "eventday.ts",
     "automatiq-race.ts",
-    "supabase/**"
+    "supabase/**",
+    // The native shell (Capacitor) type-checks on its own: apps/native/tsconfig.json.
+    "apps/**"
   ]
 }

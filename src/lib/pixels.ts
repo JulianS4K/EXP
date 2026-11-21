@@ -44,6 +44,8 @@
 
 import { getConsentState, onConsentChange, type ConsentCategory, type ConsentSnapshot } from './consent';
 import { cleanPixelId, xEventMatchesPixel } from './pixelIds';
+// The native app's build loads no pixels (server-side conversions only, docs/native-apps.md).
+import { nativeBuildFlags } from './platform/native';
 
 export interface PixelConfig {
   meta?: string;
@@ -210,7 +212,7 @@ function currentRoutePath(): string {
 // Register an org's pixels. Loads immediately if consent is granted, else
 // queues until the visitor opts in.
 export function initOrgPixels(orgId: string, pixels?: PixelConfig): void {
-  if (typeof document === 'undefined' || reloading) return;
+  if (typeof document === 'undefined' || reloading || !nativeBuildFlags().pixels) return;
   // A late org lookup can resolve after the buyer has moved on to an
   // untracked page (My Tickets, the door scanner): never load pixels there.
   if (!isPixelRoute(currentRoutePath())) return;
@@ -223,7 +225,7 @@ export function initOrgPixels(orgId: string, pixels?: PixelConfig): void {
 // from the URL. Leaving My Tickets for a ticket page reloads (see
 // leavePixelScope), so the pixels don't follow the buyer into their wallet.
 export function initOrgPixelsForPurchase(orgId: string, pixels?: PixelConfig): void {
-  if (typeof document === 'undefined' || reloading) return;
+  if (typeof document === 'undefined' || reloading || !nativeBuildFlags().pixels) return;
   register(orgId, pixels);
 }
 

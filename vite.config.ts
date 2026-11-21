@@ -1,8 +1,9 @@
 /// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import fs from 'fs';
 import path from 'path';
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import { buildSpecFiles } from './scripts/api-spec.mjs';
 
 /**
@@ -45,14 +46,46 @@ function apiSpecPlugin(): Plugin {
   };
 }
 
-export default defineConfig(() => {
+/**
+ * `vite build --mode native`: the bundle the Exos Door app ships
+ * (apps/native, docs/native-apps.md). It is served by Capacitor from the
+ * app's own origin root (capacitor://localhost/, https://localhost/), so the
+ * base is '/' and the router has no basename. (Not './': BrowserRouter deep
+ * routes would then resolve assets under the route's path.) Output goes to
+ * apps/native/www; the service worker is left out (the app is the offline
+ * shell). VITE_EXOS_WEB_URL, the public web app (https://host/bridge), is
+ * required: every link that leaves the app (Stripe's return pages, shares,
+ * auth mails) is built from it.
+ */
+function nativeShellPlugin(): Plugin {
+  let outDir = '';
+  return {
+    name: 'exos-native-shell',
+    configResolved(c) {
+      outDir = path.resolve(c.root, c.build.outDir);
+    },
+    closeBundle() {
+      fs.rmSync(path.join(outDir, 'sw.js'), { force: true });
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => {
+  const native = mode === 'native';
+  if (native && !process.env.VITEST) {
+    const env = loadEnv(mode, import.meta.dirname, 'VITE_');
+    const webUrl = (process.env.VITE_EXOS_WEB_URL ?? env.VITE_EXOS_WEB_URL ?? '').trim();
+    if (!/^https:\/\/[^/?#\s]+(\/[^?#\s]*)?$/.test(webUrl)) {
+      throw new Error('vite --mode native needs VITE_EXOS_WEB_URL: the public web app, e.g. https://exos-web.onrender.com/bridge (docs/native-apps.md).');
+    }
+  }
   return {
     // Served under /bridge/ in the unified static Render env (app.py mounts
     // /bridge → static/bridge/, mirroring D0's /terminal/). Vite emits asset
     // refs as /bridge/assets/... so they resolve under the prefix. Pair with
-    // <BrowserRouter basename="/bridge"> in App.tsx.
-    base: '/bridge/',
-    plugins: [apiSpecPlugin(), react(), tailwindcss()],
+    // <BrowserRouter basename="/bridge"> in App.tsx. The native app: '/'.
+    base: native ? '/' : '/bridge/',
+    plugins: [apiSpecPlugin(), react(), tailwindcss(), ...(native ? [nativeShellPlugin()] : [])],
     test: {
       // .claude/** holds agent worktrees (full copies of the repo): without
       // this, a local `npm test` runs every test once per worktree.
@@ -62,6 +95,13 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
+        // src/main.tsx's platform installer: a no-op on the web, the
+        // Capacitor adapters in the native app (resolved from
+        // apps/native/node_modules, never the root package.json).
+        '@exos/platform-install': path.resolve(
+          import.meta.dirname,
+          native ? 'apps/native/src/install.ts' : 'src/lib/platform/install.web.ts',
+        ),
       },
     },
     server: {
@@ -69,6 +109,8 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
     },
     build: {
+      outDir: native ? 'apps/native/www' : 'dist',
+      emptyOutDir: true,
       // Split heavy deps into their own chunks so they can be cached
       // independently and the initial route doesn't drag them in.
       // Combined with React.lazy() routes in App.tsx this lowers the

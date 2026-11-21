@@ -1,0 +1,9 @@
+# Exos Door: who the store builds belong to. Every value is the operator's and
+# comes from the environment (docs/native-apps.md "Operator steps"); nothing
+# here is a secret, and no key file lives in the repo.
+app_identifier(ENV.fetch("EXOS_APP_ID", "com.exos.door")) # iOS bundle id
+apple_id(ENV["EXOS_APPLE_ID"])                           # the App Store Connect user (email)
+team_id(ENV["EXOS_IOS_TEAM_ID"])                         # Apple Developer team
+
+package_name(ENV.fetch("EXOS_APP_ID", "com.exos.door"))  # Android application id
+json_key_file(ENV["PLAY_JSON_KEY_PATH"])                 # Play service account key, outside the repo

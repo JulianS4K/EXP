@@ -40,6 +40,7 @@ import {
 } from '../lib/walletApi';
 import { androidOpenInBrowserUrl, currentInAppState, IN_APP_LABEL } from '../lib/inAppBrowser';
 import { EscapeHatch } from './InAppBrowserBanner';
+import { platform as platformAdapters } from '../lib/platform/adapters';
 
 interface WalletTicket {
   id: string;
@@ -97,6 +98,9 @@ async function deliverPass(
   kind: WalletKind, platform: WalletPlatform, inApp: string | null | undefined,
   apple: () => Promise<Blob>, google: () => Promise<string>, fileName: string,
 ): Promise<void> {
+  // The native app hands the pass to the wallet itself (lib/platform/adapters);
+  // the web answers "not handled" and the browser path below runs as before.
+  if (await platformAdapters().walletAdd.deliver(kind, { apple, google })) return;
   if (kind === 'apple') {
     const url = URL.createObjectURL(await apple());
     if (platform === 'ios') {

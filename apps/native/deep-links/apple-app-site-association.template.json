@@ -1,0 +1,20 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["APPLE_TEAM_ID.com.exos.door"],
+        "components": [
+          { "/": "/door", "comment": "Exos Door: the door app (root of a custom domain)" },
+          { "/": "/door/*" },
+          { "/": "/checkin/*", "comment": "A staff scanner link for one event" },
+          { "/": "/bridge/door", "comment": "The same, where the app is served under /bridge" },
+          { "/": "/bridge/door/*" },
+          { "/": "/bridge/checkin/*" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["APPLE_TEAM_ID.com.exos.door"]
+  }
+}

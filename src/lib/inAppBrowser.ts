@@ -21,6 +21,7 @@ import {
   detectInAppApp, isAndroidUa, isAndroidWebViewUa, isIosUa, isIosWebViewUa, sanitizeInAppKind,
   type InAppApp, type InAppKind, type InAppRecord,
 } from '../../supabase/functions/_shared/inAppBrowser.ts';
+import { detectNativeApp } from './platform/native';
 
 export type { InAppApp, InAppKind, InAppRecord };
 export { IN_APP_APPS, IN_APP_RECORDS, sanitizeInAppKind, sanitizeInAppRecord } from '../../supabase/functions/_shared/inAppBrowser.ts';
@@ -152,13 +153,18 @@ export interface InAppState {
 
 const NOT_IN_APP: InAppState = { kind: null, platform: 'other', storage: { local: true, session: true }, applePay: null };
 
-/** Read the page's state. `win` is the window (tests pass a stand-in). */
+/**
+ * Read the page's state. `win` is the window (tests pass a stand-in). Our own
+ * native app (lib/platform/native) is a web view too, but not an in-app
+ * browser: its kind is null, so sign-in, Wallet and checkout take the app's
+ * own paths (lib/platform/adapters) instead of "open in your browser".
+ */
 export function readInAppState(win: unknown): InAppState {
   const w = win as (Window & typeof globalThis) | undefined;
   if (!w || !w.navigator) return NOT_IN_APP;
   const ua = w.navigator.userAgent;
   return {
-    kind: detectInAppKind(ua, { standalone: isStandalone(w) }),
+    kind: detectNativeApp(w) ? null : detectInAppKind(ua, { standalone: isStandalone(w) }),
     platform: inAppPlatform(ua),
     storage: { local: storageWorks(() => w.localStorage), session: storageWorks(() => w.sessionStorage) },
     applePay: applePayAvailable(w),

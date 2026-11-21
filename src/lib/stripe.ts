@@ -1,4 +1,5 @@
 import { loadStripe, Stripe } from '@stripe/stripe-js';
+import { nativeBuildFlags } from './platform/native';
 
 // Stripe lives in its own module so that views which only need helpers like
 // formatCurrency (Home, MyTickets, OrganizerDashboard) don't drag the Stripe
@@ -6,6 +7,9 @@ import { loadStripe, Stripe } from '@stripe/stripe-js';
 let stripePromise: Promise<Stripe | null> | undefined;
 
 export const getStripe = () => {
+  // PCI (docs/pci.md): the native app never hosts a Stripe card field. It
+  // pays on Stripe's hosted Checkout in the browser sheet instead.
+  if (!nativeBuildFlags().stripeJs) return Promise.reject(new Error('Card fields are not available in the app. Use hosted Checkout.'));
   if (!stripePromise) {
     const key = (import.meta as any).env?.VITE_STRIPE_PUBLISHABLE_KEY;
     if (!key) {

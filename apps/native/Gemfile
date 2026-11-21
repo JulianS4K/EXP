@@ -1,0 +1,6 @@
+# Exos Door release tooling (docs/native-apps.md "Store builds"). Run with
+# `bundle exec fastlane <platform> <lane>` from apps/native.
+source "https://rubygems.org"
+
+gem "fastlane", "2.241.2"
+gem "cocoapods", "1.17.0"
