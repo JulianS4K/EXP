@@ -8,10 +8,11 @@
 // _shared/eventbrite/client.ts ebGet (GET only). Luma and Posh are not
 // contacted at all: a pasted Luma / Posh link becomes a draft from the link
 // and the organizer's own details (reading their public pages waits for the
-// operator: _shared/eventImport/publicPage.ts, not called). No page is
+// operator and a check of each platform's terms; spec §7.2). No page is
 // scraped and no organizer-supplied URL is fetched, so there is nothing for
 // the SSRF guard to check; any future page read must go through
-// _shared/ssrf.ts first.
+// _shared/ssrf.ts first (GET only, redirect "manual", a timeout and a size
+// cap, schema.org Event JSON-LD only, returning eventbrite.ts's ImportData).
 //
 // Routes (under /functions/v1/exos-event-import), JSON in and out:
 //   GET  /eventbrite/events?org=<org>   owner / manager. The connected

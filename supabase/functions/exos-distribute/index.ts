@@ -1,7 +1,8 @@
 // exos-distribute — push Exos primary inventory to distribution channels
-// (Automatiq/Lysted -> EVO/SeatGeek/StubHub) (D4 "Toast for tickets" SCAFFOLD).
+// (StubHub / SeatGeek / Gametime / GoTickets / Vivid Seats / Ticket Evolution)
+// (D4 "Toast for tickets" SCAFFOLD).
 //
-// Three passes, each independent:
+// The passes, each independent:
 //
 // 0. Event links (link.ts). Published, upcoming events are linked to their
 //    event on each marketplace the organizer ticked, with a read-only catalog
@@ -61,16 +62,10 @@
 //    is sent to a marketplace. Sending needs an operator WriteAuthorization
 //    (Hard Rule #2) and seller credentials; see EXP docs/marketplace/.
 //
-// 2. Automatiq listings. Why this is the "it's both" path: D1's storefront
-//    reads TEvo/EVO "owned" inventory, and Automatiq distributes INTO EVO, so
-//    listing an org's primary inventory via Automatiq surfaces it in the D1
-//    storefront AND the wider secondary ecosystem from one push.
-//    bridge_event_xref.tevo_event_id links the resulting EVO listing back to
-//    the Exos primary for buy-routing + dedupe.
-//    ⚠ GATED: the actual Automatiq/Lysted listing call is a forbidden upstream
-//    WRITE without explicit operator authorization (Hard Rule #2) + provider
-//    creds. This pass is skipped until AUTOMATIQ_API_KEY is set, and the
-//    listing call is a clearly marked TODO.
+// Automatiq: no pass here. Routing Exos inventory through Automatiq is a
+//    design only (EXP docs/marketplace/automatiq.md, superseded by the S4K
+//    feed); the former scaffold pass, which never sent anything, was removed
+//    2026-11-21.
 //
 // Auth: cron-secret gated (Hard Rule #7: burns a paid upstream API + mutates).
 //
@@ -79,9 +74,7 @@
 // STUBHUB_CLIENT_SECRET (catalog reads, pass 0), SEATGEEK_CLIENT_ID
 // (SeatGeek Platform event search, pass 0), VIVID_API_TOKEN /
 // VIVID_INTEGRATOR_TOKEN (Vivid Seats event search, pass 0), TEVO_OFFICE_ID
-// (the Ticket Evolution office its inventory is planned in),
-// AUTOMATIQ_API_KEY (pass 2). Per-org distribution creds (e.g.
-// lystedSellerId) live in exos_org_secrets.distribution.
+// (the Ticket Evolution office its inventory is planned in).
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
@@ -103,15 +96,6 @@ const BATCH = 25;
 type MarketChannel = "stubhub" | "seatgeek" | "gametime" | "gotickets" | "vivid" | "evo";
 const MARKET_CHANNELS: MarketChannel[] = ["stubhub", "seatgeek", "gametime", "gotickets", "vivid", "evo"];
 const LABEL: Record<MarketChannel, string> = { stubhub: "StubHub", seatgeek: "SeatGeek", gametime: "Gametime", gotickets: "GoTickets", vivid: "Vivid Seats", evo: "Ticket Evolution" };
-
-interface DistRow {
-  id: string;
-  event_id: string;
-  org_id: string;
-  channel: string;
-  requested_qty: number | null;
-  unit_price: number | null;
-}
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const authErr = requireCronSecret(req);
@@ -144,8 +128,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const vivid = await syncChannel(sb, "vivid");
     const evo = await syncChannel(sb, "evo");
     const gametimeFile = await planGametimeInventory(sb);
-    const automatiq = await pushAutomatiq(sb);
-    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid, evo }, gametime_file: gametimeFile, automatiq });
+    return json({ links, events, pools_refilled: refilled ?? null, listings: { stubhub, seatgeek, gametime, gotickets, vivid, evo }, gametime_file: gametimeFile });
   } catch (e) {
     await reportError("exos-distribute", e);
     return json({ error: redactError(e) }, 500);
@@ -465,56 +448,6 @@ async function planGametimeInventory(sb: SupabaseClient) {
     .map((l) => l.request.body);
   const planned = new GametimeWriter().uploadInventory(rows).planned;
   return { mode: "dry-run", listings: rows.length, bytes: planned.csv?.length ?? 0, target: planned.url, sent: false };
-}
-
-// ── 2. Automatiq listings (gated scaffold) ───────────────────────────
-
-async function pushAutomatiq(sb: SupabaseClient) {
-  const automatiqKey = Deno.env.get("AUTOMATIQ_API_KEY");
-  if (!automatiqKey) {
-    // Inert until the operator activates distribution (creds + Hard Rule #2 sign-off).
-    return { skipped: "AUTOMATIQ_API_KEY unset (gated)" };
-  }
-
-  const { data: pending, error } = await sb
-    .from("exos_distribution_listings")
-    .select("id, event_id, org_id, channel, requested_qty, unit_price")
-    .eq("status", "pending")
-    // StubHub, SeatGeek, Gametime, GoTickets, Vivid Seats and Ticket Evolution are listed directly (passes 1b / 1c), not via Automatiq.
-    .not("channel", "in", "(stubhub,seatgeek,gametime,gotickets,vivid,evo)")
-    .is("tier_id", null)
-    .limit(BATCH);
-  if (error) throw new Error(`read pending automatiq rows: ${error.message}`);
-
-  const rows = (pending ?? []) as DistRow[];
-  let listed = 0;
-  let failed = 0;
-
-  for (const row of rows) {
-    await sb.from("exos_distribution_listings")
-      .update({ status: "listing", last_synced_at: new Date().toISOString() })
-      .eq("id", row.id);
-    try {
-      // TODO(operator/A1): call Automatiq/Lysted to create the listing for this
-      // event on `row.channel`, using AUTOMATIQ_API_KEY + the org's
-      // exos_org_secrets.distribution creds. On success capture the external
-      // listing id; for EVO, also record the resulting tevo_event_id into
-      // bridge_event_xref so D1 routes the buy back to the Exos primary.
-      throw new Error("automatiq integration not wired (scaffold)");
-      // const ext = await automatiqCreateListing(...);
-      // await sb.from("exos_distribution_listings").update({ status:"listed",
-      //   external_listing_id: ext.id, last_synced_at: new Date().toISOString(),
-      //   error: null }).eq("id", row.id);
-      // listed++;
-    } catch (e) {
-      await sb.from("exos_distribution_listings")
-        .update({ status: "failed", error: redactError(e).slice(0, 500), last_synced_at: new Date().toISOString() })
-        .eq("id", row.id);
-      failed++;
-    }
-  }
-
-  return { pending: rows.length, listed, failed, note: "scaffold: listing call not wired" };
 }
 
 function json(body: unknown, status = 200): Response {

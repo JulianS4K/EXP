@@ -7,9 +7,9 @@
 
 Status: **design only.** No Automatiq API docs are in this repo or in
 Terminal-2 (Terminal-2 only sees Automatiq indirectly, through the S4K CRM's
-failed-order alerts). The scaffold in `exos-distribute` (pass 2,
-`pushAutomatiq`) stays inert until `AUTOMATIQ_API_KEY` is set, and even then
-its listing call is a TODO. Hard Rule #2 still applies: any Automatiq write
+failed-order alerts). `exos-distribute` has no Automatiq pass: its inert
+scaffold (`pushAutomatiq`, never wired) was removed 2026-11-21. Hard Rule #2
+still applies: any Automatiq write
 needs a recorded operator `WriteAuthorization`, and the writer is dry-run by
 default like the StubHub, SeatGeek, Gametime, GoTickets, Vivid and TEvo ones.
 

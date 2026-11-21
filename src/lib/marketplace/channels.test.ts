@@ -116,14 +116,10 @@ describe('StubHub channel', () => {
     expect(() => normalizeStubHubSale({})).toThrow();
   });
 
-  it('plans event creation and URL fulfilment without a client', () => {
+  it('plans URL fulfilment without a client', () => {
     const ch = stubHubChannel();
     expect(ch.capabilities).toEqual({ findEvents: false, createEvent: true, listings: true, fulfilByUrls: true, displayQuantityCap: true });
     expect(ch.findEvents).toBeUndefined();
-    const create = ch.planCreateEvent!(EV);
-    expect(create).toMatchObject({ channel: 'stubhub', endpoint: 'createSellerEvent', method: 'PUT', path: '/sellerevents' });
-    expect((create.body as { country?: { code: string } }).country).toEqual({ code: 'US' });
-    expect(() => ch.planCreateEvent!({ ...EV, venueCity: null })).toThrow(/venue city is required/);
     const sale = normalizeStubHubSale({ id: 555, number_of_tickets: 1, status: 'Confirmed' });
     const fulfil = ch.planFulfilByUrls!(sale, ['https://x.test/bridge/claim/00000000-0000-4000-8000-000000000001']);
     expect(fulfil).toHaveLength(1);

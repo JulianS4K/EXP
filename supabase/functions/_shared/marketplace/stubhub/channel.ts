@@ -1,6 +1,6 @@
 // StubHub as a MarketplaceChannel (../channel.ts).
 //   link    GET /catalog/events/search (q + local date), read-only
-//   create  PUT /sellerevents (planned, see eventRequest.ts)
+//   create  PUT /sellerevents (planned by exos-distribute, see eventRequest.ts)
 //   sell    Sale -> MarketplaceSale
 //   fulfil  PATCH /sales/{id} with one claim URL per ticket (planned)
 
@@ -14,7 +14,6 @@ import {
   type SaleStatus,
 } from '../channel.ts';
 import type { StubHubClient } from './client.ts';
-import { planStubHubEventRequest } from './eventRequest.ts';
 import { eticketUrlsRequest } from './fulfilment.ts';
 import type { CatalogEvent, Sale } from './types.ts';
 import { allocationIdFromListingId } from '../listingIds.ts';
@@ -85,20 +84,6 @@ export function stubHubChannel(client?: StubHubClient): MarketplaceChannel {
           return (page._embedded?.items ?? []).map(catalogEventToCandidate);
         }
       : undefined,
-
-    planCreateEvent(ev: ExosEventRef): PlannedRequest {
-      // Same builder and error messages as the event-request queue.
-      return {
-        channel: 'stubhub',
-        ...planStubHubEventRequest({
-          name: ev.name,
-          starts_at: ev.startsAt,
-          occurs_at_local: ev.occursAtLocal ?? null,
-          venue_name: ev.venueName,
-          venue_address: { city: ev.venueCity ?? '', region: ev.venueRegion ?? '', country: ev.countryCode ?? '' },
-        }),
-      };
-    },
 
     normalizeSale: normalizeStubHubSale,
 

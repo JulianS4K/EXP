@@ -74,7 +74,7 @@ everything else with `--no-verify-jwt`.
 | `TURNSTILE_SECRET_KEY` | the waiting room's human check (`exos-wroom-join`) | your Cloudflare Turnstile widget's secret key; pair it with `VITE_TURNSTILE_SITE_KEY` below. Unset: organizers can't turn the check on (the toggle is greyed out) and `exos-wroom-join` answers 503 |
 
 Organizer-level accounts are **not** secrets here: owners and managers paste them in **Org settings →
-Integrations** (pretix, hi.events, Luma, Twilio, Telnyx, marketplaces) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
+Integrations** (pretix, hi.events, Luma, Twilio, Telnyx) or the door app (Eventbrite private token; or **Connect Eventbrite**, which needs no pasting). They're stored in
 Vault (`exos_integration:<org>:<provider>`), read only by edge functions, never shown again.
 
 ## 4. The web app
