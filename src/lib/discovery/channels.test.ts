@@ -14,10 +14,14 @@ import {
   discoveryChannel,
   feedStatus,
 } from '../../../supabase/functions/_shared/discovery/channels.ts';
+import { FREE_TIER_MAX_CAPACITY } from '../../../supabase/functions/_shared/platformFee.ts';
 import { discoveryRows } from './channels';
 
 const MIGRATION = readFileSync(
   new URL('../../../supabase/migrations/20261029130000_exos_discovery_publishing.sql', import.meta.url), 'utf8');
+// The free tier's default since 2026-11-21 (under 150 is free).
+const FREE_TIER_PATCH = readFileSync(
+  new URL('../../../supabase/migrations/20261121133000_exos_pricing_149_2pct.sql', import.meta.url), 'utf8');
 // Later migrations that seed more channels (posh_link: 20261104150000).
 const SEEDS = [MIGRATION, readFileSync(
   new URL('../../../supabase/migrations/20261104150000_exos_posh_link_channel.sql', import.meta.url), 'utf8')];
@@ -97,9 +101,13 @@ describe('statuses', () => {
 });
 
 describe('free-tier cap and minutes', () => {
-  it('match the migration (5 manual channels, cutoff default 150)', () => {
+  it('match the migrations (5 manual channels, cutoff default 149: under 150 is free)', () => {
     expect(MIGRATION).toMatch(new RegExp(`<= public\\._exos_discovery_free_tier_max\\(\\)\\s+THEN ${FREE_TIER_MANUAL_CAP} END`));
-    expect(MIGRATION).toMatch(new RegExp(`WHERE key = 'free_tier_max_capacity'\\), ${FREE_TIER_MAX_CAPACITY_DEFAULT}\\)`));
+    // The default since mig 20261121133000 (150 -> 149), the same as the fee's.
+    expect(FREE_TIER_MAX_CAPACITY_DEFAULT).toBe(149);
+    expect(FREE_TIER_MAX_CAPACITY_DEFAULT).toBe(FREE_TIER_MAX_CAPACITY);
+    expect(FREE_TIER_PATCH).toContain(`$n$WHERE key = 'free_tier_max_capacity'), ${FREE_TIER_MAX_CAPACITY_DEFAULT})$n$`);
+    expect(FREE_TIER_PATCH).toContain(`$n$_exos_setting_int('free_tier_max_capacity', ${FREE_TIER_MAX_CAPACITY}, -1, 999999)$n$`);
   });
 
   it('needs a slot only for a channel the event is not using', () => {

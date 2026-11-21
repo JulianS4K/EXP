@@ -1,23 +1,24 @@
 -- ============================================================================
 -- Free tier and the resale opt-in (mig 20261029090000):
---   T1 the cutoff: 150 is the free tier, 151 isn't; a table counts its party
+--   T1 the cutoff (under 150 since mig 20261121133000): 149 is the free tier,
+--      150 isn't; a table counts its party
 --      size; a closed type (capacity 0) adds nothing to the max
---   T2 over 150 without an opt-in: every resale path refused / planned out,
+--   T2 150 or more without an opt-in: every resale path refused / planned out,
 --      with the opt-in reason
---   T3 the opt-in: refused at 150 (the reason), for finance / scanner /
+--   T3 the opt-in: refused at 149 (the reason), for finance / scanner /
 --      strangers / anon, and with a stale text version; recorded with who,
 --      when, the version and the max capacity; idempotent
 --   T4 opted in: allocation, request, marketplace event row, auto split, S4K
 --      route, split and feed all work
 --   T5 withdrawing: pulled at once (event row, pools 0, S4K pool released,
 --      listings dropped, off the feed); allocations refused again
---   T6 a capacity drop to 150 revokes it (ticket type, overall cap, table
+--   T6 a capacity drop to 149 revokes it (ticket type, overall cap, table
 --      party size); going back over needs a new opt-in
 --   T7 settings: the cutoff and the opt-in rule are operator rows; bad values
 --      fall back; the old resale_min_capacity key is gone
---   T8 the fee: 0 on the free tier (free_tier_fee_bps), 3% over it after the
+--   T8 the fee: 0 on the free tier (free_tier_fee_bps), 2% over it after the
 --      free months; marketplace sale and POS settlement use the event's rate
---   T8b a bypass voucher selling past 150 ends the free tier (fee terms say
+--   T8b a bypass voucher selling past 149 ends the free tier (fee terms say
 --       paid, sold + the order's quantity counted); resale then needs the opt-in
 --   T9 RLS on exos_resale_consents; grants (nothing anon; helpers service only)
 --   T10 deleting an opted-in event still works
@@ -44,20 +45,20 @@ INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('c9000000-0000-0000-0000-000000000001','c9000000-0000-0000-0000-0000000000a1','manager'),
   ('c9000000-0000-0000-0000-000000000001','c9000000-0000-0000-0000-0000000000a2','finance'),
   ('c9000000-0000-0000-0000-000000000001','c9000000-0000-0000-0000-0000000000a3','scanner');
--- e1: 150 (100 + 50). e2: 151 (100 + 51). e3: tables 75 x 2 = 150.
+-- e1: 149 (100 + 49). e2: 150 (100 + 50). e3: tables 74 x 2 = 148.
 -- e4: 100 + a closed paid type (capacity 0 is closed, never unlimited: mig 20261105100000). e5: cap 300 over 300 of types.
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
-  ('c9000000-0000-0000-0000-0000000000e1','c9000000-0000-0000-0000-000000000001','Room 150','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
-  ('c9000000-0000-0000-0000-0000000000e2','c9000000-0000-0000-0000-000000000001','Room 151','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
+  ('c9000000-0000-0000-0000-0000000000e1','c9000000-0000-0000-0000-000000000001','Room 149','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
+  ('c9000000-0000-0000-0000-0000000000e2','c9000000-0000-0000-0000-000000000001','Room 150','draft',now() + interval '20 days','Hall',0,0,'{"maxPerOrder":4}','America/New_York','{}'),
   ('c9000000-0000-0000-0000-0000000000e3','c9000000-0000-0000-0000-000000000001','Tables','draft',now() + interval '20 days','Hall',0,0,'{}','America/New_York','{}'),
   ('c9000000-0000-0000-0000-0000000000e4','c9000000-0000-0000-0000-000000000001','Open','draft',now() + interval '20 days','Hall',0,0,'{}','America/New_York','{}'),
   ('c9000000-0000-0000-0000-0000000000e5','c9000000-0000-0000-0000-000000000001','Big','draft',now() + interval '20 days','Hall',300,0,'{"maxPerOrder":4}','America/New_York','{}');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility,sort_order,kind,party_size) VALUES
   ('c9000000-0000-0000-0000-0000000000d1','c9000000-0000-0000-0000-0000000000e1','GA',40,100,0,'public',1,'standard',NULL),
-  ('c9000000-0000-0000-0000-0000000000d2','c9000000-0000-0000-0000-0000000000e1','VIP',90,50,0,'public',2,'standard',NULL),
+  ('c9000000-0000-0000-0000-0000000000d2','c9000000-0000-0000-0000-0000000000e1','VIP',90,49,0,'public',2,'standard',NULL),
   ('c9000000-0000-0000-0000-0000000000d3','c9000000-0000-0000-0000-0000000000e2','GA',40,100,0,'public',1,'standard',NULL),
-  ('c9000000-0000-0000-0000-0000000000d4','c9000000-0000-0000-0000-0000000000e2','VIP',90,51,0,'public',2,'standard',NULL),
-  ('c9000000-0000-0000-0000-0000000000d5','c9000000-0000-0000-0000-0000000000e3','Table',200,75,0,'public',1,'table',2),
+  ('c9000000-0000-0000-0000-0000000000d4','c9000000-0000-0000-0000-0000000000e2','VIP',90,50,0,'public',2,'standard',NULL),
+  ('c9000000-0000-0000-0000-0000000000d5','c9000000-0000-0000-0000-0000000000e3','Table',200,74,0,'public',1,'table',2),
   ('c9000000-0000-0000-0000-0000000000d6','c9000000-0000-0000-0000-0000000000e4','GA',40,100,0,'public',1,'standard',NULL),
   ('c9000000-0000-0000-0000-0000000000d7','c9000000-0000-0000-0000-0000000000e4','Open',40,0,0,'public',2,'standard',NULL),
   ('c9000000-0000-0000-0000-0000000000d8','c9000000-0000-0000-0000-0000000000e5','GA',40,200,0,'public',1,'standard',NULL),
@@ -81,36 +82,38 @@ CREATE FUNCTION pg_temp.event_row(p_event text, p_ch text) RETURNS public.exos_d
   SELECT * FROM public.exos_distribution_listings WHERE event_id = pg_temp.u(p_event) AND channel = p_ch AND tier_id IS NULL
 $$;
 CREATE FUNCTION pg_temp.optin(p_event text) RETURNS jsonb LANGUAGE sql AS $$
-  SELECT public.exos_set_resale_consent(pg_temp.u(p_event), true, '2026-10-29')
+  SELECT public.exos_set_resale_consent(pg_temp.u(p_event), true, '2026-11-21')
 $$;
 
 -- T1. The cutoff.
 DO $$
 BEGIN
-  ASSERT public.exos_free_tier_max_capacity() = 150, 'T1: default 150';
-  ASSERT public.exos_resale_min_capacity() = 151, 'T1: the old number is 151';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 150 AND public.exos_event_is_free_tier(pg_temp.u('e1')), 'T1: 150 is free tier';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e2')) = 151 AND NOT public.exos_event_is_free_tier(pg_temp.u('e2')), 'T1: 151 is not';
-  ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 150 AND public.exos_event_is_free_tier(pg_temp.u('e3')), 'T1: 75 tables of 2';
+  ASSERT public.exos_free_tier_max_capacity() = 149, 'T1: default 149 (under 150 is free, mig 20261121133000)';
+  ASSERT public.exos_resale_min_capacity() = 150, 'T1: the old number is 150';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e1')) = 149 AND public.exos_event_is_free_tier(pg_temp.u('e1')), 'T1: 149 is free tier';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e2')) = 150 AND NOT public.exos_event_is_free_tier(pg_temp.u('e2')), 'T1: 150 is not (150 or more is paid)';
+  ASSERT (public.exos_event_fee_terms(pg_temp.u('e1')) ->> 'free_tier')::boolean
+     AND NOT (public.exos_event_fee_terms(pg_temp.u('e2')) ->> 'free_tier')::boolean, 'T1: the fee terms: 149 free, 150 paid';
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 148 AND public.exos_event_is_free_tier(pg_temp.u('e3')), 'T1: 74 tables of 2';
   ASSERT public.exos_event_max_capacity(pg_temp.u('e4')) = 100 AND public.exos_event_capacity_bounded(pg_temp.u('e4'))
      AND public.exos_event_is_free_tier(pg_temp.u('e4')), 'T1: a closed type adds nothing: 100 is free tier';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e4')), 'T1: but its capped 100 cannot resell';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e1')) AND NOT public.exos_resale_unlocked(pg_temp.u('e3')), 'T1: free tier locked';
 END $$;
--- A 76th table: 152.
-UPDATE public.exos_ticket_tiers SET capacity = 76 WHERE id = pg_temp.u('d5');
-DO $$ BEGIN
-  ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e3')), 'T1: 76 tables of 2';
-END $$;
+-- A 75th table: 150.
 UPDATE public.exos_ticket_tiers SET capacity = 75 WHERE id = pg_temp.u('d5');
+DO $$ BEGIN
+  ASSERT public.exos_event_max_capacity(pg_temp.u('e3')) = 150 AND NOT public.exos_event_is_free_tier(pg_temp.u('e3')), 'T1: 75 tables of 2';
+END $$;
+UPDATE public.exos_ticket_tiers SET capacity = 74 WHERE id = pg_temp.u('d5');
 
--- T2. 151 with no opt-in: locked, with the opt-in reason.
+-- T2. 150 with no opt-in: locked, with the opt-in reason.
 DO $$
 BEGIN
   PERFORM pg_temp.act(NULL);
   UPDATE public.exos_events SET status = 'published', distribution_networks = ARRAY['stubhub']
    WHERE id IN (pg_temp.u('e1'), pg_temp.u('e2'));
-  ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e2')), 'T2: 151 locked without the opt-in';
+  ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e2')), 'T2: 150 locked without the opt-in';
   ASSERT (pg_temp.event_row('e2', 'stubhub')).id IS NULL AND (pg_temp.event_row('e1', 'stubhub')).id IS NULL, 'T2: no event rows';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   ASSERT pg_temp.refused($q$SELECT public.exos_set_channel_allocation(pg_temp.u('e2'), 'stubhub', pg_temp.u('d3'), 10)$q$,
@@ -118,7 +121,7 @@ BEGIN
   ASSERT pg_temp.refused($q$SELECT public.exos_request_distribution(pg_temp.u('e2'), ARRAY['stubhub'])$q$,
                          'until an owner or manager opts in'), 'T2: request';
   ASSERT pg_temp.refused($q$SELECT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 10)$q$,
-                         'need a max capacity over 150 (events of 150 or less are the free tier: no Exos fee, never resold); this event''s is 150'),
+                         'need a max capacity over 149 (events of 149 or less are the free tier: no Exos fee, never resold); this event''s is 149'),
          'T2: free tier allocation';
   ASSERT NOT EXISTS (SELECT 1 FROM public._exos_channel_split_plan(pg_temp.u('e2'))), 'T2: no auto split';
   PERFORM public.exos_set_s4k_network('c9000000-0000-0000-0000-000000000001', true);
@@ -131,8 +134,8 @@ DO $$
 DECLARE r jsonb; c public.exos_resale_consents%ROWTYPE;
 BEGIN
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
-  ASSERT pg_temp.refused($q$SELECT pg_temp.optin('e1')$q$, 'need a max capacity over 150'), 'T3: refused at 150';
-  ASSERT pg_temp.refused($q$SELECT pg_temp.optin('e3')$q$, 'this event''s is 150'), 'T3: refused at 75 tables of 2';
+  ASSERT pg_temp.refused($q$SELECT pg_temp.optin('e1')$q$, 'need a max capacity over 149'), 'T3: refused at 149';
+  ASSERT pg_temp.refused($q$SELECT pg_temp.optin('e3')$q$, 'this event''s is 148'), 'T3: refused at 74 tables of 2';
   ASSERT pg_temp.refused($q$SELECT public.exos_set_resale_consent(pg_temp.u('e2'), true, '2026-01-01')$q$, 'the resale terms changed'), 'T3: stale text';
   ASSERT pg_temp.refused($q$SELECT public.exos_set_resale_consent(pg_temp.u('e2'), true)$q$, 'the resale terms changed'), 'T3: no version';
   FOREACH r IN ARRAY ARRAY['"a2"', '"a3"', '"a4"', '""']::jsonb[] LOOP
@@ -143,14 +146,14 @@ BEGIN
   r := pg_temp.optin('e2');
   ASSERT (r ->> 'resale_unlocked')::boolean AND (r -> 'consent' ->> 'given_by_email') = 'c9-manager@x.com', 'T3: opted in ' || r::text;
   SELECT * INTO c FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2') AND revoked_at IS NULL;
-  ASSERT c.given_by = pg_temp.u('a1') AND c.consent_version = '2026-10-29' AND c.max_capacity_at_consent = 151
-     AND c.cutoff_at_consent = 150 AND c.given_at IS NOT NULL AND c.org_id = 'c9000000-0000-0000-0000-000000000001', 'T3: the record';
+  ASSERT c.given_by = pg_temp.u('a1') AND c.consent_version = '2026-11-21' AND c.max_capacity_at_consent = 150
+     AND c.cutoff_at_consent = 149 AND c.given_at IS NOT NULL AND c.org_id = 'c9000000-0000-0000-0000-000000000001', 'T3: the record';
   PERFORM pg_temp.optin('e2');
   ASSERT (SELECT count(*) FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2')) = 1, 'T3: idempotent';
   -- Finance reads the rules, can't change them.
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a2');
   r := public.exos_event_sales_rules(pg_temp.u('e2'));
-  ASSERT (r ->> 'resale_unlocked')::boolean AND NOT (r ->> 'can_manage')::boolean AND (r ->> 'free_tier_max_capacity')::int = 150, 'T3: finance reads';
+  ASSERT (r ->> 'resale_unlocked')::boolean AND NOT (r ->> 'can_manage')::boolean AND (r ->> 'free_tier_max_capacity')::int = 149, 'T3: finance reads';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a3');
   ASSERT pg_temp.refused($q$SELECT public.exos_event_sales_rules(pg_temp.u('e2'))$q$, 'not allowed'), 'T3: scanner can''t read';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
@@ -206,17 +209,17 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2')) = 2, 'T5: history kept';
 END $$;
 
--- T6. A drop to 150 revokes; going back over needs a new opt-in.
+-- T6. A drop to 149 revokes; going back over needs a new opt-in.
 DO $$
 BEGIN
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   PERFORM pg_temp.optin('e2');
   PERFORM pg_temp.act(NULL);
-  UPDATE public.exos_ticket_tiers SET capacity = 50 WHERE id = pg_temp.u('d4');   -- 150
+  UPDATE public.exos_ticket_tiers SET capacity = 49 WHERE id = pg_temp.u('d4');   -- 149
   ASSERT NOT public.exos_resale_consent_active(pg_temp.u('e2')), 'T6: revoked by a ticket type';
   ASSERT (SELECT count(*) FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2') AND revoke_reason = 'capacity_dropped'
             AND revoked_by IS NULL) = 1, 'T6: reason';
-  UPDATE public.exos_ticket_tiers SET capacity = 51 WHERE id = pg_temp.u('d4');   -- 151 again
+  UPDATE public.exos_ticket_tiers SET capacity = 50 WHERE id = pg_temp.u('d4');   -- 150 again
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e2')), 'T6: still locked: opt in again';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   PERFORM pg_temp.optin('e2');
@@ -247,15 +250,15 @@ DO $$
 BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_platform_settings WHERE key = 'resale_min_capacity'), 'T7: old key gone';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_capacity', '99');
-  ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e1')), 'T7: 150 over a cutoff of 99';
+  ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e1')), 'T7: 149 over a cutoff of 99';
   ASSERT pg_temp.refused($q$SELECT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d1'), 1)$q$, 'opts in'), 'T7: still needs the opt-in';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('resale_consent_required', 'false');
   ASSERT public.exos_resale_unlocked(pg_temp.u('e1')), 'T7: no opt-in needed when the operator says so';
   UPDATE public.exos_platform_settings SET value = '"x"' WHERE key = 'free_tier_max_capacity';
   UPDATE public.exos_platform_settings SET value = '1' WHERE key = 'resale_consent_required';
-  ASSERT public.exos_free_tier_max_capacity() = 150 AND public.exos_resale_consent_required(), 'T7: bad values fall back';
+  ASSERT public.exos_free_tier_max_capacity() = 149 AND public.exos_resale_consent_required(), 'T7: bad values fall back';
   UPDATE public.exos_platform_settings SET value = '-5' WHERE key = 'free_tier_max_capacity';
-  ASSERT public.exos_free_tier_max_capacity() = 150, 'T7: negative falls back';
+  ASSERT public.exos_free_tier_max_capacity() = 149, 'T7: negative falls back';
   DELETE FROM public.exos_platform_settings WHERE key IN ('free_tier_max_capacity', 'resale_consent_required');
 END $$;
 
@@ -267,14 +270,14 @@ BEGIN
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 0 AND public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 0, 'T8: free months';
   UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day' WHERE org_id = 'c9000000-0000-0000-0000-000000000001';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 0, 'T8: free tier 0';
-  ASSERT public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 300, 'T8: 151 pays 3%';
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e2'), now()) = 200, 'T8: 150 pays 2%';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e4'), now()) = 0, 'T8: 100 + a closed type is free tier';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_fee_bps', '50');
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now()) = 50, 'T8: the free tier''s rate is a setting';
   ASSERT public.exos_event_fee_bps(pg_temp.u('e1'), now() - interval '2 days') = 0, 'T8: free months still win';
   DELETE FROM public.exos_platform_settings WHERE key = 'free_tier_fee_bps';
   j := public.exos_event_fee_terms(pg_temp.u('e1'));
-  ASSERT (j ->> 'max_capacity')::int = 150 AND (j ->> 'free_tier_max_capacity')::int = 150 AND (j ->> 'free_tier_fee_bps')::int = 0
+  ASSERT (j ->> 'max_capacity')::int = 149 AND (j ->> 'free_tier_max_capacity')::int = 149 AND (j ->> 'free_tier_fee_bps')::int = 0
      AND (j ->> 'free_tier')::boolean, 'T8: terms ' || j::text;
   j := public.exos_event_fee_terms(pg_temp.u('e4'));
   ASSERT (j ->> 'max_capacity')::int = 100 AND (j ->> 'free_tier')::boolean, 'T8: a closed type is bounded ' || j::text;
@@ -286,43 +289,43 @@ BEGIN
   INSERT INTO public.exos_marketplace_orders (channel, external_order_id, event_id, org_id, quantity, proceeds, sold_at, sale_status)
   VALUES ('stubhub', 'c9-2', pg_temp.u('e2'), 'c9000000-0000-0000-0000-000000000001', 2, 100, now(), 'confirmed') RETURNING id INTO o;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
-  ASSERT m.exos_fee = 3, 'T8: marketplace 3% over the cutoff';
+  ASSERT m.exos_fee = 2, 'T8: marketplace 2% over the cutoff';
   -- Box office.
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e1')) ->> 'fee_bps')::int = 0, 'T8: POS free tier';
-  ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e2')) ->> 'fee_bps')::int = 300, 'T8: POS 3%';
+  ASSERT (public.exos_pos_settlement_summary(pg_temp.u('e2')) ->> 'fee_bps')::int = 200, 'T8: POS 2%';
 END $$;
 
--- T8b. Selling past the cap ends the free tier: capped at 150, 148 sold, a
--- bypass_capacity voucher order of 5 goes through (153 sold). The fee terms
+-- T8b. Selling past the cap ends the free tier: capped at 149, 147 sold, a
+-- bypass_capacity voucher order of 5 goes through (152 sold). The fee terms
 -- then say paid tier, and resale is possible again with the opt-in.
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,purchase_limits,timezone,distribution_networks) VALUES
-  ('c9000000-0000-0000-0000-0000000000e6','c9000000-0000-0000-0000-000000000001','Packed','published',now() + interval '20 days','Hall',0,148,'{}','America/New_York','{}');
+  ('c9000000-0000-0000-0000-0000000000e6','c9000000-0000-0000-0000-000000000001','Packed','published',now() + interval '20 days','Hall',0,147,'{}','America/New_York','{}');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility,sort_order) VALUES
-  ('c9000000-0000-0000-0000-0000000000da','c9000000-0000-0000-0000-0000000000e6','GA',20,150,148,'public',1);
+  ('c9000000-0000-0000-0000-0000000000da','c9000000-0000-0000-0000-0000000000e6','GA',20,149,147,'public',1);
 DO $$
 DECLARE j jsonb; v uuid; ids uuid[];
 BEGIN
-  ASSERT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: free tier at 148 of 150';
+  ASSERT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: free tier at 147 of 149';
   j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 2);
-  ASSERT (j ->> 'free_tier')::boolean AND (j ->> 'sold')::int = 148 AND (j ->> 'order_admissions')::int = 2, 'T8b: 150 with the order ' || j::text;
+  ASSERT (j ->> 'free_tier')::boolean AND (j ->> 'sold')::int = 147 AND (j ->> 'order_admissions')::int = 2, 'T8b: 149 with the order ' || j::text;
   j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 3);
-  ASSERT NOT (j ->> 'free_tier')::boolean, 'T8b: 151 with the order is paid ' || j::text;
+  ASSERT NOT (j ->> 'free_tier')::boolean, 'T8b: 150 with the order is paid ' || j::text;
   INSERT INTO public.exos_vouchers (event_id, code, tier_id, max_uses, bypass_capacity)
   VALUES (pg_temp.u('e6'), 'C9PAST', pg_temp.u('da'), 5, true) RETURNING id INTO v;
   INSERT INTO public.exos_checkout_sessions (session_id, event_id, tier_id, org_id, buyer_uid, buyer_email, quantity, amount_cents, status, voucher_id)
   VALUES ('c9-past', pg_temp.u('e6'), pg_temp.u('da'), 'c9000000-0000-0000-0000-000000000001', pg_temp.u('a0'), 'c9-owner@x.com', 5, 10000, 'pending', v);
   ids := public.exos_fulfill_checkout('c9-past');
   ASSERT array_length(ids, 1) = 5, 'T8b: the bypass order went through';
-  ASSERT public.exos_event_sold_count(pg_temp.u('e6')) = 153, 'T8b: 153 sold';
+  ASSERT public.exos_event_sold_count(pg_temp.u('e6')) = 152, 'T8b: 152 sold';
   ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e6')), 'T8b: no longer the free tier';
   j := public.exos_event_fee_terms(pg_temp.u('e6'), pg_temp.u('da'), 1);
-  ASSERT NOT (j ->> 'free_tier')::boolean AND (j ->> 'max_capacity')::int = 150 AND (j ->> 'sold')::int = 153, 'T8b: terms ' || j::text;
-  ASSERT public.exos_event_fee_bps(pg_temp.u('e6'), now()) = 300, 'T8b: 3% from here on';
+  ASSERT NOT (j ->> 'free_tier')::boolean AND (j ->> 'max_capacity')::int = 149 AND (j ->> 'sold')::int = 152, 'T8b: terms ' || j::text;
+  ASSERT public.exos_event_fee_bps(pg_temp.u('e6'), now()) = 200, 'T8b: 2% from here on';
   ASSERT NOT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: resale still needs the opt-in';
   PERFORM pg_temp.act('c9000000-0000-0000-0000-0000000000a0');
   PERFORM pg_temp.optin('e6');
-  ASSERT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: opted in at 153 sold';
+  ASSERT public.exos_resale_unlocked(pg_temp.u('e6')), 'T8b: opted in at 152 sold';
   PERFORM pg_temp.act(NULL);
 END $$;
 

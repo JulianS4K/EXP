@@ -78,7 +78,7 @@ What follows for us:
 - **Resale is #7 on their list.** Marketplace channels are pitched only as the organizer's own primary inventory,
   opt-in, at their price, never as resale. Transfer rules and rotating barcodes are the control they ask for.
 - **A venue is worth several promoters.** Illustration, not data: 143 nights × 200 tickets × $20 is about $570K
-  a year in tickets; at 3% that is about $17K a year to Exos per venue, after the first 6 months.
+  a year in tickets; at 2% that is about $11K a year to Exos per venue, after the first 6 months.
 - **Bar revenue is squeezed, not gone** (25% of revenue, #10 of 10). Bar, merch and per-head spend (Phase 3 POS)
   are a follow-on, not the opening pitch.
 
@@ -89,7 +89,7 @@ What follows for us:
 
 | Pain today | What Exos does |
 |---|---|
-| Getting people in the room (venues' #1 challenge) | One listing to the storefront, Instagram checkout, Google, AI assistants, the discovery listings queue, and opt-in channels over 150 capacity |
+| Getting people in the room (venues' #1 challenge) | One listing to the storefront, Instagram checkout, Google, AI assistants, the discovery listings queue, and opt-in channels at 150 capacity or more |
 | Fans balk at buyer fees at checkout | All-in price; the platform fee comes out of the payout |
 | Checkout breaks inside Instagram | Checkout built for the Instagram and Facebook in-app browsers (item 7a) |
 | Screenshot and forwarded-ticket fraud | Barcodes that rotate every 30 s and are signed per ticket |
@@ -100,13 +100,13 @@ What follows for us:
 
 **Commercial offer** (as built: `supabase/functions/_shared/platformFee.ts`, `docs/organizer-guide.md`):
 
-- **No buyer fees.** The Exos fee is **3%**, net to Exos, paid by the organizer out of the payout. Card processing
-  (Stripe's 2.9% + 30¢) passes through to the organizer, as with any card sale. A $40 ticket pays out $37.34.
+- **No buyer fees.** The Exos fee is **2%** (operator 2026-11-21, "for now"), net to Exos, paid by the organizer out of the payout. Card processing
+  (Stripe's 2.9% + 30¢) passes through to the organizer, as with any card sale. A $40 ticket pays out $37.74.
 - **First 6 months free** for every new org: no Exos fee, only card processing.
-- **Free tier:** events with a max capacity of 150 or less never pay an Exos fee (and are never listed on resale
-  channels). This is the DIY and small-room wedge.
-- **Marketplace sales** (events over 150 that opt in): 3% of what the marketplace pays; a $40 ticket pays out
-  $38.80.
+- **Free tier:** events with a max capacity under 150 never pay an Exos fee (and are never listed on resale
+  channels); 150 or more is paid. This is the DIY and small-room wedge.
+- **Marketplace sales** (events of 150 or more that opt in): 2% of what the marketplace pays; a $40 ticket pays out
+  $39.20.
 - Exos staff at the door for the first event.
 
 **What venues get beyond ticketing** (built in the open build-phase PRs #65–#80, not merged or applied yet):

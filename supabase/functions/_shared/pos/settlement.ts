@@ -7,7 +7,7 @@
 //   tenders             cash / card / comp, tips apart (tips are staff money)
 //   card ticket sales   per order floor(ticket gross x card / order total):
 //                       a split order's card share is pro-rata
-//   Exos fee            exosFeeCents(card ticket sales, bps): 3% half up, 0 in
+//   Exos fee            exosFeeCents(card ticket sales, bps): 2% half up, 0 in
 //                       the org's free months (exos_org_fee_bps / exosFeeBpsAt).
 //                       OPERATOR DECISION (docs/pos.md): the fee is charged on
 //                       CARD TICKET sales only for now; bar, merch and cash

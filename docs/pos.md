@@ -437,7 +437,7 @@ drawer 0.10 short.
 | Gross per category | Line totals of **paid** orders, tax included, comps included |
 | Tenders | Cash, card and comp. Tips are kept apart because they are the staff's money |
 | Card ticket sales | For each order: floor(ticket gross × card / order total). A split order's card share is pro-rata |
-| Exos fee | `exosFeeCents(card ticket sales, bps)`: 3%, rounded half up, and 0 during the org's first 6 months (`exos_org_fee_bps`, `exosFeeBpsAt`) |
+| Exos fee | `exosFeeCents(card ticket sales, bps)`: 2%, rounded half up, and 0 during the org's first 6 months (`exos_org_fee_bps`, `exosFeeBpsAt`) |
 | Organizer net | cash + card − Exos fee. Card processing comes off the Stripe payout. The TS report estimates it at Stripe Terminal's standard US rate (2.7% + 5c, `STRIPE_TERMINAL_FEE`) |
 | Promoters | Per promoter: ticket lines net of tax, times the paid share (cash + card) / total. The commission is a hook (`commissionHook` uses the promoter's terms) |
 | Artist deal | `artistDealCents`: the larger of the guarantee and the door split after expenses. The deal terms are an input |
@@ -474,7 +474,7 @@ them later. Before relying on it:
 
 ## Operator decisions
 
-1. **Exos fee on POS sales.** The scaffold charges the 3% fee on **card ticket sales only**. Bar,
+1. **Exos fee on POS sales.** The scaffold charges the 2% fee on **card ticket sales only**. Bar,
    merch and cash aren't charged (`feeBase: 'card-tickets'`). The alternatives, `'card-all'` and
    `'all-sales'`, are implemented and tested. The SQL summary uses card tickets only until this is
    decided. For walk-up tickets the choice is one setting, `pos_walkup_fee_base` (`card-tickets` by

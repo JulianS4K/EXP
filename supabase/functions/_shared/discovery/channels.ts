@@ -23,6 +23,8 @@
 //
 // Pure: no Deno or Supabase imports.
 
+import { FREE_TIER_MAX_CAPACITY } from '../platformFee.ts';
+
 export type DiscoveryKind = 'feed' | 'api' | 'manual';
 
 /** Who does the submitting on a manual channel. */
@@ -179,11 +181,12 @@ export function canQueue(status: PublicationStatus | null | undefined): boolean 
 
 /** Free tier (operator, spec rev de8877d): events whose max capacity is at or
  *  under the cutoff (exos_platform_settings 'free_tier_max_capacity', default
- *  150) can use at most this many manual channels. Mirrors
+ *  149: under 150 is free, mig 20261121133000) can use at most this many
+ *  manual channels. Mirrors
  *  _exos_discovery_manual_cap; exos_discovery_event_channels returns the
  *  event's cap (null = none) and how many it uses. */
 export const FREE_TIER_MANUAL_CAP = 5;
-export const FREE_TIER_MAX_CAPACITY_DEFAULT = 150;
+export const FREE_TIER_MAX_CAPACITY_DEFAULT = FREE_TIER_MAX_CAPACITY;
 
 /** Does queueing this channel need a free slot (it isn't counted yet)? Mirrors exos_discovery_queue. */
 export function takesSlot(status: PublicationStatus | null | undefined): boolean {

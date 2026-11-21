@@ -8,7 +8,7 @@ import {
   safeDropCents,
   type SettlementOrder,
 } from './index';
-import { exosFeeBpsAt } from '../../../supabase/functions/_shared/platformFee.ts';
+import { EXOS_FEE_BPS, exosFeeBpsAt } from '../../../supabase/functions/_shared/platformFee.ts';
 
 // The same night as tests/exos/test_pos_scaffold.sql (P4-P8), so the TS and
 // the SQL settlement can't drift apart.
@@ -64,7 +64,8 @@ describe('end-of-night settlement (same numbers as exos_pos_settlement_summary)'
     reconciliation: { expectedCents: 12960, countedCents: 12950, varianceCents: -10 } }];
 
   it('tickets + bar + merch, cash vs card, Exos fee on card ticket sales', () => {
-    const s = buildSettlement(NIGHT, drawers, { feeBps: 300 });
+    const s = buildSettlement(NIGHT, drawers, { feeBps: EXOS_FEE_BPS });
+    expect(EXOS_FEE_BPS).toBe(200);
     expect(s.orders).toBe(5);
     expect(s.openOrders).toBe(1);
     expect(s.gross).toEqual({ ticket: 6000, bar: 3520, merch: 2500, total: 12020 });
@@ -75,8 +76,10 @@ describe('end-of-night settlement (same numbers as exos_pos_settlement_summary)'
     // C 4000 + D floor(2000 x 2000 / 2880) = 1388.
     expect(s.cardTicketCents).toBe(5388);
     expect(s.feeBase).toBe('card-tickets');
-    expect(s.exosFeeCents).toBe(162); // 3% of 53.88 = 1.6164, half up
-    expect(s.organizerNetCents).toBe(3640 + 7500 - 162);
+    expect(s.exosFeeCents).toBe(108); // 2% of 53.88 = 1.0776, half up
+    expect(s.organizerNetCents).toBe(3640 + 7500 - 108);
+    // A recorded 3% night still settles at its own rate.
+    expect(buildSettlement(NIGHT, drawers, { feeBps: 300 }).exosFeeCents).toBe(162); // 1.6164
     // Stripe Terminal estimate (2.7% half up + 5c): B 1800 -> 54, C 4000 -> 113, D 2000 -> 59.
     expect(s.cardProcessingEstimateCents).toBe(226);
     expect(s.promoters).toEqual([{ promoterId: P, tickets: 3, baseCents: 4898, commissionCents: null }]);
@@ -90,12 +93,12 @@ describe('end-of-night settlement (same numbers as exos_pos_settlement_summary)'
     expect(bps).toBe(0);
     expect(s.exosFeeCents).toBe(0);
     expect(s.organizerNetCents).toBe(11140);
-    expect(exosFeeBpsAt('2026-09-01T00:00:00Z', now)).toBe(300);
+    expect(exosFeeBpsAt('2026-09-01T00:00:00Z', now)).toBe(200);
   });
 
   it('the fee base is an operator decision: card-all or all-sales', () => {
-    expect(buildSettlement(NIGHT, [], { feeBps: 300, feeBase: 'card-all' })).toMatchObject({ feeBaseCents: 7500, exosFeeCents: 225 });
-    expect(buildSettlement(NIGHT, [], { feeBps: 300, feeBase: 'all-sales' })).toMatchObject({ feeBaseCents: 11140, exosFeeCents: 334 });
+    expect(buildSettlement(NIGHT, [], { feeBps: 200, feeBase: 'card-all' })).toMatchObject({ feeBaseCents: 7500, exosFeeCents: 150 });
+    expect(buildSettlement(NIGHT, [], { feeBps: 200, feeBase: 'all-sales' })).toMatchObject({ feeBaseCents: 11140, exosFeeCents: 223 }); // 222.8
   });
 
   it('promoter split hook: commission on the paid base', () => {

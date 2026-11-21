@@ -1,5 +1,5 @@
 // Edit event → Marketplaces → Resale (mig 20261029090000): whether the event
-// is the free tier (max capacity 150 or less: no Exos fee, never resold), and
+// is the free tier (max capacity under 150: no Exos fee, never resold), and
 // for bigger events the per-event opt-in, with the text it stands for, and
 // the way to withdraw it.
 

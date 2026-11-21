@@ -63,7 +63,7 @@
 3. Mail: `EXOS_APP_URL`, `RESEND_API_KEY`, `EXOS_MAIL_FROM`.
 4. Supabase Auth redirect allowlist: add `/bridge/**`.
 5. Decisions: the name (Openstub / Everystub / Doors), refunds give back the card fee? (the fee itself is settled:
-   3% net, card processing passed through, first 6 months free, free tier at 150 or less), commission base; the
+   2% net (was 3%; operator 2026-11-21 "2% for now"), card processing passed through, first 6 months free, free tier under 150, 150 or more paid), commission base; the
    channels "something else" write scope; whether unsold S4K seats come back to Exos before doors.
 6. Partner outreach: paused 2026-09-28 with 18 drafts in Gmail (none sent); needs a strategy call.
 7. Ship a new `/bridge` bundle to Terminal-2 (only matters while `EXOS_ORIGIN` is unset).
@@ -137,7 +137,7 @@ where each Exos channel stands. Status goes by "Prod state" above where a doc's 
   Google / calendar / ad-catalog status computed from each feed's rule; a manual submission queue for DoNYC, Time Out NY,
   CitySpark, RA, Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, worked at `/admin/listings`
   (`docs/organizer-guide.md` "Discovery listings"). Edmtrain's API is read-only and Meetup's `createEvent` would be a new
-  third-party write (Pro + OAuth), so both are manual until the operator decides. Free-tier events (capacity <= 150)
+  third-party write (Pro + OAuth), so both are manual until the operator decides. Free-tier events (capacity under 150)
   get at most 5 manual channels; operator minutes per submission are logged and totalled per event / org (pilot).
 
 **Not built**
@@ -171,13 +171,13 @@ Partner applications (business, no code):
 - [ ] Apple Pass Type ID certificate + Google Wallet issuer account.
 
 Build:
-- [ ] S4K feed id mapping, then one live S4K-route sale on an event over 150 (opted in to resale): listed, sold, claimed, scanned, paid out.
+- [ ] S4K feed id mapping, then one live S4K-route sale on an event of 150 or more (opted in to resale): listed, sold, claimed, scanned, paid out.
 - [x] Neighborhood pages (7c) and follower lists + "new event" email: built on `claude/exos-neighborhoods` (mig `20261111110000`; `/nyc`, `/nyc/<neighborhood>`, Fans → Followers). Left: apply, then turn on `exos-follower-digests-hourly` with the mail drain.
 - [ ] Bandsintown feed in their partner format once the spec arrives (read-only rule: they pull, we never write).
 - [ ] Fix the doc drift above.
 
 Go to market:
-- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if over 150 and opted in).
+- [ ] Run our own show on Exos first (Door + paid tickets; part of it on the S4K route if 150 or more and opted in).
 - [ ] Submit every Exos event to NYC listings: Hidden City, GUNK, Queer on the Street, coolstuff.nyc, Eddie's List,
       RA (if it takes outside ticket links).
       DoNYC, Time Out, CitySpark and RA now go through the discovery queue (`/admin/listings`); the rest aren't in the

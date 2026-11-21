@@ -1941,7 +1941,7 @@ export default function EditEvent() {
            </p>
 
            {(() => {
-             // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
+             // Free tier (under 150) and the resale opt-in (migs 20261014140000, 20261029090000).
              const caps = (eventData.ticketTiers || []).map((t) => admissionsForTier(Number(t.capacity) || 0, tableCfg[t.id]));
              const cap = eventMaxCapacity(Number(eventData.totalTickets) || 0, caps);
              return resaleUnlocked(cap) ? null : (

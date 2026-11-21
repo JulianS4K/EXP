@@ -108,7 +108,9 @@ describe('app landing pages only claim what the registry allows', () => {
         const pricing = page.querySelector('[data-claims="pricing"]')?.textContent ?? '';
         expect(pricing).toContain(`${EXOS_FEE_BPS / 100}%`);
         expect(pricing).toContain(`${FEE_FREE_MONTHS} months`);
-        expect(pricing).toContain(`${FREE_TIER_MAX_CAPACITY} or less`);
+        // Under 150 is free, 150 or more is paid (operator 2026-11-21).
+        expect(pricing).toContain(`under ${FREE_TIER_MAX_CAPACITY + 1}`);
+        expect(pricing).not.toMatch(/\b15[01] or less\b|\bover 150\b|151\+/);
         expect(pricing).toContain('passed through at cost');
         const ctas = [...page.querySelectorAll('a')].filter((a) => a.textContent?.includes(app.cta.label));
         expect(ctas.length).toBeGreaterThan(0);

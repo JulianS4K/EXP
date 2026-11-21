@@ -188,9 +188,9 @@ DO $$
 BEGIN
   ASSERT public.exos_event_is_free_tier(pg_temp.u('e2')) AND NOT public.exos_resale_unlocked(pg_temp.u('e2')), 'FB3: 40 is the free tier';
   PERFORM pg_temp.act('fb000000-0000-0000-0000-0000000000a0');
-  ASSERT pg_temp.refused($q$SELECT public.exos_set_resale_consent(pg_temp.u('e2'), true, '2026-10-29')$q$, 'free tier'), 'FB3: no opt-in on the free tier';
+  ASSERT pg_temp.refused($q$SELECT public.exos_set_resale_consent(pg_temp.u('e2'), true, '2026-11-21')$q$, 'free tier'), 'FB3: no opt-in on the free tier';
   ASSERT NOT public.exos_event_is_free_tier(pg_temp.u('e1')) AND NOT public.exos_resale_unlocked(pg_temp.u('e1')), 'FB3: 180 needs the opt-in';
-  PERFORM public.exos_set_resale_consent(pg_temp.u('e1'), true, '2026-10-29');
+  PERFORM public.exos_set_resale_consent(pg_temp.u('e1'), true, '2026-11-21');
   ASSERT public.exos_resale_unlocked(pg_temp.u('e1')), 'FB3: opted in';
   UPDATE public.exos_events SET distribution_networks = ARRAY['stubhub'] WHERE id = pg_temp.u('e1');
   ASSERT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d2'), 10) = 10, 'FB3: part of the block on StubHub';

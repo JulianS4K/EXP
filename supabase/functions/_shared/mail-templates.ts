@@ -2,13 +2,14 @@
 //
 // Rows queued by exos_mail_enqueue carry a JSON payload and an empty html;
 // the drain calls renderTemplate() to build the subject and body. Pure (its
-// one import, channelReport.ts, is pure too), so Deno and EXP's vitest
+// imports, channelReport.ts and platformFee.ts, are pure too), so Deno and EXP's vitest
 // (src/lib/mailTemplates.test.ts) both load it.
 
 import {
   type ChannelRow, type EventChannels, feeText, messageRows, money, notReportedNote, parseChannelReport, plural, sideCounts,
   sumTickets, totalsText, weekLabel,
 } from "./channelReport.ts";
+import { EXOS_FEE_BPS } from "./platformFee.ts";
 //
 // Rules every template follows:
 //   * Every payload value is escaped before it lands in HTML (event names,
@@ -657,7 +658,7 @@ const RENDERERS: Record<string, (ctx: Ctx) => Out> = {
   "fee-free-ending": (ctx) => {
     const o = org(ctx.p);
     const until = formatDate(str(ctx.p, "fee_free_until"));
-    const pct = num(ctx.p, "fee_bps", 300) / 100;
+    const pct = num(ctx.p, "fee_bps", EXOS_FEE_BPS) / 100;
     const days = num(ctx.p, "days_left", 1);
     const soon = str(ctx.p, "stage", "14d") === "1d";
     return {

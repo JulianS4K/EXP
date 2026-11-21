@@ -22,7 +22,7 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role,disabled) VALUES
   ('8d000000-0000-0000-0000-000000000001','8d000000-0000-0000-0000-0000000000a0','owner',false),
   ('8d000000-0000-0000-0000-000000000002','8d000000-0000-0000-0000-0000000000a1','owner',false);
--- Past the free months: the 3% fee applies.
+-- Past the free months: the 2% fee applies (3% before mig 20261121133000).
 UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day'
  WHERE org_id IN ('8d000000-0000-0000-0000-000000000001','8d000000-0000-0000-0000-000000000002');
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold) VALUES
@@ -68,9 +68,9 @@ BEGIN
   RAISE NOTICE 'P1 PASS: payable only when delivered and covered by confirmed money';
 
   -- P2 -----------------------------------------------------------------------
-  -- 8D-1: 40 - 1.20 = 38.80; 8D-2: 80 - 2.40 = 77.60 -> 116.40 for org 1.
+  -- 8D-1: 40 - 0.80 = 39.20; 8D-2: 80 - 1.60 = 78.40 -> 117.60 for org 1.
   SELECT * INTO p FROM public.exos_plan_org_payouts();
-  IF p.org_id <> '8d000000-0000-0000-0000-000000000001' OR p.amount <> 116.40 OR p.sale_lines <> 2 OR p.currency <> 'USD' THEN
+  IF p.org_id <> '8d000000-0000-0000-0000-000000000001' OR p.amount <> 117.60 OR p.sale_lines <> 2 OR p.currency <> 'USD' THEN
     RAISE EXCEPTION 'P2 FAIL: %', row_to_json(p);
   END IF;
   pid := p.payout_id;
@@ -104,24 +104,24 @@ BEGIN
   RAISE NOTICE 'P3 PASS: planned -> sending -> sent, retry after failure, sent is final';
 
   -- P4 -----------------------------------------------------------------------
-  -- The marketplace cancels 8D-2 after the organizer was paid 77.60.
+  -- The marketplace cancels 8D-2 after the organizer was paid 78.40.
   UPDATE public.exos_marketplace_orders SET status = 'cancelled', sale_status = 'cancelled' WHERE external_order_id = '8D-2';
   IF pg_temp.state('8D-2') <> 'clawback_due' THEN RAISE EXCEPTION 'P4 FAIL: state %', pg_temp.state('8D-2'); END IF;
-  -- Nothing else payable: -77.60 carries forward, no payout.
+  -- Nothing else payable: -78.40 carries forward, no payout.
   SELECT count(*) INTO n FROM public.exos_plan_org_payouts();
   IF n <> 0 THEN RAISE EXCEPTION 'P4 FAIL: negative payout made'; END IF;
-  -- 8D-3 delivered (covered by the confirmed remittance): 38.80 - 77.60 < 0, still nothing.
+  -- 8D-3 delivered (covered by the confirmed remittance): 39.20 - 78.40 < 0, still nothing.
   UPDATE public.exos_marketplace_orders SET status = 'delivered' WHERE external_order_id = '8D-3';
   SELECT count(*) INTO n FROM public.exos_plan_org_payouts();
   IF n <> 0 THEN RAISE EXCEPTION 'P4 FAIL: paid while the balance is negative'; END IF;
-  -- A new 100.00 sale arrives and is paid: 97.00 + 38.80 - 77.60 = 58.20.
+  -- A new 100.00 sale arrives and is paid: 98.00 + 39.20 - 78.40 = 58.80.
   INSERT INTO public.exos_marketplace_orders(id,channel,external_order_id,event_id,org_id,quantity,proceeds,currency,sale_status,status) VALUES
     ('8d000000-0000-0000-0000-00000000f005','evo','8D-5','8d000000-0000-0000-0000-0000000000e1','8d000000-0000-0000-0000-000000000001',1,100.00,'usd','delivered','delivered');
   r := public.exos_record_remittance(jsonb_build_object('channel','evo','external_id','evo-pay-2','amount',100,'source','statement',
          'allocations', jsonb_build_array(jsonb_build_object('external_order_id','8D-5','amount',100))));
   PERFORM public.exos_confirm_remittance((r ->> 'remittance_id')::uuid);
   SELECT * INTO p FROM public.exos_plan_org_payouts();
-  IF p.amount <> 58.20 OR p.sale_lines <> 2 OR p.clawback_lines <> 1 THEN RAISE EXCEPTION 'P4 FAIL: %', row_to_json(p); END IF;
+  IF p.amount <> 58.80 OR p.sale_lines <> 2 OR p.clawback_lines <> 1 THEN RAISE EXCEPTION 'P4 FAIL: %', row_to_json(p); END IF;
   IF pg_temp.state('8D-2') <> 'clawed_back' THEN RAISE EXCEPTION 'P4 FAIL: clawback state %', pg_temp.state('8D-2'); END IF;
   -- Cancelling the planned payout frees its orders and the clawback.
   IF NOT public.exos_cancel_org_payout(p.payout_id) THEN RAISE EXCEPTION 'P4 FAIL: cancel'; END IF;

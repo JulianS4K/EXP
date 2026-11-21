@@ -182,7 +182,7 @@ BEGIN
   END;
   ASSERT pg_temp.refused(format($q$SELECT public.exos_issue_ticket_to_email(%L, %L, 'door@x.com', 1, 'ab-bo-1')$q$, v_e, v_t), ''), 'I3: box office';
   ASSERT pg_temp.refused(format($q$SELECT public.exos_mint_tickets(%L, %L, 1)$q$, v_e, v_t), ''), 'I3: mint';
-  ASSERT pg_temp.refused(format($q$SELECT public.exos_set_resale_consent(%L, true, '2026-10-29')$q$, v_e), ''), 'I3: resale opt-in';
+  ASSERT pg_temp.refused(format($q$SELECT public.exos_set_resale_consent(%L, true, '2026-11-21')$q$, v_e), ''), 'I3: resale opt-in';
   ASSERT pg_temp.refused(format($q$SELECT public.exos_set_ticket_backend(%L, 'exos', NULL)$q$, v_e), 're-import'), 'I3: backend back to Exos';
   PERFORM pg_temp.act(NULL);
   ASSERT (SELECT count(*) FROM public.exos_tickets WHERE event_id = v_e) = 0, 'I3: no ticket at all';

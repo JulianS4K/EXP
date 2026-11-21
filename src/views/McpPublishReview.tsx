@@ -64,7 +64,7 @@ export default function McpPublishReview() {
       </div>
       {view.fee && (
         <p className="text-xs text-white/70">
-          {view.fee.free_tier ? `Free tier: no Exos fee (${view.fee.free_tier_max_capacity} tickets or less).` : 'The standard Exos fee applies.'}
+          {view.fee.free_tier ? `Free tier: no Exos fee (under ${view.fee.free_tier_max_capacity + 1} tickets).` : 'The standard Exos fee applies.'}
         </p>
       )}
       <p className="text-[11px] text-white/50">Once published, people can find the event and buy tickets.</p>

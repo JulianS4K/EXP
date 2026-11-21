@@ -13,7 +13,7 @@ the job that does it.
 | Field (`exos_marketplace_orders`) | Meaning |
 |---|---|
 | `proceeds` | what the marketplace pays for the order (after its own seller fee) |
-| `exos_fee` | 3% of proceeds, or 0 during the org's first 6 months (`exos_org_billing`) |
+| `exos_fee` | 2% of proceeds (`exos_event_fee_bps`), or 0 during the org's first 6 months (`exos_org_billing`) |
 | `organizer_net` | proceeds − exos_fee: what the organizer is paid |
 
 `exos_marketplace_order_money` (a view organizers can read for their own orders) says where each order stands:
