@@ -8,8 +8,13 @@ import { FREE_TIER_MAX_CAPACITY } from '../../../supabase/functions/_shared/plat
 import { supabase } from '../supabase';
 import { isMissingRpc } from '../door/net';
 
-/** Bump with the text, and SQL _exos_resale_consent_version() with it. */
-export const RESALE_CONSENT_VERSION = '2026-10-29';
+/**
+ * Bump with the text, and SQL _exos_resale_consent_version() with it (the
+ * latest migration that sets it; lastCall.test.ts checks they match). An
+ * opt-in naming another version is refused (22023). 2026-11-21: the free tier
+ * is under 150 (mig 20261121133000).
+ */
+export const RESALE_CONSENT_VERSION = '2026-11-21';
 
 export const RESALE_CONSENT_TEXT: readonly string[] = [
   'I allow Exos to list this event\'s tickets on resale marketplaces (StubHub, SeatGeek, Vivid Seats, Gametime, '
@@ -17,7 +22,7 @@ export const RESALE_CONSENT_TEXT: readonly string[] = [
     + 'each one. Marketplaces add their own fees for buyers; the Exos fee applies to those sales as to any other.',
   'Every sale comes off the same count as my own checkout, so nothing oversells.',
   'I can withdraw this at any time: listings come down and their unsold seats come back to my checkout. If the '
-    + 'event\'s max capacity drops to the free tier (150 or less) this consent ends and I have to give it again.',
+    + `event's max capacity drops to the free tier (under ${FREE_TIER_MAX_CAPACITY + 1}) this consent ends and I have to give it again.`,
 ];
 
 export interface SalesRules {

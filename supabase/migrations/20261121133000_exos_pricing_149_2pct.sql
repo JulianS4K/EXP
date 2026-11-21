@@ -5,6 +5,10 @@
 -- Touches:  P: exos_free_tier_max_capacity()   (default 150 -> 149)
 --              _exos_discovery_free_tier_max() (default 150 -> 149)
 --              exos_platform_fee_bps()         (SELECT 300 -> SELECT 200)
+--              exos_tg_marketplace_fee()       (a sale is priced once, C below)
+--              _exos_resale_consent_version()  ('2026-10-29' -> '2026-11-21': the
+--                                               opt-in text now says under 150)
+--           W: COLUMN exos_marketplace_orders.exos_fee_bps (new, backfilled)
 --           C: COMMENT ON TABLE exos_platform_settings (the default it names),
 --              COMMENT ON COLUMN exos_checkout_sessions.exos_fee_cents (the rate)
 -- Pre-reqs: 20260929062000, 20261029090000, 20261029130000
@@ -43,12 +47,28 @@
 -- _exos_feed_lines (S4K), and exos_send_mail_followups (fee-free-ending
 -- mail). TS mirror: EXOS_FEE_BPS = 200 (_shared/platformFee.ts), used by
 -- exos-checkout, exos-commerce, POS and recurring gifts; EXOS_PLATFORM_FEE_BPS
--- (env) must stay unset or 200. Rows already written keep the fee they were
--- charged (checkout sessions record fee_bps; marketplace exos_fee is set at
--- insert). Every marketplace sale is Managed (Exos's channel accounts) and
+-- (env) must stay unset or 200. Checkout sessions already written keep the
+-- fee they were charged (they record fee_bps); marketplace sales keep theirs
+-- through C below. Every marketplace sale is Managed (Exos's channel accounts) and
 -- takes the same 2%. A BYO sale (the organizer's own marketplace account,
 -- not built) would take 0: it would branch in exos_tg_marketplace_fee before
 -- exos_event_fee_bps.
+--
+-- C. A marketplace sale is priced once (Applier's review of this PR).
+-- exos_tg_marketplace_fee ran on every UPDATE OF listing_ref / proceeds / ...
+-- and recomputed exos_fee at the rate of the moment, and
+-- exos_record_marketplace_order's upsert sets listing_ref on every re-poll
+-- (exos-marketplace-sales re-checks known orders each run). So once the rate
+-- moved, an unchanged re-poll re-priced a recorded sale (3% -> 2%: fee 2.40 ->
+-- 1.60 on 80.00), the journal posted the difference and payouts paid it. The
+-- same happened when an event left the free tier after a sale.
+-- Now the rate a sale is first priced at is stored (exos_fee_bps) and never
+-- re-read: a re-poll keeps the fee to the cent, and a real proceeds change is
+-- re-priced at the stored rate. Rows written before this migration are
+-- backfilled from their own fee (0 when it is 0, else 300 when it is 3% of
+-- proceeds to the cent; anything else stays NULL and keeps its fee until its
+-- proceeds change). The new column is written only by the trigger (the
+-- table's one grant is SELECT to authenticated).
 --
 -- Applier's prod anchor check (supabase/README.md rule 4), read-only:
 --   select pg_get_functiondef('public.exos_free_tier_max_capacity()'::regprocedure);
@@ -57,7 +77,14 @@
 --     must contain once:  WHERE key = 'free_tier_max_capacity'), 150)
 --   select pg_get_functiondef('public.exos_platform_fee_bps()'::regprocedure);
 --     must contain once:  SELECT 300
--- All three matched prod on 2026-11-21 (read-only). Each patch is a counted text
+--   select pg_get_functiondef('public._exos_resale_consent_version()'::regprocedure);
+--     must contain once:  SELECT '2026-10-29'::text
+--   select pg_get_functiondef('public.exos_tg_marketplace_fee()'::regprocedure);
+--     must contain once (mig 20260929062000 as patched by 20261029090000):
+--       NEW.exos_fee := CASE WHEN NEW.proceeds IS NOT NULL
+--         THEN round(NEW.proceeds * public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now())) / 10000.0, 2) END;
+-- The first three matched prod on 2026-11-21 (read-only); the last two are
+-- still to check. Each patch is a counted text
 -- replacement on pg_get_functiondef and is skipped when its end state is
 -- already present, so the migration is re-run safe. Prod apply needs
 -- operator OK.
@@ -102,6 +129,54 @@ SELECT pg_temp.exos_patch_n('public.exos_platform_fee_bps()',
   $o$ SELECT 300 $o$,
   $n$ SELECT 200 $n$, 1);
 
+-- C. A marketplace sale is priced once: the rate it was first priced at.
+ALTER TABLE public.exos_marketplace_orders ADD COLUMN IF NOT EXISTS exos_fee_bps integer;
+COMMENT ON COLUMN public.exos_marketplace_orders.exos_fee_bps IS
+  'The Exos rate (bps) the sale was first priced at (exos_event_fee_bps at the sale), kept for good: a re-poll keeps exos_fee, a proceeds change re-prices at this rate. Set only by exos_tg_marketplace_fee. Mig 20261121133000.';
+COMMENT ON COLUMN public.exos_marketplace_orders.exos_fee IS
+  'The Exos fee: exos_fee_bps of proceeds, to the cent, half up (priced once, mig 20261121133000). Mig 20260929062000.';
+-- Rows priced before this migration (all at 300 or 0). The UPDATE OF column
+-- list doesn't include exos_fee_bps, so this fires no fee trigger.
+UPDATE public.exos_marketplace_orders
+   SET exos_fee_bps = CASE WHEN exos_fee = 0 THEN 0
+                           WHEN exos_fee = round(proceeds * 300 / 10000.0, 2) THEN 300 END
+ WHERE exos_fee_bps IS NULL AND exos_fee IS NOT NULL AND proceeds IS NOT NULL;
+
+SELECT pg_temp.exos_patch_n('public.exos_tg_marketplace_fee()',
+  $m$NEW.exos_fee_bps := OLD.exos_fee_bps$m$,
+  $o$  NEW.exos_fee := CASE WHEN NEW.proceeds IS NOT NULL
+    THEN round(NEW.proceeds * public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now())) / 10000.0, 2) END;$o$,
+  $n$  -- exos: priced once (mig 20261121133000). The rate is read when the sale
+  -- is first priced and kept (exos_fee_bps): a re-poll keeps the fee, a real
+  -- proceeds change is re-priced at the same rate.
+  IF TG_OP = 'UPDATE' THEN
+    NEW.exos_fee_bps := OLD.exos_fee_bps;
+  ELSE
+    NEW.exos_fee_bps := NULL;
+  END IF;
+  IF NEW.proceeds IS NULL THEN
+    NEW.exos_fee := NULL;
+  ELSIF TG_OP = 'UPDATE' AND NEW.exos_fee_bps IS NULL AND OLD.exos_fee IS NOT NULL
+        AND NEW.proceeds IS NOT DISTINCT FROM OLD.proceeds THEN
+    NEW.exos_fee := OLD.exos_fee;   -- an older row whose rate isn't known, re-polled unchanged
+  ELSE
+    IF NEW.exos_fee_bps IS NULL THEN
+      NEW.exos_fee_bps := public.exos_event_fee_bps(NEW.event_id, coalesce(NEW.sold_at, NEW.created_at, now()));
+    END IF;
+    NEW.exos_fee := round(NEW.proceeds * NEW.exos_fee_bps / 10000.0, 2);
+  END IF;$n$, 1);
+
+-- The resale opt-in text names the cutoff ("the free tier (under 150)"), so
+-- its version moves with it: src/lib/marketplace/resaleConsent.ts
+-- RESALE_CONSENT_VERSION is the same value (an opt-in must name the current
+-- one, else 22023). Consents already given stay active
+-- (exos_resale_consent_active doesn't read the version); prod had none on
+-- 2026-11-21.
+SELECT pg_temp.exos_patch_n('public._exos_resale_consent_version()',
+  $m$SELECT '2026-11-21'::text$m$,
+  $o$SELECT '2026-10-29'::text$o$,
+  $n$SELECT '2026-11-21'::text$n$, 1);
+
 -- The settings table's comment names the default.
 DO $$
 DECLARE v text := obj_description('public.exos_platform_settings'::regclass, 'pg_class');
@@ -124,6 +199,8 @@ BEGIN
 END $$;
 
 -- ROLLBACK (manual): the same three patches the other way (149 -> 150,
--- SELECT 200 -> SELECT 300), and the comment back to
+-- SELECT 200 -> SELECT 300), exos_tg_marketplace_fee's priced-once block back
+-- to the one CASE (the exos_fee_bps column can stay), the consent version back
+-- to '2026-10-29' (with the SPA's), and the comment back to
 -- 'free_tier_max_capacity (150)'. The cutoff alone can also go back without a
 -- migration: exos_platform_settings free_tier_max_capacity = 150.

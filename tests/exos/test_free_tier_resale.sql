@@ -82,7 +82,7 @@ CREATE FUNCTION pg_temp.event_row(p_event text, p_ch text) RETURNS public.exos_d
   SELECT * FROM public.exos_distribution_listings WHERE event_id = pg_temp.u(p_event) AND channel = p_ch AND tier_id IS NULL
 $$;
 CREATE FUNCTION pg_temp.optin(p_event text) RETURNS jsonb LANGUAGE sql AS $$
-  SELECT public.exos_set_resale_consent(pg_temp.u(p_event), true, '2026-10-29')
+  SELECT public.exos_set_resale_consent(pg_temp.u(p_event), true, '2026-11-21')
 $$;
 
 -- T1. The cutoff.
@@ -146,7 +146,7 @@ BEGIN
   r := pg_temp.optin('e2');
   ASSERT (r ->> 'resale_unlocked')::boolean AND (r -> 'consent' ->> 'given_by_email') = 'c9-manager@x.com', 'T3: opted in ' || r::text;
   SELECT * INTO c FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2') AND revoked_at IS NULL;
-  ASSERT c.given_by = pg_temp.u('a1') AND c.consent_version = '2026-10-29' AND c.max_capacity_at_consent = 150
+  ASSERT c.given_by = pg_temp.u('a1') AND c.consent_version = '2026-11-21' AND c.max_capacity_at_consent = 150
      AND c.cutoff_at_consent = 149 AND c.given_at IS NOT NULL AND c.org_id = 'c9000000-0000-0000-0000-000000000001', 'T3: the record';
   PERFORM pg_temp.optin('e2');
   ASSERT (SELECT count(*) FROM public.exos_resale_consents WHERE event_id = pg_temp.u('e2')) = 1, 'T3: idempotent';

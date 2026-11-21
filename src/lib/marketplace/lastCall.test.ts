@@ -49,8 +49,29 @@ describe('last call (mig 20261029100000)', () => {
 });
 
 describe('the resale opt-in (mig 20261029090000)', () => {
-  it('carries the version the server checks', () => {
-    expect(RESALE_CONSENT_VERSION).toBe('2026-10-29');
+  it('carries the version the server checks (the latest migration that sets it)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../../../supabase/migrations/', import.meta.url);
+    // The SQL value a fresh install ends on: the last migration (by name) that
+    // creates or patches _exos_resale_consent_version() to a new text.
+    let sql: string | null = null;
+    for (const f of readdirSync(dir).filter((n) => n.endsWith('.sql')).sort()) {
+      const body = readFileSync(new URL(f, dir), 'utf8');
+      if (!body.includes('_exos_resale_consent_version()')) continue;
+      const created = [...body.matchAll(/_exos_resale_consent_version\(\)\s+RETURNS text[^$]*\$\$ SELECT '([0-9-]+)'::text \$\$/g)];
+      const patched = [...body.matchAll(/\$n\$SELECT '([0-9-]+)'::text\$n\$/g)];
+      const last = [...created, ...patched].pop();
+      if (last) sql = last[1];
+    }
+    expect(sql).toBe(RESALE_CONSENT_VERSION);
+    expect(RESALE_CONSENT_VERSION).toBe('2026-11-21');
+  });
+
+  it('names the free tier the fee uses (under 150)', async () => {
+    const { RESALE_CONSENT_TEXT } = await import('./resaleConsent');
+    const text = RESALE_CONSENT_TEXT.join(' ');
+    expect(text).toContain('the free tier (under 150)');
+    expect(text).not.toMatch(/150 or less/);
   });
 
   it('words where an event stands', () => {

@@ -49,8 +49,8 @@ the details with counsel.)
       `_shared/platformFee.ts`). A 40.00 order: 0.80 + 1.46 = 2.26, so the organizer gets 37.74. On a
       marketplace sale Exos takes 2% of the payout (`exos_fee`, SQL `exos_platform_fee_bps()`), with no
       card fee because the marketplace charged the card. POS card sales and commerce take the same
-      rate. `EXOS_PLATFORM_FEE_BPS` overrides the 2% at checkout; keep it unset or equal to
-      `EXOS_FEE_BPS` (200) and the SQL function.
+      rate. `EXOS_PLATFORM_FEE_BPS` overrides the 2% at checkout, commerce and recurring gifts; keep it
+      unset or equal to `EXOS_FEE_BPS` (200) and the SQL function.
 - [x] **First 6 months free** (operator, 2026-09-28): no Exos fee until
       `exos_org_billing.fee_free_until`, which is signup + 6 months (orgs that exist when mig
       `20260929062000` is applied get 6 months from then). Checkout still passes Stripe's card fee
@@ -80,7 +80,7 @@ the details with counsel.)
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | stripe-webhook | `whsec_…` of the connected-accounts endpoint (step 3). Without it organizers never become `chargesEnabled` |
 | `CRON_SECRET` | exos-reconcile-checkouts (and the other cron functions) | Must match what `_cron_invoke_edge_fn` sends |
 | `EXOS_REDIRECT_ORIGINS` | exos-checkout, exos-connect-onboard | **Required.** Comma-separated origins the browser may be sent back to after Stripe, e.g. `https://vibepass-storefront-test.onrender.com`. Exact origin match, https only (http only for localhost). Unset means both functions refuse every request |
-| `EXOS_PLATFORM_FEE_BPS` | exos-checkout, exos-commerce | Optional, default 200 (2%, `_shared/platformFee.ts`); leave unset or 200 |
+| `EXOS_PLATFORM_FEE_BPS` | exos-checkout, exos-commerce, `_shared/recurringDonation.ts` (exos-commerce, exos-api, stripe-webhook) | Optional, default 200 (2%, `_shared/platformFee.ts`); leave unset or 200, never 300 (`docs/fees.md` "When the Exos rate changes") |
 | `EXOS_STRIPE_FEE_BPS` / `EXOS_STRIPE_FEE_FIXED_CENTS` | exos-checkout | Optional, default 290 / 30: Stripe's card fee, added to the application fee |
 | `EXOS_CONNECT_ACCOUNT_TYPE` | exos-connect-onboard | Optional: `standard` (default) or `express` for new organizer accounts |
 | `EXOS_GUEST_IP_SALT` | exos-checkout | Optional. Salt for the hashed client IP behind the guest checkout rate limit. Defaults to a server secret; set it if you want to rotate it independently |
