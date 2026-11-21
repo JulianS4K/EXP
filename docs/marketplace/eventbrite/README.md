@@ -52,8 +52,11 @@ mig 20261121100000); a class Exos adopted by name or the organizer mapped keeps 
 price and details, and only the inventory sync's capacity is sent for it. A live
 create is recorded first (`exos_channel_create_begin`); a pass that finds one
 recorded looks the event up (`GET /organizations/{id}/events/?name_filter=…`: same
-name, same start, created since) before creating again, and doesn't repeat a create
-younger than 2 minutes. Reads (`ebGet`, the mirror's GETs) are retried on 429 / 5xx
+name, same start, created between the first try and 2 minutes after the last, and not
+an event another Exos event uses) before creating again, and doesn't repeat a create
+younger than 2 minutes. The venue is made only once the create is begun, kept with
+it, and reused (or one of the org's with the same name and address, from
+`GET /organizations/{id}/venues/`). Reads (`ebGet`, the mirror's GETs) are retried on 429 / 5xx
 with backoff, Retry-After honoured up to 5 s; a POST is never re-sent. Only the paths in `EB_WRITES` (marked **M** below), under the same
 gate (org switch + `EXOS_EVENTBRITE_WRITES=on`, dry run otherwise). Capacity
 afterwards stays the inventory sync's job. The list above ("Exos never") holds
@@ -295,7 +298,7 @@ Access:
 | `GET /venues/{venue_id}/` | R |  | Retrieve a Venue |
 | `POST /organizations/{organization_id}/venues/` | **M** | channel sync: the mirrored event's venue | Create a Venue |
 | `POST /venues/{venue_id}/` | ✖ |  | Update a Venue |
-| `GET /organizations/{organization_id}/venues/` | R |  | List Venues by Organization |
+| `GET /organizations/{organization_id}/venues/` | R | channel sync: reuse a venue of the same name and address | List Venues by Organization |
 | `POST /organizations/{organization_id}/webhooks/` | ✖ |  | Create Webhooks by Organization ID |
 | `POST /webhooks/` | ✖ |  | Create Webhooks - deprecated |
 | `GET /organizations/{organization_id}/webhooks/` | R |  | List Webhook by Organization ID |

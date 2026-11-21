@@ -1,5 +1,5 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { contentHash, firstCapacity, makeIo, mirrorEvent, type StepRecord, type SyncHooks, textToHtml, utc, writesLive } from "./model.ts";
+import { contentHash, firstCapacity, leasedIo, makeIo, mirrorEvent, notOnAccount, type StepRecord, type SyncHooks, textToHtml, utc, writesLive } from "./model.ts";
 import { EB_WRITES, ebClassBody, ebFindCreated, ebStandIn, syncEventbrite } from "./eventbrite.ts";
 import { capacityUpdate, LUMA_WRITES, lumaSlug, lumaStandIn, lumaTicketCounts, lumaTicketNames, syncLuma } from "./luma.ts";
 import { lumaInventory } from "./lumaInventory.ts";
@@ -104,7 +104,7 @@ Deno.test("eventbrite: an unchanged mapped event sends nothing; an update leaves
                        "POST /v3/events/777/ticket_classes/5002/": () => ({}) }, calls);
   const ev = mirrorEvent(PAYLOAD)!;
   const hash = await contentHash(ev);
-  const linked = { ...PAYLOAD, mirror: { mode: "create", external_id: "777", external_meta: { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, published: true }, last_hash: "old" },
+  const linked = { ...PAYLOAD, mirror: { mode: "create", status: "synced", external_id: "777", external_meta: { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, published: true }, last_hash: "old" },
                    maps: [{ tier_id: "t1", external_ticket_id: "5001" }, { tier_id: "t2", external_ticket_id: "5002" }] };
   const steps: StepRecord[] = [];
   const io = makeIo({ fetch: f, base: "https://www.eventbriteapi.com/v3", headers: {}, live: true, allowed: EB_WRITES, steps, standIn: ebStandIn });
@@ -127,7 +127,7 @@ Deno.test("eventbrite: an unchanged mapped event sends nothing; an update leaves
 
 Deno.test("eventbrite: cancel; refusal shown to the organizer", async () => {
   const ev = mirrorEvent({ ...PAYLOAD, event: { ...PAYLOAD.event, status: "cancelled" } })!;
-  const p = { ...PAYLOAD, mirror: { external_id: "777", external_meta: { organization_id: "42" } } };
+  const p = { ...PAYLOAD, mirror: { status: "synced", external_id: "777", external_meta: { organization_id: "42" } } };
   const calls: any[] = [];
   const steps: StepRecord[] = [];
   const io = makeIo({ fetch: fakeFetch({}, calls), base: "https://www.eventbriteapi.com/v3", headers: {}, live: true, allowed: EB_WRITES, steps, standIn: ebStandIn });
@@ -165,7 +165,7 @@ Deno.test("luma: cancel only closes registration; counts approved tickets; capac
   const calls: any[] = [];
   const steps: StepRecord[] = [];
   const io = makeIo({ fetch: fakeFetch({ "POST /v1/events/update": () => ({}) }, calls), base: "https://public-api.luma.com", headers: {}, live: true, allowed: LUMA_WRITES, steps, standIn: lumaStandIn });
-  const r = await syncLuma(io, ev, { ...PAYLOAD, mirror: { external_id: "evt-Old12345", external_meta: {} } }, steps, "h");
+  const r = await syncLuma(io, ev, { ...PAYLOAD, mirror: { status: "synced", external_id: "evt-Old12345", external_meta: {} } }, steps, "h");
   assertEquals(r.state, "synced");
   assertEquals(calls[0].body, { event_id: "evt-Old12345", registration_open: false });
 
@@ -213,7 +213,7 @@ Deno.test("eventbrite: an adopted class on a linked event gets no update, so nev
   const ev = mirrorEvent(PAYLOAD)!;
   const linked = {
     ...PAYLOAD,
-    mirror: { mode: "link", external_id: "888", external_meta: { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, published: true }, last_hash: "old" },
+    mirror: { mode: "link", status: "synced", external_id: "888", external_meta: { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, published: true }, last_hash: "old" },
     // t1: found by name on the organizer's event (adopted); t2: a class Exos created there earlier.
     maps: [{ tier_id: "t2", external_ticket_id: "6002", created: true }],
   };
@@ -415,4 +415,167 @@ Deno.test("model: the first capacity follows the other platform's share", () => 
   assertEquals(firstCapacity(ev.tiers[0], ev.pack), 30);     // 100 - 4 = 96, capped at 30
   assertEquals(firstCapacity(ev.tiers[1], ev.pack), 1);      // never 0 (Eventbrite refuses it)
   assertEquals(firstCapacity(mirrorEvent(PAYLOAD)!.tiers[0], 4), 96);   // no cap sent: as before
+});
+
+// ---- Applier review of mig 20261121100000 ---------------------------------
+
+Deno.test("eventbrite: the pending lookup never adopts a sibling Exos event's event, nor one created after the last try", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const pending = { at: "2026-11-01T00:10:00Z", first: "2026-11-01T00:00:00Z", name: ev.name, start: ev.startUtc };
+  const base = { name: { text: ev.name }, start: { utc: ev.startUtc } };
+  const sibling = { ...base, id: "555", created: "2026-11-01T00:00:30Z" };      // another Exos event's (same name + start)
+  const late = { ...base, id: "556", created: "2026-11-01T00:13:00Z" };         // after the last try + 2 minutes
+  const io = ebIo(fakeFetch({ "GET /v3/organizations/42/events/": () => ({ events: [sibling, late] }) }, []), []);
+  const asked: string[][] = [];
+  const found = await ebFindCreated(io, "42", pending, (ids) => { asked.push(ids); return Promise.resolve(["555"]); });
+  assertEquals([found.ids, asked], [[], [["555"]]]);
+  // The check unavailable: nothing adopted, nothing created.
+  assertEquals((await ebFindCreated(io, "42", pending, () => Promise.resolve(null))).error !== undefined, true);
+
+  // The pass: the sibling's 555 is excluded, so it begins a create of its own and never touches 555.
+  const calls: any[] = [];
+  const f = fakeFetch({
+    "GET /v3/organizations/42/events/": () => ({ events: [sibling] }),
+    "POST /v3/organizations/42/events/": () => ({ id: "900" }),
+    "GET /v3/events/900/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/900/ticket_classes/": () => ({ id: "5900" }),
+    "POST /v3/events/900/publish/": () => ({}),
+  }, calls);
+  const payload = { ...PAYLOAD, mirror: { mode: "create", external_id: null, last_hash: null,
+    external_meta: { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery, pending_create: pending } } };
+  const seen: any[] = [];
+  const hooks: SyncHooks = { beginCreate: (m) => { seen.push(m); return Promise.resolve({ ok: true }); }, taken: () => Promise.resolve(["555"]) };
+  const r = await syncEventbrite(ebIo(f, []), ev, payload, [], "h1", hooks);
+  assertEquals([r.state, r.external_id, seen.length], ["synced", "900", 1]);
+  assertEquals(calls.some((c) => c.url.includes("/events/555/")), false);
+});
+
+Deno.test("eventbrite: no venue is made before the create is begun; a retry reuses the venue it made", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const noVenue = { ...PAYLOAD, mirror: { mode: "create", external_id: null, last_hash: null, external_meta: { organization_id: "42" } } };
+  // Refused begin: no venue POST, no event POST.
+  const calls: any[] = [];
+  const r = await syncEventbrite(ebIo(fakeFetch({ "POST /v3/organizations/42/venues/": () => ({ id: "71" }) }, calls), []), ev, noVenue, [], "h1",
+    { beginCreate: () => Promise.resolve({ ok: false, reason: "in-flight" }) });
+  assertEquals(r.state, "error");
+  assertEquals(calls.filter((c) => c.method === "POST").length, 0);
+
+  // Begun: the venue (none of the org's matches) is made after the begin, noted, then the event.
+  const order: string[] = [];
+  const calls2: any[] = [];
+  const f2 = fakeFetch({
+    "GET /v3/organizations/42/venues/": () => ({ venues: [{ id: "70", name: "Blue Room", address: { address_1: "2 Other St", city: "Brooklyn", postal_code: "11211" } }] }),
+    "POST /v3/organizations/42/venues/": () => { order.push("venue"); return { id: "71" }; },
+    "POST /v3/organizations/42/events/": (b) => { order.push(`event@${b.event.venue_id}`); return { id: "901" }; },
+    "GET /v3/events/901/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/901/ticket_classes/": () => ({ id: "5901" }),
+    "POST /v3/events/901/publish/": () => ({}),
+  }, calls2);
+  const hooks: SyncHooks = {
+    beginCreate: () => { order.push("begin"); return Promise.resolve({ ok: true, pending: {} }); },
+    note: (n) => { order.push(`note ${n.venue_id}`); return Promise.resolve(true); },
+  };
+  const r2 = await syncEventbrite(ebIo(f2, []), ev, noVenue, [], "h1", hooks);
+  assertEquals(r2.external_meta?.venue_id, "71");
+  assertEquals(order, ["begin", "venue", "note 71", "event@71"]);
+
+  // A retry with the venue noted on the pending create: no new venue.
+  const calls3: any[] = [];
+  const f3 = fakeFetch({
+    "GET /v3/organizations/42/events/": () => ({ events: [] }),
+    "POST /v3/organizations/42/events/": (b) => ({ id: b.event.venue_id === "71" ? "902" : "bad" }),
+    "GET /v3/events/902/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/902/ticket_classes/": () => ({ id: "5902" }),
+    "POST /v3/events/902/publish/": () => ({}),
+  }, calls3);
+  const pend = { at: "2026-11-01T00:00:00Z", name: ev.name, start: ev.startUtc, venue_id: "71", venue_key: ev.venueQuery! };
+  const retry = { ...noVenue, mirror: { ...noVenue.mirror, external_meta: { organization_id: "42", pending_create: pend } } };
+  const r3 = await syncEventbrite(ebIo(f3, []), ev, retry, [], "h1", { beginCreate: () => Promise.resolve({ ok: true, pending: pend }) });
+  assertEquals(r3.external_id, "902");
+  assertEquals(calls3.some((c) => c.url.includes("/venues/")), false);
+
+  // An existing venue of the org with the same name and address is reused too.
+  const calls4: any[] = [];
+  const f4 = fakeFetch({
+    "GET /v3/organizations/42/venues/": () => ({ venues: [{ id: "72", name: "blue room", address: { address_1: "1 Main St", city: "Brooklyn", postal_code: "11211" } }] }),
+    "POST /v3/organizations/42/events/": () => ({ id: "903" }),
+    "GET /v3/events/903/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/903/ticket_classes/": () => ({ id: "5903" }),
+    "POST /v3/events/903/publish/": () => ({}),
+  }, calls4);
+  const r4 = await syncEventbrite(ebIo(f4, []), ev, noVenue, [], "h1", { beginCreate: () => Promise.resolve({ ok: true }) });
+  assertEquals([r4.external_meta?.venue_id, calls4.some((c) => c.method === "POST" && c.url.includes("/venues/"))], ["72", false]);
+});
+
+Deno.test("io: a live write renews the lease first; a lost lease sends nothing", async () => {
+  const calls: any[] = [];
+  let ok = true;
+  const io = leasedIo(ebIo(fakeFetch({ "POST /v3/events/1/publish/": () => ({}), "GET /v3/users/me/": () => ({}) }, calls), []), () => Promise.resolve(ok));
+  assertEquals((await io.req("POST", "/events/1/publish/")).ok, true);
+  ok = false;
+  const r = await io.req("POST", "/events/1/publish/");
+  assertEquals([r.ok, r.error, calls.length], [false, "LEASE_LOST", 1]);
+  assertEquals((await io.req("GET", "/users/me/")).ok, true);   // reads aren't held up
+});
+
+Deno.test("luma: a slug found that another Exos event uses is not adopted", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const calls: any[] = [];
+  const f = fakeFetch({ "/v1/entities/lookup": () => ({ entity: { type: "event", event: { id: "evt-Sib12345" } } }) }, calls);
+  const payload = { ...PAYLOAD, mirror: { mode: "create", external_id: null, last_hash: null, external_meta: { pending_create: { at: "2026-11-01T00:00:00Z", slug: "x-abcdefgh" } } } };
+  const r = await syncLuma(lumaIo(f, []), ev, payload, [], "h1", { beginCreate: () => Promise.resolve({ ok: true }), taken: () => Promise.resolve(["evt-Sib12345"]) });
+  assertEquals(r.state, "error");
+  assertEquals(calls.filter((c) => c.method === "POST").length, 0);
+});
+
+Deno.test("link mode: an event the account can't read (or another org's) gets one answer, before any write", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const meta = { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery };
+  const calls: any[] = [];
+  const r = await syncEventbrite(ebIo(fakeFetch({}, calls), []), ev,
+    { ...PAYLOAD, mirror: { mode: "link", status: "pending", external_id: "999", external_meta: meta, last_hash: null } }, [], "h");
+  assertEquals([r.state, r.error], ["error", notOnAccount("eventbrite")]);
+  assertEquals(calls.filter((c) => c.method === "POST").length, 0);
+  // Luma: an event the key's calendar only views (not manages): the same answer.
+  const calls2: any[] = [];
+  const r2 = await syncLuma(lumaIo(fakeFetch({ "/v1/events/get": () => ({ access: "view" }) }, calls2), []), ev,
+    { ...PAYLOAD, mirror: { mode: "link", status: "pending", external_id: "evt-Theirs123", external_meta: {} } }, [], "h");
+  assertEquals([r2.state, r2.error], ["error", notOnAccount("luma")]);
+  assertEquals(calls2.filter((c) => c.method === "POST").length, 0);
+});
+
+Deno.test("link mode: another organizer's PUBLIC Eventbrite event (it reads fine) gets the not-on-account answer and no write", async () => {
+  const ev = mirrorEvent(PAYLOAD)!;
+  const meta = { organization_id: "42", venue_id: "99", venue_key: ev.venueQuery };
+  const linked = (id: string) => ({ ...PAYLOAD, mirror: { mode: "link", status: "pending", external_id: id, external_meta: meta, last_hash: null } });
+  const calls: any[] = [];
+  const f = fakeFetch({
+    "GET /v3/events/990001/": () => ({ id: "990001", organization_id: "555", name: { text: "Theirs" } }),   // public: readable
+    "GET /v3/users/me/organizations/": () => ({ organizations: [{ id: "42" }], pagination: { has_more_items: false } }),
+    "POST /v3/events/990001/": () => ({}),
+  }, calls);
+  const r = await syncEventbrite(ebIo(f, []), ev, linked("990001"), [], "h");
+  // The same answer exos-channel-sync gives an id another org verified.
+  assertEquals([r.state, r.error], ["error", notOnAccount("eventbrite")]);
+  assertEquals(calls.filter((c) => c.method === "POST").length, 0);
+  // A dry run too: no plan against someone else's event.
+  const d = await syncEventbrite(ebIo(f, [], false), ev, linked("990001"), [], "h");
+  assertEquals([d.state, d.error], ["error", notOnAccount("eventbrite")]);
+
+  // Its own event, its organization on the second page of the token's: goes ahead.
+  const calls2: any[] = [];
+  let page = 0;
+  const f2 = fakeFetch({
+    "GET /v3/events/880001/": () => ({ id: "880001", organization_id: "43" }),
+    "GET /v3/users/me/organizations/": () => (++page === 1
+      ? { organizations: [{ id: "42" }], pagination: { has_more_items: true, continuation: "c2" } }
+      : { organizations: [{ id: "43" }], pagination: { has_more_items: false } }),
+    "POST /v3/events/880001/": () => ({}),
+    "GET /v3/events/880001/ticket_classes/": () => ({ ticket_classes: [] }),
+    "POST /v3/events/880001/ticket_classes/": () => ({ id: "5880" }),
+    "POST /v3/events/880001/publish/": () => ({}),
+  }, calls2);
+  const r2 = await syncEventbrite(ebIo(f2, []), ev, linked("880001"), [], "h");
+  assertEquals(r2.state, "synced");
+  assertEquals(calls2.some((c) => c.url.includes("continuation=c2")), true);
 });
