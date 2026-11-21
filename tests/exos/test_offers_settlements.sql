@@ -401,7 +401,7 @@ DO $$
 DECLARE r jsonb; ev uuid;
 BEGIN
   r := public._exos_hold_convert('cf000000-0000-0000-0000-000000000001', 'cf000000-0000-0000-0000-0000000000a1', 'api', NULL,
-                                 pg_temp.g('hold'), jsonb_build_object('date', '2026-11-19', 'time', '20:00', 'capacity', 500));
+                                 pg_temp.g('hold'), jsonb_build_object('date', to_char(current_date + 30, 'YYYY-MM-DD'), 'time', '20:00', 'capacity', 500));
   ev := (r->>'event_id')::uuid;
   INSERT INTO cf VALUES ('ev', ev);
   ASSERT (SELECT count(*) FROM public.exos_offers WHERE hold_id = pg_temp.g('hold') AND event_id = ev) = 2, 'OS4: offers linked';
@@ -675,7 +675,7 @@ BEGIN
   r := public.exos_ticket_counts_run(25);
   ASSERT (r->>'switched_off')::int = 1 AND NOT (SELECT enabled FROM public.exos_ticket_count_schedules WHERE event_id = ev),
          'OS7: switched off after the show';
-  UPDATE public.exos_events SET starts_at = '2026-11-20T02:00:00Z' WHERE id = ev;
+  UPDATE public.exos_events SET starts_at = now() + interval '30 days' WHERE id = ev;
   IF to_regclass('cron.job') IS NOT NULL THEN
     EXECUTE 'SELECT NOT active FROM cron.job WHERE jobname = ''exos-ticket-counts-15min''' INTO STRICT r;
   END IF;
