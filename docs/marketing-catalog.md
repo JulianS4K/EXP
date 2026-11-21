@@ -41,10 +41,10 @@ at least one public ticket type, and has an https image. Hidden (code-unlocked) 
 | availability | `in stock` / `out of stock` / `preorder` | same | `in_stock` / `out_of_stock` / `preorder` + `g:availability_date` | In stock when a public tier is on sale with seats **Exos can sell** (`exos_public_tiers.available`, mig `20261014160000`: S4K's and the marketplaces' pools and the Eventbrite primary hold are not Exos's); preorder when every open tier's sales start later (the date is the earliest start); otherwise out of stock (also when the event is at capacity) |
 | condition | `new` | `new` | `g:condition` | Always `new` |
 | price | `price` | `price` | `g:price` | "21.78 USD": the **lowest all-in price you can buy now**, i.e. the storefront's "from" price (`buyerTierPrice`: scheduled price in force + exclusive tax; Exos adds no buyer fee), over the tiers on sale; for a presale, over the upcoming tiers; else over all tiers |
-| link | `link` | `link` | `link` | The event page (`/e/<slug>`, else `/event/<id>`) with `utm_source=<meta\|tiktok\|google>&utm_medium=paid_social&utm_campaign=catalog&utm_content=<event id>`, so catalog sales show in the Sources report |
+| link | `link` | `link` | `link` | The event page (`/e/<slug>`, else `/event/<id>`) with `utm_source=<meta\|tiktok\|google>&utm_medium=<paid_social for Meta and TikTok, paid_search for Google>&utm_campaign=catalog&utm_content=<event id>` (the *UTM scheme* below), so catalog sales show in the Sources report |
 | image | `image_link`, `additional_image_link` | same | `g:image_link`, `g:additional_image_link` | The cover image, else the first gallery image; the other gallery images as extras (up to 10). http images are dropped |
 | brand | `brand` | `brand` | `g:brand` | The organizer's name |
-| category | `product_type` | `product_type` | `g:product_type` | "Event Tickets > Concerts" (Nightlife, Comedy, Theater, Sports, Festivals, Events) |
+| category | `product_type` | `product_type` | `g:product_type` | "Event Tickets > Concerts" (Nightlife, Comedy, Theater, Sports, Festivals, Food & Drink, Community, Business, Events), from `marketCategory` (`eventStandard.ts`; derived, no SQL column) |
 | event fields | `custom_label_0`…`4` | same | `g:custom_label_0`…`4` | 0 local start date (`2026-11-06`), 1 venue, 2 city, 3 category, 4 `this_week` / `this_month` / `later`: filter product sets on these (e.g. "this week, Brooklyn") |
 | — | — | — | `g:identifier_exists` = `no`, `g:expiration_date` | Tickets have no GTIN / MPN; the item expires at the event's end |
 
@@ -97,6 +97,25 @@ Use this feed for **free** listings only; no ads are run from it.
   item shows the reason in Commerce Manager / Catalog Manager).
 - TikTok's handling of the optional columns (`additional_image_link`, `product_type`, `custom_label_*`); the nine
   required ones are verified.
+
+## UTM scheme
+
+Every link Exos builds for an organizer's marketing follows one scheme (2026-11-21,
+`supabase/functions/_shared/marketing/utm.ts`):
+
+| Tag | Value |
+|---|---|
+| `utm_source` | The platform or place: `instagram`, `facebook`, `tiktok`, `x`, `meta`, `google`, `email`, `qr`, ... |
+| `utm_medium` | `paid_social` (Meta, TikTok ads and catalogs), `paid_search` (Google ads and Merchant), `print` (posters and flyers), `email`, `organic_social`; and `sms`, `messaging` (WhatsApp), `referral` (partner sites) for the channels that are none of those |
+| `utm_campaign` | The organizer's campaign name; on a paid link without one, the platform's campaign macro (Meta `{{campaign.name}}`, TikTok `__CAMPAIGN_NAME__`, Google `{campaignid}`); `catalog` in a catalog |
+| `utm_content` | The placement: a poster's slug on a print QR (`utm_source=qr&utm_medium=print&utm_content=poster-bedford-ave`), the platform's ad macro on a paid link (Meta `{{ad.name}}`, TikTok `__CID_NAME__`, Google `{creative}`), the event id in a catalog |
+
+Macros are left unencoded so the platform fills them in at click time. The canonical event URL (the *Share the link*
+box, `<link rel=canonical>`) is never tagged; Google's gclid auto-tagging is left on and the Sources report reads the
+click id by itself. The channel report keys on source and medium (`_exos_channel_key`): `meta` + `paid_social` is
+*Meta ads*, `google` + `paid_search` (or `cpc`) *Google ads* (mig `20261121153700`), `qr` + `print` *Flyer / QR code*.
+The Sources report groups by each tag, `utm_content` as *Placement / ad*. Feed and listing links keep their own media
+(`events_feed`, `listing`, `promo_link`, `fan_share`): they are channels Exos serves, not ads.
 
 ## Audience export
 

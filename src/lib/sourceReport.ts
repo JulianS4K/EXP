@@ -4,6 +4,8 @@
 // partially_refunded / refunded), grouped by where the buyer came from:
 //   * utm_source / utm_medium / utm_campaign from `attribution` (mig
 //     20260924223000), lower-cased so "Instagram" and "instagram" merge;
+//   * utm_content, the placement: which poster or flyer QR (Promote page,
+//     lib/printPlacements.ts: utm_source=print, utm_medium=qr) or which ad;
 //   * the promoter code (promoter_id, else attribution.promoter);
 //   * the ad platform, inferred from the click id on the landing URL (`ad_ids`,
 //     mig 20260929131000; fbclid also lives in attribution). A click id means
@@ -71,6 +73,8 @@ export interface SourceKey {
   source: string | null;
   medium: string | null;
   campaign: string | null;
+  /** utm_content: the placement (poster / flyer QR) or ad variant. */
+  content: string | null;
   promoter: string | null;
   platform: AdPlatform | null;
   assistant: AiAssistant | null;
@@ -89,6 +93,7 @@ export function sourceKeyOf(r: SourceSessionRow): SourceKey {
     source: lower(a?.utm_source),
     medium: lower(a?.utm_medium),
     campaign: lower(a?.utm_campaign),
+    content: lower(a?.utm_content),
     promoter: str(r.promoter_id) ?? str(a?.promoter) ?? null,
     platform: adPlatformOf(r.ad_ids, a),
     assistant: aiAssistantOf(a),
@@ -96,10 +101,10 @@ export function sourceKeyOf(r: SourceSessionRow): SourceKey {
 }
 
 export function isDirect(k: SourceKey): boolean {
-  return !k.source && !k.medium && !k.campaign && !k.promoter && !k.platform && !k.assistant;
+  return !k.source && !k.medium && !k.campaign && !k.content && !k.promoter && !k.platform && !k.assistant;
 }
 
-export type SourceDimension = 'all' | 'source' | 'campaign' | 'promoter' | 'platform' | 'assistant';
+export type SourceDimension = 'all' | 'source' | 'campaign' | 'content' | 'promoter' | 'platform' | 'assistant';
 
 export interface SourceRow extends SourceKey {
   /** Display label for the row's group. */
@@ -123,7 +128,7 @@ export interface SourceSummary {
   mixedCurrencies: boolean;
 }
 
-const NONE: SourceKey = { source: null, medium: null, campaign: null, promoter: null, platform: null, assistant: null };
+const NONE: SourceKey = { source: null, medium: null, campaign: null, content: null, promoter: null, platform: null, assistant: null };
 
 /** Project a key onto the chosen dimension (the other parts become null). */
 function project(k: SourceKey, dim: SourceDimension): SourceKey {
@@ -131,6 +136,7 @@ function project(k: SourceKey, dim: SourceDimension): SourceKey {
     case 'all': return k;
     case 'source': return { ...NONE, source: k.source, medium: k.medium };
     case 'campaign': return { ...NONE, campaign: k.campaign };
+    case 'content': return { ...NONE, content: k.content };
     case 'promoter': return { ...NONE, promoter: k.promoter };
     case 'platform': return { ...NONE, platform: k.platform };
     case 'assistant': return { ...NONE, assistant: k.assistant };
@@ -142,6 +148,7 @@ export const EMPTY_LABEL: Record<SourceDimension, string> = {
   all: DIRECT_LABEL,
   source: 'No UTM source',
   campaign: 'No campaign',
+  content: 'No placement',
   promoter: 'No promoter',
   platform: 'No ad click id',
   assistant: 'Not from an AI assistant',
@@ -152,6 +159,7 @@ function labelOf(k: SourceKey, dim: SourceDimension): string {
   const parts: string[] = [];
   if (k.source || k.medium) parts.push(`${k.source ?? '(none)'} / ${k.medium ?? '(none)'}`);
   if (k.campaign) parts.push(k.campaign);
+  if (k.content) parts.push(dim === 'content' ? k.content : `placement ${k.content}`);
   if (k.promoter) parts.push(`promoter ${k.promoter}`);
   if (k.platform) parts.push(k.platform);
   if (k.assistant) parts.push(`via ${k.assistant}`);
@@ -174,7 +182,7 @@ export function summarizeSources(sessions: SourceSessionRow[], dim: SourceDimens
     if (!COUNTED.has(s.status)) continue;
     const full = sourceKeyOf(s);
     const k = project(full, dim);
-    const id = JSON.stringify([k.source, k.medium, k.campaign, k.promoter, k.platform, k.assistant]);
+    const id = JSON.stringify([k.source, k.medium, k.campaign, k.content, k.promoter, k.platform, k.assistant]);
     let row = groups.get(id);
     if (!row) {
       row = { ...k, label: labelOf(k, dim), direct: isDirect(k), orders: 0, tickets: 0, grossCents: 0, refundedOrders: 0 };
@@ -206,7 +214,7 @@ export function summarizeSources(sessions: SourceSessionRow[], dim: SourceDimens
 }
 
 export const SOURCES_CSV_HEADER = [
-  'utm_source', 'utm_medium', 'utm_campaign', 'promoter', 'ad_platform', 'ai_assistant', 'orders', 'tickets', 'gross',
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'promoter', 'ad_platform', 'ai_assistant', 'orders', 'tickets', 'gross',
   'refunded_orders', 'currency',
 ];
 
@@ -216,6 +224,7 @@ export function sourcesCsvRows(s: SourceSummary): CsvCell[][] {
     r.direct ? r.label : r.source ?? '',
     r.medium ?? '',
     r.campaign ?? '',
+    r.content ?? '',
     r.promoter ?? '',
     r.platform ?? '',
     r.assistant ?? '',

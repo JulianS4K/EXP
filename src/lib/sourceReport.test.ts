@@ -46,7 +46,7 @@ describe('sourceKeyOf', () => {
       promoter_id: 'dj-kay',
       attribution: { utm_source: ' Instagram ', utm_medium: 'Paid_Social', utm_campaign: 'Launch', promoter: 'other' },
       ad_ids: { fbclid: 'x' },
-    }))).toEqual({ source: 'instagram', medium: 'paid_social', campaign: 'launch', promoter: 'dj-kay', platform: 'Meta', assistant: null });
+    }))).toEqual({ source: 'instagram', medium: 'paid_social', campaign: 'launch', content: null, promoter: 'dj-kay', platform: 'Meta', assistant: null });
     expect(sourceKeyOf(row({ attribution: { promoter: 'p1' } })).promoter).toBe('p1');
   });
 });
@@ -105,8 +105,27 @@ describe('summarizeSources', () => {
     const s = summarizeSources(sessions);
     const rows = sourcesCsvRows(s);
     expect(rows.every((r) => r.length === SOURCES_CSV_HEADER.length)).toBe(true);
-    expect(rows[1]).toEqual(['instagram', 'paid_social', 'launch', '', 'Meta', '', 2, 3, '75.00', 1, 'USD']);
-    expect(rows.at(-1)).toEqual([DIRECT_LABEL, '', '', '', '', '', 2, 2, '20.00', 0, 'USD']);
+    expect(rows[1]).toEqual(['instagram', 'paid_social', 'launch', '', '', 'Meta', '', 2, 3, '75.00', 1, 'USD']);
+    expect(rows.at(-1)).toEqual([DIRECT_LABEL, '', '', '', '', '', '', 2, 2, '20.00', 0, 'USD']);
+  });
+});
+
+describe('placements (utm_content)', () => {
+  const qr = (content: string, cents: number) =>
+    row({ attribution: { utm_source: 'qr', utm_medium: 'print', utm_content: content }, amount_cents: cents });
+  it('groups print QR sales by placement and keeps the placement in the full breakdown and CSV', () => {
+    const list = [qr('poster-bedford-ave', 4000), qr('Poster-Bedford-Ave', 2000), qr('flyer-bar-x', 1000), row({ amount_cents: 0 })];
+    const s = summarizeSources(list, 'content');
+    expect(s.rows.map((r) => [r.label, r.orders, r.grossCents])).toEqual([
+      ['poster-bedford-ave', 2, 6000], ['flyer-bar-x', 1, 1000], ['No placement', 1, 0],
+    ]);
+    const all = summarizeSources(list, 'all');
+    expect(all.rows[0].label).toBe('qr / print · placement poster-bedford-ave');
+    const csv = sourcesCsvRows(all);
+    expect(csv[0].slice(0, 4)).toEqual(['qr', 'print', '', 'poster-bedford-ave']);
+    expect(SOURCES_CSV_HEADER[3]).toBe('utm_content');
+    // A placement alone is a source: not "Direct / unknown".
+    expect(summarizeSources([row({ attribution: { utm_content: 'flyer-bar-x' } })]).attributedOrders).toBe(1);
   });
 });
 
@@ -132,7 +151,7 @@ describe('AI assistants as a source', () => {
     expect(s.attributedOrders).toBe(3);
     const all = summarizeSources([row({ attribution: { ai_ref: 'Claude' } })]);
     expect(all.rows[0].label).toBe('via Claude');
-    expect(sourcesCsvRows(all)[0][5]).toBe('Claude');
+    expect(sourcesCsvRows(all)[0][6]).toBe('Claude');
   });
 });
 

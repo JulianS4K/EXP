@@ -211,7 +211,8 @@ tiers and discount codes, into a series of dates.
   through from (Google, Meta, TikTok, Reddit, Snap, X, Microsoft, read from the click id), with
   everything else under "Direct / unknown". Switch the grouping to one dimension at a time, and
   export the full breakdown as CSV. Tag your ad links with `utm_source`, `utm_medium` and
-  `utm_campaign` so they show up here. Free claims aren't in it.
+  `utm_campaign` so they show up here. **Placement / ad** groups by `utm_content`: which poster or flyer QR
+  (*Posters and flyers* below) or which ad sold. Free claims aren't in it.
 - **Sold elsewhere** (Overview tab; owner, manager and finance): tickets you sold outside Exos, so one
   report covers every channel. Exos lists them beside its own numbers and never adds them in: they
   are not in "Tickets sold", revenue, payouts or check-ins. The tile under "Tickets sold" shows the
@@ -434,7 +435,8 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   `exos_calendar_public_feed` whether the event is in the org's `.ics`. Live means *in the feed*: Google reads it only
   once Exos is in its events ticketing program, and ad platforms only once the organizer adds the catalog URL.
 - **Calendars and listings sites (manual):** DoNYC, Time Out New York, CitySpark local calendars, Resident Advisor,
-  Oh My Rockness, Edmtrain, Meetup, Songkick, Bandsintown, Posh (third-party link). **Queue for submission** puts the event in the operator's
+  Oh My Rockness, Edmtrain, Meetup, Bandsintown, Posh (third-party link), The Skint, AllEvents, Fever (free listing),
+  Nonsense NYC, Spotify concerts and, last, Songkick. **Queue for submission** puts the event in the operator's
   queue; a person submits it on the channel's form and records **Submitted**, **Live** (with the listing's URL) or
   **Rejected** (with the reason). A live listing can later be marked **Removed**; rejected or removed ones can be queued
   again. Withdraw takes a queued event back out. Only upcoming published events can be queued.
@@ -451,8 +453,40 @@ Visits and redemptions show per link, and sales are attributed to the channel un
   and records **I submitted it** / **It's live** on the same screen.
 - **Posh (third-party link)** (`posh_link`, mig `20261104150000_exos_posh_link_channel.sql`): a free Posh event page
   whose **Get Tickets** button opens your Exos ticket link. See *Listing on Posh with a third-party link* below.
-- Each channel's "How to submit" link was looked up on 2026-10-29; links marked *not verified* point at the site, not
-  a submission page.
+- **Suggested for your event's category:** the list shows the channels that suit the event's category first, best
+  first, and hides the others behind **Show all channels** (a channel the event already has a record on always shows).
+  The category is derived from the event's category, genres and title (`marketCategory`,
+  `_shared/marketplace/eventStandard.ts`): concerts, nightlife, comedy, theater, festivals, sports, food & drink,
+  community (games, meetups, classes, dice / RPG nights), business (networking, conferences) or other. The default
+  mapping is one constant, `GENRE_CHANNELS` in `_shared/discovery/channels.ts` (operator 2026-11-21):
+
+  | Category | Channels, best first (plus every "all" one) |
+  |---|---|
+  | all | Google events feed, calendar feeds, ad catalogs, CitySpark, Posh (third-party link) |
+  | Concerts | Bandsintown, Spotify, DoNYC, Oh My Rockness, Songkick (lowest) |
+  | Nightlife | Resident Advisor (electronic only), Edmtrain (electronic), Nonsense NYC |
+  | Comedy | Time Out, The Skint, DoNYC |
+  | Theater | Time Out |
+  | Festivals | every channel, Fever first |
+  | Food & drink | Time Out, The Skint, Fever |
+  | Community, Business | Meetup, AllEvents, The Skint |
+  | Sports | (the "all" ones) |
+  | Other | AllEvents |
+- **City:** a channel's region is a city code (`NYC`: DoNYC, Time Out New York, Oh My Rockness, The Skint, Nonsense
+  NYC) or wider (`US`, `global`). City channels are suggested only for events whose venue is in that city; other events
+  fall back to the wider ones. Cities are data, in `_shared/discovery/cities.ts`: id, name, boroughs, the region codes
+  that apply there, ad geo defaults (radius around the venue, DMA, a ZIP-by-borough list still to fill in) and a
+  community list (to fill in), plus the city's poster rules for the playbook. NYC is the only city so far; adding one
+  is a new entry there.
+- **Limits:** each suggestion shows the channel's own limits with a short reason, from one table,
+  `CHANNEL_LIMITS` in `_shared/discovery/limits.ts` (rows of id, rule, action warn / block, reason, source; shaped like the channel-core platform limits table, which can replace it): Meetup's Starter plan caps an event at
+  10 attendees (Standard or Pro for more); AllEvents' free plan allows 5 active upcoming events; Google lists a free
+  event only if anyone can book it (an invite-only event with no public ticket type, or one hidden from search, isn't
+  eligible); Shotgun is hidden for free events (it lists a free event only if it's 100% free there, with no ticketing
+  elsewhere); resale marketplaces are not suggested for $0 tickets (the event editor's Marketplaces section says so).
+- Each channel's "How to submit" link was looked up on 2026-10-29 (the five added 2026-11-21 on that day); links marked
+  *not verified* point at the site, not a submission page. Nonsense NYC shows **How to submit: unknown**: no form or
+  address was found.
 - **Tracking:** the ticket link given to each channel is the event page with `utm_source=<channel id>`,
   `utm_medium=listing`, `utm_campaign=discovery`, so its sales show under *Sales by source*. Every ticket link
   discovery shows or copies comes from one function, `discoveryTicketLink` (`_shared/discovery/copy.ts`), so imported
@@ -470,9 +504,14 @@ Visits and redemptions show per link, and sales are attributed to the channel un
 | Oh My Rockness | manual | NYC | ohmyrockness.com, no form found (no) |
 | Edmtrain | manual | US | edmtrain.com "Add Event" (sign-in) (no) |
 | Meetup | manual | global | the organizer's own group (no) |
-| Songkick | manual | global | Songkick help: "Add an event" footer link (yes) |
 | Bandsintown | manual | global | Bandsintown for Artists "Add an event", per artist (yes) |
 | Posh (third-party link) | manual | global | posh.vip web: Create Event → External tickets, your own Posh account (no: no help page found) |
+| The Skint | manual | NYC | theskint.com/submit-an-event: web form, curated free and cheap events (yes) |
+| AllEvents | manual | global | allevents.in "publish events": free posting from your own account (yes) |
+| Fever (free listing) | manual | global | business.feverup.com: Fever's terms describe a free "0% Commission Link" listing; no public page for it, ask Fever (no) |
+| Nonsense NYC | manual | NYC | unknown: no form or address found |
+| Spotify concerts | manual | global | Spotify for Artists help "Adding concerts to Spotify": via Bandsintown, since Exos isn't a Spotify ticketing partner (yes) |
+| Songkick | manual | global | Songkick help: "Add an event" footer link (yes); lowest priority (reports it is winding down) |
 
 **Why Edmtrain and Meetup aren't automatic:** Edmtrain's public API is read-only (event and location listings with a
 client key) and takes no submissions. Meetup's GraphQL API has `createEvent`, but only for an organizer of the group
@@ -490,12 +529,43 @@ RPCs: `exos_discovery_event_channels`, `exos_discovery_queue`, `exos_discovery_w
 `exos_discovery_set_status` (with minutes), `exos_discovery_queue_list` (admin), `exos_discovery_minutes`. Tests: `tests/exos/test_discovery_publishing.sql`,
 `src/lib/discovery/*.test.ts`.
 
+### Posters and flyers (a QR code per spot)
+
+**Promote page → Posters and flyers** (mig `20261121153700_exos_promotion.sql`). Name each spot a poster or flyer
+goes ("Poster - Bedford Ave", "Flyer - Bar X"). Each placement gets its own QR code and link: the event's short link
+(`/e/<slug>`) tagged `utm_source=qr`, `utm_medium=print`, `utm_content=<placement>`, where the placement is the name
+in lower case with dashes (`poster-bedford-ave`; a second spot with the same name gets `-2`). Copy the link, download
+one QR as a PNG, or open **Printable QR sheet** (`/print/qr/:eventId`): every placement's QR with its name, two to a
+row, ready to print or save as PDF.
+
+Sales follow the tag: **Sources → Placement / ad** shows orders, tickets and gross per placement, and the channel
+report counts all of them under *Flyer / QR code*. Removing a placement keeps the sales it brought in. Owners and
+managers add and remove placements; finance can see them; at most 200 per event. RPCs: `exos_print_placements`,
+`exos_print_placement_add`, `exos_print_placement_remove`. Code: `src/lib/printPlacements.ts`,
+`src/components/PrintPlacementsPanel.tsx`, `src/views/PrintQrSheet.tsx`. Tests: `tests/exos/test_promotion.sql`,
+`src/lib/printPlacements.test.ts`.
+
+NYC: flyers on lamp posts, poles and trees are illegal (Admin Code § 10-119): use licensed poster walls, community
+boards and venues that agree.
+
+### Promotion playbook
+
+**Promote page → Playbook** shows, for the event's category, where to advertise (Meta / Instagram and TikTok first:
+about half of Gen Z find events on Instagram and 3 in 10 on TikTok), creative tips, poster and QR guidance, and the ad
+rules to know: Google's event ticket certification, 21+ targeting for alcohol (and TikTok's disclaimer and nobody
+under 25 on screen), dating-ad rules a "singles night" can trigger, Snap's ban on strip clubs and burlesque, and NYC's
+flyer rule. It's static: `src/lib/promoPlaybook.ts`, with its sources in the file's header.
+
 ### Tracking links and the weekly channel report
 
 **Promo links → Make a link per channel** lists one tracking link per channel (Instagram, Facebook, TikTok, X,
 email, text, WhatsApp, partner sites, flyer / QR, Meta and Google ads), with an optional campaign name. A
 tracking link is the event page tagged with `utm_source` / `utm_medium`: no code, no limit, and guests can buy
-without signing in (a promo link's code needs an account). Use a promo link when you want a deal or a cap.
+without signing in (a promo link's code needs an account). Use a promo link when you want a deal or a cap. The tags
+follow one scheme (`_shared/marketing/utm.ts`, [`marketing-catalog.md`](marketing-catalog.md) *UTM scheme*):
+`utm_medium` is `organic_social`, `email`, `print`, `paid_social` or `paid_search` (`sms`, `messaging`, `referral` for
+the rest), `utm_source` the platform; the Meta and Google ads links carry the platform's macros in `utm_campaign`
+(unless you name a campaign) and `utm_content`, which the platform fills in.
 
 **Event report → Overview → Channels** shows every ticket by where it sold, for the last full week (Monday to
 Sunday, UTC) and to date (mig `20261029120000`, `exos_event_channel_report`). Owner, manager and finance only.

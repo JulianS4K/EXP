@@ -55,8 +55,62 @@ describe('marketCategory', () => {
     expect(marketCategory({ category: 'Nightlife', genres: ['Festival'] })).toBe('festivals');
     expect(marketCategory({ category: 'Comedy' })).toBe('comedy');
     expect(marketCategory({ category: 'Sports', genres: ['Basketball'] })).toBe('sports');
-    expect(marketCategory({ category: 'Tech', genres: ['Conference'] })).toBe('other');
+    // A conference is a business event now (it was "other" before 2026-11-21).
+    expect(marketCategory({ category: 'Tech', genres: ['Conference'] })).toBe('business');
     expect(marketCategory({ name: 'Tuesday Stand-Up Showcase' })).toBe('comedy');
+  });
+
+  // Every category and genre chip the event editor offers (lib/eventTaxonomy.ts),
+  // with what it mapped to before the food_drink / community / business split.
+  // Only the ones that were "other" may move, and only into a new category.
+  it('keeps the older mappings for every editor category and genre', () => {
+    const same: Array<[string, string[], string]> = [
+      ['Music', ['Electronic'], 'concerts'], ['Music', ['Hip Hop'], 'concerts'], ['Music', ['Rock'], 'concerts'],
+      ['Music', ['Jazz'], 'concerts'], ['Music', ['Classical'], 'concerts'], ['Music', ['Latin'], 'concerts'],
+      ['Music', [], 'concerts'],
+      ['Nightlife', ['Club'], 'nightlife'], ['Nightlife', ['Bar'], 'nightlife'], ['Nightlife', ['Lounge'], 'nightlife'],
+      ['Nightlife', ['Festival'], 'festivals'], ['Nightlife', ['Underground'], 'nightlife'], ['Nightlife', ['House Party'], 'nightlife'],
+      ['Nightlife', [], 'nightlife'],
+      ['Sports', ['Basketball'], 'sports'], ['Sports', ['Esports'], 'sports'], ['Sports', ['Combat Sports'], 'sports'],
+      ['Arts', ['Gallery'], 'theater'], ['Arts', ['Theatre'], 'theater'], ['Arts', ['Dance'], 'theater'],
+      ['Arts', ['Performance Art'], 'theater'], ['Arts', ['Photography'], 'theater'], ['Arts', ['Fashion'], 'theater'],
+      ['Food', ['Festival'], 'festivals'],
+      ['Tech', ['AI'], 'other'], ['Tech', ['Web3'], 'other'], ['Tech', [], 'other'],
+      ['Wellness', [], 'other'],
+    ];
+    for (const [category, genres, want] of same) expect(marketCategory({ category, genres }), `${category} ${genres}`).toBe(want);
+    // No category: the title decides, a concert by default.
+    expect(marketCategory({ name: 'Late Night Jazz' })).toBe('concerts');
+    expect(marketCategory({ name: 'Lumen Live' })).toBe('concerts');
+    expect(marketCategory({ name: 'Warehouse Rave' })).toBe('nightlife');
+    expect(marketCategory({ name: 'Jazz Brunch' })).toBe('concerts');
+    expect(marketCategory({ name: 'Swan Lake Ballet' })).toBe('theater');
+    expect(marketCategory({ name: 'Drag Brunch' })).toBe('theater');
+    expect(marketCategory({ category: 'Arts', genres: ['Drag'] })).toBe('theater');
+  });
+
+  it('puts food, community and business events in their own categories', () => {
+    expect(marketCategory({ category: 'Food', genres: ['Tasting'] })).toBe('food_drink');
+    expect(marketCategory({ category: 'Food', genres: ['Pop-up'] })).toBe('food_drink');
+    expect(marketCategory({ category: 'Food', genres: ['Workshop'] })).toBe('food_drink');
+    expect(marketCategory({ category: 'Food', genres: ['Dining Experience'] })).toBe('food_drink');
+    expect(marketCategory({ category: 'Food' })).toBe('food_drink');
+    expect(marketCategory({ category: 'Tech', genres: ['Meetup'] })).toBe('community');
+    expect(marketCategory({ category: 'Tech', genres: ['Workshop'] })).toBe('community');
+    expect(marketCategory({ category: 'Tech', genres: ['Hackathon'] })).toBe('community');
+    expect(marketCategory({ category: 'Tech', name: 'Founders Networking Night' })).toBe('business');
+    expect(marketCategory({ category: 'Games', genres: ['Dice'] })).toBe('community');
+    expect(marketCategory({ category: 'Community' })).toBe('community');
+    expect(marketCategory({ category: 'Business' })).toBe('business');
+    // No category: a title that clearly names one, and no music.
+    expect(marketCategory({ name: 'Dungeons & Dragons One-Shot' })).toBe('community');
+    expect(marketCategory({ name: 'D&D Night' })).toBe('community');
+    expect(marketCategory({ name: 'Board Game Night' })).toBe('community');
+    expect(marketCategory({ name: 'Pub Trivia' })).toBe('community');
+    expect(marketCategory({ name: 'Natural Wine Tasting' })).toBe('food_drink');
+    expect(marketCategory({ name: 'Startup Networking Mixer' })).toBe('business');
+    expect(marketCategory({ name: 'Book Club: Middlemarch' })).toBe('community');
+    expect(marketCategory({ name: 'Supper Club' })).toBe('food_drink');
   });
 });
 

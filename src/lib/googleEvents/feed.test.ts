@@ -75,6 +75,9 @@ describe('Google events feed', () => {
     expect(item.googleFields).toEqual({ category: 'CONCERT', placeId: 'ChIJabc', sellerType: 'PRIMARY', updatedFrom: 'exos' });
     const e = item.event;
     expect(e['@type']).toBe('MusicEvent');
+    expect(build([ev({ category: 'Food', genres: ['Tasting'] })], [tier()]).feed.events[0].event['@type']).toBe('FoodEvent');
+    expect(build([ev({ category: 'Tech', genres: ['Meetup'] })], [tier()]).feed.events[0].event['@type']).toBe('SocialEvent');
+    expect(build([ev({ category: 'Tech', genres: ['Conference'] })], [tier()]).feed.events[0].googleFields.category).toBe('OTHER');
     expect(e.name).toBe('LATE NIGHT JAZZ w/ The Trio'); // marketTitle: emoji and age stripped
     expect(e.url).toBe(`${BASE}/e/late-night-jazz`);
     expect(e.description).toBe('Two sets. Bar opens early.');

@@ -4,7 +4,9 @@
 // event row's Megaphone action). Everything a venue/promoter needs to push
 // an event out the door, in one place:
 //   * the canonical public link (copy / native-share / X / Facebook)
-//   * a downloadable QR for posters & flyers
+//   * a downloadable QR for posters & flyers, and one tracked QR per
+//     placement (poster / flyer spot) with a printable sheet
+//   * a per-genre playbook (ad platforms, creative, print, ad rules)
 //   * a paste-ready embed snippet for the venue's own site
 //   * caption templates for IG / TikTok / X
 //   * a jump to Marketing & socials (pixels) so ad spend is measurable
@@ -33,20 +35,21 @@ import { formatInTz } from '../lib/datetime';
 import ShareModal from '../components/ShareModal';
 import PromoterKitPanel from '../components/PromoterKitPanel';
 import DiscoveryListingsPanel from '../components/DiscoveryListingsPanel';
+import PrintPlacementsPanel from '../components/PrintPlacementsPanel';
+import PromoPlaybookPanel from '../components/PromoPlaybookPanel';
+import { TRACKING_CHANNELS, trackingUrl, type TrackingChannel } from '../lib/trackingLinks';
+import { marketCategory } from '../../supabase/functions/_shared/marketplace/eventStandard.ts';
+import { cityOf } from '../../supabase/functions/_shared/discovery/cities.ts';
 import SocialLinks from '../components/SocialLinks';
 
-// Channel presets for the campaign-link builder. utm_medium follows the GA4
-// convention (social / email / cpc) so the org's GA4 + ad pixels bucket them
-// correctly with zero extra config.
-const CHANNELS: { key: string; label: string; medium: string }[] = [
-  { key: 'instagram', label: 'Instagram', medium: 'social' },
-  { key: 'tiktok', label: 'TikTok', medium: 'social' },
-  { key: 'facebook', label: 'Facebook', medium: 'social' },
-  { key: 'x', label: 'X / Twitter', medium: 'social' },
-  { key: 'email', label: 'Email', medium: 'email' },
-  { key: 'meta-ads', label: 'Paid — Meta', medium: 'cpc' },
-  { key: 'google-ads', label: 'Paid — Google', medium: 'cpc' },
-];
+// Channel presets for the campaign-link builder: the tracking-link channels
+// (lib/trackingLinks.ts), so the tags follow the one Exos UTM scheme
+// (organic_social / email / paid_social / paid_search; _shared/marketing/utm.ts)
+// and paid links carry the ad platform's macros.
+const CAMPAIGN_KEYS = ['instagram', 'tiktok', 'facebook', 'x', 'email', 'meta-ads', 'google-ads'];
+const CHANNELS: readonly TrackingChannel[] = CAMPAIGN_KEYS
+  .map((k) => TRACKING_CHANNELS.find((c) => c.key === k))
+  .filter((c): c is TrackingChannel => !!c);
 
 const slugify = (s: string) =>
   // Capped at 64 to match the promoter-code rule (_shared/attribution.ts).
@@ -98,17 +101,13 @@ export default function PromoteEvent() {
   // attribution — the buy flow stamps it onto exos_tickets.promoter_id, which
   // the event Sales report already aggregates into a per-campaign table).
   const campaignSlug = slugify(campaignName);
-  const buildCampaignUrl = (ch: { key: string; medium: string }): string => {
+  const buildCampaignUrl = (ch: TrackingChannel): string => {
     if (!eventId) return '';
     const u = new URL(publicUrl(event ? eventSharePath(event) : `event/${eventId}`));
-    if (campaignSlug) {
-      u.searchParams.set('utm_campaign', campaignSlug);
-      u.searchParams.set('promoter', campaignSlug);
-    }
-    u.searchParams.set('utm_source', ch.key);
-    u.searchParams.set('utm_medium', ch.medium);
-    return u.toString();
+    if (campaignSlug) u.searchParams.set('promoter', campaignSlug);
+    return trackingUrl(u.toString(), ch, campaignSlug);
   };
+  const category = marketCategory({ category: event?.category ?? null, genres: event?.genres ?? null, name: event?.title ?? '' });
 
   const dateLabel = event?.date
     ? formatInTz(event.date.toDate(), event.timezone, {
@@ -303,6 +302,8 @@ export default function PromoteEvent() {
           )}
         </section>
 
+        <PromoPlaybookPanel category={category} city={cityOf(event.address)} />
+
         {eventId && <DiscoveryListingsPanel eventId={eventId} />}
 
         {/* QR code */}
@@ -324,6 +325,8 @@ export default function PromoteEvent() {
             </div>
           </div>
         </section>
+
+        {eventId && <PrintPlacementsPanel eventId={eventId} eventUrl={url} fileStem={event.slug || eventId} />}
 
         {/* Embed */}
         <section className="bg-[#111] p-6 border border-white/10 mb-6">

@@ -83,6 +83,7 @@ const Kiosk = lazy(() => import('./views/Kiosk'));
 // The apps suite's public landing pages (docs/strategy.md "Apps"; claude/exos-apps-pages).
 const AppLanding = lazy(() => import('./views/AppLanding'));
 const PromoteEvent = lazy(() => import('./views/PromoteEvent'));
+const PrintQrSheet = lazy(() => import('./views/PrintQrSheet'));
 const CreateSeries = lazy(() => import('./views/CreateSeries'));
 // Series, collections, timed entry (mig 20261030150000).
 const SeriesEditor = lazy(() => import('./views/SeriesEditor'));
@@ -169,6 +170,7 @@ function ChromeLayout({ children }: { children: ReactNode }) {
     // Printable receipts / credit notes: the page is the document.
     location.pathname.startsWith('/invoice/') ||
     location.pathname.startsWith('/credit-note/') ||
+    location.pathname.startsWith('/print/') ||
     // White-label org storefront (/o/:slug) supplies its own org-branded
     // nav + footer, so the platform chrome is suppressed here too.
     location.pathname.startsWith('/o/');
@@ -269,6 +271,7 @@ export default function App() {
                     <Route path="/apps/money" element={<AppLanding app="money" />} />
                     <Route path="/dashboard/event/:eventId" element={<OrganizerEventReport />} />
                     <Route path="/dashboard/event/:eventId/promote" element={<PromoteEvent />} />
+                    <Route path="/print/qr/:eventId" element={<PrintQrSheet />} />
                     <Route path="/dashboard/event/:eventId/series" element={<CreateSeries />} />
                     <Route path="/dashboard/event/:eventId/recurring" element={<SeriesEditor />} />
                     <Route path="/dashboard/series/:seriesId" element={<SeriesManager />} />

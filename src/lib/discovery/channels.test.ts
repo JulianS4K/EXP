@@ -13,14 +13,19 @@ import {
   canQueue,
   discoveryChannel,
   feedStatus,
+  GENRE_CHANNELS,
+  rankChannels,
+  suitsCategory,
 } from '../../../supabase/functions/_shared/discovery/channels.ts';
+import { MARKET_CATEGORIES } from '../../../supabase/functions/_shared/marketplace/eventStandard.ts';
 import { discoveryRows } from './channels';
 
 const MIGRATION = readFileSync(
   new URL('../../../supabase/migrations/20261029130000_exos_discovery_publishing.sql', import.meta.url), 'utf8');
-// Later migrations that seed more channels (posh_link: 20261104150000).
-const SEEDS = [MIGRATION, readFileSync(
-  new URL('../../../supabase/migrations/20261104150000_exos_posh_link_channel.sql', import.meta.url), 'utf8')];
+// Later migrations that seed more channels (posh_link: 20261104150000; The
+// Skint, AllEvents, Fever, Nonsense NYC, Spotify and Songkick last: 20261121153700).
+const SEEDS = [MIGRATION, ...['20261104150000_exos_posh_link_channel', '20261121153700_exos_promotion'].map((f) =>
+  readFileSync(new URL(`../../../supabase/migrations/${f}.sql`, import.meta.url), 'utf8'))];
 
 // The seed rows: ('id', 'name', 'kind', 'region', url|NULL, verified, sort)
 function seeded(): Map<string, { kind: string; region: string; url: string | null; verified: boolean }> {
@@ -47,9 +52,10 @@ describe('discovery channel catalog', () => {
     for (const id of ids) expect(id).toMatch(/^[a-z0-9_]{2,40}$/);
   });
 
-  it('gives every manual channel an https submission URL and a submitter', () => {
+  it('gives every manual channel an https submission URL (or says how to submit is unknown) and a submitter', () => {
     for (const c of MANUAL_CHANNELS) {
-      expect(c.submissionUrl, c.id).toMatch(/^https:\/\//);
+      if (c.submissionUrl === null) expect(c.howToSubmit, c.id).toBe('unknown');
+      else expect(c.submissionUrl, c.id).toMatch(/^https:\/\//);
       expect(c.submitter, c.id).toBeDefined();
       expect(c.notes.length, c.id).toBeGreaterThan(20);
     }
@@ -69,6 +75,60 @@ describe('discovery channel catalog', () => {
     for (const id of ['stubhub', 'seatgeek', 'vivid', 'gametime', 'tickpick', 'gotickets', 'tixel']) {
       expect(discoveryChannel(id)).toBeUndefined();
     }
+  });
+});
+
+describe('genres', () => {
+  it('maps every category, and every id it names is a channel', () => {
+    expect(Object.keys(GENRE_CHANNELS).sort()).toEqual(['all', ...MARKET_CATEGORIES].sort());
+    for (const ids of Object.values(GENRE_CHANNELS)) for (const id of ids) expect(discoveryChannel(id), id).toBeDefined();
+    // Every channel suits at least one category, so none is only behind "Show all".
+    for (const c of DISCOVERY_CHANNELS) expect(c.genres === 'all' || c.genres.length > 0, c.id).toBe(true);
+  });
+
+  it('has the default mapping', () => {
+    const g = (id: string) => discoveryChannel(id)!.genres;
+    for (const id of ['google_events', 'calendar_ics', 'ad_catalog']) expect(g(id)).toBe('all');
+    expect(g('resident_advisor')).toEqual(['nightlife', 'festivals']);
+    expect(discoveryChannel('resident_advisor')!.subgenre).toBe('electronic');
+    expect(discoveryChannel('edmtrain')!.subgenre).toBe('electronic');
+    expect(g('bandsintown')).toEqual(['concerts', 'festivals']);
+    expect(g('donyc')).toEqual(['concerts', 'comedy', 'festivals']);
+    expect(g('timeout_nyc')).toEqual(['comedy', 'theater', 'festivals', 'food_drink']);
+    expect(g('fever')).toEqual(['festivals', 'food_drink']);
+    expect(g('meetup')).toEqual(['festivals', 'community', 'business']);
+    expect(g('the_skint')).toEqual(['comedy', 'festivals', 'food_drink', 'community', 'business']);
+    expect(suitsCategory(discoveryChannel('songkick')!, 'nightlife')).toBe(false);
+    for (const c of DISCOVERY_CHANNELS) expect(suitsCategory(c, 'festivals'), c.id).toBe(true);
+  });
+
+  it('marks Nonsense NYC manual with no known way to submit, and the new channels manual', () => {
+    expect(discoveryChannel('nonsense_nyc')).toMatchObject({ kind: 'manual', submissionUrl: null, howToSubmit: 'unknown' });
+    for (const id of ['the_skint', 'allevents', 'fever', 'spotify']) expect(discoveryChannel(id)?.kind, id).toBe('manual');
+    // Songkick last in the catalog (lowest priority).
+    expect(MANUAL_CHANNELS.at(-1)?.id).toBe('songkick');
+  });
+});
+
+describe('rankChannels', () => {
+  const rows = MANUAL_CHANNELS.map((c) => ({ id: c.id, status: 'not_submitted' as string }));
+  it('shows the category channels first, then the all-genre ones, and hides the rest', () => {
+    expect(rankChannels(rows, 'concerts').map((r) => r.id))
+      .toEqual(['bandsintown', 'spotify', 'donyc', 'oh_my_rockness', 'songkick', 'cityspark', 'posh_link']);
+    expect(rankChannels(rows, 'nightlife').map((r) => r.id))
+      .toEqual(['resident_advisor', 'edmtrain', 'nonsense_nyc', 'cityspark', 'posh_link']);
+    expect(rankChannels(rows, 'community').map((r) => r.id)).toEqual(['meetup', 'allevents', 'the_skint', 'cityspark', 'posh_link']);
+    expect(rankChannels(rows, 'festivals').map((r) => r.id)[0]).toBe('fever');
+    expect(rankChannels(rows, 'festivals')).toHaveLength(rows.length);
+  });
+  it('shows everything with showAll (fits first) and keeps a channel the event already uses', () => {
+    const all = rankChannels(rows, 'theater', { showAll: true });
+    expect(all).toHaveLength(rows.length);
+    expect(all.slice(0, 3).map((r) => [r.id, r.fits])).toEqual([['timeout_nyc', true], ['cityspark', true], ['posh_link', true]]);
+    expect(all.at(-1)).toMatchObject({ id: 'songkick', fits: false });
+    const used = rows.map((r) => (r.id === 'resident_advisor' ? { ...r, status: 'live' } : r));
+    expect(rankChannels(used, 'theater', { keep: (r) => r.status !== 'not_submitted' }).map((r) => r.id))
+      .toEqual(['timeout_nyc', 'cityspark', 'posh_link', 'resident_advisor']);
   });
 });
 

@@ -100,6 +100,7 @@ import FixedBlockPanel from '../components/FixedBlockPanel';
 import type { SalesRules } from '../lib/marketplace/resaleConsent';
 import { effectiveTierPrice } from '../lib/pricing';
 import { maxPerOrderFromLimits } from '../lib/marketplace/stubhub';
+import { channelLimits, limitFacts } from '../../supabase/functions/_shared/discovery/limits.ts';
 import { ACCESSIBLE_NOTE_MAX, serializeAccessibility } from '../lib/accessibility';
 import { EventAccessInfoEditor } from '../components/Accessibility';
 import StoreContentEditor from '../components/StoreContentEditor';
@@ -1939,6 +1940,12 @@ export default function EditEvent() {
              Coming soon: listings are prepared here but not yet sent to any marketplace. Sending is switched on
              per marketplace later, so nothing is listed or sold there today.
            </p>
+           {(() => {
+             // Channel limits (_shared/discovery/limits.ts): no resale suggestion for $0 tickets.
+             const lim = channelLimits('stubhub', limitFacts({ tiers: eventData.ticketTiers || [] }))[0];
+             return lim && (eventData.ticketTiers || []).length > 0
+               ? <p role="note" className="type text-xs text-amber-300 mt-2">{lim.reason}</p> : null;
+           })()}
 
            {(() => {
              // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
