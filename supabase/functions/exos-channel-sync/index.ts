@@ -37,7 +37,7 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
-import { contentHash, leasedIo, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
+import { contentHash, leasedIo, lumaEnabled, makeIo, mirrorEvent, notOnAccount, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
 import { EB_API, EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
 import { compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, syncLuma } from "../_shared/channels/luma.ts";
 import { lumaInventory } from "../_shared/channels/lumaInventory.ts";
@@ -148,6 +148,18 @@ async function pass(sb: SupabaseClient, c: Claimed) {
     return !error && data === true;
   };
   const io = leasedIo(raw, () => renew());
+  // A linked id another org has verified as its own: refused before any call,
+  // in the words of an event not on this account (mig 20261121100000).
+  if (typeof m.external_id === "string" && m.status !== "synced") {
+    const { data: used, error: usedErr } = await sb.rpc("exos_channel_external_taken", {
+      p_event_id: c.event_id, p_provider: c.provider, p_ids: [m.external_id],
+    });
+    if (usedErr) throw usedErr;
+    if (Array.isArray(used) && used.includes(m.external_id)) {
+      await mark(sb, c, { state: "error", error: notOnAccount(c.provider) });
+      return { state: "error" };
+    }
+  }
   const hooks: SyncHooks = {
     async taken(ids) {
       const { data, error } = await sb.rpc("exos_channel_external_taken", { p_event_id: c.event_id, p_provider: c.provider, p_ids: ids });

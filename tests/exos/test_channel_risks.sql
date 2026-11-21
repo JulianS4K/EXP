@@ -22,6 +22,11 @@
 --      exos_channel_set refuses it
 --   R8 the lease renewed per write; the venue kept with a pending create;
 --      link mode refused while a create is pending
+--   R9 a channel isn't removed while a pass holds its lease
+--   R10 squatting: another org's UNVERIFIED id blocks no one; once the owner
+--      verifies it (a live pass, or a read proving it), the squatter's pass and
+--      mark refuse it; "another org's" and "not on this account" get one answer
+--   (the migration's re-apply is checked by reapply_check.sh in run_p0)
 -- Self-contained (ce1 prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -51,6 +56,10 @@ INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,tot
   ('ce100000-0000-0000-0000-0000000000e8','ce100000-0000-0000-0000-000000000001','Relink','relink','published',
    now() + interval '10 days','America/New_York',0,0,'{}','ce100000-0000-0000-0000-0000000000a1'),
   ('ce100000-0000-0000-0000-0000000000e9','ce100000-0000-0000-0000-000000000001','Sibling','sibling','published',
+   now() + interval '10 days','America/New_York',0,0,'{}','ce100000-0000-0000-0000-0000000000a1'),
+  ('ce100000-0000-0000-0000-0000000000eb','ce100000-0000-0000-0000-000000000001','Linker','linker','published',
+   now() + interval '10 days','America/New_York',0,0,'{}','ce100000-0000-0000-0000-0000000000a1'),
+  ('ce100000-0000-0000-0000-0000000000ed','ce100000-0000-0000-0000-000000000001','Owner','owner-event','published',
    now() + interval '10 days','America/New_York',0,0,'{}','ce100000-0000-0000-0000-0000000000a1');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,sort_order) VALUES
   ('ce100000-0000-0000-0000-0000000000d1','ce100000-0000-0000-0000-0000000000e1','GA',25,100,0,1),
@@ -402,12 +411,20 @@ SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
 SELECT set_config('ce1.bk_link', pg_temp.refused($$SELECT public.exos_backend_link(pg_temp.u('e8'), 'pretix', 'onpretix')$$, 'sold on Luma')::text, true);
 SELECT set_config('ce1.bk_other', pg_temp.refused($$SELECT public.exos_backend_link(pg_temp.u('e8'), 'luma', 'evt-ce1other')$$, 'evt-ce1relink')::text, true);
 SELECT set_config('ce1.bk_unlink', pg_temp.refused($$SELECT public.exos_backend_unlink(pg_temp.u('e8'))$$, 'remove it there first')::text, true);
+-- R9: not while a pass holds the lease (it may still be writing).
+SELECT set_config('ce1.rm_leased', pg_temp.refused($$SELECT public.exos_channel_remove(pg_temp.u('e8'), 'eventbrite')$$, 'is running')::text, true);
+RESET ROLE;
+SELECT pg_temp.act(NULL);
+UPDATE public.exos_channel_mirrors SET lease_id = NULL, lease_until = NULL WHERE event_id = pg_temp.u('e8');
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
 SELECT public.exos_channel_remove(pg_temp.u('e8'), 'luma');
 SELECT public.exos_channel_remove(pg_temp.u('e8'), 'eventbrite');
 RESET ROLE;
 SELECT pg_temp.act(NULL);
 DO $$
 BEGIN
+  ASSERT current_setting('ce1.rm_leased')::boolean, 'R9: remove refused while leased';
   ASSERT current_setting('ce1.bk_link')::boolean AND current_setting('ce1.bk_other')::boolean AND current_setting('ce1.bk_unlink')::boolean,
          'R6b: Luma''s door list the same';
   -- The channels removed (the events stay on sale there): the door links keep both in the promise.
@@ -424,6 +441,8 @@ INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,cre
    now() + interval '10 days','America/New_York','ce100000-0000-0000-0000-0000000000a1');
 INSERT INTO public.exos_channel_mirrors (event_id, provider, org_id, mode, external_id, status)
 VALUES (pg_temp.u('ea'), 'eventbrite', 'ce100000-0000-0000-0000-000000000002', 'create', '881401', 'synced');
+-- Verified: a live pass of that org recorded it (mark sets this).
+UPDATE public.exos_channel_mirrors SET external_verified_at = now() WHERE event_id = pg_temp.u('ea');
 DO $$
 DECLARE c record; j jsonb; m public.exos_channel_mirrors%ROWTYPE;
 BEGIN
@@ -455,14 +474,17 @@ BEGIN
 END $$;
 SET LOCAL ROLE authenticated;
 SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
-SELECT set_config('ce1.set_taken', pg_temp.refused($$SELECT public.exos_channel_set(pg_temp.u('e9'), 'eventbrite', 'link', '881401')$$,
-  'already belongs to another Exos event')::text, true);
+-- Linking another org's verified event isn't refused here (that would tell
+-- this org it is used); the pass refuses it in the words of an event not on
+-- the account (exos-channel-sync, Deno), and mark would never keep it.
+SELECT public.exos_channel_set(pg_temp.u('eb'), 'eventbrite', 'link', '881401');
 RESET ROLE;
 SELECT pg_temp.act(NULL);
 DO $$
 DECLARE c record; j jsonb;
 BEGIN
-  ASSERT current_setting('ce1.set_taken')::boolean, 'R7: set refuses a taken id';
+  ASSERT (SELECT external_id FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('eb') AND provider = 'eventbrite') = '881401'
+     AND '881401' = ANY (public.exos_channel_external_taken(pg_temp.u('eb'), 'eventbrite', ARRAY['881401'])), 'R7: accepted at set, taken for the pass';
   -- R8: the lease is renewed per write; the venue is kept with the pending create.
   UPDATE public.exos_channel_mirrors SET lease_id = NULL, lease_until = NULL, external_meta = '{}', status = 'pending' WHERE event_id = pg_temp.u('e9');
   SELECT * INTO c FROM public.exos_channel_claim(5, pg_temp.u('e9')) x WHERE x.provider = 'eventbrite';
@@ -486,6 +508,58 @@ RESET ROLE;
 SELECT pg_temp.act(NULL);
 DO $$ BEGIN ASSERT current_setting('ce1.link_pending')::boolean, 'R8: link mode refused while a create is pending'; END $$;
 
+-- R10: squatting. Another org links (unverified) an id it doesn't own: it
+-- blocks no one, and nothing tells either org about the other.
+INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
+  ('ce100000-0000-0000-0000-000000000002','ce100000-0000-0000-0000-0000000000a1','owner');
+INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,created_by) VALUES
+  ('ce100000-0000-0000-0000-0000000000ec','ce100000-0000-0000-0000-000000000002','Squatter','squatter','published',
+   now() + interval '10 days','America/New_York','ce100000-0000-0000-0000-0000000000a1');
+SELECT public.exos_eventbrite_connect('ce100000-0000-0000-0000-000000000002', pg_temp.u('a1'), 'TOKENRISK0002', 'Other Room');
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
+SELECT public.exos_save_integration('ce100000-0000-0000-0000-000000000002', 'luma', '{}', 'secret-luma-key-ce2');
+SELECT public.exos_channel_set(pg_temp.u('ec'), 'eventbrite', 'link', '881601');   -- org 2 squats org 1's public event
+SELECT public.exos_channel_set(pg_temp.u('ed'), 'eventbrite', 'link', '881601');   -- org 1, the owner: not blocked
+RESET ROLE;
+SELECT pg_temp.act(NULL);
+DO $$
+DECLARE c record; j jsonb;
+BEGIN
+  ASSERT NOT ('881601' = ANY (public.exos_channel_external_taken(pg_temp.u('ed'), 'eventbrite', ARRAY['881601']))), 'R10: an unverified id blocks no one';
+  -- The owner's door link too (exos-eventbrite-sync reads it first).
+  PERFORM public.exos_eventbrite_link(pg_temp.u('ed'), pg_temp.u('a1'), '881601', 'Owner on Eventbrite');
+  -- The owner's live pass writes with its own token: verified.
+  SELECT * INTO c FROM public.exos_channel_claim(5, pg_temp.u('ed')) x WHERE x.provider = 'eventbrite';
+  j := public.exos_channel_mark(pg_temp.u('ed'), 'eventbrite', c.lease_id, c.change_seq, '{"state":"synced","external_id":"881601","hash":"h"}');
+  ASSERT j ->> 'state' = 'synced', 'R10: the owner syncs ' || j::text;
+  ASSERT (SELECT external_verified_at IS NOT NULL FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('ed') AND provider = 'eventbrite')
+     AND (SELECT verified_at IS NOT NULL FROM public.exos_eventbrite_links WHERE event_id = pg_temp.u('ed')), 'R10: verified by the live pass';
+  -- Now it is the owner's: the squatter's pass is refused and mark never keeps it for them.
+  ASSERT '881601' = ANY (public.exos_channel_external_taken(pg_temp.u('ec'), 'eventbrite', ARRAY['881601'])), 'R10: taken for the squatter';
+  SELECT * INTO c FROM public.exos_channel_claim(5, pg_temp.u('ec')) x WHERE x.provider = 'eventbrite';
+  j := public.exos_channel_mark(pg_temp.u('ec'), 'eventbrite', c.lease_id, c.change_seq, '{"state":"synced","external_id":"881601"}');
+  ASSERT j ->> 'state' = 'error' AND (SELECT external_verified_at FROM public.exos_channel_mirrors WHERE event_id = pg_temp.u('ec')) IS NULL,
+         'R10: the squatter never verifies it ' || j::text;
+  -- One answer for "another org's" and "not on this account": the door link refuses
+  -- in exos-eventbrite-sync's 404 words; the Luma backend link in checkRef's.
+  ASSERT pg_temp.refused($q$SELECT public.exos_eventbrite_link(pg_temp.u('ec'), pg_temp.u('a1'), '881601', 'x')$q$,
+                         'exos_eventbrite_link: Eventbrite has no such event for this account.'), 'R10: the same answer (Eventbrite)';
+  -- Org 2's Luma event, read with its own key (verified): refused to org 1 in checkRef's words.
+  INSERT INTO public.exos_guest_lists (id, event_id, org_id, name, max_plus_ones, counts_toward_capacity)
+  VALUES (pg_temp.u('fc'), pg_temp.u('ec'), 'ce100000-0000-0000-0000-000000000002', 'Luma', 0, false);
+  INSERT INTO public.exos_backend_links (event_id, org_id, provider, external_ref, external_name, list_id, verified_at)
+  VALUES (pg_temp.u('ec'), 'ce100000-0000-0000-0000-000000000002', 'luma', 'evt-ce2owned', 'Theirs', pg_temp.u('fc'), now());
+  PERFORM public.exos_channel_link_verified(pg_temp.u('ec'), 'luma', 'evt-ce2owned');
+END $$;
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('ce100000-0000-0000-0000-0000000000a1');
+SELECT set_config('ce1.luma_same', pg_temp.refused($$SELECT public.exos_backend_link(pg_temp.u('e4'), 'luma', 'evt-ce2owned')$$,
+  'exos_backend_link: Luma has no event with that id.')::text, true);
+RESET ROLE;
+SELECT pg_temp.act(NULL);
+DO $$ BEGIN ASSERT current_setting('ce1.luma_same')::boolean, 'R10: the same answer (Luma)'; END $$;
+
 -- Grants: the new functions are the service role's only.
 DO $$
 BEGIN
@@ -494,7 +568,8 @@ BEGIN
      AND NOT has_function_privilege('authenticated', 'public._exos_channel_share_cap(uuid,uuid,text,integer,integer)', 'EXECUTE')
      AND NOT has_function_privilege('authenticated', 'public._exos_channel_outstanding(uuid)', 'EXECUTE')
      AND NOT has_function_privilege('authenticated', 'public.exos_channel_external_taken(uuid,text,text[])', 'EXECUTE')
-     AND NOT has_function_privilege('authenticated', 'public.exos_channel_lease_renew(uuid,text,uuid,jsonb)', 'EXECUTE'), 'grants';
+     AND NOT has_function_privilege('authenticated', 'public.exos_channel_lease_renew(uuid,text,uuid,jsonb)', 'EXECUTE')
+     AND NOT has_function_privilege('authenticated', 'public.exos_channel_link_verified(uuid,text,text)', 'EXECUTE'), 'grants';
 END $$;
 
 ROLLBACK;

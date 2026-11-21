@@ -103,6 +103,14 @@ export function pendingCreate(meta: unknown): PendingCreate | null {
   return p && typeof p === "object" && !Array.isArray(p) ? p as PendingCreate : null;
 }
 
+/**
+ * One answer for "not on this account" and "another Exos org's event" (mig
+ * 20261121100000), so a link says nothing about other orgs' events.
+ */
+export function notOnAccount(provider: "eventbrite" | "luma"): string {
+  return `${provider === "eventbrite" ? "Eventbrite" : "Luma"}: that event wasn't found on this account`;
+}
+
 /** Why a create wasn't started, for the organizer. */
 export function beginRefused(reason: string | undefined): string {
   if (reason === "in-flight") return "an earlier pass is still creating it; checking again shortly";

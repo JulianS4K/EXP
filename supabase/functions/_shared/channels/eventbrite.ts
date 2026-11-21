@@ -17,7 +17,7 @@
 // a pass that finds one recorded looks the event up by the name and start it
 // sent, created since then, before it creates again.
 import {
-  beginRefused, firstCapacity, type Io, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
+  beginRefused, firstCapacity, type Io, notOnAccount, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
   type StepRecord, type SyncHooks, type SyncResult, textToHtml, utc,
 } from "./model.ts";
 
@@ -104,6 +104,13 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     const org = r.ok ? r.body?.organizations?.[0]?.id : null;
     if (typeof org !== "string" || !/^[0-9]{1,24}$/.test(org)) return fail(steps, "no organization on this account", r.error);
     meta.organization_id = org;
+  }
+
+  // A linked event not yet synced: it must be readable with this account's
+  // token first (same answer as another org's event, mig 20261121100000).
+  if (id && mirror.status !== "synced") {
+    const r = await io.req("GET", `/events/${id}/`);
+    if (!r.ok) return { state: "error", error: notOnAccount("eventbrite"), plan: { steps } };
   }
 
   if (ev.status === "cancelled") {
