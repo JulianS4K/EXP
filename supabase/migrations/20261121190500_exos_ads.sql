@@ -392,9 +392,13 @@ COMMENT ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) IS
 -- takes someone out).
 -- Is this account's email VERIFIED, not just marked confirmed (review of
 -- #138, T1)? True when either
---   * a Google / Apple / other OAuth identity (not 'email' / 'phone') carries
---     this address and its provider says email_verified (a JSON boolean or a
---     string 'true'), or
+--   * a Google or Apple identity (an allowlist: provider IN ('google',
+--     'apple')) carries this address and its provider says email_verified (a
+--     JSON boolean or a string 'true'). Not any other provider: with Azure AD
+--     the tenant admin sets the mail claim (the nOAuth class of bug), and an
+--     SSO provider's claim is the customer IdP's say-so (review of #138, U3).
+--     Add a provider here only once its verified flag is shown to be the
+--     provider's own; or
 --   * Supabase sent a confirmation mail and the person answered it
 --     (confirmation_sent_at set, email_confirmed_at at or after it), AND the
 --     operator has said Supabase Auth's "Confirm email" is on
@@ -439,7 +443,7 @@ BEGIN
       SELECT EXISTS (
         SELECT 1 FROM auth.identities i
          WHERE i.user_id = $1
-           AND coalesce(to_jsonb(i) ->> 'provider', 'email') NOT IN ('email', 'phone', 'anonymous')
+           AND coalesce(to_jsonb(i) ->> 'provider', '') IN ('google', 'apple')
            AND lower(btrim(coalesce(to_jsonb(i) -> 'identity_data' ->> 'email', ''))) = $2
            AND lower(coalesce(to_jsonb(i) -> 'identity_data' ->> 'email_verified', 'false')) = 'true')
     $q$ INTO v_ok USING p_uid, v_email;

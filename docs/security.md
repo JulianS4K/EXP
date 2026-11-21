@@ -1339,8 +1339,9 @@ exception for that platform.
   no open or lost dispute (`dispute_status` NULL, `won` or `warning_closed`, the set payouts read; T2),
   whose email the person proved (`_exos_consent_grant_ok`): an `exos_order_proofs` row proven via
   `email_code` for that very address, or no proof row and their own live account with the same
-  address and a **verified** email (`_exos_account_email_verified`, T1): a Google / Apple / other
-  OAuth identity whose provider says `email_verified` for that address, or a confirmation mail
+  address and a **verified** email (`_exos_account_email_verified`, T1): a Google or Apple identity
+  (an allowlist; not Microsoft / Azure, whose tenant admin sets the mail claim, nor SSO) whose
+  provider says `email_verified` for that address, or a confirmation mail
   Supabase sent and the person answered (`confirmation_sent_at` set, `email_confirmed_at` at or after
   it), the last only while the platform setting `auth_confirm_email_on` is true (default false).
   `email_confirmed_at` alone isn't proof: with Supabase Auth's **Confirm email** off (prod today:
