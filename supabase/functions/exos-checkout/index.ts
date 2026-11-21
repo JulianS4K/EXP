@@ -176,6 +176,7 @@ import { validateAnswers, type NormalizedAnswers, type QuestionDef } from "../_s
 import { GROUP_PAY_OFF, gateGroupClaim, groupPayOffGate } from "../_shared/groupGate.ts";
 import { wroomAttach, wroomBindSession } from "../_shared/wroomCheckout.ts";
 import { expireOwnStripeSession } from "../_shared/wroomStripe.ts";
+import { checkoutPaymentMethodTypes, isPaymentMethodTypeRejection, linkEnabled } from "../_shared/checkoutMethods.ts";
 
 // exos: waiting room — ids are checked before they reach the queue check.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -208,6 +209,8 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
     ui_mode?: string; return_url?: string;
     addons?: { addon_id?: string; quantity?: number }[];
     voucher_code?: string;
+    // 'check_voucher': a guest's promo code check only (mig 20261121143700).
+    action?: string;
     // Promoter code + UTM / fbclid / cart_origin from the landing URL.
     attribution?: Record<string, unknown>;
     // Guest checkout: the email the tickets (or their claim links) go to.
@@ -243,6 +246,26 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   // body is refused here, first: before the rate gate, any DB claim or Stripe.
   const groupOff = groupPayOffGate(p, Deno.env.get("EXOS_GROUP_PAY"));
   if (groupOff) return json(groupOff.body, groupOff.status);
+  // Salted hash of the request IP: the guest hold's rate-limit key, a guest
+  // code's throttle key and the checkout record's client_ip_hash (the IP
+  // itself is never stored).
+  const ipHash = await hashIp(
+    clientIp((h) => req.headers.get(h)),
+    Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  // exos: guest codes (mig 20261121143700) — a signed-out buyer checks a promo
+  // code before paying. Nothing is held or charged; misses count per network
+  // and per event (exos_check_voucher_guest), never on an account's budget.
+  if (p.action === "check_voucher") {
+    if (user) return json({ error: "signed in: check codes with exos_check_voucher" }, 400);
+    const ev = typeof p.event_id === "string" && UUID_RE.test(p.event_id) ? p.event_id : "";
+    const code = typeof p.voucher_code === "string" ? p.voucher_code.trim().slice(0, 64) : "";
+    if (!ev || !code) return json({ error: "missing event_id / voucher_code" }, 400);
+    const r = await checkGuestVoucher(createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!), ev, code, ipHash);
+    if ("error" in r) return json({ error: r.error }, r.status);
+    const { voucher_id: _id, ...out } = r.row;
+    return json(out);
+  }
   const guestEmail = user ? null : normalizeGuestEmail(p.guest_email);
   if (!user && p.guest_email === undefined) return json({ error: "unauthorized" }, 401);
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
@@ -424,15 +447,24 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   let discountPercent: number | null = null;
   let discountAmount: number | null = null;
   let voucherUnlocksTier = false;
-  // Codes need an account (mig 20260929080000): a guest can't try codes here
-  // either, so guessing stays on the per-account throttle.
-  if (voucherCode && !user) return json({ error: "sign in to use a code" }, 401);
+  // A guest's code (mig 20261121143700) goes through exos_check_voucher_guest:
+  // its misses count per network and per event, never with an email, and a
+  // capacity-bypass or hidden-type code answers "sign in" (accounts only).
   if (voucherCode) {
-    const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
-      p_event_id: event_id, p_code: voucherCode, p_email: buyerEmail || null,
-    });
-    const v = Array.isArray(vRows) ? vRows[0] : vRows;
-    if (vErr || !v?.is_valid) {
+    let v: { is_valid?: boolean; reason?: string | null; voucher_id?: string; restrict_tier_id?: string | null;
+             can_bypass?: boolean | null; override_price?: number | null } | null = null;
+    if (user) {
+      const { data: vRows, error: vErr } = await sb.rpc("exos_check_voucher", {
+        p_event_id: event_id, p_code: voucherCode, p_email: buyerEmail || null,
+      });
+      v = vErr ? null : (Array.isArray(vRows) ? vRows[0] : vRows) ?? null;
+    } else {
+      const g = await checkGuestVoucher(sb, event_id!, voucherCode, ipHash);
+      if ("error" in g) return json({ error: g.error }, g.status);
+      if (g.row.reason === "sign in required") return json({ error: "sign in to use this code", reason: "sign_in" }, 401);
+      v = g.row;
+    }
+    if (!v?.is_valid) {
       return json({ error: `voucher ${v?.reason ?? "invalid"}` }, 409);
     }
     if (v.restrict_tier_id && v.restrict_tier_id !== tier_id) {
@@ -938,12 +970,6 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
     if (pdErr) console.error("exos-checkout: price disclosure record failed (non-fatal)", pdErr);
   };
 
-  // Salted hash of the request IP: the guest hold's rate-limit key and the
-  // checkout record's client_ip_hash (the IP itself is never stored).
-  const ipHash = await hashIp(
-    clientIp((h) => req.headers.get(h)),
-    Deno.env.get("EXOS_GUEST_IP_SALT") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
   // Proof of email (mig 20261105100000): a guest's tickets (or those of an
   // account whose email isn't confirmed) are released only once the buyer
   // proves the email (a mailed code) or a phone (an SMS code) on this page.
@@ -1338,41 +1364,51 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
   // late, still lands on a seat held for it. Recorded on the session row.
   const stripeExpiresAt = Math.floor(Date.now() / 1000) + 30 * 60;
   let session: Stripe.Checkout.Session;
+  // Cards (Apple Pay and Google Pay come with them), Link, and Cash App Pay
+  // (mig 20261031220000, USD only): all confirm at once. Bank debits and other
+  // delayed methods would complete "unpaid", outlive the hold and settle days
+  // later into seats that may be gone; _shared/checkoutMethods.ts says why
+  // Link's bank option is not one of them.
+  const sessionParams = (withLink: boolean): Stripe.Checkout.SessionCreateParams => ({
+    mode: "payment",
+    payment_method_types: checkoutPaymentMethodTypes({ cashApp, link: withLink }),
+    line_items: lineItems,
+    ...(giftCoupon ? { discounts: [{ coupon: giftCoupon }] } : {}),
+    // Destination charge (application fee + transfer), unless the
+    // commission plan says split at sale or a commission in the fee.
+    payment_intent_data: paymentIntentData(commissionPlan, {
+      applicationFeeCents: applicationFee, destination: payments.connectedAccountId!,
+    }),
+    // Embedded: card payments finish in place (the iframe's onComplete);
+    // only redirect-based methods come back through return_url.
+    ...(embedded
+      ? { ui_mode: "embedded" as const, return_url: returnUrl, redirect_on_completion: "if_required" as const }
+      : { success_url: successBack, cancel_url }),
+    // Stripe's minimum (30 minutes), set explicitly: the seat hold runs to
+    // this + 10 minutes, so nobody pays after their seats went back to the
+    // pool, and a late webhook still finds its seat.
+    expires_at: stripeExpiresAt,
+    customer_email: buyerEmail || undefined,
+    billing_address_collection: "auto", // buyer location (mig 20261106140000): country + postal code, never "required"
+    metadata: {
+      exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
+      exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
+      ...(timedSlot ? { exos_slot: timedSlot } : {}),
+      ...(giftCents > 0 ? { exos_gift_card_cents: String(giftCents), exos_gift_card_last4: giftLast4 } : {}),
+      ...(donationCampaign ? { exos_donation_cents: String(donationCents) } : {}),
+      ...checkoutChargeMetadata(commissionPlan),
+    },
+  });
+  const withLink = linkEnabled((k) => Deno.env.get(k));
   try {
-    session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      // Cards only (Apple Pay and Google Pay come with them). Bank debits and
-      // other delayed methods would complete "unpaid", outlive the 30-minute
-      // hold and settle days later into seats that may be gone.
-      // Cash App Pay (mig 20261031220000) settles at once too; USD only.
-      payment_method_types: cashApp ? ["card", "cashapp"] : ["card"],
-      line_items: lineItems,
-      ...(giftCoupon ? { discounts: [{ coupon: giftCoupon }] } : {}),
-      // Destination charge (application fee + transfer), unless the
-      // commission plan says split at sale or a commission in the fee.
-      payment_intent_data: paymentIntentData(commissionPlan, {
-        applicationFeeCents: applicationFee, destination: payments.connectedAccountId!,
-      }),
-      // Embedded: card payments finish in place (the iframe's onComplete);
-      // only redirect-based methods come back through return_url.
-      ...(embedded
-        ? { ui_mode: "embedded" as const, return_url: returnUrl, redirect_on_completion: "if_required" as const }
-        : { success_url: successBack, cancel_url }),
-      // Stripe's minimum (30 minutes), set explicitly: the seat hold runs to
-      // this + 10 minutes, so nobody pays after their seats went back to the
-      // pool, and a late webhook still finds its seat.
-      expires_at: stripeExpiresAt,
-      customer_email: buyerEmail || undefined,
-      billing_address_collection: "auto", // buyer location (mig 20261106140000): country + postal code, never "required"
-      metadata: {
-        exos_event_id: event_id, exos_tier_id: tier_id, exos_buyer_uid: buyerUid ?? "",
-        exos_guest: buyerUid ? "" : "1", exos_promoter: promoterId ?? "",
-        ...(timedSlot ? { exos_slot: timedSlot } : {}),
-        ...(giftCents > 0 ? { exos_gift_card_cents: String(giftCents), exos_gift_card_last4: giftLast4 } : {}),
-        ...(donationCampaign ? { exos_donation_cents: String(donationCents) } : {}),
-        ...checkoutChargeMetadata(commissionPlan),
-      },
-    });
+    try {
+      session = await stripe.checkout.sessions.create(sessionParams(withLink));
+    } catch (e) {
+      // Link off in the platform's Dashboard: the same session without it.
+      if (!withLink || !isPaymentMethodTypeRejection(e)) throw e;
+      console.error("exos-checkout: Stripe refused Link; retrying cards only", (e as Error).message);
+      session = await stripe.checkout.sessions.create(sessionParams(false));
+    }
   } catch (e) {
     console.error("exos-checkout: stripe session create failed", e);
     await releaseHold(sb, holdId);
@@ -1735,4 +1771,41 @@ async function wroomBind(sb: SupabaseClient<any, any, any>, wr: WroomAttempt, se
   return await wroomBindSession(async (fn, args) => await sb.rpc(fn, args), {
     p_event_id: wr.eventId, p_attempt: wr.attempt, p_session_id: sessionId, p_buyer_uid: wr.buyerUid, p_email: wr.email,
   }, (m) => console.error(m));
+}
+
+// exos: guest codes (mig 20261121143700) — exos_check_voucher_guest for a
+// signed-out buyer, keyed on the salted network hash. A missing hash or an
+// unapplied migration means no guest codes (sign in), never an unthrottled check.
+type GuestVoucherRow = {
+  is_valid: boolean; reason: string | null; voucher_id?: string; restrict_tier_id: string | null;
+  can_bypass: boolean; override_price: number | null; discount_percent: number | null; discount_amount: number | null;
+};
+// deno-lint-ignore no-explicit-any
+async function checkGuestVoucher(sb: SupabaseClient<any, any, any>, eventId: string, code: string, netHash: string | null):
+  Promise<{ row: GuestVoucherRow } | { error: string; status: number }> {
+  if (!netHash) return { error: "sign in to use a code", status: 401 };
+  // Lookups per network per minute (hits too): bounds load, the misses are
+  // bounded in SQL.
+  const { data: ok, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: `vcg:${netHash}`, p_limit: 20 });
+  if (rlErr) return { error: "could not check the code, try again", status: 503 };
+  if (ok !== true) return { error: "too many tries, wait a minute", status: 429 };
+  const { data, error } = await sb.rpc("exos_check_voucher_guest", { p_event_id: eventId, p_code: code, p_net_hash: netHash });
+  if (error) {
+    console.error("exos-checkout: guest code check failed", error.message);
+    return { error: "sign in to use a code", status: 401 };
+  }
+  const r = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | null;
+  const num = (x: unknown) => (x == null ? null : Number(x));
+  return {
+    row: {
+      is_valid: r?.is_valid === true,
+      reason: typeof r?.reason === "string" ? r.reason : null,
+      ...(typeof r?.voucher_id === "string" ? { voucher_id: r.voucher_id } : {}),
+      restrict_tier_id: typeof r?.restrict_tier_id === "string" ? r.restrict_tier_id : null,
+      can_bypass: false,
+      override_price: num(r?.override_price),
+      discount_percent: num(r?.discount_percent),
+      discount_amount: num(r?.discount_amount),
+    },
+  };
 }

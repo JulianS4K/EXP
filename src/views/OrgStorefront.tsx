@@ -37,6 +37,9 @@ import { splitAroundEvents } from '../lib/site';
 import { orgFeedLinks } from '../lib/calendar';
 import { formatCurrency, publicUrl } from '../lib/utils';
 import { fromPrice } from '../lib/pricing';
+import { FALLBACK_EVENT_IMAGE, eventImageOr } from '../lib/fallbackImage';
+import { followerLabel } from '../lib/socialProof';
+import { pageFrom, pageMoney } from '../lib/eventFrom';
 
 interface ResolvedOrg {
   org: Organization;
@@ -45,20 +48,6 @@ interface ResolvedOrg {
 // Neon green — the mockup default. Used for storefront chrome whenever the
 // org hasn't set its own brand colour (keeps a themeless page on-design).
 const NEON = '#00FF00';
-
-// Demo xerox imagery (from the reference mockup) — used only as a fallback
-// when an org/event has no artwork of its own, so the grid never shows a
-// blank tile. Cycled by index for visual variety.
-const DEMO_HERO =
-  'https://images.unsplash.com/photo-1574391884720-bbc3740c59d1?q=80&w=1400';
-const DEMO_CARD_IMAGES = [
-  'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=600',
-  'https://images.unsplash.com/photo-1574391884720-bbc3740c59d1?q=80&w=600',
-  'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?q=80&w=600',
-  'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?q=80&w=600',
-  'https://images.unsplash.com/photo-1533174072545-7a4b6ad7a6c3?q=80&w=600',
-  'https://images.unsplash.com/photo-1485872299829-c673f5194813?q=80&w=600',
-];
 
 function StorefrontInner({ org }: ResolvedOrg) {
   const motionGate = useMotionGate();
@@ -143,40 +132,42 @@ function StorefrontInner({ org }: ResolvedOrg) {
       {/* ---- Org-branded nav (white-label) ---- */}
       <nav className="sticky top-0 z-50 bg-black/90 backdrop-blur border-b border-white/10">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex justify-between h-20 items-center">
-            <div className="flex items-center gap-3">
+          {/* min-w-0 + truncate: a long org name shrinks instead of pushing
+              Follow off a 390px screen. */}
+          <div className="flex justify-between h-20 items-center gap-3">
+            <div className="flex items-center gap-3 min-w-0">
               {theme.logoUrl ? (
                 <img
                   src={theme.logoUrl}
                   alt={`${org.name} logo`}
-                  className="w-11 h-11 object-contain"
+                  className="w-11 h-11 object-contain shrink-0"
                 />
               ) : (
                 <div
-                  className="w-11 h-11 flex items-center justify-center disp text-2xl text-black"
+                  className="w-11 h-11 shrink-0 flex items-center justify-center disp text-2xl text-black"
                   style={{ background: accent }}
                 >
                   {initial}
                 </div>
               )}
               <span
-                className="disp text-3xl tracking-tight leading-none pt-1 uppercase"
+                className="disp text-2xl sm:text-3xl tracking-tight leading-none pt-1 uppercase truncate min-w-0"
                 style={{ transform: 'skewX(-5deg)' }}
               >
                 {org.name}
               </span>
             </div>
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-3 sm:gap-6 shrink-0">
               <a
                 href="#events"
-                className="type text-[11px] uppercase tracking-widest text-white/60 hover:text-brand-primary"
+                className="hidden sm:inline type text-xs uppercase tracking-widest text-white/60 hover:text-brand-primary"
               >
                 events
               </a>
               <button
                 onClick={toggleFollow}
                 aria-pressed={isFollowing}
-                className={`disp px-5 py-1 text-lg tracking-wide uppercase transition-colors ${
+                className={`disp px-4 sm:px-5 py-1 text-lg tracking-wide uppercase whitespace-nowrap transition-colors ${
                   isFollowing
                     ? 'bg-transparent border border-white/30 text-white hover:border-white/60'
                     : 'text-black'
@@ -194,20 +185,21 @@ function StorefrontInner({ org }: ResolvedOrg) {
       <header className="relative h-72 overflow-hidden flex items-end border-b border-white/10">
         <img
           src={site.hero?.image && /^https:\/\//.test(site.hero.image) ? site.hero.image
-            : theme.logoUrl && org.marketing?.shareImageUrl ? org.marketing.shareImageUrl : DEMO_HERO}
+            : theme.logoUrl && org.marketing?.shareImageUrl ? org.marketing.shareImageUrl : FALLBACK_EVENT_IMAGE}
           className="xerox absolute inset-0 w-full h-full object-cover opacity-40"
           alt=""
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black to-transparent" />
         <div className="max-w-6xl mx-auto px-4 sm:px-6 w-full relative z-10 pb-8">
           <span
-            className="type text-[11px] uppercase tracking-widest"
+            className="type text-xs uppercase tracking-widest"
             style={{ color: accent }}
           >
-            powered by exos · {followers.toLocaleString()} followers
+            {/* Follower counts only from 10 up (lib/socialProof.ts): "0 followers" reads as nobody goes. */}
+            powered by exos{followerLabel(followers) ? ` · ${followerLabel(followers)}` : ''}
           </span>
           <h1
-            className="disp text-6xl md:text-8xl tracking-tight leading-[0.82] mt-2 uppercase"
+            className="disp text-5xl sm:text-6xl md:text-8xl tracking-tight leading-[0.82] mt-2 uppercase break-words"
             style={{ transform: 'skewX(-4deg)' }}
           >
             {site.hero?.title || org.name}
@@ -262,9 +254,9 @@ function StorefrontInner({ org }: ResolvedOrg) {
           </div>
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-            {events.map((ev, i) => {
+            {events.map((ev) => {
               const genre = (ev.category || ev.genres?.[0] || 'LIVE').toUpperCase();
-              const img = ev.image || DEMO_CARD_IMAGES[i % DEMO_CARD_IMAGES.length];
+              const img = eventImageOr(ev.image);
               return (
                 <Link
                   key={ev.id}
@@ -285,25 +277,30 @@ function StorefrontInner({ org }: ResolvedOrg) {
                     </span>
                     <div className="absolute bottom-3 left-3 right-3">
                       <p
-                        className="type text-[10px] uppercase tracking-widest mb-0.5"
+                        className="type text-xs uppercase tracking-widest mb-0.5"
                         style={{ color: accent }}
                       >
                         {ev.date ? formatInTz(ev.date.toDate(), ev.timezone || 'UTC') : 'TBA'}
                       </p>
-                      <h3 className="disp text-2xl leading-[0.9] tracking-tight uppercase">
+                      <h3 className="disp text-2xl leading-[0.9] tracking-tight uppercase break-words">
                         {ev.title}
                       </h3>
                       {ev.summary && (
-                        <p className="type text-[11px] text-white/60 line-clamp-1 mt-1">{ev.summary}</p>
+                        <p className="type text-xs text-white/60 line-clamp-1 mt-1">{ev.summary}</p>
                       )}
                     </div>
                   </div>
-                  <div className="p-3 flex items-center justify-between">
-                    <span className="type text-[11px] uppercase text-white/50 truncate">
+                  <div className="p-3 flex items-center justify-between gap-2">
+                    <span className="type text-xs uppercase text-white/50 truncate min-w-0">
                       {ev.location}
                     </span>
                     <span className="stamp neon text-base shrink-0" style={{ color: accent }}>
-                      {formatCurrency(fromPrice(ev.ticketTiers, ev.price), ev.currency)}+
+                      {(() => {
+                        // The shared "from" price (lib/eventFrom.ts), as the event page and the ad feed.
+                        const pf = pageFrom(ev.ticketTiers, ev);
+                        if (!pf) return `${formatCurrency(fromPrice(ev.ticketTiers, ev.price), ev.currency)}+`;
+                        return pf.cents === 0 ? 'Free' : `${pageMoney(pf.cents, ev.currency)}+`;
+                      })()}
                     </span>
                   </div>
                 </Link>
@@ -317,7 +314,7 @@ function StorefrontInner({ org }: ResolvedOrg) {
 
       {/* ---- Footer ---- */}
       <footer className="border-t border-white/10 py-8 text-center">
-        <p className="type text-[10px] uppercase tracking-[0.3em] text-white/30">
+        <p className="type text-xs uppercase tracking-[0.3em] text-white/30">
           powered by ▲ exos · secure ticketing
         </p>
       </footer>

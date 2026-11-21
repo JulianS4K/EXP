@@ -32,10 +32,16 @@ the details with counsel.)
       from the organizer.
 - [ ] Events are priced in a two-decimal currency (`_shared/currency.ts`: USD, EUR, GBP, CAD,
       AUD, MXN, BRL). Checkout refuses others; a zero-decimal one like JPY would be charged 100x.
-- [ ] Checkout takes cards only (Apple Pay and Google Pay included). Bank debits and other
-      delayed methods would outlive the 30-minute seat hold.
+- [ ] Checkout takes cards (Apple Pay and Google Pay included) and **Link** (Stripe's one-tap
+      saved wallet, the one that shows inside Instagram / Facebook in-app browsers). Bank debits and
+      other delayed methods would outlive the 30-minute seat hold, so they are never offered.
+      Link's US bank option is Instant Bank Payments, which Stripe confirms at once; it would turn
+      into slow ACH only if `us_bank_account` were offered too, which `_shared/checkoutMethods.ts`
+      never does (its test pins that). Link is on unless `EXOS_STRIPE_LINK=off`; in the live
+      Dashboard: Settings → Payment methods → Link on. If Stripe refuses Link, checkout retries the
+      same session with cards only, so the Dashboard setting can't take checkout down.
 - [ ] Stripe Checkout must collect the billing address: `exos-checkout` sets `billing_address_collection: "auto"` (country and postal code; never `"required"`, which adds a full address form), and stripe-webhook stores country / region / city / postal code for "Where buyers are" (mig 20261106140000).
-- [ ] Apple Pay and Google Pay switched on (no code: `payment_method_types: ["card"]` already
+- [ ] Apple Pay and Google Pay switched on (no code: `"card"` in `payment_method_types` already
       carries both wallets). In the live Dashboard: Settings → Payment methods → Apple Pay and
       Google Pay on. The event-page checkout runs on `checkout.stripe.com`, so nothing else is needed
       there. For the venue embed (Embedded Checkout on our page), add our public domain under

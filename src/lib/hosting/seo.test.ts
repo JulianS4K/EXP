@@ -478,6 +478,19 @@ describe('Open Graph for Meta and WhatsApp', () => {
     expect(tags).toContain('twitter:card" content="summary"');
     expect(eventTags(summary(), url, 'https://x.example/bridge/icon-512.png')).not.toContain('og:image:width');
   });
+  it('gives an event image its real size only when the record knows it', () => {
+    const known = eventTags(summary({ image_width: 1200, image_height: 630 }), url, 'https://x.example/bridge/icon-512.png');
+    expect(known).toContain('og:image:width" content="1200"');
+    expect(known).toContain('og:image:height" content="630"');
+    // A bogus or half-known size is never claimed.
+    for (const over of [{ image_width: 1200 }, { image_width: 0, image_height: 630 }, { image_width: 'big', image_height: 630 }]) {
+      expect(eventTags(summary(over), url, 'https://x.example/bridge/icon-512.png')).not.toContain('og:image:width');
+    }
+    // No image: the icon card, with its true 512 x 512, even if a size is on the row.
+    const icon = eventTags(summary({ image_url: null, image_width: 1200, image_height: 630 }), url, 'https://x.example/bridge/icon-512.png');
+    expect(icon).toContain('og:image:width" content="512"');
+    expect(icon).toContain('og:image:height" content="512"');
+  });
   it('the site card for any other page has absolute URLs', () => {
     const tags = defaultTags('https://x.example', 'map?utm_source=instagram');
     expect(tags).toContain('og:image" content="https://x.example/bridge/icon-512.png"');
@@ -507,5 +520,58 @@ describe('app landing pages', () => {
       expect(xml).toContain(`<loc>${base}/bridge${app.path}</loc>`);
       expect(txt).toContain(`- [Exos ${app.name}](${base}/bridge${app.path}): ${app.headline}`);
     }
+  });
+});
+
+// Ad landing / SEO quick wins (2026-11-21).
+describe('event JSON-LD: image crops, free offers, availability', () => {
+  const ldOf = (tags: string) => JSON.parse(tags.split('<script type="application/ld+json">')[1].split('</script>')[0]);
+  const url = `https://x.example/bridge/event/${EV}`;
+  const icon = 'https://x.example/bridge/icon-512.png';
+  const ev = (over: Record<string, unknown> = {}) => ({
+    id: EV, name: 'Show', starts_at: '2026-12-04T22:00:00Z', image_url: 'https://img.example/p.jpg', currency: 'USD', ...over,
+  });
+
+  it('lists the 16x9, 4x3 and 1x1 crops when they exist, else the one image', () => {
+    const withCrops = eventSummary(ev({ image_variants: {
+      '1x1': 'https://img.example/sq.jpg', '16x9': 'https://img.example/wide.jpg', '4x3': 'https://img.example/43.jpg',
+      '9x16': 'https://img.example/story.jpg',
+    } }), [{ price: 25 }])!;
+    expect(ldOf(eventTags(withCrops, url, icon)).image)
+      .toEqual(['https://img.example/wide.jpg', 'https://img.example/43.jpg', 'https://img.example/sq.jpg']);
+    const partial = eventSummary(ev({ image_variants: { '1x1': 'https://img.example/sq.jpg', '4x3': 'http://insecure/x.jpg' } }), [{ price: 25 }])!;
+    expect(ldOf(eventTags(partial, url, icon)).image).toEqual(['https://img.example/sq.jpg']);
+    expect(ldOf(eventTags(eventSummary(ev(), [{ price: 25 }])!, url, icon)).image).toEqual(['https://img.example/p.jpg']);
+    expect(ldOf(eventTags(eventSummary(ev({ image_url: null }), [{ price: 25 }])!, url, icon)).image).toEqual([icon]);
+  });
+
+  it('a free event gets a price-0 Offer', () => {
+    const s = eventSummary(ev(), [{ price: 0, capacity: 100, sold: 0 }])!;
+    const ld = ldOf(eventTags(s, url, icon));
+    expect(ld.offers).toMatchObject({ '@type': 'Offer', price: 0, priceCurrency: 'USD', availability: 'https://schema.org/InStock' });
+    expect(eventTags(s, url, icon)).toContain(' · Free');
+  });
+
+  it('the Offer is the on-sale "from" price with its availability', () => {
+    const tiers = [{ price: 10, capacity: 50, sold: 50 }, { price: 30, capacity: 50, sold: 0 }];
+    const ld = ldOf(eventTags(eventSummary(ev(), tiers)!, url, icon));
+    expect(ld.offers.price).toBe('30.00');
+    expect(ld.offers.availability).toBe('https://schema.org/InStock');
+    const soldOut = ldOf(eventTags(eventSummary(ev(), [{ price: 10, capacity: 5, sold: 5 }])!, url, icon));
+    expect(soldOut.offers.availability).toBe('https://schema.org/SoldOut');
+    // An older view without seat counts claims no sell-out.
+    expect(ldOf(eventTags(eventSummary(ev(), [{ price: 10 }])!, url, icon)).offers.availability).toBe('https://schema.org/InStock');
+  });
+});
+
+describe('crawler page without AI discovery', () => {
+  it('content without faq: the plain-HTML page, no FAQPage JSON-LD', async () => {
+    const read = fake({
+      exos_public_events: [{ id: EV, name: 'Fall Party', starts_at: '2026-12-04T22:00:00Z', faq: [{ q: 'Coat check?', a: 'Yes.' }] }],
+      exos_public_tiers: [{ id: 't1', event_id: EV, name: 'GA', price: 25, capacity: 10, sold: 0 }],
+    });
+    const page = (await buildPreviewPage(read, ['event', EV], 'https://x.example', { content: true, faq: false }))!;
+    expect(page.body).toContain('<h1>Fall Party</h1>');
+    expect(page.tags).not.toContain('FAQPage');
   });
 });

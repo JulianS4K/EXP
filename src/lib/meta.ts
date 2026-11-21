@@ -174,7 +174,8 @@ export function buildEventJsonLd(ev: SchemaEvent) {
   if (ev.offers) {
     out.offers = {
       '@type': 'Offer',
-      ...(ev.offers.price !== undefined ? { price: ev.offers.price.toFixed(2) } : {}),
+      // A free event is an Offer at price 0 (Google supports it), as seo.ts.
+      ...(ev.offers.price !== undefined ? { price: ev.offers.price === 0 ? 0 : ev.offers.price.toFixed(2) } : {}),
       ...(ev.offers.currency ? { priceCurrency: ev.offers.currency } : {}),
       ...(ev.offers.availability
         ? { availability: `https://schema.org/${ev.offers.availability}` }

@@ -72,6 +72,46 @@ export async function checkVoucher(eventId: string, code: string, email?: string
   };
 }
 
+/** A signed-out buyer's code (mig 20261121143700): checked by exos-checkout
+ *  (action check_voucher) against the guest throttle, never with an email.
+ *  A capacity-bypass or hidden-type code comes back 'sign in required'. */
+export async function checkGuestVoucher(eventId: string, code: string): Promise<VoucherCheck> {
+  const { data, error } = await supabase.functions.invoke('exos-checkout', {
+    body: { action: 'check_voucher', event_id: eventId, voucher_code: code.trim() },
+  });
+  let r = data as Record<string, unknown> | null;
+  if (error) {
+    let payload: { error?: string; reason?: string } | null = null;
+    try {
+      payload = await (error as { context?: Response }).context?.json();
+    } catch {
+      /* not JSON */
+    }
+    const status = (error as { context?: Response }).context?.status;
+    // 401: guests can't use codes here (the server's answer); the field asks to sign in.
+    if (status === 401) r = { is_valid: false, reason: 'sign in required' };
+    else if (status === 429) r = { is_valid: false, reason: 'too many attempts' };
+    else throw new Error(payload?.error || 'Could not check the code.');
+  }
+  return guestVoucherCheck(r);
+}
+
+/** exos-checkout's check_voucher answer as a VoucherCheck (pure; tested). */
+export function guestVoucherCheck(r: Record<string, unknown> | null): VoucherCheck {
+  const valid = r?.is_valid === true;
+  const num = (x: unknown) => (x != null && Number.isFinite(Number(x)) ? Number(x) : null);
+  return {
+    valid,
+    voucherId: null,
+    restrictTierId: valid && typeof r?.restrict_tier_id === 'string' ? r.restrict_tier_id : null,
+    canBypass: false,
+    overridePrice: valid ? num(r?.override_price) : null,
+    discountPercent: valid ? num(r?.discount_percent) : null,
+    discountAmount: valid ? num(r?.discount_amount) : null,
+    reason: valid ? null : typeof r?.reason === 'string' ? r.reason : 'invalid code',
+  };
+}
+
 /** The hidden tier a valid voucher unlocks (exos_voucher_tier, mig
  *  20260925000000). The public tier list never includes hidden tiers, so the
  *  event page adds this one once the code checks out. Null when the code is

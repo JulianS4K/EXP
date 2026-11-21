@@ -63,6 +63,20 @@ and deploying are Render writes.
 6. **Retire the copy.** Once it's stable, delete Terminal-2's `static/bridge/`
    in a follow-up PR.
 
+## Crawlers and ad landing pages
+
+Known crawlers (`src/lib/hosting/crawler.ts`: search engines including Google Ads' AdsBot-Google and
+AdsBot-Google-Mobile, which must be able to crawl every ad destination, and the link-unfurl bots) get, flag or
+no flag (since 2026-11-21):
+- the event's tags and Event JSON-LD (`seo.ts` `eventTags`): the "from" price is the catalog feed's rule
+  (`supabase/functions/_shared/eventStrings.ts`), `og:image:width` / `height` only when the size is known (the
+  512 x 512 icon fallback always), image crops 16x9 / 4x3 / 1x1 in the JSON-LD when an event has them, and a
+  price-0 Offer for a free event;
+- **the event page as plain HTML** inside `#root` (`seo.ts` `eventBody`): summary, date, venue or "Online",
+  organizer, ages, description, lineup, ticket types with all-in prices and sold-out / sales-ended state, the
+  event link, FAQ, what to bring, refund policy and notes. React replaces it on mount for anyone running
+  JavaScript. Hidden (`noindex`) events never get it.
+
 ## AI discovery (off until launch)
 
 `EXOS_AI_DISCOVERY=on` on `exos-web` makes Exos readable by AI assistants and answer engines. **Leave it unset
@@ -74,10 +88,7 @@ With it on:
   `AI_AGENT_UA_TOKENS`: ChatGPT-User, OAI-SearchBot, GPTBot, Claude-User, Claude-SearchBot, ClaudeBot,
   PerplexityBot, Perplexity-User, MistralAI-User, DuckAssistBot, Amazonbot, CCBot…), so they get the event tags
   and JSON-LD that Google and Meta get today.
-- **Every crawler gets the event page as plain HTML** inside `#root` (`seo.ts` `eventBody`): summary, date, venue
-  or "Online", organizer, ages, description, lineup, ticket types with all-in prices and sold-out / sales-ended
-  state, the event link, FAQ, what to bring, refund policy and notes. React replaces it on mount for anyone
-  running JavaScript. Hidden (`noindex`) events never get it.
+- **AI crawlers also get the plain-HTML event page** that every known crawler gets with the flag off (below).
 - **FAQPage JSON-LD** from the organizer's FAQ (not on hidden events or promoter pages).
 - **`/llms.txt`**: what Exos is, that prices are all-in and purchases happen on the event page, the sitemap, the
   MCP endpoint (from `VITE_SUPABASE_URL`), what Exos does for ticket buyers and organizers (the `Live` and

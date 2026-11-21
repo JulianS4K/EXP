@@ -294,7 +294,8 @@ for m in \
   20261118110000_exos_own_cron_helpers \
   20261118120000_exos_waiting_room \
   20261119130000_exos_mcp_writes \
-  20261121100000_exos_channel_risks; do
+  20261121100000_exos_channel_risks \
+  20261121143700_exos_guest_promo_codes; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -548,7 +549,8 @@ for m in \
          20261118110000_exos_own_cron_helpers \
          20261118120000_exos_waiting_room \
          20261119130000_exos_mcp_writes \
-         20261121100000_exos_channel_risks; do
+         20261121100000_exos_channel_risks \
+         20261121143700_exos_guest_promo_codes; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -707,5 +709,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_waiting_r
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp_writes.sql"
 # claude/exos-channel-risks (mig 20261121100000): before Eventbrite / Luma writes go live: one promise across platforms (an event on Eventbrite AND Luma never offers the same free seats twice, per ticket type and per house; the shared pool split; one platform unchanged; one lock per event), a link to another external event refused at set and recorded as a conflict at mark (the new id kept, no link written, cleared by the next save), the pending create (lease, 2-minute in-flight, first time + slug kept, cleared once synced), a Luma ack keeps its steps, created classes + first capacities (race: race_channel_promise.sh, by hand)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_risks.sql"
+# claude/exos-ux-quick (mig 20261121143700): guest promo codes: anon still can't check codes, only the service role calls exos_check_voucher_guest (network hash required, accounts refused); a guest's promo code checks out with its discount, a bypass, hidden-type or one-person (reserved_email) code says sign in; guest misses 10 per network (all events) and 30 per event, never on the server's or an account's bucket
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_guest_promo_codes.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

@@ -40,8 +40,9 @@ async function startServer() {
   const HOST = process.env.HOST || "0.0.0.0";
   const isProd = process.env.NODE_ENV === "production";
   // AI discovery (docs/hosting.md "AI discovery"): AI crawlers and fetchers
-  // treated as link crawlers, full event pages for crawlers, FAQ JSON-LD and
-  // /llms.txt. Off until launch: set EXOS_AI_DISCOVERY=on to turn it on.
+  // treated as link crawlers, FAQ JSON-LD and /llms.txt. Off until launch: set
+  // EXOS_AI_DISCOVERY=on to turn it on. (The plain-HTML event page goes to every
+  // known crawler regardless, since 2026-11-21.)
   const aiDiscovery = process.env.EXOS_AI_DISCOVERY === "on";
   const corsAllowlist = parseAllowlist();
 
@@ -329,7 +330,11 @@ async function startServer() {
           const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?") + 1) : "";
           const target = previewTarget(page, query);
           const read = target ? await getReader() : null;
-          const preview = target && read ? await buildPreviewPage(read, target, publicBase(req), { content: aiDiscovery, promoter: promoterReader }) : null;
+          // Every known crawler (search, ads, unfurl) gets the plain-HTML event
+          // page; FAQ JSON-LD and AI crawlers stay behind EXOS_AI_DISCOVERY.
+          const preview = target && read
+            ? await buildPreviewPage(read, target, publicBase(req), { content: true, faq: aiDiscovery, promoter: promoterReader })
+            : null;
           if (preview) return res.type("html").send(injectBody(inject(getShell(), preview.tags), preview.body));
           // No record behind this page: the site card, with absolute URLs.
           return res.type("html").send(inject(getShell(), defaultTags(publicBase(req), page)));

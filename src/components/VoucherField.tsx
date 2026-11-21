@@ -4,14 +4,17 @@
 // check we report the code + grant up to EventDetails, which then enables the
 // buy button (even when sold out) and forwards the code to checkout.
 //
-// Codes need an account (mig 20260929080000): a signed-out buyer who taps
-// Apply, or arrives on a link carrying a code, is asked to sign in (the
-// emailed 6-digit code keeps them on this page) and the code is applied as
-// soon as they are. This keeps code guessing on the per-account throttle.
+// Guests apply ordinary promo codes too (mig 20261121143700): a signed-out
+// buyer's code is checked by exos-checkout on the guest throttle (misses per
+// network and per event, never on an account's budget). Codes the server keeps
+// for accounts (a capacity-bypass offer, a hidden ticket type, one reserved to
+// an email) answer 'sign in required': then the buyer is asked to sign in
+// (the emailed 6-digit code keeps them on this page) and the code is applied
+// as soon as they are.
 
 import { useEffect, useRef, useState } from 'react';
 import { Ticket, Check } from 'lucide-react';
-import { checkVoucher } from '../lib/vouchers';
+import { checkGuestVoucher, checkVoucher } from '../lib/vouchers';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -44,17 +47,22 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
   // A code waiting for the buyer to sign in; applied once they have.
   const [pendingCode, setPendingCode] = useState<string | null>(null);
 
-  const apply = async (override?: string) => {
+  // onLoad: a link's code, applied as the page opens: no sign-in prompt then.
+  const apply = async (override?: string, onLoad = false) => {
     const c = (override ?? code).trim();
     if (!c) return;
-    if (!user) {
-      setPendingCode(c);
-      openAuth('code');
-      return;
-    }
     setBusy(true);
     try {
-      const res = await checkVoucher(eventId, c, email);
+      const res = user ? await checkVoucher(eventId, c, email) : await checkGuestVoucher(eventId, c);
+      if (!user && !res.valid && res.reason === 'sign in required') {
+        // Kept for accounts by the server: sign in, then it applies.
+        setPendingCode(c);
+        if (!onLoad) {
+          toast({ kind: 'info', message: 'Sign in to use this code.' });
+          openAuth('code');
+        }
+        return;
+      }
       if (!res.valid) {
         toast({ kind: 'error', message: voucherErrorMessage(res.reason) });
         setAppliedCode(null);
@@ -74,14 +82,13 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     }
   };
 
-  // A code from a checkout link: applied on mount when signed in; otherwise it
-  // waits in the field until the buyer signs in (no sign-in prompt on load).
+  // A code from a checkout link: applied on mount, signed in or not (a code
+  // kept for accounts then waits until the buyer signs in).
   const autoApplied = useRef(false);
   useEffect(() => {
     if (initialCode && !autoApplied.current) {
-      if (!user) { setPendingCode(initialCode.trim()); return; }
       autoApplied.current = true;
-      void apply(initialCode);
+      void apply(initialCode, true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCode]);
@@ -121,9 +128,9 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
         type="button"
         disabled={busy || !code.trim()}
         onClick={() => apply()}
-        className="px-4 py-2 border-2 border-white/20 hover:border-brand-primary text-white/70 hover:text-brand-primary text-[10px] font-black uppercase tracking-widest transition-all disabled:opacity-40"
+        className="px-4 py-2 border-2 border-white/20 hover:border-brand-primary text-white/70 hover:text-brand-primary text-xs font-black uppercase tracking-widest transition-all disabled:opacity-40"
       >
-        {busy ? '…' : user ? 'Apply' : 'Sign in to apply'}
+        {busy ? '…' : 'Apply'}
       </button>
       {!user && pendingCode && (
         <span className="sr-only" role="status">Sign in to use the code {pendingCode}.</span>
