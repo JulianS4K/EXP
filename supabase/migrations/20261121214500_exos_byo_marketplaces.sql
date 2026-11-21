@@ -446,6 +446,14 @@ DECLARE
   v_why    text;
   v_removed boolean := false;
 BEGIN
+  -- The event row first, then the route lock: the order an event save takes
+  -- them in (its UPDATE holds the row, then exos_sync_marketplace_distribution
+  -- takes the route lock), so the two never deadlock. Holding the row also
+  -- serializes this with a concurrent Distribution tick or primary-market-only
+  -- change (exos_tg_events_byo_networks runs inside that UPDATE): whichever
+  -- goes second sees the first (review of #143, R1 race). Read after the lock,
+  -- so v_ev is the latest committed row.
+  PERFORM 1 FROM public.exos_events WHERE id = p_event_id FOR NO KEY UPDATE;
   -- The route lock every allocation change takes (exos_set_channel_allocation).
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_route:' || p_event_id::text, 0));
   SELECT * INTO v_ev FROM public.exos_events WHERE id = p_event_id;
@@ -471,6 +479,13 @@ BEGIN
   -- so holding seats for it would hold them for a channel that can never list
   -- (review of #143). Not supported until it plans with the organizer's own
   -- office; 0% (releasing) stays allowed.
+  -- Primary market only means no resale anywhere: an own share would be
+  -- pulled on the next save (exos_sync_marketplace_distribution delists on
+  -- it), so it's refused, as the tick is (review of #143, R6b).
+  IF v_pct > 0 AND coalesce(v_ev.exclusivity ->> 'primaryMarketOnly', 'false') = 'true' THEN
+    RAISE EXCEPTION 'exos_byo_set_allocation: this event is primary market only (no resale): turn that off first to sell it with your own accounts'
+      USING ERRCODE = '22023';
+  END IF;
   IF p_channel = 'evo' AND v_pct > 0 THEN
     RAISE EXCEPTION 'exos_byo_set_allocation: Ticket Evolution with your own account is not supported yet'
       USING ERRCODE = '22023';
@@ -579,12 +594,21 @@ BEGIN
         USING ERRCODE = '22023';
     END IF;
   END LOOP;
+  -- Turning primary market only on while an own share is set would silently
+  -- pull the organizer's own listings: refused, set the shares to 0 first
+  -- (review of #143, R6b).
+  IF coalesce(NEW.exclusivity ->> 'primaryMarketOnly', 'false') = 'true'
+     AND coalesce(OLD.exclusivity ->> 'primaryMarketOnly', 'false') <> 'true'
+     AND EXISTS (SELECT 1 FROM public.exos_byo_allocations a WHERE a.event_id = NEW.id AND a.pct > 0) THEN
+    RAISE EXCEPTION 'this event sells on your own marketplace accounts: set those shares to 0 under Your own marketplace accounts before making it primary market only'
+      USING ERRCODE = '22023';
+  END IF;
   RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_tg_events_byo_networks() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS exos_events_byo_networks ON public.exos_events;
 CREATE TRIGGER exos_events_byo_networks
-  BEFORE UPDATE OF distribution_networks ON public.exos_events
+  BEFORE UPDATE OF distribution_networks, exclusivity ON public.exos_events
   FOR EACH ROW EXECUTE FUNCTION public.exos_tg_events_byo_networks();
 
 -- ---------------------------------------------------------------------------

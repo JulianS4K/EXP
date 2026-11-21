@@ -12,6 +12,10 @@
 #          committed last, and both are audited
 #   race 3 the organizer grows StubHub while an Exos checkout takes the free
 #          seats: never more allocated + sold than the ticket type holds
+#   race 4 SeatGeek ticked under Distribution at the same moment the organizer
+#          sets an own SeatGeek share, both orders (review of #143, R1 race):
+#          the second waits on the event row and is refused, never ticked
+#          and own at once
 set -euo pipefail
 DB="${1:-exos_p0_test}"
 H="${PGHOST:-/tmp/pgrun}"; PORT="${PGPORT:-5433}"; U="${PGUSER:-postgres}"
@@ -20,6 +24,7 @@ P="psql -h $H -p $PORT -U $U -d $DB -v ON_ERROR_STOP=1 -qAt"
 R=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')
 O=$R-b4ac-0000-0000-000000000001; A=$R-b4ac-0000-0000-0000000000a0
 E=$R-b4ac-0000-0000-0000000000e1; T=$R-b4ac-0000-0000-0000000000d1
+E4=$R-b4ac-0000-0000-0000000000e4; T4=$R-b4ac-0000-0000-0000000000d4
 AS_OWNER="SELECT set_config('app.uid','$A',false), set_config('request.jwt.claims','{\"role\":\"authenticated\"}',false);"
 fail=0
 check() { if [ "$1" = "$2" ]; then echo "  ok: $3"; else echo "  FAIL: $3 (got '$1', want '$2')"; fail=1; fi; }
@@ -30,7 +35,7 @@ cleanup() {
          DELETE FROM exos_journal_entries WHERE org_id='$O';
          DELETE FROM exos_marketplace_orders WHERE org_id='$O' OR external_order_id LIKE 'b4race-%';
          DELETE FROM exos_distribution_listings WHERE org_id='$O'; DELETE FROM exos_byo_allocations WHERE org_id='$O';
-         DELETE FROM exos_ticket_tiers WHERE event_id='$E'; DELETE FROM exos_events WHERE id='$E';
+         DELETE FROM exos_ticket_tiers WHERE event_id IN ('$E','$E4'); DELETE FROM exos_events WHERE id IN ('$E','$E4');
          DELETE FROM exos_org_memberships WHERE org_id='$O'; DELETE FROM exos_orgs WHERE id='$O';
          DELETE FROM auth.users WHERE id='$A';" >/dev/null 2>&1 || true
 }
@@ -75,6 +80,32 @@ $P -c "$AS_OWNER SELECT exos_byo_set_allocation('$E','stubhub',50);" >/dev/null 
 wait
 over=$($P -c "SELECT (SELECT sold FROM exos_ticket_tiers WHERE id='$T') + (SELECT greatest(coalesce(requested_qty,0),0) FROM exos_distribution_listings WHERE id='$LST') > 200")
 check "$over" "f" "never more sold + held than 200"
+
+echo "race 4: a Distribution tick and an own share of the same marketplace at once"
+# Its own event: race 3 sold most of the first one.
+$P -c "INSERT INTO exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks)
+         VALUES ('$E4','$O','B4 Race 4','published',now() + interval '60 days','Hall',200,0,'{}');
+       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES ('$T4','$E4','GA',40,200,0);" >/dev/null
+bad() { echo "SELECT ('$1' = ANY (distribution_networks)) AND EXISTS (SELECT 1 FROM exos_byo_allocations WHERE event_id='$E4' AND channel='$1' AND pct > 0) FROM exos_events WHERE id='$E4'"; }
+# (a) the tick first, held open; the own share waits for it, then sees it.
+( $P -c "BEGIN; UPDATE exos_events SET distribution_networks = array_append(distribution_networks, 'seatgeek') WHERE id='$E4'; SELECT pg_sleep(2); COMMIT;" >/dev/null ) &
+sleep 0.5
+out=$($P -c "$AS_OWNER SELECT exos_byo_set_allocation('$E4','seatgeek',10);" 2>&1 || true)
+wait
+case "$out" in *"ticked under Distribution"*) r4a=refused ;; *) r4a="$out" ;; esac
+check "$r4a" "refused" "tick first: the own share waited and was refused"
+check "$($P -c "$(bad seatgeek)")" "f" "tick first: never ticked and own at once"
+# (b) the own share first, held open; the tick waits for it, then sees it.
+# Vivid: (a) left SeatGeek network rows, and an own switch is refused while
+# network rows exist (R4), so a fresh marketplace keeps (b) a pure race.
+( $P -c "BEGIN; $AS_OWNER SELECT exos_byo_set_allocation('$E4','vivid',10); SELECT pg_sleep(2); COMMIT;" >/dev/null ) &
+sleep 0.5
+out=$($P -c "UPDATE exos_events SET distribution_networks = array_append(distribution_networks, 'vivid') WHERE id='$E4';" 2>&1 || true)
+wait
+case "$out" in *"sold with your own seller account"*) r4b=refused ;; *) r4b="$out" ;; esac
+check "$r4b" "refused" "own share first: the tick waited and was refused"
+check "$($P -c "SELECT count(*) FROM exos_byo_allocations WHERE event_id='$E4' AND channel='vivid' AND pct > 0")" "1" "own share first: the own share stands"
+check "$($P -c "$(bad vivid)")" "f" "own share first: never ticked and own at once"
 
 [ "$fail" -eq 0 ] && echo "race_byo_allocations: all passed"
 exit $fail

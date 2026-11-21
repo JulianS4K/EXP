@@ -35,6 +35,9 @@
 --        account it was first matched on
 --   BY17 an event edit doesn't pull an own-account marketplace's seats
 --   BY18 Ticket Evolution with an own account is refused (not supported yet)
+--   BY19 primary market only and own shares don't mix: an own share is
+--        refused on a primary-market-only event, and turning it on is refused
+--        while an own share is set (R6b)
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -412,6 +415,37 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e1') AND channel = 'evo' AND account = 'own'),
     'BY18: no own TEvo seats';
   RAISE NOTICE 'BY18 PASS: own-account Ticket Evolution is refused (not supported yet)';
+END $$;
+
+-- BY19 primary market only vs own shares (review of #143, R6b). e1 sells
+-- StubHub with an own share: turning primary market only on is refused (it
+-- would pull those listings on the next save). Off every own share, it can be
+-- turned on, and then a new own share is refused.
+DO $$
+DECLARE v_ex jsonb;
+BEGIN
+  SELECT coalesce(exclusivity, '{}'::jsonb) INTO v_ex FROM public.exos_events WHERE id = pg_temp.u('e1');
+  ASSERT EXISTS (SELECT 1 FROM public.exos_byo_allocations WHERE event_id = pg_temp.u('e1') AND pct > 0), 'BY19: set up with an own share';
+  ASSERT left(pg_temp.st(format($q$UPDATE public.exos_events SET exclusivity = %L::jsonb WHERE id = %L$q$,
+           (v_ex || '{"primaryMarketOnly":true}')::text, pg_temp.u('e1'))), 5) = '22023',
+    'BY19: primary market only refused while an own share is set';
+  ASSERT coalesce((SELECT exclusivity ->> 'primaryMarketOnly' FROM public.exos_events WHERE id = pg_temp.u('e1')), 'false') <> 'true',
+    'BY19: still not primary market only';
+  RAISE NOTICE 'BY19 PASS: primary market only is refused while an own share is set';
+END $$;
+INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks,exclusivity) VALUES
+  (pg_temp.u('e5'),pg_temp.u('1'),'B4 Primary','published',now() + interval '60 days','Hall',257,0,'{}','{"primaryMarketOnly":true}');
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,sort_order) VALUES
+  (pg_temp.u('d7'),pg_temp.u('e5'),'GA',40,200,0,1);
+DO $$
+BEGIN
+  ASSERT left(pg_temp.st(format($q$SELECT public.exos_byo_set_allocation(%L, 'stubhub', 10)$q$, pg_temp.u('e5'))), 5) = '22023',
+    'BY19: an own share refused on a primary-market-only event';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_byo_allocations WHERE event_id = pg_temp.u('e5')), 'BY19: no own row on e5';
+  -- A rename (an unrelated save) changes nothing either.
+  UPDATE public.exos_events SET name = 'B4 Primary renamed' WHERE id = pg_temp.u('e5');
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_distribution_listings WHERE event_id = pg_temp.u('e5') AND account = 'own'), 'BY19: no own seats on e5';
+  RAISE NOTICE 'BY19 PASS: an own share is refused on a primary-market-only event';
 END $$;
 
 ROLLBACK;

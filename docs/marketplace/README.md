@@ -251,8 +251,12 @@ How it is built (one model, one planner, one transport):
   otherwise). Each row's `account` is `'own'`, fixed when the row is made; each order keeps the account of the
   listing it was first matched to, and its fee and books follow that. An own-account order is never Exos's to pay
   out (money view state `own_account`; no remittance covers it). Saving the event doesn't pull an own-account
-  marketplace's seats (only cancelling, unpublishing or primary market only does). `exos_byo_allocations_view(event)`
-  is what the panel reads.
+  marketplace's seats (only cancelling or unpublishing does). Primary market only and own shares don't mix: an own
+  share is refused on a primary-market-only event, and turning primary market only on is refused while an own share
+  is set (`exos_tg_events_byo_networks`). `exos_byo_set_allocation` locks the event row before the route lock, the
+  order an event save takes them in, so a share and a Distribution tick saved at the same moment run one after the
+  other and the second is refused (`race_byo_allocations.sh` race 4). `exos_byo_allocations_view(event)` is what
+  the panel reads.
 - **The same plan.** exos-distribute plans the allocation's listings as for every marketplace (`planned_listing`).
   `exos-byo` (`/plan`) replays that plan on the channel core with the org's credential from the store (providers
   `stubhub`, `seatgeek`, `vivid`, `tevo`, Org settings -> Integrations): `adapters/byoMarketplace.ts`, adapter ids
