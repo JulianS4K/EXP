@@ -665,7 +665,14 @@ BEGIN
   CASE jsonb_typeof(p)
     WHEN 'object' THEN
       RETURN coalesce((SELECT jsonb_object_agg(e.k, CASE
-                 WHEN e.k ~* '(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|^key$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)'
+                 WHEN e.k ~* '(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)'
+                   THEN to_jsonb('[redacted]'::text)
+                 -- A bare "key" is a secret unless it is a short targeting key
+                 -- (geo "US" / "US:10001", a numeric id), as gatedHttp.ts secretEntry.
+                 WHEN e.k ~* '^key$'
+                      AND NOT (jsonb_typeof(e.v) = 'number'
+                               OR (jsonb_typeof(e.v) = 'string'
+                                   AND (e.v #>> '{}') ~ '^([A-Z]{2}(:[A-Za-z0-9 ._-]{1,40})?|[0-9]{1,12})$'))
                    THEN to_jsonb('[redacted]'::text)
                  ELSE public._exos_channel_audit_scrub(e.v, p_depth + 1) END)
                FROM jsonb_each(p) e(k, v)), '{}'::jsonb);

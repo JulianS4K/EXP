@@ -354,7 +354,8 @@ BEGIN
      "live": false, "error": "upstream said: Bearer leakyleakyleaky and api_key=LEAK2",
      "warnings": [{"reason": "token=WARNLEAK in a reason", "private_key": "PK-LEAK"}],
      "request": {"body": {"key": "K-LEAK", "private_key": "P-LEAK", "access_key": "A-LEAK", "pass": "PW1", "pwd": "PW2", "jwt": "J-LEAK",
-                          "note": "see sk_live_abcdefghijkl and ghp_abcdefghijklmnopqrstuvwxyz0123", "keep": "monkey=1 stays"}}}
+                          "note": "see sk_live_abcdefghijkl and ghp_abcdefghijklmnopqrstuvwxyz0123", "keep": "monkey=1 stays",
+                          "targeting": {"zips": [{"key": "US:10001"}, {"key": "2490299"}, {"key": 3847}], "regions": [{"key": "sk_live_abcdefghijklmnop"}]}}}}
   ]$j$::jsonb);
   ASSERT n = 3, 'CC6: three good steps written, the bad one skipped, got ' || n;
   n := public.exos_channel_audit_record(pg_temp.org(2), jsonb_build_array(
@@ -376,6 +377,9 @@ BEGIN
   ASSERT a.error NOT LIKE '%leakyleakyleaky%' AND a.error NOT LIKE '%LEAK2%' AND a.error LIKE 'upstream said:%', 'CC6: error scrubbed, got ' || a.error;
   ASSERT a.warnings::text NOT LIKE '%WARNLEAK%' AND a.warnings::text NOT LIKE '%PK-LEAK%', 'CC6: warnings scrubbed, got ' || a.warnings;
   ASSERT a.request::text !~ '(K-LEAK|P-LEAK|A-LEAK|PW1|PW2|J-LEAK|sk_live_abcdefghijkl|ghp_abcdef)', 'CC6: secret keys and tokens out, got ' || a.request;
+  ASSERT a.request #> '{body,targeting,zips}' = '[{"key": "US:10001"}, {"key": "2490299"}, {"key": 3847}]'::jsonb
+         AND a.request #>> '{body,targeting,regions,0,key}' = '[redacted]',
+         'CC6: a bare "key" keeps a targeting key and drops anything else, got ' || (a.request #> '{body,targeting}');
   ASSERT a.request -> 'body' ->> 'keep' = 'monkey=1 stays', 'CC6: ordinary text kept, got ' || a.request;
   DELETE FROM public.exos_channel_audit WHERE id = a.id;
 END $$;
