@@ -18,7 +18,8 @@
 // The "wallet-a:" / "wallet-g:" prefixes keep these MACs apart from the T-
 // code's HMAC over "{ticket}:{owner}:{bucket}".
 
-import { fromHex, hmac, sha256, timingSafeEqual, toBase64Url, toHex, utf8 } from "./bytes.ts";
+import { fromHex, hmac, sha256, toBase64Url, toHex, utf8 } from "./bytes.ts";
+import { constantTimeEqual } from "../constantTime.ts";
 
 export const TOTP_PERIOD_MS = 30_000;
 export const TOTP_DIGITS = 8;
@@ -117,13 +118,13 @@ export async function verifyWalletCode(
   if (!secret) return { ok: false, reason: "signature-mismatch", code };
   if (code.kind === "apple") {
     const expected = await appleWalletCode(code.ticketId, code.ownerId, secret, code.epoch);
-    return timingSafeEqual(expected, payload) ? { ok: true, code } : { ok: false, reason: "signature-mismatch", code };
+    return constantTimeEqual(expected, payload) ? { ok: true, code } : { ok: false, reason: "signature-mismatch", code };
   }
   const key = await googleTotpKey(code.ticketId, code.ownerId, secret, code.epoch);
   const cur = totpStep(opts.now ?? Date.now());
   let hit = false;
   for (let s = cur - TOTP_WINDOW; s <= cur + TOTP_WINDOW; s++) {
-    if (timingSafeEqual(await totp(key, s), code.totp)) hit = true;
+    if (constantTimeEqual(await totp(key, s), code.totp)) hit = true;
   }
   return hit ? { ok: true, code } : { ok: false, reason: "signature-mismatch", code };
 }

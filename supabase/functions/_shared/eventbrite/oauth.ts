@@ -21,6 +21,7 @@
 
 import { isAllowedRedirect, parseRedirectOrigins } from "../redirects.ts";
 import { normalizeAppUrl } from "../mail-render.ts";
+import { isTokenShaped } from "./client.ts";
 
 export const EB_AUTHORIZE_URL = "https://www.eventbrite.com/oauth/authorize";
 export const EB_TOKEN_URL = "https://www.eventbrite.com/oauth/token";
@@ -161,10 +162,6 @@ export type TokenResult =
    * network; bad: anything else.
    */
   | { ok: false; kind: "denied" | "config" | "retry" | "bad"; error: string };
-
-/** A token Exos can store (the SQL checks the same shape). */
-export const isTokenShaped = (t: unknown): t is string =>
-  typeof t === "string" && /^[A-Za-z0-9_-]{8,255}$/.test(t);
 
 /** Sort the token endpoint's answer. Never puts a token or the body in `error`. */
 export function parseTokenResponse(status: number, body: unknown): TokenResult {

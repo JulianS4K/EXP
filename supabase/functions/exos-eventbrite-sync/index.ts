@@ -64,12 +64,13 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import {
   type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listTicketClasses,
   listUpcomingEvents, readEvent, type SyncOutcome, syncLink, unshareableReason, whoAmI,
 } from "../_shared/eventbrite/client.ts";
-import { planCapacity, planRecord, sendCapacity, writesLive } from "../_shared/eventbrite/writer.ts";
+import { planCapacity, planRecord, sendCapacity } from "../_shared/eventbrite/writer.ts";
+import { writesLive } from "../_shared/channels/model.ts";
+import { corsHeaders, json, signedInUser } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Wall-clock budget for one cron run (the platform limit is higher). */
@@ -378,31 +379,3 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
   return json({ error: "something went wrong" }, 500, cors);
 }
 
-async function signedInUser(req: Request): Promise<string | null> {
-  const auth = req.headers.get("Authorization") ?? "";
-  if (!/^Bearer\s+\S+/.test(auth)) return null;
-  const sbUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: auth } },
-  });
-  const { data } = await sbUser.auth.getUser();
-  return data.user?.id ?? null;
-}
-
-/** CORS for the SPA's fetch calls: only allow-listed origins are echoed. */
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra },
-  });
-}

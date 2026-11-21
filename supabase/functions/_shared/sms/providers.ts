@@ -53,13 +53,6 @@ export async function twilioSignature(url: string, params: Record<string, string
   return btoa(String.fromCharCode(...sig));
 }
 
-export function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let x = 0;
-  for (let i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return x === 0;
-}
-
 const b64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 /** Telnyx webhooks: Ed25519 over "<timestamp>|<raw body>"; rejects anything older than 5 minutes. */

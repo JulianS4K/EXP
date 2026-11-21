@@ -12,6 +12,8 @@
 //     // ... rest of handler
 //   });
 
+import { constantTimeEqual } from "./constantTime.ts";
+
 export function requireCronSecret(req: Request): Response | null {
   const expected = Deno.env.get("CRON_SECRET");
   if (!expected) {
@@ -25,17 +27,4 @@ export function requireCronSecret(req: Request): Response | null {
     return new Response("unauthorized", { status: 401 });
   }
   return null;
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  // Length mismatch leaks 1 bit (provided length != expected length), which
-  // is acceptable for a fixed-length shared secret. The byte-by-byte loop
-  // is constant-time across the longest-of-two so per-character timing
-  // cannot reveal where the mismatch is.
-  let mismatch = a.length ^ b.length;
-  const n = Math.max(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    mismatch |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return mismatch === 0;
 }

@@ -12,6 +12,7 @@
 // both and returns `unknown` for anything new. Each delivery also carries a
 // unique delivery id (the spec gives no header name) usable for de-dup.
 
+import { constantTimeEqual } from '../../constantTime.ts';
 import type { CatalogEvent, HalLinks, Sale, SellerListing, Venue, Webhook } from './types.ts';
 
 export const STUBHUB_WEBHOOK_TOPICS = [
@@ -62,12 +63,7 @@ export function normalizeTopic(raw: string | null | undefined): StubHubWebhookTo
  */
 export function verifyWebhookAuthorization(received: string | null | undefined, expected: string): boolean {
   if (!expected || received == null) return false;
-  const enc = new TextEncoder();
-  const a = enc.encode(received);
-  const b = enc.encode(expected);
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < b.length; i++) diff |= (a[i] ?? 0) ^ b[i];
-  return diff === 0;
+  return constantTimeEqual(received, expected);
 }
 
 export class WebhookPayloadError extends Error {

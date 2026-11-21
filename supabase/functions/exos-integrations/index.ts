@@ -29,7 +29,6 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import { guardedFetch, urlIsBlocked } from "../_shared/ssrf.ts";
 import { retryingGetFetch } from "../_shared/retry.ts";
 import { baseUrl, SLUG } from "../_shared/backends/rows.ts";
@@ -37,6 +36,7 @@ import { cursorString, parseCursor, pretixItems, pretixOrdersPage } from "../_sh
 import { hiEventsAttendeesPage, hiEventsList } from "../_shared/backends/hievents.ts";
 import { testProvider } from "../_shared/backends/providers.ts";
 import { lumaEvent, lumaGuestsPage } from "../_shared/backends/luma.ts";
+import { corsHeaders, json } from "../_shared/spaHttp.ts";
 
 // Luma is plugged in but off until the operator sets EXOS_LUMA_ENABLED=on: no Luma API call is made.
 const lumaOn = () => Deno.env.get("EXOS_LUMA_ENABLED") === "on";
@@ -56,7 +56,7 @@ const PROVIDER_NAME: Record<string, string> = { pretix: "pretix", hievents: "hi.
 Deno.serve(async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const route = url.pathname.replace(/\/+$/, "").split("/").pop() ?? "";
-  const cors = corsHeaders(req.headers.get("origin"));
+  const cors = corsHeaders(req.headers.get("origin"), "POST, OPTIONS");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
 
@@ -306,20 +306,3 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
   return json({ error: "something went wrong" }, 500, cors);
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra },
-  });
-}

@@ -15,15 +15,13 @@
 // Prefer a header: a query-string secret can end up in proxy and platform
 // access logs. Exos itself never logs the request URL.
 
+import { constantTimeEqual } from '../../constantTime.ts';
 import type { GoTicketsWebhookPayload } from './types.ts';
 
 /** Constant-time check of the token in the target URL. */
 export function verifyGoTicketsWebhookToken(got: string | null, expected: string): boolean {
   if (!expected) return false;
-  const g = got ?? '';
-  let diff = g.length ^ expected.length;
-  for (let i = 0; i < Math.max(g.length, expected.length); i++) diff |= (g.charCodeAt(i) || 0) ^ (expected.charCodeAt(i) || 0);
-  return diff === 0;
+  return constantTimeEqual(got ?? '', expected);
 }
 
 export const GOTICKETS_WEBHOOK_TOKEN_HEADER = 'x-exos-webhook-token';

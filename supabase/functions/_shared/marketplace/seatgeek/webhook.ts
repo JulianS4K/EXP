@@ -9,6 +9,8 @@
 // Setup is by request to SeatGeek (URL, token, types, streaming/batching).
 // Pure: parsing and routing only.
 
+import { constantTimeEqual } from '../../constantTime.ts';
+
 export const SEATGEEK_NOTIFICATION_TYPES = [
   'ping',
   'order.created',
@@ -36,11 +38,7 @@ export interface SeatGeekNotification {
 /** Constant-time check of `Authorization: Bearer <token>` against our configured token. */
 export function verifySeatGeekWebhook(header: string | null, expectedToken: string): boolean {
   if (!expectedToken) return false;
-  const got = header ?? '';
-  const want = `Bearer ${expectedToken}`;
-  let diff = got.length ^ want.length;
-  for (let i = 0; i < Math.max(got.length, want.length); i++) diff |= (got.charCodeAt(i) || 0) ^ (want.charCodeAt(i) || 0);
-  return diff === 0;
+  return constantTimeEqual(header ?? '', `Bearer ${expectedToken}`);
 }
 
 export class SeatGeekWebhookError extends Error {

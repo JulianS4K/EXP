@@ -45,7 +45,7 @@ import {
   connectOrg, DICE_DISABLED_MESSAGE, type DiceDb, diceImportEnabled, dryRunOrg, RUN_BUDGET_MS, syncClaimed, syncOrg,
 } from "../_shared/dice/run.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsHeaders, json, signedInUser } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BODY = 16 * 1024;
@@ -57,7 +57,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const parts = url.pathname.replace(/\/+$/, "").split("/");
   const fnAt = parts.lastIndexOf("exos-dice-import");
   const route = (fnAt >= 0 ? parts.slice(fnAt + 1) : parts.slice(-1)).join("/");
-  const cors = corsHeaders(req.headers.get("origin"));
+  const cors = corsHeaders(req.headers.get("origin"), "POST, OPTIONS");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (!diceImportEnabled((k) => Deno.env.get(k))) {
     return json({ error: DICE_DISABLED_MESSAGE, reason: "disabled" }, 503, cors);
@@ -74,7 +74,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const auth = req.headers.get("Authorization") ?? "";
-  const user = await signedInUser(auth);
+  const user = await signedInUser(req);
   if (!user) return json({ error: "sign in first" }, 401, cors);
   const text = await readCapped(req, MAX_BODY);
   if (text === null) return json({ error: "request too large" }, 413, cors);
@@ -159,30 +159,3 @@ function rpcError(error: { code?: string; message?: string }, cors: Record<strin
   return json({ error: "something went wrong" }, 500, cors);
 }
 
-async function signedInUser(auth: string): Promise<string | null> {
-  if (!/^Bearer\s+\S+/.test(auth)) return null;
-  const sbUser = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
-    global: { headers: { Authorization: auth } },
-  });
-  const { data } = await sbUser.auth.getUser();
-  return data.user?.id ?? null;
-}
-
-/** CORS for the SPA's fetch calls: only allow-listed origins are echoed. */
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
-    status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra },
-  });
-}

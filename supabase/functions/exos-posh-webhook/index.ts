@@ -29,6 +29,7 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { detectKind, extractOrder, parseBody, redact, route, sha256Hex } from "../_shared/posh/payload.ts";
 import { poshRateBucket } from "../_shared/posh/bucket.ts";
+import { readCapped } from "../_shared/api/body.ts";
 
 const MAX_BODY = 64 * 1024;
 
@@ -59,8 +60,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return json(out);
   }
 
-  const declared = Number(req.headers.get("content-length") ?? "0");
-  if (declared > MAX_BODY) return json({ error: "body too large" }, 413);
   const text = await readCapped(req, MAX_BODY);
   if (text === null) return json({ error: "body too large" }, 413);
 
@@ -101,24 +100,3 @@ Deno.serve(async (req: Request): Promise<Response> => {
   return json({ ok: true, outcome: out?.outcome });
 });
 
-/** The body as text, read as a stream and cut off past `max` bytes (null). */
-async function readCapped(req: Request, max: number): Promise<string | null> {
-  if (!req.body) return "";
-  const reader = req.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > max) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
-  const all = new Uint8Array(size);
-  let off = 0;
-  for (const c of chunks) { all.set(c, off); off += c.byteLength; }
-  return new TextDecoder().decode(all);
-}

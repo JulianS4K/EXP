@@ -36,11 +36,12 @@
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
 import { contentHash, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
-import { EB_API, EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
+import { EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
+import { EB_API } from "../_shared/eventbrite/client.ts";
 import { compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, syncLuma } from "../_shared/channels/luma.ts";
 import { lumaInventory } from "../_shared/channels/lumaInventory.ts";
+import { corsHeaders, json } from "../_shared/spaHttp.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 100_000;
@@ -50,7 +51,7 @@ interface Claimed { event_id: string; provider: "eventbrite" | "luma"; org_id: s
 Deno.serve(async (req: Request): Promise<Response> => {
   const url = new URL(req.url);
   const route = url.pathname.replace(/\/+$/, "").split("/").pop() ?? "";
-  const cors = corsHeaders(req.headers.get("origin"));
+  const cors = corsHeaders(req.headers.get("origin"), "POST, OPTIONS");
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405, cors);
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -191,18 +192,3 @@ async function lumaComps(sb: SupabaseClient, io: ReturnType<typeof makeIo>, even
   return added;
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
-  if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-    "Access-Control-Max-Age": "600",
-    vary: "Origin",
-  };
-}
-
-function json(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store", ...extra } });
-}

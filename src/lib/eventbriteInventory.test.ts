@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { EB_API, listTicketClasses, unshareableReason, type EbTicketClass, type Fetch } from '../../supabase/functions/_shared/eventbrite/client.ts';
 import {
-  assertCapacityOnly, planCapacity, planRecord, sendCapacity, writesLive, type CapacityPlan,
+  assertCapacityOnly, planCapacity, planRecord, sendCapacity, type CapacityPlan,
 } from '../../supabase/functions/_shared/eventbrite/writer.ts';
+import { writesLive } from '../../supabase/functions/_shared/channels/model.ts';
 
 type Call = { url: string; init?: RequestInit };
 function fake(status: number, body: unknown): { fetch: Fetch; calls: Call[] } {

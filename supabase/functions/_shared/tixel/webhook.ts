@@ -10,6 +10,8 @@
 //
 // Pure TypeScript, imported by vitest.
 
+import { constantTimeEqual } from '../constantTime.ts';
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const MIN_SECRET_LENGTH = 16;
 export const MAX_TIXEL_BODY = 32 * 1024;
@@ -36,14 +38,6 @@ export function parseTixelSecrets(raw: string | undefined | null): { pairs: Arra
     pairs.push({ orgId: orgId.toLowerCase(), secret });
   }
   return { pairs, dropped };
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const ea = new TextEncoder().encode(a);
-  const eb = new TextEncoder().encode(b);
-  let diff = ea.length ^ eb.length;
-  for (let i = 0; i < Math.max(ea.length, eb.length); i++) diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
-  return diff === 0;
 }
 
 /** The org whose secret this is, or null. Compares against every secret, in constant time each. */

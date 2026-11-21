@@ -43,6 +43,7 @@ import { createPayPalClient, PayPalError, paypalConfig, type PayPalClient } from
 import { captureOrder, type Db, handleWebhook, settleCapture } from "../_shared/paypal/flows.ts";
 import { orderCapture, PAYPAL_ORDER_RE } from "../_shared/paypal/model.ts";
 import { paypalTxn, reconcilePayPal, type LedgerPayment, type LedgerRefund } from "../_shared/paypal/reconcile.ts";
+import { readCapped } from "../_shared/api/body.ts";
 
 const log = (msg: string, err?: unknown) => console.error(msg, err ?? "");
 
@@ -61,25 +62,6 @@ function dbOf(sb: SupabaseClient<any, any, any>): Db {
   };
 }
 
-// The body as text, or null past `max` bytes (stops reading there).
-async function readCappedText(req: Request, max: number): Promise<string | null> {
-  if (!req.body) return "";
-  const reader = req.body.getReader();
-  const parts: Uint8Array[] = [];
-  let n = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    n += value.byteLength;
-    if (n > max) { await reader.cancel(); return null; }
-    parts.push(value);
-  }
-  const all = new Uint8Array(n);
-  let o = 0;
-  for (const p of parts) { all.set(p, o); o += p.byteLength; }
-  return new TextDecoder().decode(all);
-}
-
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -93,7 +75,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const db = dbOf(sb);
 
   // Bodies here are small (a webhook event, an order id): cap them.
-  const raw = await readCappedText(req, 256 * 1024);
+  const raw = await readCapped(req, 256 * 1024);
   if (raw === null) return json({ error: "body too large" }, 413);
 
   if (req.headers.get("paypal-transmission-id")) {

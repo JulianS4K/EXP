@@ -24,7 +24,8 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { fillAppUrl, normalizeAppUrl } from "../_shared/mail-render.ts";
 import { drainRsvpSms } from "../_shared/sms/rsvpOutbox.ts";
-import { safeEqual, sendSms, type SmsConfig, telnyxInbound, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
+import { sendSms, type SmsConfig, telnyxInbound, telnyxVerified, twilioSignature } from "../_shared/sms/providers.ts";
+import { constantTimeEqual } from "../_shared/constantTime.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BUDGET_MS = 50_000;
@@ -53,7 +54,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const params = Object.fromEntries(new URLSearchParams(raw));
         const publicUrl = `${Deno.env.get("SUPABASE_URL")!.replace(/\/+$/, "")}/functions/v1/exos-sms-drain/inbound/twilio?org=${org}`;
         const want = await twilioSignature(publicUrl, params, cfg.secret ?? "");
-        if (!safeEqual(want, req.headers.get("x-twilio-signature") ?? "")) return new Response("bad signature", { status: 403 });
+        if (!constantTimeEqual(want, req.headers.get("x-twilio-signature") ?? "")) return new Response("bad signature", { status: 403 });
         await sb.rpc("exos_sms_inbound", { p_org_id: org, p_from: params.From ?? "", p_text: params.Body ?? "" });
         return new Response('<?xml version="1.0" encoding="UTF-8"?><Response/>', { headers: { "content-type": "text/xml" } });
       }
