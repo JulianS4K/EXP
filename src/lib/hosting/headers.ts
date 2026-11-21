@@ -49,8 +49,12 @@ export function isCheckoutReturn(path: string, search: string): boolean {
   return q.get('checkout') === 'success' && /^cs_[A-Za-z0-9_]{8,250}$/.test(q.get('session_id') ?? '');
 }
 
-const MAPS_SCRIPT =
-  ' https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com https://*.googleusercontent.com blob:';
+// Only the Maps JavaScript API's own two hosts (as the native policy,
+// lib/platform/nativeCsp.ts). A wildcard would also allow
+// storage.googleapis.com and *.googleusercontent.com (anyone's uploaded .js)
+// and *.google.com (JSONP endpoints). Maps' tiles and photos load as images
+// (img-src https:), its generated workers as blob: (worker-src below).
+const MAPS_SCRIPT = ' https://maps.googleapis.com https://maps.gstatic.com';
 const MAPS_CONNECT = ' https://*.googleapis.com https://*.google.com https://*.gstatic.com data: blob:';
 const MAPS_PREFIXES = ['/bridge/event/', '/bridge/map'];
 

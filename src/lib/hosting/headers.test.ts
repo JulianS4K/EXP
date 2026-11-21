@@ -44,6 +44,14 @@ describe('bridgeCsp', () => {
   it('allows Google Maps only where a map renders', () => {
     expect(bridgeCsp('/bridge/map')).toContain('*.googleapis.com');
     expect(bridgeCsp('/bridge/map')).toContain("worker-src 'self' blob:");
+    // Scripts: Maps' own two hosts only, no wildcard Google host, no blob:.
+    for (const path of ['/bridge/map', '/bridge/event/1']) {
+      const script = bridgeCsp(path).split('; ').find((d) => d.startsWith('script-src'))!;
+      expect(script).toContain(' https://maps.googleapis.com https://maps.gstatic.com');
+      for (const banned of ['*.googleapis.com', '*.googleusercontent.com', '*.google.com', '*.gstatic.com', '*.ggpht.com', 'storage.googleapis.com', 'blob:']) {
+        expect(script).not.toContain(banned);
+      }
+    }
     expect(bridgeCsp('/bridge/dashboard')).not.toContain('*.googleapis.com');
     expect(bridgeCsp('/bridge/dashboard')).toContain("worker-src 'self';");
   });
