@@ -1284,8 +1284,8 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   pattern: `*token*`, `*secret*`, `*signature*`, `api_key`, `access_key`, `X-Amz-*`, ...; paging cursors such as
   `pageToken` excepted) is refused. Every request is an audit step with credential headers (any name with token,
   secret, key, auth, signature, cookie, password or session), secret-named keys (`SECRET_KEY`: also
-  `private_key`, `access_key`, `pass`, `pwd`, `jwt`; a bare `key` unless its value is a short targeting key such as
-  Meta's geo `US:10001` or a numeric id, `secretEntry`) and every secret value redacted. Redaction is best effort:
+  `private_key`, `access_key`, `pass`, `pwd`, `jwt`; a bare `key` always, except a geo key such as Meta's `US:10001` or an
+  integer id of at most 10 digits inside a geo list (`zips`, `regions`, `cities`, ...; `secretEntry`)) and every secret value redacted. Redaction is best effort:
   adapters still send credentials only in headers.
 - **`exos_channel_audit`**: RLS, SELECT for owner / manager of the row's org (finance, scanners and other orgs read
   nothing), no client writes. Only `exos_channel_audit_record` (service role) writes: it drops query values from
@@ -1333,15 +1333,22 @@ exception for that platform.
   the consent flag. A batch of hashes is recorded in `exos_channel_audit` as a count
   (`RequestOptions.auditBody`), never the hashes. More than 100,000 people: the first 100,000, and
   the answer says `truncated` with the `total`.
-- **Whose "yes" counts** (review of #138, B2; the same rule now in `exos_org_audience_export`, live on
-  prod). A guest can start a checkout with anyone's email, so a "yes" counts only from an order that
-  was paid or issued (fulfilled, partly or fully refunded) whose email was proven or never needed
-  proof (`_exos_consent_grant_ok`: no `exos_order_proofs` row that isn't `proven`); the buyer rows
-  need the same. A "no" counts from any checkout (it can only take someone out); the latest counted
+- **Whose "yes" counts** (review of #138, B2 and B2'; the same rule now in
+  `exos_org_audience_export`, live on prod). A guest can start a checkout with anyone's email, so a
+  "yes" counts only from an order that was paid or issued (fulfilled, partly or fully refunded), not
+  lost to a dispute, whose email the person proved (`_exos_consent_grant_ok`): an `exos_order_proofs`
+  row proven via `email_code` for that very address, or no proof row and their own confirmed,
+  live account with the same address. An SMS proof (it proves a phone: a stranger can start a
+  checkout with your email and prove their own) and an organizer's correction (`proven_via
+  'organizer'`) never make a "yes". Guest orders from before proofs (mig 20261105100000: no proof row,
+  no account) no longer count as a "yes". The buyer rows need the same. A "no" counts from any checkout (it can only take someone out); the latest counted
   choice per email and per account wins, and at the same moment a "no" wins. A fan is in only on a
   "yes" that came with an order not fully refunded. Tombstoned (deleted) and banned accounts are out,
   and `exos_delete_my_account` deletes the person's fan rows (by account and by confirmed email) and
-  gives their earlier finished guest checkouts under that email the tombstone address.
+  their tags, and gives every guest checkout under that email the tombstone address, pending ones
+  too (one paid later still reaches its buyer through the paying page's phone proof or the
+  organizer's resend). A ban counts while `banned_until` is in the future: an expired ban counts
+  again.
 - **Throttles, shared and atomic.** The source and the hashed CSV export share 3 a minute
   (`exos_rate_hit('audience:<org>')`) and 20 a day per org, counted in `exos_audience_exports` under
   a per-org advisory lock held to commit (`_exos_audience_daily_gate`), so parallel pulls can't pass

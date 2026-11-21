@@ -94,18 +94,24 @@
 --    exos_org_audience_export, live on prod). Anyone can start a guest
 --    checkout with anyone's email and tick the box, so a "yes" counts only
 --    from an order that was paid or issued (fulfilled, partly or fully
---    refunded) whose email was proven, or that never needed proof
---    (_exos_consent_grant_ok: no exos_order_proofs row that isn't
---    'proven'). A "no" counts from any checkout: it can only take someone
+--    refunded), not lost to a dispute, whose email the person proved
+--    (_exos_consent_grant_ok, B2'): an email code for that very address, or
+--    no proof row and their own confirmed account with the same address. An
+--    SMS proof (proves a phone, which a stranger can use on your email) and
+--    an organizer's correction (proven_via 'organizer') never make a "yes".
+--    Guest orders from before proofs (mig 20261105100000: no proof row, no
+--    account) no longer count as a "yes". A banned account is out while
+--    banned_until is in the future; once a ban expires the account counts
+--    again. A "no" counts from any checkout: it can only take someone
 --    out. The latest counted choice per email (and per account) wins; at
 --    the same moment a "no" wins (S2). The buyer rows themselves need the
 --    same proof. The daily cap is taken under a per-org advisory lock held
 --    to commit, so 20 means 20 under any concurrency (S5).
 -- 6. ACCOUNT DELETION (B1). exos_delete_my_account now deletes the person's
---    fan profiles (by account, and by their confirmed email) and gives
---    their earlier finished guest checkouts under that confirmed email the
---    tombstone address, so neither an export nor an audience finds them
---    again. A
+--    fan profiles (by account, and by their confirmed email) and those
+--    profiles' tags, and gives every guest checkout under that confirmed
+--    email (pending ones too) the tombstone address, so neither an export
+--    nor an audience finds them again. A
 --    tombstoned or banned account is never exported.
 --
 -- Two existing bodies are text-patched (README rule 4: check each patch's
@@ -345,15 +351,41 @@ COMMENT ON FUNCTION public.exos_ads_campaign_context(uuid, uuid) IS
 -- 5. Whose advertising choice counts, the shared daily cap
 -- ===========================================================================
 -- May a checkout's "yes" count? Only from an order that was paid or issued
--- (fulfilled, partly or fully refunded) whose email was proven or never
--- needed proof: a guest can start a checkout with anyone's email.
+-- (fulfilled, partly or fully refunded), not lost to a dispute, whose email
+-- the person themselves proved: a guest can start a checkout with anyone's
+-- email (review of #138, B2 / B2'). Proved means exactly one of
+--   * an email code: exos_order_proofs proven via 'email_code' for this very
+--     address (an SMS proof proves a phone, not the email: anyone can start a
+--     checkout with your email and prove their own phone; an organizer's
+--     correction ('organizer') proves nothing about either address);
+--   * no proof row, and a signed-in account whose email is confirmed, the
+--     same address as the checkout's, and not deleted or banned.
+-- A guest order from before proofs existed (mig 20261105100000) has no proof
+-- row and no account: its "yes" no longer counts (it can't be told apart
+-- from a stranger's). A "no" from any checkout still counts (it only ever
+-- takes someone out).
 CREATE OR REPLACE FUNCTION public._exos_consent_grant_ok(p_status text, p_session_id text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
   SELECT coalesce(p_status, '') IN ('fulfilled', 'partially_refunded', 'refunded')
-     AND NOT EXISTS (SELECT 1 FROM public.exos_order_proofs p
-                      WHERE p.session_id = p_session_id AND p.status <> 'proven')
+     AND EXISTS (
+       SELECT 1
+         FROM public.exos_checkout_sessions s
+         LEFT JOIN public.exos_order_proofs p ON p.session_id = s.session_id
+         LEFT JOIN auth.users u ON u.id = s.buyer_uid
+        WHERE s.session_id = p_session_id
+          AND coalesce(s.dispute_status, '') <> 'lost'
+          AND (
+                (p.id IS NOT NULL AND p.status = 'proven' AND p.proven_via = 'email_code'
+                 AND p.email = lower(btrim(s.buyer_email)))
+             OR (p.id IS NULL AND u.id IS NOT NULL
+                 AND u.email_confirmed_at IS NOT NULL
+                 AND u.email NOT LIKE 'deleted+%'
+                 AND (to_jsonb(u) ->> 'deleted_at') IS NULL
+                 AND NOT coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false)
+                 AND lower(btrim(coalesce(nullif(btrim(s.buyer_email), ''), u.email))) = lower(btrim(u.email)))
+              ))
 $$;
 REVOKE ALL ON FUNCTION public._exos_consent_grant_ok(text, text) FROM PUBLIC, anon, authenticated;
 
@@ -407,6 +439,7 @@ BEGIN
            regexp_replace(regexp_replace(coalesce(to_jsonb(u) ->> 'phone', ''), '\D', '', 'g'), '^0+', '') AS phone_digits,
            -- Gone, tombstoned (exos_delete_my_account) or banned.
            (s.buyer_uid IS NOT NULL AND (u.id IS NULL OR u.email LIKE 'deleted+%'
+              OR (to_jsonb(u) ->> 'deleted_at') IS NOT NULL
               OR coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false))) AS account_gone,
            public._exos_consent_grant_ok(s.status, s.session_id) AS trusted
       FROM public.exos_checkout_sessions s
@@ -462,6 +495,7 @@ BEGIN
        AND f.discarded_at IS NULL
        AND (f.user_id IS NULL
             OR (u.id IS NOT NULL AND u.email NOT LIKE 'deleted+%'
+                AND (to_jsonb(u) ->> 'deleted_at') IS NULL
                 AND NOT coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false)))
        -- A "yes" that came with an order still standing (S1: a fully
        -- refunded buyer's automatic fan row doesn't bring them back).
@@ -633,8 +667,10 @@ $n$  /* exos: audience consent (mig 20261121190500) */ -- 20 a day, under the
            regexp_replace(regexp_replace(coalesce(to_jsonb(u) ->> 'phone', ''), '\D', '', 'g'), '^0+', '') AS phone_digits,
            -- Gone, tombstoned (exos_delete_my_account) or banned.
            (s.buyer_uid IS NOT NULL AND (u.id IS NULL OR u.email LIKE 'deleted+%'
+              OR (to_jsonb(u) ->> 'deleted_at') IS NOT NULL
               OR coalesce((to_jsonb(u) ->> 'banned_until')::timestamptz > now(), false))) AS account_gone,
-           -- A "yes" counts only from a paid / issued order with its email proven (or no proof needed).
+           -- A "yes" counts only from a paid / issued order whose email the person proved
+           -- (an email code, or their own confirmed account): _exos_consent_grant_ok.
            public._exos_consent_grant_ok(s.status, s.session_id) AS trusted
       FROM public.exos_checkout_sessions s
       LEFT JOIN auth.users u ON u.id = s.buyer_uid
@@ -674,15 +710,21 @@ SELECT pg_temp.exos_patch_n('public.exos_delete_my_account()',
 $o$  -- Close the login for good (the row stays so order history keeps its keys).
 $o$,
 $n$  /* exos: fans and guest orders (mig 20261121190500) */ -- fan profiles
-  -- are personal data (signup answers cascade with them); a finished guest
-  -- checkout under the confirmed email gets the tombstone address (a guest
-  -- row must keep an address; exports skip the tombstone), a pending one
-  -- keeps it (it may still be fulfilled).
+  -- are personal data (signup answers cascade with them; their tags go too,
+  -- as _exos_fan_discard does); every guest checkout under the confirmed
+  -- email gets the tombstone address (a guest row must keep an address;
+  -- exports skip the tombstone), pending ones included: one paid after this
+  -- still reaches its buyer through the paying page (phone proof) or the
+  -- organizer's resend to a corrected address.
+  DELETE FROM public.exos_tagged_items t
+   USING public.exos_fans f
+   WHERE t.taggable_type = 'fan' AND t.taggable_id = f.id AND t.org_id = f.org_id
+     AND (f.user_id = v_uid OR (v_email IS NOT NULL AND v_email <> '' AND lower(btrim(f.email)) = v_email));
   DELETE FROM public.exos_fans
    WHERE user_id = v_uid OR (v_email IS NOT NULL AND v_email <> '' AND lower(btrim(email)) = v_email);
   IF v_email IS NOT NULL AND v_email <> '' THEN
     UPDATE public.exos_checkout_sessions SET buyer_email = v_tomb
-     WHERE buyer_uid IS NULL AND status <> 'pending' AND lower(btrim(buyer_email)) = v_email;
+     WHERE buyer_uid IS NULL AND lower(btrim(buyer_email)) = v_email;
   END IF;
 
   -- Close the login for good (the row stays so order history keeps its keys).

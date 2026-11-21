@@ -200,6 +200,11 @@ INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,guest,buyer
   ('cs_test_ad1_x3',pg_temp.ev('e1'),pg_temp.org(),true,'xbuyer3@x.com',1,0,'usd','pending','granted',NULL),
   ('cs_test_ad1_x9',pg_temp.ev('e9'),pg_temp.org(2),true,'xbuyer9@x.com',1,5000,'usd','pending','granted',NULL);
 UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id LIKE 'cs_test_ad1_x%';
+-- The consenting guests proved their address with the email code (B2': only
+-- that makes a guest's "yes" count).
+INSERT INTO public.exos_order_proofs(org_id,event_id,session_id,email,original_email,status,proven_via,proven_at,expires_at)
+SELECT s.org_id, s.event_id, s.session_id, lower(btrim(s.buyer_email)), lower(btrim(s.buyer_email)), 'proven', 'email_code', now(), now() + interval '1 day'
+  FROM public.exos_checkout_sessions s WHERE s.session_id IN ('cs_test_ad1_x1', 'cs_test_ad1_x3');
 DO $$
 DECLARE p jsonb; c jsonb;
 BEGIN
@@ -332,6 +337,9 @@ INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,g
 UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now()
  WHERE session_id IN ('cs_test_ad1_a1','cs_test_ad1_a2','cs_test_ad1_a3','cs_test_ad1_a4','cs_test_ad1_a6','cs_test_ad1_a7','cs_test_ad1_a9');
 INSERT INTO public.exos_mail_prefs(user_id, marketing_opt_out, opted_out_at) VALUES ('ad100000-0000-0000-0000-0000000000b3', true, now());
+-- fan4's checkout email isn't the account's: proven with the email code.
+INSERT INTO public.exos_order_proofs(org_id,event_id,session_id,email,original_email,status,proven_via,proven_at,expires_at) VALUES
+  (pg_temp.org(),pg_temp.ev('e2'),'cs_test_ad1_a4','fan4-checkout@x.com','fan4-checkout@x.com','proven','email_code',now(),now() + interval '1 day');
 SELECT set_config('exos.fan_consent_action', 'on', true);
 INSERT INTO public.exos_fans(org_id,email,user_id,source) VALUES
   (pg_temp.org(),'fan4@x.com','ad100000-0000-0000-0000-0000000000b4','manual'),
@@ -443,7 +451,9 @@ UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = no
 UPDATE public.exos_checkout_sessions SET status = 'refunded' WHERE session_id = 'cs_test_ad1_p4';
 INSERT INTO public.exos_order_proofs(org_id,event_id,session_id,email,original_email,status,proven_via,proven_at,expires_at) VALUES
   (pg_temp.org(),pg_temp.ev('e1'),'cs_test_ad1_p1c','p1c@x.com','p1c@x.com','cancelled',NULL,NULL,now() + interval '1 day'),
-  (pg_temp.org(),pg_temp.ev('e1'),'cs_test_ad1_p1c2','p1c-ok@x.com','p1c-ok@x.com','proven','email_code',now(),now() + interval '1 day');
+  (pg_temp.org(),pg_temp.ev('e1'),'cs_test_ad1_p1c2','p1c-ok@x.com','p1c-ok@x.com','proven','email_code',now(),now() + interval '1 day'),
+  -- del7's earlier guest checkout, proven by code (so it is in until deletion).
+  (pg_temp.org(),pg_temp.ev('e1'),'cs_test_ad1_d7g','del7@x.com','del7@x.com','proven','email_code',now(),now() + interval '1 day');
 SELECT set_config('exos.fan_consent_action', 'on', true);
 INSERT INTO public.exos_fans(org_id,email,user_id,source) VALUES
   (pg_temp.org(),'p1a@x.com',NULL,'signup'),
@@ -467,7 +477,7 @@ BEGIN
   ASSERT NOT ('tie@x.com' = ANY (e)) AND NOT ('tie@x.com' = ANY (x)), 'AD6 S2: a "yes" at the same moment beat the "no"';
   -- The rest of AD5 still holds in the export as in the source.
   ASSERT 'buyer1@x.com' = ANY (x) AND 'xbuyer@x.com' = ANY (x), 'AD6: the export keeps consenting buyers, got ' || x::text;
-  RAISE NOTICE 'OK  AD6 a "yes" counts only from a paid / issued order with a proven (or no) proof; refunds and ties (source and export)';
+  RAISE NOTICE 'OK  AD6 a "yes" counts only from a paid / issued order the person proved; refunds and ties (source and export)';
 END $$;
 -- The account's phone, hashed both ways (p4 is out, so a fresh consenting
 -- account with a phone).
@@ -495,6 +505,14 @@ BEGIN
   ASSERT 'del7@x.com' = ANY (e) AND 'del7@x.com' = ANY (x), 'AD7: before deletion the buyer is in, got ' || e::text;
   ASSERT NOT ('ban8@x.com' = ANY (e)) AND NOT ('ban8@x.com' = ANY (x)), 'AD7: a banned account is out';
 END $$;
+-- S-a: a tag on del7's fan profile; S-b: a guest checkout under del7's email
+-- still pending when the account is deleted.
+INSERT INTO public.exos_tags(id,org_id,name,scope) VALUES ('ad100000-0000-0000-0000-0000000000f7',pg_temp.org(),'VIP','fan');
+INSERT INTO public.exos_tagged_items(org_id,tag_id,taggable_type,taggable_id)
+SELECT f.org_id, 'ad100000-0000-0000-0000-0000000000f7', 'fan', f.id FROM public.exos_fans f WHERE f.org_id = pg_temp.org() AND f.email = 'del7@x.com';
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at) VALUES
+  ('cs_test_ad1_d7p',pg_temp.ev('e1'),pg_temp.org(),NULL,true,'del7@x.com',1,2500,'usd','pending','granted',now() - interval '1 hour');
+DO $$ BEGIN ASSERT (SELECT count(*) FROM public.exos_tagged_items WHERE tag_id = 'ad100000-0000-0000-0000-0000000000f7') = 1, 'AD7: tag set up'; END $$;
 SELECT pg_temp.act('ad100000-0000-0000-0000-0000000000c7');
 SET LOCAL ROLE authenticated;
 SELECT public.exos_delete_my_account();
@@ -511,8 +529,12 @@ BEGIN
     'AD7: the fan profiles are deleted';
   ASSERT (SELECT buyer_email = 'deleted+ad100000-0000-0000-0000-0000000000c7@deleted.invalid' FROM public.exos_checkout_sessions WHERE session_id = 'cs_test_ad1_d7g'),
     'AD7: the guest checkout has the tombstone address';
+  ASSERT (SELECT buyer_email = 'deleted+ad100000-0000-0000-0000-0000000000c7@deleted.invalid' FROM public.exos_checkout_sessions WHERE session_id = 'cs_test_ad1_d7p'),
+    'AD7 S-b: a checkout still pending at deletion kept the email';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_tagged_items WHERE tag_id = 'ad100000-0000-0000-0000-0000000000f7'),
+    'AD7 S-a: the deleted fan profile''s tags are left dangling';
   ASSERT 'buyer1@x.com' = ANY (e), 'AD7: nobody else is touched';
-  RAISE NOTICE 'OK  AD7 a deleted account (fan rows, earlier guest checkouts) and a banned one stay out of the source and the export';
+  RAISE NOTICE 'OK  AD7 a deleted account (fan rows and their tags, every guest checkout, pending too) and a banned one stay out of the source and the export';
 END $$;
 
 -- AD8 ------------------------------------------------------------------------
@@ -548,6 +570,92 @@ BEGIN
   ASSERT pg_temp.state_of($q$SELECT pg_temp.xp()$q$) LIKE 'P0001%daily export limit%', 'AD9: the export counts the source''s pulls';
   ASSERT pg_temp.state_of($q$SELECT pg_temp.source(NULL)$q$) LIKE 'P0001%daily audience limit%', 'AD9: and the source the export''s';
   RAISE NOTICE 'OK  AD9 the 20 a day counts both';
+END $$;
+
+-- AD10 -----------------------------------------------------------------------
+-- B2': only the person's own proof of the email makes a "yes".
+SELECT pg_temp.fresh_minute();
+DELETE FROM public.exos_audience_exports WHERE org_id = pg_temp.org();
+CREATE FUNCTION pg_temp.guest(p_id text, p_email text) RETURNS void LANGUAGE sql AS $$
+  INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at,proof_token_hash)
+  VALUES (p_id, pg_temp.ev('e1'), pg_temp.org(), NULL, true, p_email, 1, 2500, 'usd', 'pending', 'granted', now() - interval '1 hour',
+          encode(extensions.digest('tok-' || p_id || '-0123456789abcdef', 'sha256'), 'hex'));
+  UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = p_id;
+  SELECT public._exos_proof_open(p_id);
+$$;
+-- R1: a stranger checks out with the victim's email, ticks "yes", and proves
+-- their OWN phone with the token the paying page holds (anon RPCs).
+SELECT pg_temp.guest('cs_test_ad1_r1v', 'victim-r1@x.com');
+SELECT pg_temp.act(NULL);
+SET LOCAL ROLE anon;
+DO $$
+DECLARE j jsonb;
+BEGIN
+  j := public.exos_order_proof_send('cs_test_ad1_r1v', 'tok-cs_test_ad1_r1v-0123456789abcdef', 'sms', '(212) 555-0177');
+  ASSERT (j ->> 'ok')::boolean, 'AD10 R1: SMS code sent, got ' || j;
+END $$;
+RESET ROLE;
+CREATE TEMP TABLE ad_code AS
+  SELECT substring(body from '^([0-9]{6})') AS c FROM public.exos_rsvp_sms_outbox WHERE phone = '+12125550177' ORDER BY created_at DESC LIMIT 1;
+GRANT SELECT ON ad_code TO anon;
+SET LOCAL ROLE anon;
+DO $$
+DECLARE j jsonb;
+BEGIN
+  j := public.exos_order_proof_verify('cs_test_ad1_r1v', 'tok-cs_test_ad1_r1v-0123456789abcdef', (SELECT c FROM pg_temp.ad_code));
+  ASSERT (j ->> 'ok')::boolean, 'AD10 R1: the phone proof went through, got ' || j;
+END $$;
+RESET ROLE;
+-- R2: a typo corrected by the organizer: the original address stays on the
+-- checkout, the corrected one on the proof (proven_via 'organizer').
+SELECT pg_temp.guest('cs_test_ad1_r2t', 'typo-r2@x.com');
+SELECT pg_temp.act('ad100000-0000-0000-0000-0000000000a1');
+SET LOCAL ROLE authenticated;
+SELECT public.exos_order_proof_resend('cs_test_ad1_r2t', 'right-r2@x.com');
+RESET ROLE;
+INSERT INTO pg_temp.ad_seen VALUES ('right-r2@x.com');
+-- Control: the buyer proves the email with the code mailed to it.
+SELECT pg_temp.guest('cs_test_ad1_r3c', 'coded-r3@x.com');
+CREATE TEMP TABLE ad_mcode AS
+  SELECT substring(html from 'letter-spacing:6px"><strong>([0-9]{6})</strong>') AS c FROM public.exos_mail
+   WHERE to_email = 'coded-r3@x.com' AND template = 'rsvp-code' ORDER BY created_at DESC, id DESC LIMIT 1;
+GRANT SELECT ON ad_mcode TO anon;
+SELECT pg_temp.act(NULL);
+SET LOCAL ROLE anon;
+DO $$
+DECLARE j jsonb;
+BEGIN
+  j := public.exos_order_proof_verify('cs_test_ad1_r3c', 'tok-cs_test_ad1_r3c-0123456789abcdef', (SELECT c FROM pg_temp.ad_mcode));
+  ASSERT (j ->> 'ok')::boolean, 'AD10: the email code went through, got ' || j;
+END $$;
+RESET ROLE;
+-- A confirmed account's order lost to a dispute.
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('ad100000-0000-0000-0000-0000000000c9','disp9@x.com',now());
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at) VALUES
+  ('cs_test_ad1_dp9',pg_temp.ev('e1'),pg_temp.org(),'ad100000-0000-0000-0000-0000000000c9',false,'disp9@x.com',1,2500,'usd','pending','granted',now() - interval '1 hour');
+UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now(), dispute_status = 'lost' WHERE session_id = 'cs_test_ad1_dp9';
+-- An account buyer whose email isn't confirmed (a proof row is opened, never proven).
+INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('ad100000-0000-0000-0000-0000000000ca','unconf@x.com',NULL);
+INSERT INTO public.exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,guest,buyer_email,quantity,amount_cents,currency,status,consent_marketing,created_at) VALUES
+  ('cs_test_ad1_uc',pg_temp.ev('e1'),pg_temp.org(),'ad100000-0000-0000-0000-0000000000ca',false,'unconf@x.com',1,2500,'usd','pending','granted',now() - interval '1 hour');
+UPDATE public.exos_checkout_sessions SET status = 'fulfilled', fulfilled_at = now() WHERE session_id = 'cs_test_ad1_uc';
+SELECT pg_temp.fresh_minute();
+DO $$
+DECLARE e text[]; x text[];
+BEGIN
+  ASSERT (SELECT proven_via FROM public.exos_order_proofs WHERE session_id = 'cs_test_ad1_r1v') = 'sms', 'AD10 R1: set up as an SMS proof';
+  ASSERT (SELECT proven_via = 'organizer' AND email = 'right-r2@x.com' FROM public.exos_order_proofs WHERE session_id = 'cs_test_ad1_r2t'), 'AD10 R2: set up as an organizer correction';
+  e := pg_temp.emails(pg_temp.source(NULL));
+  x := pg_temp.xemails(pg_temp.xp());
+  ASSERT NOT ('victim-r1@x.com' = ANY (e)) AND NOT ('victim-r1@x.com' = ANY (x)),
+    'AD10 R1: a stranger''s phone proof made the victim a consenting buyer (source ' || e::text || ', export ' || x::text || ')';
+  ASSERT NOT ('typo-r2@x.com' = ANY (e)) AND NOT ('typo-r2@x.com' = ANY (x)), 'AD10 R2: the never-proven original address counted';
+  ASSERT NOT ('right-r2@x.com' = ANY (e)) AND NOT ('right-r2@x.com' = ANY (x)), 'AD10 R2: the organizer''s correction counted as consent';
+  ASSERT 'coded-r3@x.com' = ANY (e) AND 'coded-r3@x.com' = ANY (x), 'AD10: an email-code proof counts, got ' || e::text;
+  ASSERT NOT ('disp9@x.com' = ANY (e)) AND NOT ('disp9@x.com' = ANY (x)), 'AD10: an order lost to a dispute counted';
+  ASSERT NOT ('unconf@x.com' = ANY (e)) AND NOT ('unconf@x.com' = ANY (x)), 'AD10: an unconfirmed account''s "yes" counted';
+  ASSERT 'ph5@x.com' = ANY (e) AND 'buyer1@x.com' = ANY (x), 'AD10: confirmed accounts still count';
+  RAISE NOTICE 'OK  AD10 a "yes" needs the person''s own email proof: not an SMS proof, an organizer''s correction, a lost dispute or an unconfirmed account';
 END $$;
 
 ROLLBACK;
