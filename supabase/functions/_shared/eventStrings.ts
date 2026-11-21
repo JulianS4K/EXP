@@ -1,8 +1,10 @@
 // One source for the strings that describe an event to a buyer (2026-11-21):
 // the date line, the money format and the all-in "from" price. The event page
-// (src/views/EventDetails.tsx, its client JSON-LD in src/lib/meta.ts), the
-// crawler card and JSON-LD (src/lib/hosting/seo.ts) and the ad catalog feed
-// (_shared/catalog/feed.ts) all read them from here, so an ad, the page it
+// (src/views/EventDetails.tsx and its client JSON-LD, through
+// src/lib/eventFrom.ts), the org storefront's cards and the crawler card and
+// JSON-LD (src/lib/hosting/seo.ts) read them from here. The ad catalog feed
+// (_shared/catalog/feed.ts) doesn't import this file: it is the other way
+// round, this file calls the feed's own price rule, so an ad, the page it
 // lands on and the feed behind it quote the same price.
 //
 // The "from" price is the catalog feed's rule (feed.ts priceAndAvailability,

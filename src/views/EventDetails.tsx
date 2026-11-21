@@ -1741,8 +1741,9 @@ export default function EventDetails() {
       </div>
 
       {!buyInView && eventStatus !== 'cancelled' && (() => {
-        // The shared "from" rule (lib/eventFrom.ts): what the ad and the card quote.
-        const pf = pageFrom(visibleTiers, event);
+        // The shared "from" rule (lib/eventFrom.ts): what the ad and the card
+        // quote, on the same live sold / capacity as the ticket list (liveTier).
+        const pf = pageFrom(visibleTiers.map((tier) => ({ ...tier, ...liveTier(tier.id, tier.capacity) })), event);
         const from = pf && pf.availability !== 'out of stock' ? pf.cents : null;
         return (
           <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-black/95 border-t border-white/10 backdrop-blur px-4 py-3 flex items-center gap-4" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>

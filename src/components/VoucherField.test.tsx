@@ -56,20 +56,28 @@ describe('VoucherField: guests apply promo codes (mig 20261121143700)', () => {
     await waitFor(() => expect(onApplied).toHaveBeenCalledWith(expect.objectContaining({ code: 'upgrade1' })));
   });
 
-  it('applies a link code for a guest on load, without a sign-in prompt', async () => {
+  // Review of #132, S1: a check on load would spend every visitor's guest
+  // attempt on a bad link (?code=DEADCODE) and fill the event's guest budget.
+  it('never checks a guest\'s link code on load: it waits in the field for Apply', async () => {
     const onApplied = vi.fn();
     render(<VoucherField eventId="e1" onApplied={onApplied} initialCode="LINK20" />);
-    await waitFor(() => expect(h.checkGuestVoucher).toHaveBeenCalledWith('e1', 'LINK20'));
-    await waitFor(() => expect(onApplied).toHaveBeenCalled());
-    expect(h.openAuth).not.toHaveBeenCalled();
-  });
-
-  it('holds an account-only link code for a guest without prompting on load', async () => {
-    h.checkGuestVoucher.mockResolvedValue(signInRequired);
-    render(<VoucherField eventId="e1" onApplied={vi.fn()} initialCode="LINK20" />);
-    await waitFor(() => expect(h.checkGuestVoucher).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.checkGuestVoucher).not.toHaveBeenCalled();
+    expect(h.checkVoucher).not.toHaveBeenCalled();
     expect(h.openAuth).not.toHaveBeenCalled();
     expect((screen.getByLabelText(/promo or access code/i) as HTMLInputElement).value).toBe('LINK20');
+    fireEvent.click(screen.getByRole('button', { name: /^apply$/i }));
+    await waitFor(() => expect(h.checkGuestVoucher).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(onApplied).toHaveBeenCalled());
+  });
+
+  it('sends a guest whose tries are used up to sign in, not an error', async () => {
+    h.checkGuestVoucher.mockResolvedValue({ ...signInRequired, reason: 'too many attempts' });
+    render(<VoucherField eventId="e1" onApplied={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText(/promo or access code/i), { target: { value: 'early20' } });
+    fireEvent.click(screen.getByRole('button', { name: /^apply$/i }));
+    await waitFor(() => expect(h.openAuth).toHaveBeenCalledWith('code'));
+    expect(h.toast).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'error' }));
   });
 
   it('checks a link code straight away when signed in', async () => {

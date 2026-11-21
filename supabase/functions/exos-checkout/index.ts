@@ -461,7 +461,10 @@ async function handleCheckout(req: Request, wr: WroomAttempt): Promise<Response>
     } else {
       const g = await checkGuestVoucher(sb, event_id!, voucherCode, ipHash);
       if ("error" in g) return json({ error: g.error }, g.status);
-      if (g.row.reason === "sign in required") return json({ error: "sign in to use this code", reason: "sign_in" }, 401);
+      // Kept for accounts, or the guest tries used up: the buyer signs in.
+      if (g.row.reason === "sign in required" || g.row.reason === "too many attempts") {
+        return json({ error: "sign in to use this code", reason: "sign_in" }, 401);
+      }
       v = g.row;
     }
     if (!v?.is_valid) {

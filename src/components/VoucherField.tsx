@@ -10,7 +10,8 @@
 // for accounts (a capacity-bypass offer, a hidden ticket type, one reserved to
 // an email) answer 'sign in required': then the buyer is asked to sign in
 // (the emailed 6-digit code keeps them on this page) and the code is applied
-// as soon as they are.
+// as soon as they are. So does a guest whose guest tries are used up. A
+// guest's link code (?code=) is never checked on load, only on Apply.
 
 import { useEffect, useRef, useState } from 'react';
 import { Ticket, Check } from 'lucide-react';
@@ -47,20 +48,18 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
   // A code waiting for the buyer to sign in; applied once they have.
   const [pendingCode, setPendingCode] = useState<string | null>(null);
 
-  // onLoad: a link's code, applied as the page opens: no sign-in prompt then.
-  const apply = async (override?: string, onLoad = false) => {
+  const apply = async (override?: string) => {
     const c = (override ?? code).trim();
     if (!c) return;
     setBusy(true);
     try {
       const res = user ? await checkVoucher(eventId, c, email) : await checkGuestVoucher(eventId, c);
-      if (!user && !res.valid && res.reason === 'sign in required') {
-        // Kept for accounts by the server: sign in, then it applies.
+      // A code kept for accounts, or the guest path's tries used up (per
+      // network / per event): sign in, then it applies on the account's own budget.
+      if (!user && !res.valid && (res.reason === 'sign in required' || res.reason === 'too many attempts')) {
         setPendingCode(c);
-        if (!onLoad) {
-          toast({ kind: 'info', message: 'Sign in to use this code.' });
-          openAuth('code');
-        }
+        toast({ kind: 'info', message: res.reason === 'too many attempts' ? 'Sign in to use a code right now.' : 'Sign in to use this code.' });
+        openAuth('code');
         return;
       }
       if (!res.valid) {
@@ -82,16 +81,19 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
     }
   };
 
-  // A code from a checkout link: applied on mount, signed in or not (a code
-  // kept for accounts then waits until the buyer signs in).
+  // A code from a checkout link: checked on mount when signed in. For a
+  // guest it waits in the field until they tap Apply: a check on load would
+  // spend every visitor's guest attempt on a bad or stale link (?code=DEAD)
+  // and fill the event's guest budget (review of #132, S1).
   const autoApplied = useRef(false);
   useEffect(() => {
     if (initialCode && !autoApplied.current) {
+      if (!user || pendingCode) return;
       autoApplied.current = true;
-      void apply(initialCode, true);
+      void apply(initialCode);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialCode]);
+  }, [initialCode, user?.uid]);
 
   useEffect(() => {
     if (!user || !pendingCode || appliedCode) return;
@@ -134,6 +136,9 @@ export default function VoucherField({ eventId, email, onApplied, initialCode }:
       </button>
       {!user && pendingCode && (
         <span className="sr-only" role="status">Sign in to use the code {pendingCode}.</span>
+      )}
+      {!user && !pendingCode && initialCode && code.trim() === initialCode.trim() && (
+        <span className="sr-only" role="status">Your code {initialCode} is ready: tap Apply to use it.</span>
       )}
     </div>
   );
