@@ -14,10 +14,17 @@
 
 import { parseRedirectOrigins } from "./redirects.ts";
 
-/** Capacitor's origins: iOS (capacitor://localhost), Android (https://, or http:// with androidScheme 'http'). */
-export const NATIVE_APP_ORIGINS = ["capacitor://localhost", "https://localhost", "http://localhost"] as const;
+/**
+ * Capacitor's origins: iOS (capacitor://localhost), Android (https://localhost;
+ * apps/native/capacitor.config.ts sets androidScheme 'https', so http:// is
+ * never the app's and isn't accepted).
+ */
+export const NATIVE_APP_ORIGINS = ["capacitor://localhost", "https://localhost"] as const;
 
-/** The CORS-only extras that are on the native list, exactly; the rest dropped. */
+/**
+ * The CORS-only extras that are on the native list, exactly; the rest dropped.
+ * An origin has no path, so "https://localhost/" (trailing slash) is dropped too.
+ */
 export function parseCorsExtraOrigins(raw: string | undefined | null): string[] {
   const ok = new Set<string>(NATIVE_APP_ORIGINS);
   return (raw ?? "")

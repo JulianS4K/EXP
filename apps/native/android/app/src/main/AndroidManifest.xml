@@ -37,12 +37,16 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" />
                 <data android:host="${exosAppLinkHost}" />
-                <data android:pathPrefix="/door" />
+                <data android:path="/door" />
+                <data android:pathPrefix="/door/" />
                 <data android:pathPrefix="/checkin/" />
-                <data android:pathPrefix="/my-tickets" />
-                <data android:pathPrefix="/bridge/door" />
+                <data android:path="/my-tickets" />
+                <data android:pathPrefix="/my-tickets/" />
+                <data android:path="/bridge/door" />
+                <data android:pathPrefix="/bridge/door/" />
                 <data android:pathPrefix="/bridge/checkin/" />
-                <data android:pathPrefix="/bridge/my-tickets" />
+                <data android:path="/bridge/my-tickets" />
+                <data android:pathPrefix="/bridge/my-tickets/" />
             </intent-filter>
 
         </activity>

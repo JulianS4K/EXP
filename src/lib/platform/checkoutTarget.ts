@@ -5,10 +5,11 @@
 // in the browser sheet. Everything else (javascript:, data:, http:, a
 // protocol-relative //host, a loopback host) is refused, never navigated to.
 
+import { isLoopbackHost } from '../../../supabase/functions/_shared/redirects.ts';
+
 export type CheckoutTarget = { kind: 'app'; route: string } | { kind: 'sheet'; url: string };
 
 const SAFE_PATH = /^\/(?!\/)[^\\\u0000-\u001f\u007f]*$/;
-const LOOPBACK = /^(localhost|.*\.localhost|127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0)$/i;
 
 export function checkoutTarget(url: unknown, webBase: string | null): CheckoutTarget | null {
   if (typeof url !== 'string' || url.length > 4096) return null;
@@ -24,7 +25,7 @@ export function checkoutTarget(url: unknown, webBase: string | null): CheckoutTa
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' || u.username || u.password || LOOPBACK.test(u.hostname)) return null;
+  if (u.protocol !== 'https:' || u.username || u.password || isLoopbackHost(u.hostname)) return null;
   return { kind: 'sheet', url: u.toString() };
 }
 
@@ -37,6 +38,6 @@ export function externalUrl(url: string, webBase: string | null): string | null 
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' || u.username || u.password || LOOPBACK.test(u.hostname)) return null;
+  if (u.protocol !== 'https:' || u.username || u.password || isLoopbackHost(u.hostname)) return null;
   return u.toString();
 }

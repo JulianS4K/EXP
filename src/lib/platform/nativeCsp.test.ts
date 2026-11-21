@@ -27,8 +27,18 @@ describe('nativeCsp', () => {
     expect(connect).not.toContain('/bridge');
   });
 
-  it('frames the event video only', () => {
-    expect(directive(csp, 'frame-src')).toBe('frame-src https://www.youtube-nocookie.com https://player.vimeo.com');
+  it('frames the venue map and the event video only', () => {
+    expect(directive(csp, 'frame-src')).toBe('frame-src https://www.google.com https://www.youtube-nocookie.com https://player.vimeo.com');
+  });
+
+  it('allows the Maps script hosts only: no wildcard Google host, no blob: script', () => {
+    const script = directive(csp, 'script-src');
+    expect(script).toBe("script-src 'self' https://maps.googleapis.com https://maps.gstatic.com");
+    for (const banned of ['*.googleapis.com', '*.googleusercontent.com', '*.google.com', '*.gstatic.com', 'storage.googleapis.com', 'blob:', 'data:']) {
+      expect(script).not.toContain(banned);
+    }
+    expect(directive(csp, 'worker-src')).toBe("worker-src 'self' blob:");
+    expect(directive(csp, 'img-src')).toContain('https:');
   });
 
   it('drops a URL that is not plain https', () => {

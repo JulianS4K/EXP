@@ -3,7 +3,7 @@
 // return-URL / Turnstile check still refuses them.
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { corsAllowedOrigins, NATIVE_APP_ORIGINS, parseCorsExtraOrigins } from "./corsOrigins.ts";
-import { isAllowedEmbedReturn, isAllowedRedirect, parseRedirectOrigins } from "./redirects.ts";
+import { isAllowedEmbedReturn, isAllowedRedirect, isLoopbackHost, parseRedirectOrigins } from "./redirects.ts";
 import { allowedHosts, verifyAnswer } from "./wroomJoin.ts";
 
 const WEB = "https://exos-web.onrender.com";
@@ -21,8 +21,8 @@ Deno.test("CORS allows the native origins when listed", () => {
 
 Deno.test("only the exact native origins are kept: no wildcard, no other host", () => {
   assertEquals(
-    parseCorsExtraOrigins("*, https://*.example.com, https://evil.example, capacitor://localhost/, http://localhost:8080, null, http://localhost"),
-    ["http://localhost"],
+    parseCorsExtraOrigins("*, https://*.example.com, https://evil.example, capacitor://localhost/, https://localhost/, http://localhost:8080, null, http://localhost, https://localhost"),
+    ["https://localhost"],
   );
   assertEquals(parseCorsExtraOrigins(NATIVE_APP_ORIGINS.join(",")), [...NATIVE_APP_ORIGINS]);
   assertEquals(parseCorsExtraOrigins(""), []);
@@ -38,6 +38,21 @@ Deno.test("redirect, return-URL and Turnstile checks never see the CORS extras",
   assert(isAllowedRedirect(`${WEB}/bridge/my-tickets`, redirect));
   // The waiting room's Turnstile hostnames.
   assertEquals(allowedHosts((n) => env[n]), ["exos-web.onrender.com"]);
+});
+
+Deno.test("isLoopbackHost: 127.x written as IPv6 too, and nothing public", () => {
+  for (const h of ["localhost", "x.localhost", "127.0.0.1", "127.9.9.9", "0.0.0.0", "::1", "[::1]", "::", "[::]",
+    "::ffff:127.0.0.1", "[::ffff:7f00:1]", "[::ffff:7f12:3456]", "::127.0.0.1", "[::7f00:1]", "LOCALHOST."]) {
+    assert(isLoopbackHost(h), h);
+  }
+  // As URL writes them.
+  for (const u of ["https://[::ffff:127.0.0.1]/", "https://[::127.0.0.1]/"]) assert(isLoopbackHost(new URL(u).hostname), u);
+  for (const h of ["exos-web.onrender.com", "128.0.0.1", "[::ffff:8000:1]", "[2001:db8::1]", "localhost.example.com", "[::ffff:7f00:1:2]"]) {
+    assert(!isLoopbackHost(h), h);
+  }
+  const redirect = parseRedirectOrigins("https://[::ffff:127.0.0.1],https://[::127.0.0.1]");
+  assert(!isAllowedRedirect("https://[::ffff:7f00:1]/x", redirect));
+  assert(!isAllowedRedirect("https://[::7f00:1]/x", redirect));
 });
 
 Deno.test("loopback and non-https entries are ignored even when configured", () => {

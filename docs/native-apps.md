@@ -179,7 +179,7 @@ devices before the first TestFlight / internal build.
 6. **Edge function origins (CORS only):** the app calls the edge functions from `capacitor://localhost`
    (iOS) and `https://localhost` (Android). Set the edge secret
    `EXOS_CORS_EXTRA_ORIGINS=capacitor://localhost,https://localhost` (`_shared/corsOrigins.ts`; only those
-   two and `http://localhost` are accepted, no wildcard). It only widens the CORS answer of the ten
+   two are accepted, exactly as written: no wildcard, no trailing slash, no `http://localhost`). It only widens the CORS answer of the ten
    functions that echo allow-listed origins. **Do not** add localhost origins to `EXOS_REDIRECT_ORIGINS`
    (or Supabase Auth's redirect URLs): that list decides where Stripe, OAuth and the waiting room may send
    or accept a browser, and a localhost entry could hand a return URL to another app on the device. The

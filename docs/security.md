@@ -1305,14 +1305,14 @@ Two settings, kept apart on purpose. `EXOS_REDIRECT_ORIGINS` decides where a
 browser may be **sent back to** (Stripe return pages, OAuth returns) and which
 hosts a Turnstile answer may come from; it is also allowed for CORS.
 `EXOS_CORS_EXTRA_ORIGINS` (`_shared/corsOrigins.ts`) is **CORS only**: it lets
-the native app's web views (`capacitor://localhost`, `https://localhost`,
-`http://localhost`, exactly those, no wildcard; `docs/native-apps.md`) call the
+the native app's web views (`capacitor://localhost` and `https://localhost`,
+exactly those, no wildcard or trailing slash; `docs/native-apps.md`) call the
 functions below, and nothing is ever redirected or returned there. Never put a
 localhost origin in `EXOS_REDIRECT_ORIGINS`: another app on the device could
 then receive a return URL. The same goes for Supabase Auth's redirect URLs
 (dashboard). The code enforces it too: `isAllowedRedirect` /
 `isAllowedEmbedReturn` accept https only and never a loopback host
-(`isLoopbackHost`: localhost, `*.localhost`, 127.x, ::1, 0.0.0.0) even when one
+(`isLoopbackHost`: localhost, `*.localhost`, 127.x, ::1, ::, 0.0.0.0, and 127.x written as IPv6, ::ffff:127.x / ::127.x) even when one
 is configured, and the waiting room's Turnstile host list drops loopback and
 non-https entries and never passes a loopback answer (an app web view reports
 `localhost`), so the native app sends Turnstile rooms to the browser sheet.

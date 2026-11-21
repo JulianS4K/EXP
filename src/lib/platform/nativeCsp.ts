@@ -10,7 +10,8 @@
 //     sheet instead, docs/native-apps.md).
 //   * network: this project's Supabase (https + realtime wss), the public web
 //     app's origin, Sentry, Maps.
-//   * frames: the event page's YouTube / Vimeo video only.
+//   * frames: the venue's Maps embed and the event page's YouTube / Vimeo
+//     video only.
 // Mirrors the web policy's choices (src/lib/hosting/headers.ts bridgeCsp).
 
 export interface NativeCspInput {
@@ -20,7 +21,11 @@ export interface NativeCspInput {
   webUrl?: string;
 }
 
-const MAPS_SCRIPT = 'https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.ggpht.com https://*.googleusercontent.com';
+// Only the Maps JavaScript API's own two hosts: a wildcard would also allow
+// storage.googleapis.com / *.googleusercontent.com (anyone's uploaded .js) and
+// *.google.com (JSONP endpoints). Maps' tiles and photos load as images
+// (img-src https:), and its generated workers as blob: (worker-src).
+const MAPS_SCRIPT = 'https://maps.googleapis.com https://maps.gstatic.com';
 const MAPS_CONNECT = 'https://*.googleapis.com https://*.google.com https://*.gstatic.com';
 
 function httpsOrigin(raw: string | undefined): string | null {
@@ -41,13 +46,13 @@ export function nativeCsp(input: NativeCspInput): string {
   connect.push('https://*.sentry.io', MAPS_CONNECT, 'data:', 'blob:');
   return [
     "default-src 'self'",
-    // blob: for Maps' own generated scripts, as on the web (headers.ts MAPS_SCRIPT).
-    `script-src 'self' ${MAPS_SCRIPT} blob:`,
+    `script-src 'self' ${MAPS_SCRIPT}`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
     `connect-src ${connect.join(' ')}`,
-    'frame-src https://www.youtube-nocookie.com https://player.vimeo.com',
+    // The venue map (VenueMap.tsx: www.google.com/maps/embed) and the event video.
+    'frame-src https://www.google.com https://www.youtube-nocookie.com https://player.vimeo.com',
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "media-src 'self' blob: https:",

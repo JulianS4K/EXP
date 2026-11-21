@@ -100,8 +100,16 @@ describe('deep links into the app', () => {
     const manifest = readFileSync(resolve(__dirname, '../../../apps/native/android/app/src/main/AndroidManifest.xml'), 'utf8');
     for (const r of APP_LINK_ROUTES) {
       expect(aasa).toContain(`"/${r.replace(/^\//, '').replace(/\/$/, '')}`);
-      expect(manifest).toContain(`android:pathPrefix="${r}"`);
-      expect(manifest).toContain(`android:pathPrefix="/bridge${r}"`);
+      for (const p of [r, `/bridge${r}`]) {
+        // A route without a trailing slash is claimed exactly and under "/",
+        // never as a bare prefix (/my-tickets must not also claim /my-ticketsX).
+        if (p.endsWith('/')) expect(manifest).toContain(`android:pathPrefix="${p}"`);
+        else {
+          expect(manifest).toContain(`android:path="${p}"`);
+          expect(manifest).toContain(`android:pathPrefix="${p}/"`);
+          expect(manifest).not.toContain(`android:pathPrefix="${p}"`);
+        }
+      }
       expect(aasa).toContain(`"/bridge/${r.replace(/^\//, '').replace(/\/$/, '')}`);
     }
   });
@@ -146,7 +154,7 @@ describe('checkout and external targets in the app', () => {
 
   it('refuses every other scheme or shape', () => {
     for (const u of ['javascript:alert(1)', 'data:text/html,x', 'http://checkout.stripe.com/x', '//evil.example/x', '/\\evil.example',
-      'https://u:p@checkout.stripe.com/', 'https://localhost/x', 'capacitor://localhost/x', `${BASE}//evil.example`, '', 42]) {
+      'https://u:p@checkout.stripe.com/', 'https://localhost/x', 'capacitor://localhost/x', 'https://[::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://[::127.0.0.1]/x', 'https://127.0.0.1/x', `${BASE}//evil.example`, '', 42]) {
       expect(checkoutTarget(u, BASE)).toBeNull();
     }
   });
@@ -156,5 +164,6 @@ describe('checkout and external targets in the app', () => {
     expect(externalUrl(`${BASE}/pay/paypal`, BASE)).toBe(`${BASE}/pay/paypal`);
     expect(externalUrl('javascript:alert(1)', BASE)).toBeNull();
     expect(externalUrl('http://pay.example/', BASE)).toBeNull();
+    expect(externalUrl('https://[::ffff:127.0.0.1]/pay', BASE)).toBeNull();
   });
 });

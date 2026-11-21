@@ -17,11 +17,17 @@ export function parseRedirectOrigins(raw: string | undefined | null): string[] {
     .filter((s) => s.length > 0);
 }
 
-/** localhost, *.localhost, 127.0.0.0/8, ::1 (bracketed or not), 0.0.0.0. */
+/**
+ * localhost, *.localhost, 127.0.0.0/8, ::1, ::, 0.0.0.0, and 127.0.0.0/8 as an
+ * IPv6 address (::ffff:127.x.x.x, ::127.x.x.x; URL writes them as ::ffff:7fxx:x
+ * and ::7fxx:x). IPv6 forms bracketed or not.
+ */
 export function isLoopbackHost(hostname: string): boolean {
   const h = hostname.trim().toLowerCase().replace(/\.$/, "");
+  const v6 = h.replace(/^\[(.*)\]$/, "$1");
   return h === "localhost" || h.endsWith(".localhost") || /^127\.\d+\.\d+\.\d+$/.test(h)
-    || h === "::1" || h === "[::1]" || h === "0.0.0.0" || h === "[::]";
+    || h === "0.0.0.0" || v6 === "::1" || v6 === "::"
+    || /^::(ffff:)?(7f[0-9a-f]{2}:[0-9a-f]{1,4}|127\.\d+\.\d+\.\d+)$/.test(v6);
 }
 
 export function isAllowedRedirect(url: unknown, allowedOrigins: string[]): boolean {
