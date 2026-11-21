@@ -78,6 +78,8 @@ export interface CoreCtx {
   credKind?: "api_key" | "pat" | "oauth";
   tokenHash?: string;
   tokenOrg?: string | null;
+  /** An OAuth token's resource, which SQL holds to this API's canonical URL. */
+  tokenResource?: string | null;
 }
 
 /** The route ids this module answers. */
@@ -435,6 +437,7 @@ async function write(c: CoreCtx, action: string, target: string | null, args: Re
     return await rpc(c.sb, "exos_api_write", {
       p_key_id: null, p_action: action, p_target: target, p_args: args, p_idempotency_key: c.idempotencyKey,
       p_token_hash: c.tokenHash, p_token_kind: c.credKind, p_token_org: c.tokenOrg ?? null,
+      p_source: "api", p_token_resource: c.credKind === "oauth" ? c.tokenResource ?? null : null,
     });
   }
   // An org API key: the same five arguments as before.

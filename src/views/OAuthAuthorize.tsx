@@ -16,16 +16,19 @@ import { useLocation } from 'react-router-dom';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { authorizeApprove, authorizeInfo, sqlMessage, type AuthorizeInfo } from '../lib/developerPlatform';
-import { parseAuthorizeQuery, withParams } from '../../supabase/functions/_shared/api/credentials.ts';
+import { exosResources, parseAuthorizeQuery, withParams } from '../../supabase/functions/_shared/api/credentials.ts';
 import { isScope, SCOPE_INFO } from '../../supabase/functions/_shared/api/scopes.ts';
 import { approvedScope, splitConsentScopes } from '../lib/oauthConsent';
 
 const BTN = 'px-5 py-2 text-xs font-black uppercase tracking-widest border disabled:opacity-40';
+const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+// The resources a token may be for (exos_oauth_authorize_approve enforces the same list).
+const RESOURCES = env.VITE_SUPABASE_URL ? Object.values(exosResources(env.VITE_SUPABASE_URL)) : undefined;
 
 export default function OAuthAuthorize() {
   const { user, openAuthModal } = useAuth();
   const location = useLocation();
-  const parsed = useMemo(() => parseAuthorizeQuery(new URLSearchParams(location.search)), [location.search]);
+  const parsed = useMemo(() => parseAuthorizeQuery(new URLSearchParams(location.search), RESOURCES), [location.search]);
   const [info, setInfo] = useState<AuthorizeInfo | null>(null);
   const [orgId, setOrgId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -143,7 +146,11 @@ export default function OAuthAuthorize() {
               </div>
             );
           })}
-          <p className="text-[11px] text-white/40">Untick anything you don't want it to change. An AI assistant asks you before each change it makes in Exos.</p>
+          <p className="text-[11px] text-white/40">
+            Untick anything you don't want it to change. Once allowed, the app can make these changes without asking you
+            each time. Through Exos's AI assistant connection, drafts and ticket types are made after the assistant shows a
+            preview, and nothing is published until you click Publish in Exos yourself.
+          </p>
         </fieldset>
       )}
       <p className="text-[11px] text-white/40">Never more than your role allows; if your role changes, so does the app's access. Disconnect it any time in your profile.</p>

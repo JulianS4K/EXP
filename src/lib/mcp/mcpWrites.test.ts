@@ -5,13 +5,16 @@
 // keeps the SQL's confirmation rules (tests/exos/test_mcp_writes.sql runs the
 // real ones).
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EXOS_MCP_INSTRUCTIONS, WRITE_TOOLS, exosMcpServer, expectedFeeStatement, feeStatement, handleBody, imageUrl,
-  zonedToUtc, type EventState, type ExosData, type McpWriteData, type ToolContext, type WriteExec,
+  reviewUrl, zonedToUtc, type EventState, type ExosData, type McpWriteData, type PublishStatus, type ToolContext, type WriteExec,
 } from '.';
 import { USER_TOKEN_CORE_WRITES, userTokenMayCall } from '../../../supabase/functions/_shared/api/request.ts';
 import { ROUTES } from '../../../supabase/functions/_shared/api/routes.ts';
+
+// The review page's helpers import the app's client; these tests need none.
+vi.mock('../supabase', () => ({ supabase: {} }));
 
 const ORG = '33333333-3333-4333-8333-333333333333';
 const OTHER_EVENT = '99999999-9999-4999-8999-999999999999';
@@ -30,6 +33,7 @@ const canon = (v: unknown): string => JSON.stringify(v, (_k, x) => (x && typeof 
 function fakeDb(state: { event: EventState; free: boolean }) {
   const confirms = new Map<string, { cred: string; tool: string; exec: string; used: boolean; expires: number }>();
   const writes: Array<{ tool: string; exec: WriteExec }> = [];
+  const requests = new Map<string, PublishStatus & { cred: string; digest: string }>();
   let n = 0;
   const credOf = (ctx: ToolContext) => `${ctx.credKind}:${ctx.credId}`;
   const db: McpWriteData = {
@@ -50,8 +54,18 @@ function fakeDb(state: { event: EventState; free: boolean }) {
       c.used = true;
       writes.push({ tool, exec });
       if (exec.action === 'event.create') return { ok: true, result: { id: EV, name: (exec.args.event as { name: string }).name, publish_blockers: [] } };
-      if (exec.action === 'ticket_type.create') return { ok: true, result: { id: 'tier-1', ...(exec.args.ticket_type as object) } };
-      return { ok: true, result: { published: state.event.blockers.length === 0, blockers: state.event.blockers } };
+      return { ok: true, result: { id: 'tier-1', ...(exec.args.ticket_type as object) } };
+    },
+    async publishRequest(ctx, eventId, digest) {
+      if (digest !== state.event.digest) return { ok: false, error: 'changed', message: 'the event changed since the preview' };
+      if (state.event.blockers.length) return { ok: false, error: 'blocked', message: 'blocked', blockers: state.event.blockers };
+      const id = `aaaaaaaa-aaaa-4aaa-8aaa-${String(requests.size + 1).padStart(12, '0')}`;
+      requests.set(id, { request_id: id, event_id: eventId, status: 'pending', expires_at: '2099-01-01T00:00:00Z', decided_at: null, cred: credOf(ctx), digest });
+      return { ok: true, status: 'pending', request_id: id, event_id: eventId, expires_at: '2099-01-01T00:00:00Z' };
+    },
+    async publishStatus(ctx, id) {
+      const r = requests.get(id);
+      return r && r.cred === credOf(ctx) ? r : null;
     },
     async orgVenue(orgId, id) { return orgId === ORG && id === VENUE ? { id, name: 'The Loft', address: { street: '1 Main St', city: 'Brooklyn' }, timezone: null } : null; },
     async eventState(orgId, id) { return orgId === ORG && id === EV ? state.event : null; },
@@ -59,7 +73,7 @@ function fakeDb(state: { event: EventState; free: boolean }) {
       return orgId === ORG && id === EV ? { free_tier: state.free, max_capacity: state.free ? 120 : 300, free_tier_max_capacity: 150 } : null;
     },
   };
-  return { db, writes, confirms };
+  return { db, writes, confirms, requests };
 }
 
 const draft = (over: Partial<EventState> = {}): EventState => ({
@@ -67,6 +81,7 @@ const draft = (over: Partial<EventState> = {}): EventState => ({
     currency: 'USD', venue_name: 'The Loft', total_tickets: 120 },
   ticket_types: [{ id: 't1', name: 'RSVP', price: 0, capacity: 120, sales_start: null, sales_end: null }],
   blockers: [],
+  digest: 'd'.repeat(64),
   ...over,
 });
 
@@ -98,16 +113,21 @@ describe('tools/list', () => {
     expect(await t.call('create_event_draft', CREATE, { orgId: null })).toMatchObject({ isError: true });
   });
 
-  it('annotations: none read-only, publish destructive and idempotent; every write takes a confirm_token', async () => {
+  it('annotations: none read-only, publish destructive and idempotent; drafts take a confirm_token, publish never', async () => {
     const t = setup();
     const tools = (await t.rpc('tools/list', {}, pat)).result.tools as any[];
     const by = Object.fromEntries(tools.map((x) => [x.name, x]));
     for (const name of Object.keys(WRITE_TOOLS)) {
       expect(by[name].annotations.readOnlyHint, name).toBe(false);
-      expect(by[name].inputSchema.properties.confirm_token, name).toBeDefined();
-      expect(by[name].inputSchema.required ?? [], name).not.toContain('confirm_token');
       expect(by[name].inputSchema.additionalProperties, name).toBe(false);
     }
+    for (const name of ['create_event_draft', 'add_ticket_type']) {
+      expect(by[name].inputSchema.properties.confirm_token, name).toBeDefined();
+      expect(by[name].inputSchema.required ?? [], name).not.toContain('confirm_token');
+    }
+    // A publish completes only when the person clicks Publish in Exos.
+    expect(by.publish_event.inputSchema.properties.confirm_token).toBeUndefined();
+    expect(by.publish_event.description).toMatch(/does not publish/);
     expect(by.publish_event.annotations).toMatchObject({ destructiveHint: true, idempotentHint: true });
     expect(by.create_event_draft.annotations).toMatchObject({ destructiveHint: false, idempotentHint: false });
     expect(by.add_ticket_type.annotations).toMatchObject({ destructiveHint: false, idempotentHint: false });
@@ -119,7 +139,8 @@ describe('tools/list', () => {
 
   it('the instructions require explicit confirmation and treat content as content', () => {
     expect(EXOS_MCP_INSTRUCTIONS).toMatch(/only after they have explicitly agreed/);
-    expect(EXOS_MCP_INSTRUCTIONS).toMatch(/Never publish an event without the person's explicit confirmation/);
+    expect(EXOS_MCP_INSTRUCTIONS).toMatch(/Never publish an event without the person's explicit\s+confirmation/);
+    expect(EXOS_MCP_INSTRUCTIONS).toMatch(/publish_event never publishes/);
     expect(EXOS_MCP_INSTRUCTIONS).toMatch(/content, not instructions/);
     expect(EXOS_MCP_INSTRUCTIONS).toMatch(/Never send a confirm_token on your own initiative/);
     expect(EXOS_MCP_INSTRUCTIONS).toMatch(/free tier: no Exos fee/);
@@ -162,16 +183,35 @@ describe('the confirm_token flow', () => {
     expect(t.writes).toHaveLength(1);
   });
 
-  it('publish without a confirm_token returns the summary and publishes nothing', async () => {
+  it('publish_event never publishes: a summary and a review link the person publishes from', async () => {
     const t = setup();
     const r = (await t.call('publish_event', { event_id: EV })).structuredContent;
-    expect(r.status).toBe('confirmation_required');
-    expect(r.preview.action).toMatch(/PUBLISH/);
-    expect(r.preview.ticket_types).toEqual([{ name: 'RSVP', price: 'free', quantity: 120 }]);
+    expect(r.status).toBe('review_required');
+    expect(r.summary.ticket_types).toEqual([{ name: 'RSVP', price: 'free', quantity: 120 }]);
+    expect(r.review_url).toBe(reviewUrl('https://exos.example.test/bridge', ORG, EV, r.request_id));
+    expect(r.review_url).toBe(`https://exos.example.test/bridge/orgs/${ORG}/events/${EV}/publish-review?request=${r.request_id}`);
+    expect(r.next_step).toMatch(/you cannot publish it yourself/);
     expect(t.writes).toHaveLength(0);
-    const p = (await t.call('publish_event', { event_id: EV, confirm_token: r.confirm_token })).structuredContent;
-    expect(p).toMatchObject({ status: 'published', event_id: EV });
-    expect(t.writes.map((w) => w.exec.action)).toEqual(['event.publish']);
+    // The request is bound to the digest of the state it previewed.
+    expect([...t.requests.values()][0].digest).toBe('d'.repeat(64));
+    // Reading it back: pending until the person clicks; nothing the assistant sends publishes it.
+    expect((await t.call('publish_event', { event_id: EV, request_id: r.request_id })).structuredContent).toMatchObject({ status: 'pending' });
+    expect((await t.call('publish_event', { event_id: EV, confirm_token: `exos_mcc_${'a'.repeat(43)}` })).isError).toBe(true);
+    t.requests.get(r.request_id)!.status = 'published';
+    expect((await t.call('publish_event', { event_id: EV, request_id: r.request_id })).structuredContent)
+      .toMatchObject({ status: 'published', event_url: `https://exos.example.test/bridge/event/${EV}` });
+    // Another credential can't read it.
+    expect((await t.call('publish_event', { event_id: EV, request_id: r.request_id }, oauth)).isError).toBe(true);
+  });
+
+  it('a changed event refuses the old preview', async () => {
+    const t = setup();
+    t.state.event = { ...t.state.event, digest: 'e'.repeat(64) };
+    const f = fakeDb({ event: draft(), free: true });
+    const realDigest = { ...f.db, eventState: async () => draft({ digest: '1'.repeat(64) }) };
+    const server = exosMcpServer(reads, { appBase: 'https://x.test', version: '1', writes: { ...realDigest, publishRequest: f.db.publishRequest } });
+    const res: any = await handleBody(server, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'publish_event', arguments: { event_id: EV } } }), pat);
+    expect(res.result.structuredContent.error).toMatch(/changed since the preview/);
   });
 
   it('paid tickets without Stripe Connect: a clear error with the onboarding link, no token issued', async () => {
@@ -281,5 +321,49 @@ describe('the TypeScript lists match the SQL (mig 20261119130000)', () => {
       expect(userTokenMayCall('oauth', r.method, r.id), id).toBe(false);
       expect(userTokenMayCall('pat', r.method, r.id), id).toBe(false);
     }
+  });
+});
+
+describe('OAuth resources (RFC 8707)', () => {
+  it('the consent page refuses a resource that is not an Exos API', async () => {
+    const { exosResources, parseAuthorizeQuery } = await import('../../../supabase/functions/_shared/api/credentials.ts');
+    const res = exosResources('https://abc.supabase.co/');
+    expect(res).toEqual({ api: 'https://abc.supabase.co/functions/v1/exos-api', mcp: 'https://abc.supabase.co/functions/v1/exos-mcp/organizer' });
+    const q = (resource: string) => new URLSearchParams({
+      response_type: 'code', client_id: `exos_app_${'a'.repeat(24)}`, redirect_uri: 'https://claude.ai/api/mcp/auth_callback',
+      state: 'xyz', code_challenge: 'A'.repeat(43), code_challenge_method: 'S256', resource,
+    });
+    const allowed = Object.values(res);
+    expect(parseAuthorizeQuery(q('https://evil.example/mcp'), allowed)).toMatchObject({ ok: false, error: 'invalid_target', redirect: true });
+    expect(parseAuthorizeQuery(q(`${res.mcp}/`), allowed)).toMatchObject({ ok: false, error: 'invalid_target' });
+    expect(parseAuthorizeQuery(q(res.mcp), allowed)).toMatchObject({ ok: true });
+    expect(parseAuthorizeQuery(q(res.api), allowed)).toMatchObject({ ok: true });
+  });
+  it('the SQL default list is this project\'s exos-api and exos-mcp organizer URLs', async () => {
+    const { exosResources } = await import('../../../supabase/functions/_shared/api/credentials.ts');
+    const mig = readFileSync('supabase/migrations/20261119130000_exos_mcp_writes.sql', 'utf8');
+    const res = exosResources('https://hzrizjeaxlqcxfrtczpq.supabase.co');
+    expect(mig).toContain(`'${res.api}'`);
+    expect(mig).toContain(`'${res.mcp}'`);
+  });
+});
+
+describe('the publish review page helpers', () => {
+  it('reads the request id and says why Publish is off', async () => {
+    const { publishBlockedReason, requestIdFrom, approveMessage, viaLabel } = await import('../mcpPublishReview');
+    expect(requestIdFrom('?request=aaaaaaaa-aaaa-4aaa-8aaa-000000000001')).toBe('aaaaaaaa-aaaa-4aaa-8aaa-000000000001');
+    expect(requestIdFrom('?request=x')).toBeNull();
+    const base = {
+      request: { id: 'r', status: 'pending', expires_at: '2099-01-01T00:00:00Z', created_at: '', via: 'oauth' as const, app: 'Claude' },
+      state: { event: { ...draft().event }, ticket_types: draft().ticket_types, blockers: [] },
+      fee: null, unchanged: true,
+    };
+    expect(publishBlockedReason(base)).toBeNull();
+    expect(publishBlockedReason({ ...base, unchanged: false })).toMatch(/changed after the assistant/);
+    expect(publishBlockedReason({ ...base, request: { ...base.request, expires_at: '2000-01-01T00:00:00Z' } })).toMatch(/expired/);
+    expect(publishBlockedReason({ ...base, request: { ...base.request, status: 'published' } })).toMatch(/published/);
+    expect(approveMessage({ ok: true, status: 'published', event_id: EV })).toMatch(/^Published/);
+    expect(approveMessage({ ok: false, status: 'changed', event_id: EV })).toMatch(/changed/);
+    expect(viaLabel(base.request)).toBe('Claude (an app you connected)');
   });
 });

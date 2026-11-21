@@ -124,7 +124,8 @@ import {
 } from "../_shared/api/routes.ts";
 import { MAX_BODY_BYTES, readCapped } from "../_shared/api/body.ts";
 import {
-  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, RPC_STATUS, userTokenMayCall,
+  idempotencyKeyOf, parseBodyText, PLATFORM_ROUTES, RequestError, rpcAnswer, RPC_STATUS, USER_TOKEN_CORE_WRITES,
+  userTokenMayCall,
 } from "../_shared/api/request.ts";
 import { effectiveScopes, hasScope, type Scope } from "../_shared/api/scopes.ts";
 import { pageEnvelope, PagingError, parsePage, type Page } from "../_shared/api/paging.ts";
@@ -183,7 +184,7 @@ import { ATTENDANCE_ROUTES, AttendanceError, handleAttendance } from "./attendan
 import { AUDIT_ROUTES, AuditError, handleAudit } from "./audit.ts"; // claude/exos-org-audit
 import { actorHeaders } from "../_shared/api/audit.ts"; // claude/exos-org-audit
 import { genreFilter, GenreParamError } from "../_shared/api/genres.ts";
-import { bearerKind, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
+import { bearerKind, exosResources, ORG_ROLES, ROLE_INFO, ROLE_SCOPES, sha256Hex } from "../_shared/api/credentials.ts";
 import {
   opendatePage, orderFilters, PARTNER_KEY_RE, ParamError, parseOrderItems, presentedPartnerKey,
   reservationAnswersParam, reservationAttrs, RESERVATION_TOKEN_RE, unwrapParams,
@@ -283,6 +284,8 @@ interface Credential {
   account: boolean;
   /** A personal access token acting in another org (X-Exos-Org): the org it was made in. */
   homeOrgId?: string | null;
+  /** An OAuth token's resource (RFC 8707), null when it named none (mig 20261119130000). */
+  resource?: string | null;
 }
 
 interface Ctx {
@@ -367,6 +370,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
   if (!resolved) return json({ error: "invalid or revoked API key" }, 401);
   const { cred, orgId } = resolved;
+  // The audience (RFC 8707, mig 20261119130000): an OAuth token issued for
+  // another resource (e.g. exos-mcp, or a server that named exos-oauth as its
+  // authorization server) is not this API's. A token that named no resource
+  // still reads; its writes are refused below.
+  const apiResource = exosResources(Deno.env.get("SUPABASE_URL") ?? "").api;
+  if (cred.kind === "oauth" && cred.resource && cred.resource !== apiResource) {
+    return json({ error: "this OAuth token was issued for another resource" }, 401, {
+      "www-authenticate": `Bearer error="invalid_token", error_description="wrong resource"`,
+    });
+  }
 
   // Per-credential rate limit: RATE_LIMIT requests per clock minute (fixed
   // window). API keys use exos_api_rate_hit (mig 20260925020000), user tokens
@@ -413,6 +426,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
     !USER_TOKEN_WRITES.has(match.route.id)
   ) {
     return json({ error: "this write needs an organization API key (sk_live_…)" }, 403);
+  }
+  // A user token's core write (USER_TOKEN_CORE_WRITES): an OAuth token only if
+  // it was issued for this API exactly; exos_api_write checks it again.
+  if (cred.kind === "oauth" && USER_TOKEN_CORE_WRITES.has(match.route.id) && cred.resource !== apiResource) {
+    return json({
+      error: "this write needs an OAuth token issued for the Exos API (authorize with resource=" + apiResource + ")",
+    }, 403);
   }
 
   try {
@@ -574,6 +594,7 @@ async function resolveCredential(
       userId: String(t.user_id), role: account ? null : String(t.role), clientId: (t.client_id as string | null) ?? null,
       account,
       homeOrgId: (t.home_org_id as string | null) ?? null,
+      resource: (t.resource as string | null) ?? null,
     },
   };
 }
@@ -660,6 +681,7 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       // claude/exos-mcp-writes (mig 20261119130000): a user token's core writes
       // (USER_TOKEN_CORE_WRITES) go to exos_api_write with the token's hash.
       credKind: c.cred.kind, tokenHash: c.tokenHash, tokenOrg: c.switchOrg,
+      tokenResource: c.cred.kind === "oauth" ? c.cred.resource ?? null : null,
     });
   }
   // Membership products, memberships, imported attendees (mig 20261102100000).

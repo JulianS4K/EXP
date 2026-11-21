@@ -1,8 +1,15 @@
 // exos-mcp's OAuth discovery (docs/mcp.md "Sign in with OAuth"): RFC 9728
 // protected-resource metadata, the WWW-Authenticate challenge that starts a
-// connector's sign-in, the resource check on OAuth tokens (RFC 8707), and the
+// connector's sign-in, the audience check on OAuth tokens (RFC 8707), and the
 // write tools' confirm tokens. Pure (web crypto only), so Deno tests and
 // vitest both import it.
+//
+// exos-mcp's ONE canonical resource is its organizer URL
+// (…/functions/v1/exos-mcp/organizer, exosResources().mcp). An OAuth token is
+// for exos-mcp only when its resource is exactly that; a token that named no
+// resource may read, never write; any other resource is refused.
+
+import { exosResources } from '../api/credentials.ts';
 
 /** The scopes the organizer tools use: what a connector asks for at sign-in. */
 export const ORGANIZER_SCOPES = ['events:read', 'events:write', 'orders:read', 'tickets:read'] as const;
@@ -12,17 +19,16 @@ export function isOrganizerPath(pathname: string): boolean {
   return /\/exos-mcp\/organizer(?:\/|$)/.test(pathname);
 }
 
-/** The MCP URLs a token may name as its resource: the server and its sign-in-required twin. */
-export function mcpResources(supabaseUrl: string): [string, string] {
-  const base = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/exos-mcp`;
-  return [base, `${base}/organizer`];
+/** exos-mcp's canonical resource URL. */
+export function mcpResource(supabaseUrl: string): string {
+  return exosResources(supabaseUrl).mcp;
 }
 
-/** RFC 9728 metadata for the server (or its /organizer twin). */
-export function protectedResource(supabaseUrl: string, issuer: string | undefined, organizer: boolean) {
+/** RFC 9728 metadata, served at the canonical resource's well-known path only. */
+export function protectedResource(supabaseUrl: string, issuer: string | undefined) {
   const base = supabaseUrl.replace(/\/+$/, '');
   return {
-    resource: mcpResources(supabaseUrl)[organizer ? 1 : 0],
+    resource: mcpResource(supabaseUrl),
     authorization_servers: [issuer || `${base}/functions/v1/exos-oauth`],
     bearer_methods_supported: ['header'],
     scopes_supported: [...ORGANIZER_SCOPES],
@@ -31,15 +37,18 @@ export function protectedResource(supabaseUrl: string, issuer: string | undefine
 }
 
 /** The WWW-Authenticate value on a 401: where the metadata is, and what to ask for. */
-export function challenge(supabaseUrl: string, organizer: boolean, error?: 'invalid_token'): string {
-  return `Bearer realm="exos", resource_metadata="${mcpResources(supabaseUrl)[organizer ? 1 : 0]}/.well-known/oauth-protected-resource", ` +
+export function challenge(supabaseUrl: string, error?: 'invalid_token'): string {
+  return `Bearer realm="exos", resource_metadata="${mcpResource(supabaseUrl)}/.well-known/oauth-protected-resource", ` +
     `scope="${ORGANIZER_SCOPES.join(' ')}"${error ? `, error="${error}"` : ''}`;
 }
 
-/** An OAuth token's `resource` (RFC 8707): none, or one of this server's URLs. */
-export function tokenResourceOk(resource: string | null | undefined, supabaseUrl: string): boolean {
-  if (!resource) return true;
-  return (mcpResources(supabaseUrl) as string[]).includes(resource.replace(/\/+$/, ''));
+/**
+ * An OAuth token's audience: `ok` (issued for exos-mcp exactly: reads and
+ * writes), `none` (named no resource: reads only), `other` (refused).
+ */
+export function tokenAudience(resource: string | null | undefined, supabaseUrl: string): 'ok' | 'none' | 'other' {
+  if (resource === null || resource === undefined || resource === '') return 'none';
+  return resource === mcpResource(supabaseUrl) ? 'ok' : 'other';
 }
 
 /** A new confirm token for the write tools: exos_mcc_ + 32 random bytes, base64url. */

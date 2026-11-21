@@ -132,7 +132,9 @@ Credentials: an org API key (`sk_live_…`), a personal access token (`exos_pat_
 user's live role; they may call every GET and the platform routes (distribution partners, organizer
 reservations, the team, tokens: `PLATFORM_ROUTES` in `_shared/api/request.ts`), and three core writes as
 their own user: `create-event`, `create-ticket-type`, `publish-event` (`USER_TOKEN_CORE_WRITES`, mig 20261119130000;
-`exos_api_write` re-resolves the token in SQL, docs/developer-platform.md "Writes as yourself"). Every other write
+`exos_api_write` re-resolves the token in SQL; an OAuth token only if it was issued for exos-api's URL,
+docs/developer-platform.md "Writes as yourself"). An OAuth token issued for another resource (RFC 8707), such as
+exos-mcp, is refused here with 401. Every other write
 records or checks an org API key id (`exos_api_write`, booking, offers, listing keys) and answers 403 to a user
 token.
 

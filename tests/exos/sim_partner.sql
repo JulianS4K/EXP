@@ -689,7 +689,7 @@ BEGIN
   END IF;
   IF has_function_privilege('authenticated', 'public._exos_partner_reserve(uuid,uuid,uuid,uuid,jsonb,jsonb,boolean,boolean)', 'EXECUTE')
      OR NOT has_function_privilege('service_role', 'public._exos_partner_reserve(uuid,uuid,uuid,uuid,jsonb,jsonb,boolean,boolean)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)', 'EXECUTE') THEN
     RAISE EXCEPTION 'SIM-PARTNER-G FAIL: a patched function''s grants changed';
   END IF;
   RAISE NOTICE 'OK SIM-PARTNER-G grants kept after the patches';

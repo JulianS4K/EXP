@@ -211,8 +211,8 @@ BEGIN
   ASSERT position('/* exos: addon pass refs */' in pg_get_functiondef('public.exos_check_in_offline(uuid,uuid,uuid,timestamptz,text,text,text,text,uuid,text)'::regprocedure)) > 0, 'DG0 offline marker';
   ASSERT position('/* exos: replay not-assigned */' in pg_get_functiondef('public.exos_check_in_offline(uuid,uuid,uuid,timestamptz,text,text,text,text,uuid,text)'::regprocedure)) > 0, 'DG0 earlier offline marker kept';
   ASSERT position('/* exos: addon lists */' in pg_get_functiondef('public._exos_checkin_list_refusal(uuid,uuid,uuid,text,timestamptz)'::regprocedure)) > 0, 'DG0 list marker';
-  ASSERT position('/* exos: addon access barcode */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)'::regprocedure)) > 0, 'DG0 api write marker';
-  ASSERT position('/* exos: door price */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)'::regprocedure)) > 0, 'DG0 earlier api write marker kept';
+  ASSERT position('/* exos: addon access barcode */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)'::regprocedure)) > 0, 'DG0 api write marker';
+  ASSERT position('/* exos: door price */' in pg_get_functiondef('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)'::regprocedure)) > 0, 'DG0 earlier api write marker kept';
   FOR f IN SELECT unnest(ARRAY['1', '2', '3', '4']) LOOP
     ASSERT position('/* exos: conditional questions ' || f || ' */' in pg_get_functiondef('public._exos_validate_answers_core(jsonb,uuid[],jsonb,boolean)'::regprocedure)) > 0, 'DG0 core marker ' || f;
   END LOOP;

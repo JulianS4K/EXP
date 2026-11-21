@@ -2,21 +2,25 @@
 //
 //   create_event_draft   a DRAFT event in the credential's organization
 //   add_ticket_type      a ticket type on one of the organization's drafts
-//   publish_event        makes a draft public (destructive: it goes on sale)
+//   publish_event        asks to publish a draft: answers a review link; the
+//                        person publishes there, signed in to Exos
 //
 // Each runs the partner API's own SQL (exos_api_write's event.create /
 // ticket_type.create / event.publish, mig 20261031110000), so the rules are the
 // dashboard's and the REST API's: no business rule lives here. This file turns
 // a tool's arguments into that one call and words the answers.
 //
-// Every write is two calls (mig 20261119130000). The first call (no
-// confirm_token) changes nothing: it answers a preview of exactly what will be
-// written and a confirm_token the server issued, bound by hash to the
-// credential, the tool and the exact write, single use, 10 minutes. The second
-// call repeats the same arguments plus that confirm_token. A bare flag would
-// not do: text an assistant reads (an event description, a web page) could
-// tell it to set one. Changed arguments burn the token. The org's MCP writes
-// are capped per hour in SQL.
+// create_event_draft and add_ticket_type are two calls (mig 20261119130000).
+// The first (no confirm_token) changes nothing: it answers a preview of
+// exactly what will be written and a confirm_token the server issued, bound by
+// hash to the credential, the tool and the exact write, single use, 10
+// minutes. The second repeats the same arguments plus that token; changed
+// arguments burn it. The token goes back to the same assistant, so it is not
+// the person's consent: it stops accidental, replayed and altered writes, not
+// a compromised assistant. That is enough for drafts (nothing public). A
+// publish needs the person: publish_event only answers a review link, and the
+// event goes live when they click Publish in Exos (exos_mcp_publish_approve).
+// Writes are capped per hour, per org and per credential, in SQL.
 //
 // Needs: an organizer credential (org API key, personal access token or OAuth
 // token) holding events:write, narrowed to the user's live role. Pure
@@ -43,6 +47,8 @@ export interface EventState {
   };
   ticket_types: Array<{ id: string; name: string; price: number | string; capacity: number; sales_start: string | null; sales_end: string | null }>;
   blockers: Array<{ code: string; field: string | null; message: string }>;
+  /** SHA-256 of what publishing would make public (_exos_mcp_event_digest). */
+  digest: string;
 }
 
 export interface FeeOutcome {
@@ -62,9 +68,13 @@ export interface OrgVenue {
 /** What the write tools need from the database. exos-mcp implements it; every method is held to ctx's org. */
 export interface McpWriteData {
   /** Stores a confirmation for exactly `exec` (exos_mcp_confirm_issue) and returns the token. */
-  issueConfirm(ctx: ToolContext, tool: WriteToolName, exec: WriteExec): Promise<{ token: string; expires_at: string }>;
+  issueConfirm(ctx: ToolContext, tool: ConfirmToolName, exec: WriteExec): Promise<{ token: string; expires_at: string }>;
   /** Spends the confirmation and writes (exos_mcp_write). */
-  runWrite(ctx: ToolContext, tool: WriteToolName, confirmToken: string, exec: WriteExec): Promise<WriteOutcome>;
+  runWrite(ctx: ToolContext, tool: ConfirmToolName, confirmToken: string, exec: WriteExec): Promise<WriteOutcome>;
+  /** Asks the person to publish (exos_mcp_publish_request), bound to the previewed state's digest. */
+  publishRequest(ctx: ToolContext, eventId: string, digest: string): Promise<PublishAnswer>;
+  /** Where that request stands, for this credential only. */
+  publishStatus(ctx: ToolContext, requestId: string): Promise<PublishStatus | null>;
   orgVenue(orgId: string, venueId: string): Promise<OrgVenue | null>;
   eventState(orgId: string, eventId: string): Promise<EventState | null>;
   feeOutcome(orgId: string, eventId: string): Promise<FeeOutcome | null>;
@@ -81,6 +91,22 @@ export const WRITE_TOOLS = {
   publish_event: { action: 'event.publish', route: 'publish-event' },
 } as const;
 export type WriteToolName = keyof typeof WRITE_TOOLS;
+/** The tools that write after a confirm_token (publishing needs the person instead). */
+export type ConfirmToolName = Exclude<WriteToolName, 'publish_event'>;
+
+/** exos_mcp_publish_request's answer. */
+export type PublishAnswer =
+  | { ok: true; status: 'pending' | 'already_published'; request_id?: string; event_id: string; expires_at?: string }
+  | { ok: false; error: string; message: string; blockers?: EventState['blockers']; retry_after_seconds?: number };
+
+/** exos_mcp_publish_status's answer. */
+export interface PublishStatus {
+  request_id: string;
+  event_id: string;
+  status: 'pending' | 'published' | 'blocked' | 'changed' | 'expired' | 'cancelled';
+  expires_at: string;
+  decided_at: string | null;
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** What exos-mcp hands out: exos_mcc_ + 43 base64url characters (32 random bytes). */
@@ -248,6 +274,11 @@ function payoutsUrl(base: string, orgId: string): string {
   return `${base}/orgs/${orgId}/payouts`;
 }
 
+/** The review page where the person publishes (src/views/McpPublishReview.tsx). */
+export function reviewUrl(base: string, orgId: string, eventId: string, requestId: string): string {
+  return `${base}/orgs/${orgId}/events/${eventId}/publish-review?request=${requestId}`;
+}
+
 /** The write refused or failed: what the assistant should tell the person. */
 function outcomeError(out: WriteOutcome): never {
   const o = out as Extract<WriteOutcome, { ok: false }>;
@@ -261,7 +292,7 @@ function outcomeError(out: WriteOutcome): never {
   throw new ToolError(o.message);
 }
 
-function confirmationAnswer(tool: WriteToolName, preview: Record<string, unknown>, issued: { token: string; expires_at: string }) {
+function confirmationAnswer(tool: ConfirmToolName, preview: Record<string, unknown>, issued: { token: string; expires_at: string }) {
   return {
     status: 'confirmation_required',
     preview,
@@ -486,21 +517,26 @@ export function exosWriteTools(data: McpWriteData, opts: WriteToolOptions): Tool
   };
 
   // ── publish_event ────────────────────────────────────────────────────────
+  // Never publishes by itself: it asks for a review (exos_mcp_publish_request,
+  // bound to a digest of the event as previewed) and answers a link. The
+  // person opens it in Exos, signed in as the credential's user, and clicks
+  // Publish there; the assistant only reads back how it went (request_id).
   const publish_event: ToolDefinition = {
     name: 'publish_event',
     title: 'Publish an event',
     requiresOrg: true,
     scope: 'events:write',
     description:
-      'Publish one of the organization\'s draft events: it becomes public (search, its event page, listing feeds) and ' +
-      'tickets go on sale per their sale windows. Two steps: the first call returns a summary and a confirm_token; ' +
-      'publish only after the person explicitly confirms that summary. Paid tickets need Stripe Connect finished; ' +
-      'free / RSVP events don\'t.',
+      'Ask to publish one of the organization\'s draft events: it would become public (search, its event page, ' +
+      'listing feeds) and tickets would go on sale per their sale windows. This tool does not publish: it returns ' +
+      'a summary and a review link; the person opens the link, signed in to Exos, checks the event and clicks ' +
+      'Publish there. Call it again with request_id to see whether it was published. Paid tickets need Stripe ' +
+      'Connect finished; free / RSVP events don\'t.',
     inputSchema: {
       type: 'object',
       properties: {
         event_id: { type: 'string', description: 'A draft event id (from create_event_draft or my_events)' },
-        confirm_token: confirmTokenSchema,
+        request_id: { type: 'string', description: 'From an earlier publish_event answer: check whether the person published it' },
       },
       required: ['event_id'],
       additionalProperties: false,
@@ -508,19 +544,49 @@ export function exosWriteTools(data: McpWriteData, opts: WriteToolOptions): Tool
     annotations: { title: 'Publish an event', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     handler: async (args, ctx) => {
       const orgId = needCredential(ctx);
-      const token = confirmToken(args);
+      if (args.confirm_token !== undefined) {
+        throw new ToolError('publish_event takes no confirm_token: the person publishes on the review page in Exos');
+      }
       const id = eventId(args);
+      const requestId = str(args, 'request_id', { max: 36 });
+      if (requestId !== undefined) {
+        if (!UUID_RE.test(requestId)) throw new ToolError('request_id must be the id publish_event answered');
+        const st = await data.publishStatus(ctx, requestId);
+        if (!st || st.event_id !== id) throw new ToolError('no publish request with that id for this event and credential');
+        const said: Record<string, string> = {
+          pending: 'Waiting for the person to click Publish on the review page.',
+          published: 'Published: the event is public and on sale per its sale windows.',
+          blocked: 'Not published: something blocks publishing; call publish_event again for the list.',
+          changed: 'Not published: the event changed after the preview; call publish_event again for a new review link.',
+          expired: 'Not published: the review link expired (30 minutes); call publish_event again for a new one.',
+          cancelled: 'Not published: a newer review link replaced this one.',
+        };
+        return {
+          status: st.status, event_id: id, request_id: requestId, note: said[st.status] ?? st.status,
+          ...(st.status === 'published' ? { event_url: `${base}/event/${id}` } : {}),
+          ...(st.status === 'pending' ? { review_url: reviewUrl(base, orgId, id, requestId), expires_at: st.expires_at } : {}),
+        };
+      }
       const st = await data.eventState(orgId, id);
       if (!st) throw new ToolError('no event with that id in your organization');
       if (st.event.status === 'published') return { status: 'already_published', event_id: id, edit_url: editUrl(base, id) };
       if (st.event.status !== 'draft') throw new ToolError(`this event is ${st.event.status} and can't be published`);
       if (st.blockers.length) refuseBlockers(st.blockers, base, orgId, id);
-      const exec: WriteExec = { action: 'event.publish', target: id, args: {} };
-      if (!token) {
-        const fee = await data.feeOutcome(orgId, id);
-        const issued = await data.issueConfirm(ctx, 'publish_event', exec);
-        return confirmationAnswer('publish_event', {
-          action: 'PUBLISH this event: it becomes public and tickets go on sale',
+      const out = await data.publishRequest(ctx, id, st.digest);
+      if (!out.ok) {
+        const o = out as Extract<PublishAnswer, { ok: false }>;
+        if (o.error === 'blocked') refuseBlockers(o.blockers ?? [], base, orgId, id);
+        throw new ToolError(o.message);
+      }
+      if (out.status === 'already_published') return { status: 'already_published', event_id: id, edit_url: editUrl(base, id) };
+      const fee = await data.feeOutcome(orgId, id);
+      return {
+        status: 'review_required',
+        event_id: id,
+        request_id: out.request_id,
+        review_url: reviewUrl(base, orgId, id, String(out.request_id)),
+        expires_at: out.expires_at,
+        summary: {
           title: st.event.name,
           starts: st.event.starts_at ? `${st.event.starts_at} (${st.event.timezone ?? 'UTC'})` : null,
           venue: st.event.venue_name,
@@ -528,16 +594,13 @@ export function exosWriteTools(data: McpWriteData, opts: WriteToolOptions): Tool
             name: t.name, price: Number(t.price) === 0 ? 'free' : `${Number(t.price).toFixed(2)} ${st.event.currency}`, quantity: t.capacity,
           })),
           fee: fee ? feeStatement(fee, st.event.total_tickets) : null,
-          warning: 'Once published, people can find the event and buy tickets. Unpublishing later is done in the dashboard.',
-        }, issued);
-      }
-      const out = await data.runWrite(ctx, 'publish_event', token, exec);
-      if (!out.ok) outcomeError(out);
-      if (out.result.published !== true) {
-        const b = Array.isArray(out.result.blockers) ? out.result.blockers as EventState['blockers'] : [];
-        refuseBlockers(b, base, orgId, id);
-      }
-      return { status: 'published', event_id: id, event_url: `${base}/event/${id}`, edit_url: editUrl(base, id) };
+        },
+        next_step:
+          'Nothing is published yet, and you cannot publish it yourself. Show the person this summary and the ' +
+          'review_url: they open it, signed in to Exos, and click Publish there if it is right (the link works for ' +
+          '30 minutes, only for them, and only while the event is unchanged). Then call publish_event with ' +
+          'request_id to see the outcome.',
+      };
     },
   };
 

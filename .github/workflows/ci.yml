@@ -176,10 +176,10 @@ jobs:
       # locally: money journal, journal payouts, group pay, org audit, and the
       # end-to-end races with the simulation's invariants. Each cleans up after
       # itself. The other race_*.sh stay by hand (see their headers).
-      - name: Exos race scripts (journal, group pay, audit, end-to-end)
+      - name: Exos race scripts (journal, group pay, audit, end-to-end, API idempotency)
         run: |
           set -e
-          for r in race_money_journal race_journal_payouts race_group_pay race_org_audit race_full; do
+          for r in race_money_journal race_journal_payouts race_group_pay race_org_audit race_full race_idem; do
             echo "::group::$r"
             bash "tests/exos/$r.sh" exos_p0_test
             echo "::endgroup::"

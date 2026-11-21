@@ -1078,19 +1078,33 @@ to review:
 
 **A new authority:** a personal access token or an OAuth access token can now **write**, as its own user, three
 core actions: `event.create`, `ticket_type.create`, `event.publish` (`POST /v1/events`,
-`POST /v1/events/:id/ticket-types`, `POST /v1/events/:id/publish`, and the MCP tools `create_event_draft`,
-`add_ticket_type`, `publish_event`). Until now a user token could write only the platform routes; every core
-write needed an org API key. Nothing new is granted to anon or authenticated (H3 unchanged). Points to review:
+`POST /v1/events/:id/ticket-types`, `POST /v1/events/:id/publish`; through MCP, `create_event_draft` and
+`add_ticket_type`, while `publish_event` only asks the person). Until now a user token could write only the platform
+routes; every core write needed an org API key. Nothing new is granted to anon (H3 unchanged); two functions are
+new for authenticated (the review page, below). Points to review:
 
 - **One resolution, in the write's transaction.** `exos_api_write` (service role only) now takes either a key id or
-  a token's SHA-256 (`p_token_hash` + `p_token_kind` pat / oauth, and `p_token_org` for `X-Exos-Org`); both at once
-  is 22023. With a token it calls `exos_api_token_auth_org`, the same function every API and MCP request is
-  authenticated with: not revoked or expired, for OAuth a live grant and an undeleted app, the user an active,
-  enabled member, the token's consented scopes narrowed to the role **now** (and the org's role settings). Any
-  failure is 42501, before anything is read or written. The function then sets the transaction's JWT claims to
-  that user, exactly as it does for a key's creator, so the dashboard's checks (`exos_has_org_role`,
-  `exos_publish_event`) decide; every target is still pinned to the org first (another org's id is P0002). A
-  demotion, a removal, a disable, a revoked token or grant, or a deleted app stops the next write.
+  a token's SHA-256 (`p_token_hash` + `p_token_kind` pat / oauth, `p_token_org` for `X-Exos-Org`, and
+  `p_token_resource`, the caller's own canonical URL); key and token at once is 22023. With a token it calls
+  `exos_api_token_auth_org`, the same function every API and MCP request is authenticated with: not revoked or
+  expired, for OAuth a live grant and an undeleted app, the user an active, enabled member, the token's scopes
+  capped by its grant's **current** scopes (`_exos_oauth_grant_cap`) and narrowed to the role **now** (and the
+  org's role settings). Any failure is 42501, before anything is read or written. It then sets the transaction's JWT
+  claims to that user, exactly as it does for a key's creator, so the dashboard's checks decide; every target is
+  still pinned to the org first (another org's id is P0002). A demotion, a removal, a disable, a revoked token or
+  grant, a narrowed grant or a deleted app stops the next write.
+- **OAuth audience (RFC 8707).** Authorization accepts a `resource` only if it is exactly exos-api's canonical URL or
+  exos-mcp's organizer URL (`_exos_oauth_resources()`, patched into `exos_oauth_authorize_approve`; anything else,
+  including a trailing slash, is `invalid_target`). A token writes only where it was issued for: `exos_api_write`
+  refuses an OAuth token unless `p_token_resource` is in that list **and** equals the token's resource (none is
+  refused), and exos-api passes its own URL, exos-mcp its own. exos-api answers 401 to an OAuth token issued for
+  another resource and 403 to the three writes with a token issued for none; exos-mcp the same (its write tools
+  are hidden from a no-resource token and the SQL refuses it). So an MCP connector's token can't be replayed at
+  exos-api to skip the review link, the confirm token and the caps, and a server that names exos-oauth as its
+  authorization server can't obtain an Exos token for itself.
+- **Consent narrows at once.** `exos_api_token_auth`, `exos_oauth_refresh` and `exos_oauth_introspect` cap a token's
+  scopes by its grant's current scopes, and re-consenting with fewer scopes revokes every live token of the grant
+  (`exos_oauth_authorize_approve`; counted marker patches, rule 4).
 - **Allowlisted actions only.** `_exos_api_user_token_actions()` lists the three; any other action with a token is
   42501 in SQL, and exos-api refuses the other routes before SQL (`userTokenMayCall`, `USER_TOKEN_CORE_WRITES`;
   vitest keeps the two lists equal and checks every other write route still refuses a user token).
@@ -1099,33 +1113,51 @@ write needed an org API key. Nothing new is granted to anon or authenticated (H3
   block, the idempotency claim and replay, the two request keys, the log row); a count that doesn't match stops the
   migration. The five-argument function is dropped (two overloads would be ambiguous to PostgREST). REST calls with
   a key send the same five arguments as before.
-- **Records.** `exos_api_writes` gains `credential_kind`, `credential_id` (a key's id, a personal token's id, an OAuth
-  grant's id) and `source` (`api` / `mcp`); old rows are backfilled from `api_key_id`, and a BEFORE INSERT trigger
-  fills them for the other writers. Idempotency-Keys are unique per credential (new index), so one credential can
-  never replay another's answer; the refund nonce / comp request key use the credential id (a key's is its id, as
-  before).
-- **MCP confirmations.** A write tool's first call stores a confirmation (`exos_mcp_confirms`: RLS on, no client
-  grant; SHA-256 of 32 random bytes; the credential, tool, action, target and `_exos_api_request_hash` of the exact
-  args; 10 minutes). `exos_mcp_write` takes it under a row lock: another credential's, unknown, used or expired is
-  refused without saying more; different args burn it. It re-checks the credential (`_exos_mcp_credential`: the
-  key live and its creator a member, or the token re-resolved with the same id), counts the org's MCP writes in the
-  last hour under an advisory lock (20, `mcp_writes_per_hour`), spends the token, and runs `exos_api_write` with
-  source `mcp` in a subtransaction, so a failed write rolls back alone and is still logged. At most 30 open
-  confirmations per credential (54000).
-- **Audit.** `exos_mcp_writes` (RLS: owner / manager of the org; SELECT only) and an `exos_org_audit` row
-  `mcp.write` (entity `mcp_write`, source `mcp`). `mcp` is a new org-audit source (CHECK and `_exos_audit_actor`);
-  exos-mcp's PostgREST calls send `X-Exos-Source: mcp` with the actor headers, believed on service-role requests
-  only, as before.
-- **Reads for previews.** `exos_mcp_event_state` (the event, its ticket types, its publish blockers) and
+- **Records and idempotency.** `exos_api_writes` gains `credential_kind`, `credential_id` (a key's id, a personal
+  token's id, an OAuth grant's id) and `source` (`api` / `mcp`); old rows are backfilled from `api_key_id`, and a
+  BEFORE INSERT trigger fills them for the other writers. Idempotency-Keys are unique per credential (new index);
+  the claim is `ON CONFLICT DO NOTHING` with no conflict target, so a concurrent twin on either unique index (the
+  key's old one, which the other writers still name, or the credential's) waits and replays instead of failing
+  with 23505 (`tests/exos/race_idem.sh`, in CI). The refund nonce / comp request key use the credential id (a key's
+  is its id, as before).
+- **Drafts: confirm tokens, and what they are.** `create_event_draft` / `add_ticket_type` store a confirmation
+  (`exos_mcp_confirms`: RLS on, no client grant; SHA-256 of 32 random bytes; the credential, tool, action, target and
+  `_exos_api_request_hash` of the exact args; 10 minutes). `exos_mcp_write` takes it under a row lock: another
+  credential's, unknown, used or expired is refused; different args burn it. The token is returned to the same
+  assistant, so **it is not the person's consent**: it stops accidental, replayed and altered writes, not a
+  compromised or misled assistant. It guards only drafts and ticket types, which nobody outside the org sees.
+- **Publishing needs the person.** `publish_event` stores a review request (`exos_mcp_publish_requests`: RLS on, no
+  client grant; the credential, its user, a SHA-256 digest of the event and every ticket type as previewed,
+  `_exos_mcp_event_digest`; 30 minutes; one live per event and credential, at most 10 open) and answers a link. Only
+  the person publishes: `exos_mcp_publish_review` / `exos_mcp_publish_approve` (authenticated, not anon) answer only
+  the request's own user, still owner or manager of the org (anyone else, and an unknown id, P0002); approve locks
+  the request and the event, refuses a changed digest (`changed`) or an expired request, and calls the dashboard's
+  `exos_publish_event` as the signed-in user, which checks the role and the blockers again. A blocked publish is
+  recorded as `blocked`. MCP elicitation isn't used (no server-to-client channel on this stateless server).
+- **Who, and the caps.** A confirm token or a review link only for an owner or manager now; anyone else is refused
+  before anything is stored or counted. The org cap (20 an hour, `mcp_writes_per_hour`, under an advisory lock)
+  counts only writes that ran (`done`), so a member who can't write can't use it up; each credential has its own
+  60 attempts an hour of every status (`mcp_attempts_per_hour`), and past that nothing more is logged, so a flood
+  can't grow the log. At most 30 open confirmations per credential.
+- **Audit.** `exos_mcp_writes` (RLS: owner / manager of the org; SELECT only) holds every attempt: `done`,
+  `failed`, `blocked`, or `refused` with a reason (credential, role, confirm_invalid / _used / _expired /
+  _mismatch, rate_limited, changed, not_found, not_draft). Writes that ran and publishes add an `exos_org_audit`
+  row `mcp.write` (entity `mcp_write`, source `mcp`); refusals stay out of the append-only org audit. `mcp` is a new
+  org-audit source (CHECK and `_exos_audit_actor`); exos-mcp's PostgREST calls send `X-Exos-Source: mcp` with the
+  actor headers, believed on service-role requests only, as before.
+- **Reads for previews.** `exos_mcp_event_state` (the event, its ticket types, its blockers, its digest) and
   `exos_mcp_fee_outcome` (the free tier) take the org and answer NULL for another org's event; service role only.
-- **OAuth audience.** exos-mcp refuses an OAuth token whose `resource` (RFC 8707) is set and isn't one of its own
-  URLs. DCR stays off unless `EXOS_OAUTH_DCR=on`; self-registered apps are marked unverified on the consent screen,
-  which lists write scopes apart from read scopes, each one untickable.
-- **Prompt injection.** A write needs a token the server issued for that exact write, so text an assistant reads
-  can't make one valid; the server instructions say to send it only after the person explicitly agreed to the
-  preview, and to treat people's and organizers' text as content.
-- Tests: `tests/exos/test_mcp_writes.sql` (M1-M17), `src/lib/mcp/mcpWrites.test.ts`,
-  `supabase/functions/_shared/mcp/discovery_test.ts`.
+- **Discovery.** DCR stays off unless `EXOS_OAUTH_DCR=on`; self-registered apps are marked unverified on the consent
+  screen, which lists write scopes apart from read scopes, each one untickable, and says plainly that an app may make
+  allowed changes without asking each time and that a publish from an assistant needs the person's click.
+  `exos-oauth` serves its RFC 8414 document at `/.well-known/openid-configuration` too (where MCP clients look for an
+  issuer with a path); it lists only what it supports and claims no OpenID features.
+- **Prompt injection.** Text an assistant reads can't publish anything: a publish needs the person's click on the
+  review page. For drafts it can at worst make the assistant ask for, and send, a confirm token for a draft the
+  person didn't intend; the server instructions say to show every preview and send the token only after the person
+  agreed, and to treat people's and organizers' text as content.
+- Tests: `tests/exos/test_mcp_writes.sql` (M1-M17, X1-X3, P, R), `tests/exos/race_idem.sh`,
+  `src/lib/mcp/mcpWrites.test.ts`, `supabase/functions/_shared/mcp/discovery_test.ts`.
 
 ### Search path
 

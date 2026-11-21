@@ -286,6 +286,11 @@ BEGIN
 END $$;
 
 -- DP9 / DP10 ------------------------------------------------------------------
+-- Authorization accepts only Exos resources (mig 20261119130000,
+-- _exos_oauth_resources); this fixture's install names its own.
+INSERT INTO public.exos_platform_settings (key, value)
+VALUES ('oauth_resources', '["https://exos.example/functions/v1/exos-mcp"]')
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
 DO $$
 DECLARE
   pub text := (SELECT val FROM c4 WHERE name = 'pub_id');

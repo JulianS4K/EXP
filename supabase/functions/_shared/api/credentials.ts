@@ -186,6 +186,17 @@ export function scopeList(raw: unknown): string[] | null {
   return raw.split(/\s+/).filter(Boolean);
 }
 
+/**
+ * The resources (RFC 8707) an Exos OAuth token may be issued for, exactly:
+ * exos-api's canonical URL and exos-mcp's organizer URL (mig 20261119130000,
+ * `_exos_oauth_resources()` in SQL, which is what enforces it). A token is held
+ * to its resource: exos-api refuses one issued for exos-mcp, and the reverse.
+ */
+export function exosResources(supabaseUrl: string): { api: string; mcp: string } {
+  const base = supabaseUrl.replace(/\/+$/, '');
+  return { api: `${base}/functions/v1/exos-api`, mcp: `${base}/functions/v1/exos-mcp/organizer` };
+}
+
 /** Parameters of an authorization request the consent page acts on. */
 export interface AuthorizeRequest {
   clientId: string;
@@ -205,9 +216,10 @@ export type AuthorizeParse =
 /**
  * Shape checks of /oauth/authorize's query, before the SQL checks the app.
  * Unsupported response types and PKCE methods go back to the app; a missing
- * client or redirect URI is shown on the page.
+ * client or redirect URI is shown on the page. With `allowedResources`, a
+ * `resource` outside it is invalid_target.
  */
-export function parseAuthorizeQuery(q: URLSearchParams): AuthorizeParse {
+export function parseAuthorizeQuery(q: URLSearchParams, allowedResources?: readonly string[]): AuthorizeParse {
   const clientId = q.get('client_id') ?? '';
   const redirectUri = q.get('redirect_uri') ?? '';
   if (!CLIENT_ID_RE.test(clientId)) return { ok: false, error: 'invalid_client', description: 'Unknown app.', redirect: false };
@@ -232,6 +244,11 @@ export function parseAuthorizeQuery(q: URLSearchParams): AuthorizeParse {
   const resource = q.get('resource');
   if (resource !== null && (!/^https:\/\//.test(resource) || resource.length > 500)) {
     return { ok: false, error: 'invalid_target', description: 'resource must be an https URL.', redirect: true };
+  }
+  // Only Exos's own APIs (the SQL refuses any other too): a token for another
+  // server must never be one Exos would accept.
+  if (resource !== null && allowedResources && !allowedResources.includes(resource)) {
+    return { ok: false, error: 'invalid_target', description: 'resource must be the Exos API or the Exos MCP organizer URL.', redirect: true };
   }
   return {
     ok: true,

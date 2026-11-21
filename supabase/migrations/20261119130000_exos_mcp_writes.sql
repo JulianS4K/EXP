@@ -12,58 +12,88 @@
 --      resolves both: with p_token_hash it re-resolves the personal or OAuth
 --      token in SQL, in this transaction (exos_api_token_auth_org: a revoked
 --      or expired token, a revoked grant or deleted app, a user who left or
---      was disabled are refused; the token's consented scopes are narrowed to
---      the user's role NOW), and runs as that user instead of a key's creator.
---      Only three actions are open to user tokens (_exos_api_user_token_actions:
---      event.create, ticket_type.create, event.publish); every other action
---      still needs an org API key (42501). The key path is unchanged. The
---      signature gains four defaulted parameters (p_token_hash, p_token_kind,
---      p_token_org, p_source), so calls with the old five arguments still
---      resolve to it; the old five-argument function is dropped (two would be
---      ambiguous). A later migration that patches it names
---      public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text).
+--      was disabled are refused; the token's consented scopes are capped by
+--      its grant and narrowed to the user's role NOW), and runs as that user
+--      instead of a key's creator. Only three actions are open to user tokens
+--      (_exos_api_user_token_actions: event.create, ticket_type.create,
+--      event.publish); every other action still needs an org API key
+--      (42501). An OAuth token writes only on the API it was issued for:
+--      p_token_resource (the caller's canonical URL) must be an Exos resource
+--      and equal the token's resource (RFC 8707). The key path is unchanged.
+--      The signature gains five defaulted parameters (p_token_hash,
+--      p_token_kind, p_token_org, p_source, p_token_resource), so calls with
+--      the old five arguments still resolve to it; the old five-argument
+--      function is dropped (two would be ambiguous). A later migration that
+--      patches it names
+--      public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text).
 --   2. exos_api_writes records the credential (kind api_key / pat / oauth and
 --      its id: the key's, the personal token's, the OAuth grant's) and the
---      source (api / mcp). Idempotency-Keys are unique per credential. A
---      BEFORE INSERT trigger fills the credential from api_key_id for the
---      other writers (exos_api_commerce_write, _order_write, _gap_write).
+--      source (api / mcp). Idempotency-Keys are unique per credential; the
+--      claim takes no conflict target, so a twin on either unique index waits
+--      and replays (tests/exos/race_idem.sh). A BEFORE INSERT trigger fills the
+--      credential from api_key_id for the other writers
+--      (exos_api_commerce_write, _order_write, _gap_write).
+--   2b. OAuth: authorization accepts only Exos resources
+--      (_exos_oauth_resources: exos-api's and exos-mcp's canonical URLs,
+--      platform setting oauth_resources elsewhere); a token's scopes are capped
+--      by its grant's current scopes (exos_api_token_auth, exos_oauth_refresh,
+--      exos_oauth_introspect), and re-consenting with fewer scopes revokes the
+--      grant's live tokens (exos_oauth_authorize_approve).
 --   3. 'mcp' is an org-audit source (exos_org_audit.source, _exos_audit_actor).
---   4. MCP write confirmations (exos_mcp_confirms): an assistant's write is two
---      calls. The first gets a preview and a confirm token (32 random bytes,
---      only its SHA-256 stored), bound to the credential, the tool and the
---      exact action / target / args (_exos_api_request_hash), 10 minutes,
---      single use. The second sends it back: exos_mcp_write checks it under a
---      row lock, counts the org's MCP writes in the last hour (20 by default,
---      platform setting mcp_writes_per_hour), spends it, and calls
---      exos_api_write with source mcp. Changed args burn the token.
---   5. exos_mcp_writes: one row per executed MCP write (credential, actor,
---      tool, route, action, target, event, outcome), plus an exos_org_audit
---      row mcp.write (source mcp).
+--   4. MCP write confirmations (exos_mcp_confirms) for drafts and ticket types:
+--      the first call gets a preview and a confirm token (32 random bytes, only
+--      its SHA-256 stored), bound to the credential, the tool and the exact
+--      action / target / args (_exos_api_request_hash), 10 minutes, single
+--      use; owner / manager only, refused before anything counts. The second
+--      sends it back: exos_mcp_write checks it under a row lock, counts the
+--      org's MCP writes that ran in the last hour (20, mcp_writes_per_hour)
+--      and the credential's attempts (60, mcp_attempts_per_hour), spends it,
+--      and calls exos_api_write with source mcp. Changed args burn the token.
+--      The token goes back to the same assistant: it is not the person's
+--      consent, so it guards only drafts.
+--   5. exos_mcp_writes: one row per attempt (done / failed / blocked /
+--      refused + reason), plus an exos_org_audit row mcp.write (source mcp)
+--      for writes that ran and publishes.
 --   6. exos_mcp_event_state / exos_mcp_fee_outcome: what the previews show
---      (the event, its ticket types, its publish blockers; the free tier),
---      for the credential's org only (NULL for any other org's event).
+--      (the event, its ticket types, its publish blockers, its digest; the
+--      free tier), for the credential's org only (NULL for another org's).
+--   7. Publishing waits for the person: exos_mcp_publish_request (a review
+--      bound to the event's digest, 30 minutes) and, on the SPA's review page,
+--      exos_mcp_publish_review / exos_mcp_publish_approve (authenticated: the
+--      request's own user, owner / manager; publishes through
+--      exos_publish_event only if the event is unchanged).
 --
 -- All new functions are SECURITY DEFINER with a pinned search_path and
--- service_role EXECUTE only (exos-mcp / exos-api); nothing is granted to anon
--- or authenticated except SELECT on exos_mcp_writes (owner / manager, RLS).
+-- service_role EXECUTE only (exos-mcp / exos-api), except the review page's
+-- two (authenticated); nothing is granted to anon; authenticated also gets
+-- SELECT on exos_mcp_writes (owner / manager, RLS).
 -- Re-run safe. Prod apply needs operator OK.
 --
 -- Touches:  W: FUNCTION exos_api_write (widened, see 1), _exos_audit_actor
---              (patched: 'mcp' source)
+--              (patched: 'mcp' source), exos_api_token_auth, exos_oauth_refresh,
+--              exos_oauth_introspect (patched: grant cap),
+--              exos_oauth_authorize_approve (patched: Exos resources only,
+--              narrowed grant revokes tokens)
 --              TABLE exos_api_writes (+ credential_kind, credential_id, source;
 --              index, trigger), exos_org_audit (source CHECK + 'mcp')
---           C: TABLE exos_mcp_confirms, exos_mcp_writes
+--           C: TABLE exos_mcp_confirms, exos_mcp_writes, exos_mcp_publish_requests
 --              FUNCTION _exos_api_user_token_actions, _exos_tg_api_writes_cred,
---              _exos_mcp_credential, exos_mcp_confirm_issue, exos_mcp_write,
---              exos_mcp_event_state, exos_mcp_fee_outcome
+--              _exos_oauth_resources, _exos_oauth_grant_cap, _exos_mcp_tool_action,
+--              _exos_mcp_credential, _exos_mcp_log, _exos_mcp_attempts_over,
+--              _exos_mcp_event_digest, _exos_mcp_review_row,
+--              exos_mcp_confirm_issue, exos_mcp_write, exos_mcp_event_state,
+--              exos_mcp_fee_outcome, exos_mcp_publish_request,
+--              exos_mcp_publish_status, exos_mcp_publish_review,
+--              exos_mcp_publish_approve
 --           R: exos_api_keys, exos_personal_tokens, exos_oauth_*, exos_events,
 --              exos_ticket_tiers, exos_org_memberships, exos_platform_settings
 --           Calls (unchanged): exos_api_token_auth_org, _exos_api_request_hash,
---              _exos_event_publish_blockers, exos_event_is_free_tier,
---              exos_event_max_capacity, exos_event_capacity_bounded,
---              exos_free_tier_max_capacity, _exos_setting_int, _exos_audit
--- Pre-reqs: 20261031110000 (exos_api_write), 20261031130500 (user tokens),
---           20261104130000 (request hash), 20261105120000 (X-Exos-Org),
+--              _exos_event_publish_blockers, exos_publish_event,
+--              exos_event_is_free_tier, exos_event_max_capacity,
+--              exos_event_capacity_bounded, exos_free_tier_max_capacity,
+--              _exos_setting_int, _exos_audit
+-- Pre-reqs: 20261031110000 (exos_api_write), 20261031130500 (user tokens,
+--           OAuth), 20261104130000 (request hash), 20261105120000 (X-Exos-Org),
 --           20261109100000 (org audit), 20261029090000 (free tier)
 -- ============================================================================
 
@@ -155,16 +185,81 @@ REVOKE ALL ON FUNCTION public._exos_api_user_token_actions() FROM PUBLIC, anon, 
 GRANT EXECUTE ON FUNCTION public._exos_api_user_token_actions() TO service_role;
 
 -- ---------------------------------------------------------------------------
+-- 2b. OAuth: Exos resources only, and the grant caps its tokens.
+-- ---------------------------------------------------------------------------
+-- The resources (RFC 8707) an OAuth token may be issued for: exos-api's
+-- canonical URL and exos-mcp's organizer URL, exactly (no trailing slash).
+-- Platform setting oauth_resources (a JSON array of https URLs) for another
+-- install; the default is this project's.
+CREATE OR REPLACE FUNCTION public._exos_oauth_resources()
+RETURNS text[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v jsonb; r text[];
+BEGIN
+  SELECT value INTO v FROM public.exos_platform_settings WHERE key = 'oauth_resources';
+  IF jsonb_typeof(v) = 'array' THEN
+    r := ARRAY(SELECT x FROM jsonb_array_elements_text(v) x WHERE x ~ '^https://[^[:space:]/]+(/[^[:space:]]*)?$' AND x !~ '/$');
+    IF cardinality(r) > 0 THEN RETURN r; END IF;
+  END IF;
+  RETURN ARRAY['https://hzrizjeaxlqcxfrtczpq.supabase.co/functions/v1/exos-api',
+               'https://hzrizjeaxlqcxfrtczpq.supabase.co/functions/v1/exos-mcp/organizer'];
+END $$;
+REVOKE ALL ON FUNCTION public._exos_oauth_resources() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_oauth_resources() TO service_role;
+
+-- A token's scopes, capped by its grant's current scopes (none once revoked):
+-- re-consenting with fewer scopes narrows every live token of the grant.
+CREATE OR REPLACE FUNCTION public._exos_oauth_grant_cap(p_scopes text[], p_grant uuid)
+RETURNS text[]
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT coalesce(ARRAY(SELECT s FROM unnest(coalesce(p_scopes, '{}')) s
+                         WHERE s = ANY (coalesce((SELECT g.scopes FROM public.exos_oauth_grants g
+                                                   WHERE g.id = p_grant AND g.revoked_at IS NULL), '{}'))), '{}')
+$$;
+REVOKE ALL ON FUNCTION public._exos_oauth_grant_cap(text[], uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._exos_oauth_grant_cap(text[], uuid) TO service_role;
+
+SELECT pg_temp.exos_patch_n('public.exos_api_token_auth(text,text)', '/* exos: grant caps token */',
+  '''scopes'', to_jsonb(public._exos_scopes_for_role(t.scopes, v_role, t.org_id)), ''token_scopes'', to_jsonb(t.scopes));',
+  '''scopes'', to_jsonb(public._exos_scopes_for_role(public._exos_oauth_grant_cap(t.scopes, t.grant_id) /* exos: grant caps token */, v_role, t.org_id)), ''token_scopes'', to_jsonb(t.scopes));', 1);
+SELECT pg_temp.exos_patch_n('public.exos_oauth_refresh(text,text,text,text[])', '/* exos: grant caps token */',
+  E'  v_scopes := t.scopes;\n',
+  E'  v_scopes := public._exos_oauth_grant_cap(t.scopes, g.id); /* exos: grant caps token */\n', 1);
+SELECT pg_temp.exos_patch_n('public.exos_oauth_introspect(text,text,text)', '/* exos: grant caps token */',
+  'public._exos_scopes_for_role(t.scopes, v_role, t.org_id)',
+  'public._exos_scopes_for_role(public._exos_oauth_grant_cap(t.scopes, t.grant_id) /* exos: grant caps token */, v_role, t.org_id)', 1);
+SELECT pg_temp.exos_patch_n('public.exos_oauth_authorize_approve(text,text,text,uuid,text,text,text)', '/* exos: exos resources only */',
+  E'    RAISE EXCEPTION ''invalid_target: resource must be an https URL'' USING ERRCODE = ''22023'';\n  END IF;\n',
+  E'    RAISE EXCEPTION ''invalid_target: resource must be an https URL'' USING ERRCODE = ''22023'';\n  END IF;\n' ||
+  E'  IF p_resource IS NOT NULL AND NOT (p_resource = ANY (public._exos_oauth_resources())) THEN /* exos: exos resources only */\n' ||
+  E'    RAISE EXCEPTION ''invalid_target: resource must be the Exos API or the Exos MCP organizer URL'' USING ERRCODE = ''22023'';\n' ||
+  E'  END IF;\n', 1);
+SELECT pg_temp.exos_patch_n('public.exos_oauth_authorize_approve(text,text,text,uuid,text,text,text)', '/* exos: narrowed grant revokes tokens */',
+  E'  ELSIF g.scopes IS DISTINCT FROM v_scopes THEN\n    UPDATE public.exos_oauth_grants SET scopes = v_scopes WHERE id = g.id;\n',
+  E'  ELSIF g.scopes IS DISTINCT FROM v_scopes THEN\n' ||
+  E'    -- Fewer scopes than before: every live token of the grant ends now.\n' ||
+  E'    IF EXISTS (SELECT 1 FROM unnest(g.scopes) s WHERE NOT (s = ANY (v_scopes))) THEN /* exos: narrowed grant revokes tokens */\n' ||
+  E'      UPDATE public.exos_oauth_tokens SET revoked_at = now() WHERE grant_id = g.id AND revoked_at IS NULL;\n' ||
+  E'    END IF;\n' ||
+  E'    UPDATE public.exos_oauth_grants SET scopes = v_scopes WHERE id = g.id;\n', 1);
+
+-- ---------------------------------------------------------------------------
 -- 3. exos_api_write: a key or a user token, resolved in one place.
 --    Built from the live body (prod's, by rule 4), then the five-argument
---    function is replaced by the nine-argument one. Re-run: when the old one
---    exists again (the replay re-creates it from 20261031110000) it is rebuilt.
+--    function is replaced by the ten-argument one. Re-run: when the old one
+--    exists again (the replay re-creates it from 20261031110000) it is rebuilt
+--    and every other overload is dropped first.
 -- ---------------------------------------------------------------------------
 DO $mig$
 DECLARE
   v_old regprocedure := to_regprocedure('public.exos_api_write(uuid,text,text,jsonb,text)');
-  v_new regprocedure := to_regprocedure('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)');
+  v_new regprocedure := to_regprocedure('public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)');
   d text;
+  f regprocedure;
 BEGIN
   IF v_old IS NULL THEN
     IF v_new IS NULL THEN RAISE EXCEPTION 'exos_api_write: not present'; END IF;
@@ -175,7 +270,7 @@ BEGIN
 
   d := pg_temp.exos_sub(d, 'signature',
     'p_idempotency_key text DEFAULT NULL::text)',
-    'p_idempotency_key text DEFAULT NULL::text, p_token_hash text DEFAULT NULL::text, p_token_kind text DEFAULT NULL::text, p_token_org uuid DEFAULT NULL::uuid, p_source text DEFAULT ''api''::text)', 1);
+    'p_idempotency_key text DEFAULT NULL::text, p_token_hash text DEFAULT NULL::text, p_token_kind text DEFAULT NULL::text, p_token_org uuid DEFAULT NULL::uuid, p_source text DEFAULT ''api''::text, p_token_resource text DEFAULT NULL::text)', 1);
 
   d := pg_temp.exos_sub(d, 'declare',
     E'  v_was      jsonb;\n',
@@ -203,6 +298,14 @@ BEGIN
     E'      RAISE EXCEPTION ''exos_api_write: invalid, expired or revoked token, or its user is no longer a member of the organization''\n' ||
     E'        USING ERRCODE = ''42501'';\n' ||
     E'    END IF;\n' ||
+    E'    -- The audience (RFC 8707): an OAuth token writes only on the Exos API it was\n' ||
+    E'    -- issued for (p_token_resource, the caller''s own canonical URL), never one\n' ||
+    E'    -- issued for another resource, or for none.\n' ||
+    E'    IF p_token_kind = ''oauth'' AND (p_token_resource IS NULL\n' ||
+    E'         OR NOT (p_token_resource = ANY (public._exos_oauth_resources()))\n' ||
+    E'         OR (v_tok ->> ''resource'') IS DISTINCT FROM p_token_resource) THEN\n' ||
+    E'      RAISE EXCEPTION ''exos_api_write: this OAuth token was not issued for this API (resource)'' USING ERRCODE = ''42501'';\n' ||
+    E'    END IF;\n' ||
     E'    v_org := (v_tok ->> ''org_id'')::uuid;\n' ||
     E'    v_actor := (v_tok ->> ''user_id'')::uuid;\n' ||
     E'    v_cred_kind := p_token_kind;\n' ||
@@ -229,7 +332,9 @@ BEGIN
     E'    ON CONFLICT (api_key_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING\n',
     E'    INSERT INTO public.exos_api_writes (org_id, api_key_id, credential_kind, credential_id, source, actor, action, target, idempotency_key, money_moving)\n' ||
     E'    VALUES (v_org, k.id, v_cred_kind, v_cred, p_source, v_actor, p_action, left(p_target, 255), p_idempotency_key, v_money)\n' ||
-    E'    ON CONFLICT (credential_kind, credential_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING\n', 1);
+    -- No conflict target: a twin on either unique index (the key's old one or
+    -- the credential's) waits, then does nothing and replays below.
+    E'    ON CONFLICT DO NOTHING\n', 1);
   d := pg_temp.exos_sub(d, 'idempotency replay',
     E'       WHERE api_key_id = k.id AND idempotency_key = p_idempotency_key;\n',
     E'       WHERE credential_kind = v_cred_kind AND credential_id = v_cred AND idempotency_key = p_idempotency_key;\n', 1);
@@ -244,14 +349,15 @@ BEGIN
     E'    INSERT INTO public.exos_api_writes (org_id, api_key_id, credential_kind, credential_id, source, actor, action, target, money_moving, result)\n' ||
     E'    VALUES (v_org, k.id, v_cred_kind, v_cred, p_source, v_actor, p_action, left(p_target, 255), v_money,\n', 1);
 
-  IF v_new IS NOT NULL THEN
-    DROP FUNCTION public.exos_api_write(uuid, text, text, jsonb, text, text, text, uuid, text);
-  END IF;
+  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public' AND p.proname = 'exos_api_write' AND p.oid <> v_old::oid LOOP
+    EXECUTE 'DROP FUNCTION ' || f::text;
+  END LOOP;
   DROP FUNCTION public.exos_api_write(uuid, text, text, jsonb, text);
   EXECUTE d;
 END $mig$;
-REVOKE ALL ON FUNCTION public.exos_api_write(uuid, text, text, jsonb, text, text, text, uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_api_write(uuid, text, text, jsonb, text, text, text, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_api_write(uuid, text, text, jsonb, text, text, text, uuid, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_api_write(uuid, text, text, jsonb, text, text, text, uuid, text, text) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 4. 'mcp' as an org-audit source.
@@ -286,6 +392,10 @@ ALTER TABLE public.exos_mcp_confirms ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.exos_mcp_confirms FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.exos_mcp_confirms TO service_role;
 
+-- One row per MCP write attempt: done / failed (it ran), blocked (publish
+-- blockers), refused (credential, role, confirmation, rate limit: `reason`).
+-- Only `done` counts toward the org's hourly cap; every row toward the
+-- credential's.
 CREATE TABLE IF NOT EXISTS public.exos_mcp_writes (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id          uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
@@ -297,12 +407,21 @@ CREATE TABLE IF NOT EXISTS public.exos_mcp_writes (
   action          text NOT NULL,
   target          text CHECK (target IS NULL OR length(target) <= 255),
   event_id        uuid,
-  status          text NOT NULL DEFAULT 'started' CHECK (status IN ('started', 'done', 'failed')),
+  status          text NOT NULL DEFAULT 'started',
+  reason          text,
   error_code      text CHECK (error_code IS NULL OR error_code ~ '^[A-Z0-9]{5}$'),
   created_at      timestamptz NOT NULL DEFAULT now(),
   finished_at     timestamptz
 );
+ALTER TABLE public.exos_mcp_writes ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE public.exos_mcp_writes DROP CONSTRAINT IF EXISTS exos_mcp_writes_status_check;
+ALTER TABLE public.exos_mcp_writes ADD CONSTRAINT exos_mcp_writes_status_check
+  CHECK (status IN ('started', 'done', 'failed', 'refused', 'blocked'));
+ALTER TABLE public.exos_mcp_writes DROP CONSTRAINT IF EXISTS exos_mcp_writes_reason_check;
+ALTER TABLE public.exos_mcp_writes ADD CONSTRAINT exos_mcp_writes_reason_check
+  CHECK (reason IS NULL OR reason ~ '^[a-z_]{2,40}$');
 CREATE INDEX IF NOT EXISTS exos_mcp_writes_org_idx ON public.exos_mcp_writes (org_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS exos_mcp_writes_cred_idx ON public.exos_mcp_writes (credential_kind, credential_id, created_at DESC);
 ALTER TABLE public.exos_mcp_writes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS exos_mcp_writes_sel ON public.exos_mcp_writes;
 CREATE POLICY exos_mcp_writes_sel ON public.exos_mcp_writes FOR SELECT TO authenticated
@@ -310,6 +429,27 @@ CREATE POLICY exos_mcp_writes_sel ON public.exos_mcp_writes FOR SELECT TO authen
 REVOKE ALL ON public.exos_mcp_writes FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON public.exos_mcp_writes TO authenticated;
 GRANT ALL ON public.exos_mcp_writes TO service_role;
+
+-- Publishing from an assistant waits for the person (section 7).
+CREATE TABLE IF NOT EXISTS public.exos_mcp_publish_requests (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_id          uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
+  event_id        uuid NOT NULL REFERENCES public.exos_events (id) ON DELETE CASCADE,
+  credential_kind text NOT NULL CHECK (credential_kind IN ('api_key', 'pat', 'oauth')),
+  credential_id   uuid NOT NULL,
+  actor           uuid NOT NULL,
+  digest          text NOT NULL CHECK (digest ~ '^[0-9a-f]{64}$'),
+  status          text NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending', 'published', 'blocked', 'changed', 'expired', 'cancelled')),
+  expires_at      timestamptz NOT NULL,
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  decided_at      timestamptz
+);
+CREATE INDEX IF NOT EXISTS exos_mcp_publish_requests_cred_idx
+  ON public.exos_mcp_publish_requests (credential_kind, credential_id, status);
+ALTER TABLE public.exos_mcp_publish_requests ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.exos_mcp_publish_requests FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.exos_mcp_publish_requests TO service_role;
 
 -- The tools and what each one writes (exos-mcp's WRITE_TOOLS, checked by
 -- src/lib/mcp/mcpWrites.test.ts).
@@ -326,10 +466,17 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_mcp_tool_action(text) FROM PUBLIC, anon, authenticated;
 
+-- The previous version of this migration's helper (four arguments).
+DROP FUNCTION IF EXISTS public._exos_mcp_credential(uuid, text, uuid, text);
+DROP FUNCTION IF EXISTS public.exos_mcp_confirm_issue(uuid, text, uuid, text, text, text, text, jsonb, text);
+DROP FUNCTION IF EXISTS public.exos_mcp_write(text, uuid, text, uuid, text, text, text, text, jsonb);
+
 -- The credential's actor, if it is live and belongs to p_org; else NULL.
 -- A key: not revoked, its creator an active member. A user token: the same
--- resolution as exos_api_write (exos_api_token_auth_org), and the same id.
-CREATE OR REPLACE FUNCTION public._exos_mcp_credential(p_org uuid, p_kind text, p_cred uuid, p_bearer_hash text)
+-- resolution as exos_api_write (exos_api_token_auth_org), the same id, and an
+-- OAuth token only when it was issued for p_resource exactly (exos-mcp's
+-- canonical URL), never one with no resource.
+CREATE OR REPLACE FUNCTION public._exos_mcp_credential(p_org uuid, p_kind text, p_cred uuid, p_bearer_hash text, p_resource text)
 RETURNS uuid
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
@@ -348,30 +495,80 @@ BEGIN
        OR (v ->> 'credential_id') IS DISTINCT FROM p_cred::text THEN
       RETURN NULL;
     END IF;
+    IF p_kind = 'oauth' AND (p_resource IS NULL OR NOT (p_resource = ANY (public._exos_oauth_resources()))
+                             OR (v ->> 'resource') IS DISTINCT FROM p_resource) THEN
+      RETURN NULL;
+    END IF;
     RETURN (v ->> 'user_id')::uuid;
   END IF;
   RETURN NULL;
 END $$;
-REVOKE ALL ON FUNCTION public._exos_mcp_credential(uuid, text, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._exos_mcp_credential(uuid, text, uuid, text, text) FROM PUBLIC, anon, authenticated;
 
--- First call: store a confirmation for exactly this write.
+-- An MCP write attempt that didn't run (or a publish the blockers stopped).
+CREATE OR REPLACE FUNCTION public._exos_mcp_log(
+  p_org uuid, p_kind text, p_cred uuid, p_actor uuid, p_tool text, p_target text, p_status text, p_reason text,
+  p_event uuid DEFAULT NULL)
+RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_map text[] := public._exos_mcp_tool_action(p_tool); v_id uuid;
+BEGIN
+  IF v_map IS NULL OR p_cred IS NULL OR p_kind NOT IN ('api_key', 'pat', 'oauth')
+     OR NOT EXISTS (SELECT 1 FROM public.exos_orgs WHERE id = p_org) THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO public.exos_mcp_writes (org_id, credential_kind, credential_id, actor, tool, route_id, action, target,
+                                      event_id, status, reason, finished_at)
+  VALUES (p_org, p_kind, p_cred, p_actor, p_tool, v_map[2], v_map[1], left(p_target, 255), p_event, p_status, p_reason, now())
+  RETURNING id INTO v_id;
+  RETURN v_id;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_mcp_log(uuid, text, uuid, uuid, text, text, text, text, uuid) FROM PUBLIC, anon, authenticated;
+
+-- The credential's MCP attempts in the last hour (every status).
+CREATE OR REPLACE FUNCTION public._exos_mcp_attempts_over(p_kind text, p_cred uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT count(*) >= public._exos_setting_int('mcp_attempts_per_hour', 60, 1, 10000)
+    FROM public.exos_mcp_writes
+   WHERE credential_kind = p_kind AND credential_id = p_cred AND created_at > now() - interval '1 hour'
+$$;
+REVOKE ALL ON FUNCTION public._exos_mcp_attempts_over(text, uuid) FROM PUBLIC, anon, authenticated;
+
+-- First call: store a confirmation for exactly this write. Drafts and ticket
+-- types only; publishing goes through a review link (section 7).
 CREATE OR REPLACE FUNCTION public.exos_mcp_confirm_issue(
-  p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_tool text,
+  p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_resource text, p_tool text,
   p_action text, p_target text, p_args jsonb, p_confirm_hash text)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE v_map text[] := public._exos_mcp_tool_action(p_tool); v_live int; v_exp timestamptz;
+DECLARE v_map text[] := public._exos_mcp_tool_action(p_tool); v_live int; v_exp timestamptz; v_actor uuid;
 BEGIN
-  IF v_map IS NULL OR v_map[1] IS DISTINCT FROM p_action THEN
+  IF v_map IS NULL OR v_map[1] IS DISTINCT FROM p_action OR p_tool = 'publish_event' THEN
     RAISE EXCEPTION 'exos_mcp_confirm_issue: unknown tool' USING ERRCODE = '22023';
   END IF;
   IF p_confirm_hash IS NULL OR p_confirm_hash !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION 'exos_mcp_confirm_issue: bad confirmation' USING ERRCODE = '22023';
   END IF;
-  IF public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash) IS NULL THEN
+  v_actor := public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash, p_resource);
+  IF v_actor IS NULL THEN
     RAISE EXCEPTION 'exos_mcp_confirm_issue: invalid or revoked credential' USING ERRCODE = '42501';
+  END IF;
+  -- Before anything is counted: only those who may make these changes in the
+  -- dashboard (owner / manager now) may ask for one.
+  IF public._exos_member_role(p_org, v_actor) IS DISTINCT FROM 'owner'
+     AND public._exos_member_role(p_org, v_actor) IS DISTINCT FROM 'manager' THEN
+    RAISE EXCEPTION 'exos_mcp_confirm_issue: only an owner or manager can create events from an AI assistant'
+      USING ERRCODE = '42501';
+  END IF;
+  IF public._exos_mcp_attempts_over(p_cred_kind, p_cred) THEN
+    RAISE EXCEPTION 'exos_mcp_confirm_issue: too many attempts from this credential in the last hour' USING ERRCODE = '54000';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('exos-mcp-confirm:' || p_cred::text, 0));
   DELETE FROM public.exos_mcp_confirms
@@ -388,16 +585,18 @@ BEGIN
           public._exos_api_request_hash(p_action, p_target, coalesce(p_args, '{}'::jsonb)), v_exp);
   RETURN jsonb_build_object('expires_at', v_exp);
 END $$;
-REVOKE ALL ON FUNCTION public.exos_mcp_confirm_issue(uuid, text, uuid, text, text, text, text, jsonb, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_mcp_confirm_issue(uuid, text, uuid, text, text, text, text, jsonb, text) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_mcp_confirm_issue(uuid, text, uuid, text, text, text, text, text, jsonb, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_confirm_issue(uuid, text, uuid, text, text, text, text, text, jsonb, text) TO service_role;
 
 -- Second call: check and spend the confirmation, count the hour, write.
 -- Answers { ok: true, write_id, result } or { ok: false, error, message }
--- (confirm_invalid / confirm_used / confirm_expired / confirm_mismatch /
--- rate_limited / write_failed with the SQLSTATE in code). A mismatch burns
--- the confirmation; a rate limit leaves it for later; a failed write spends it.
+-- (credential / role / confirm_invalid / confirm_used / confirm_expired /
+-- confirm_mismatch / rate_limited / write_failed with the SQLSTATE in code).
+-- Every refusal is logged (status refused, the reason) except one over the
+-- credential's own cap, so a flood can't grow the log. A mismatch burns the
+-- confirmation; the org cap leaves it for later; a failed write spends it.
 CREATE OR REPLACE FUNCTION public.exos_mcp_write(
-  p_confirm_hash text, p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_tool text,
+  p_confirm_hash text, p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_resource text, p_tool text,
   p_action text, p_target text, p_args jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -407,6 +606,7 @@ DECLARE
   c        public.exos_mcp_confirms%ROWTYPE;
   v_map    text[] := public._exos_mcp_tool_action(p_tool);
   v_actor  uuid;
+  v_role   text;
   v_n      int;
   v_cap    int := public._exos_setting_int('mcp_writes_per_hour', 20, 1, 1000);
   v_id     uuid;
@@ -415,41 +615,55 @@ DECLARE
   v_msg    text;
   v_event  uuid;
   v_oldest timestamptz;
+  v_why    text;
 BEGIN
-  IF v_map IS NULL OR v_map[1] IS DISTINCT FROM p_action THEN
+  IF v_map IS NULL OR v_map[1] IS DISTINCT FROM p_action OR p_tool = 'publish_event' THEN
     RAISE EXCEPTION 'exos_mcp_write: unknown tool' USING ERRCODE = '22023';
   END IF;
-  v_actor := public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash);
+  IF public._exos_mcp_attempts_over(p_cred_kind, p_cred) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'rate_limited', 'retry_after_seconds', 3600,
+      'message', 'too many attempts from this credential in the last hour; try again later');
+  END IF;
+  v_actor := public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash, p_resource);
   IF v_actor IS NULL THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, NULL, p_tool, p_target, 'refused', 'credential');
     RETURN jsonb_build_object('ok', false, 'error', 'credential', 'message', 'invalid or revoked credential');
   END IF;
+  v_role := public._exos_member_role(p_org, v_actor);
+  IF v_role IS NULL OR v_role NOT IN ('owner', 'manager') THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, p_tool, p_target, 'refused', 'role');
+    RETURN jsonb_build_object('ok', false, 'error', 'role',
+      'message', 'only an owner or manager can create events from an AI assistant');
+  END IF;
   SELECT * INTO c FROM public.exos_mcp_confirms WHERE token_hash = p_confirm_hash FOR UPDATE;
-  IF NOT FOUND OR c.org_id <> p_org OR c.credential_kind <> p_cred_kind OR c.credential_id <> p_cred THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'confirm_invalid',
-      'message', 'this confirm_token is not valid; call the tool again without one for a new preview');
-  END IF;
-  IF c.used_at IS NOT NULL THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'confirm_used',
-      'message', 'this confirm_token was already used; call the tool again without one for a new preview');
-  END IF;
-  IF c.expires_at <= now() THEN
-    RETURN jsonb_build_object('ok', false, 'error', 'confirm_expired',
-      'message', 'this confirm_token expired (10 minutes); call the tool again without one for a new preview');
-  END IF;
-  IF c.tool <> p_tool OR c.action <> p_action OR c.target IS DISTINCT FROM left(p_target, 255)
-     OR c.request_hash <> public._exos_api_request_hash(p_action, p_target, coalesce(p_args, '{}'::jsonb)) THEN
-    UPDATE public.exos_mcp_confirms SET used_at = now() WHERE token_hash = p_confirm_hash;
-    RETURN jsonb_build_object('ok', false, 'error', 'confirm_mismatch',
-      'message', 'the arguments changed since the preview, so that confirm_token no longer applies; call the tool again without one for a new preview');
+  v_why := CASE
+    WHEN c.token_hash IS NULL OR c.org_id <> p_org OR c.credential_kind <> p_cred_kind OR c.credential_id <> p_cred THEN 'confirm_invalid'
+    WHEN c.used_at IS NOT NULL THEN 'confirm_used'
+    WHEN c.expires_at <= now() THEN 'confirm_expired'
+    WHEN c.tool <> p_tool OR c.action <> p_action OR c.target IS DISTINCT FROM left(p_target, 255)
+      OR c.request_hash <> public._exos_api_request_hash(p_action, p_target, coalesce(p_args, '{}'::jsonb)) THEN 'confirm_mismatch'
+  END;
+  IF v_why IS NOT NULL THEN
+    IF v_why = 'confirm_mismatch' THEN
+      UPDATE public.exos_mcp_confirms SET used_at = now() WHERE token_hash = p_confirm_hash;
+    END IF;
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, p_tool, p_target, 'refused', v_why);
+    RETURN jsonb_build_object('ok', false, 'error', v_why, 'message', CASE v_why
+      WHEN 'confirm_invalid' THEN 'this confirm_token is not valid; call the tool again without one for a new preview'
+      WHEN 'confirm_used' THEN 'this confirm_token was already used; call the tool again without one for a new preview'
+      WHEN 'confirm_expired' THEN 'this confirm_token expired (10 minutes); call the tool again without one for a new preview'
+      ELSE 'the arguments changed since the preview, so that confirm_token no longer applies; call the tool again without one for a new preview'
+    END);
   END IF;
 
-  -- The org's MCP writes in the last hour (every attempt counts).
+  -- The org's MCP writes that ran in the last hour (refusals don't count).
   PERFORM pg_advisory_xact_lock(hashtextextended('exos-mcp-writes:' || p_org::text, 0));
   SELECT count(*), min(created_at) INTO v_n, v_oldest FROM public.exos_mcp_writes
-   WHERE org_id = p_org AND created_at > now() - interval '1 hour';
+   WHERE org_id = p_org AND status = 'done' AND created_at > now() - interval '1 hour';
   IF v_n >= v_cap THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, p_tool, p_target, 'refused', 'rate_limited');
     RETURN jsonb_build_object('ok', false, 'error', 'rate_limited',
-      'message', format('this organization has made %s writes from an AI assistant in the last hour (the most is %s); try again later', v_n, v_cap),
+      'message', format('this organization has made %s changes from an AI assistant in the last hour (the most is %s); try again later', v_n, v_cap),
       'retry_after_seconds', greatest(1, ceil(extract(epoch FROM (v_oldest + interval '1 hour' - now())))::int));
   END IF;
 
@@ -461,10 +675,10 @@ BEGIN
   BEGIN
     IF p_cred_kind = 'api_key' THEN
       v_out := public.exos_api_write(p_cred, p_action, p_target, coalesce(p_args, '{}'::jsonb),
-                                     'mcp-' || replace(v_id::text, '-', ''), NULL, NULL, NULL, 'mcp');
+                                     'mcp-' || replace(v_id::text, '-', ''), NULL, NULL, NULL, 'mcp', NULL);
     ELSE
       v_out := public.exos_api_write(NULL, p_action, p_target, coalesce(p_args, '{}'::jsonb),
-                                     'mcp-' || replace(v_id::text, '-', ''), p_bearer_hash, p_cred_kind, p_org, 'mcp');
+                                     'mcp-' || replace(v_id::text, '-', ''), p_bearer_hash, p_cred_kind, p_org, 'mcp', p_resource);
     END IF;
   EXCEPTION WHEN others THEN
     GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE, v_msg = MESSAGE_TEXT;
@@ -493,8 +707,8 @@ BEGIN
   END IF;
   RETURN jsonb_build_object('ok', true, 'write_id', v_id, 'result', coalesce(v_out, '{}'::jsonb));
 END $$;
-REVOKE ALL ON FUNCTION public.exos_mcp_write(text, uuid, text, uuid, text, text, text, text, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.exos_mcp_write(text, uuid, text, uuid, text, text, text, text, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.exos_mcp_write(text, uuid, text, uuid, text, text, text, text, text, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_write(text, uuid, text, uuid, text, text, text, text, text, jsonb) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 6. What the previews read, for the credential's org only.
@@ -518,6 +732,29 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_mcp_fee_outcome(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_mcp_fee_outcome(uuid, uuid) TO service_role;
 
+-- What a publish would make public: the event's buyer-facing fields and every
+-- ticket type (id, name, price and steps, quantity, kind, visibility, sale
+-- window, last change), as SHA-256 hex. Any edit in between changes it.
+CREATE OR REPLACE FUNCTION public._exos_mcp_event_digest(p_event uuid)
+RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT encode(sha256(convert_to(jsonb_build_object(
+    'event', jsonb_build_object('id', e.id, 'name', e.name, 'status', e.status, 'starts_at', e.starts_at,
+      'ends_at', e.ends_at, 'doors_at', e.doors_at, 'timezone', e.timezone, 'currency', e.currency,
+      'venue_name', e.venue_name, 'venue_address', e.venue_address, 'total_tickets', e.total_tickets,
+      'format', e.format, 'description', e.description, 'image_url', e.image_url, 'updated_at', e.updated_at),
+    'ticket_types', coalesce((
+      SELECT jsonb_agg(jsonb_build_object('id', t.id, 'name', t.name, 'price', t.price, 'price_schedule', t.price_schedule,
+               'capacity', t.capacity, 'ticket_type', t.ticket_type, 'kind', t.kind, 'party_size', t.party_size,
+               'visibility', t.visibility, 'sales_start', t.sales_start, 'sales_end', t.sales_end,
+               'updated_at', t.updated_at) ORDER BY t.id)
+        FROM public.exos_ticket_tiers t WHERE t.event_id = e.id), '[]'::jsonb))::text, 'UTF8')), 'hex')
+    FROM public.exos_events e WHERE e.id = p_event
+$$;
+REVOKE ALL ON FUNCTION public._exos_mcp_event_digest(uuid) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public.exos_mcp_event_state(p_org uuid, p_event uuid)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -536,7 +773,197 @@ BEGIN
                                                                   'sales_start', t.sales_start, 'sales_end', t.sales_end)
                                                ORDER BY t.sort_order, t.created_at)
                                 FROM public.exos_ticket_tiers t WHERE t.event_id = e.id), '[]'::jsonb),
-    'blockers', public._exos_event_publish_blockers(e.id));
+    'blockers', public._exos_event_publish_blockers(e.id),
+    'digest', public._exos_mcp_event_digest(e.id));
 END $$;
 REVOKE ALL ON FUNCTION public.exos_mcp_event_state(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.exos_mcp_event_state(uuid, uuid) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 7. Publishing waits for the person. An assistant's publish_event asks for a
+--    review (exos_mcp_publish_request: the event as previewed, its digest, 30
+--    minutes). The person opens /orgs/<org>/events/<id>/publish-review in
+--    Exos, signed in as the credential's user, sees the event as it is now and
+--    clicks Publish (exos_mcp_publish_approve), which publishes only if the
+--    event is still exactly what the assistant previewed. The assistant can't
+--    complete a publish on its own.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.exos_mcp_publish_request(
+  p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_resource text, p_event uuid, p_digest text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_actor uuid; v_role text; e public.exos_events%ROWTYPE; v_blk jsonb; v_id uuid; v_exp timestamptz; v_open int;
+BEGIN
+  IF public._exos_mcp_attempts_over(p_cred_kind, p_cred) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'rate_limited', 'retry_after_seconds', 3600,
+      'message', 'too many attempts from this credential in the last hour; try again later');
+  END IF;
+  v_actor := public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash, p_resource);
+  IF v_actor IS NULL THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, NULL, 'publish_event', p_event::text, 'refused', 'credential');
+    RETURN jsonb_build_object('ok', false, 'error', 'credential', 'message', 'invalid or revoked credential');
+  END IF;
+  v_role := public._exos_member_role(p_org, v_actor);
+  IF v_role IS NULL OR v_role NOT IN ('owner', 'manager') THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, 'publish_event', p_event::text, 'refused', 'role');
+    RETURN jsonb_build_object('ok', false, 'error', 'role', 'message', 'only an owner or manager can publish');
+  END IF;
+  SELECT * INTO e FROM public.exos_events WHERE id = p_event AND org_id = p_org;
+  IF NOT FOUND THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, 'publish_event', p_event::text, 'refused', 'not_found');
+    RETURN jsonb_build_object('ok', false, 'error', 'not_found', 'message', 'no event with that id in your organization');
+  END IF;
+  IF e.status = 'published' THEN
+    RETURN jsonb_build_object('ok', true, 'status', 'already_published', 'event_id', e.id);
+  END IF;
+  IF e.status <> 'draft' THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, 'publish_event', p_event::text, 'refused', 'not_draft', e.id);
+    RETURN jsonb_build_object('ok', false, 'error', 'not_draft', 'message', format('this event is %s and can''t be published', e.status));
+  END IF;
+  IF p_digest IS DISTINCT FROM public._exos_mcp_event_digest(e.id) THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, 'publish_event', p_event::text, 'refused', 'changed', e.id);
+    RETURN jsonb_build_object('ok', false, 'error', 'changed',
+      'message', 'the event changed since the preview; call publish_event again for a new one');
+  END IF;
+  v_blk := public._exos_event_publish_blockers(e.id);
+  IF jsonb_array_length(v_blk) > 0 THEN
+    PERFORM public._exos_mcp_log(p_org, p_cred_kind, p_cred, v_actor, 'publish_event', p_event::text, 'blocked', 'blockers', e.id);
+    RETURN jsonb_build_object('ok', false, 'error', 'blocked', 'blockers', v_blk, 'message', 'the event can''t be published yet');
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos-mcp-publish:' || p_cred::text, 0));
+  -- One live request per event and credential; at most 10 open per credential.
+  UPDATE public.exos_mcp_publish_requests SET status = 'cancelled', decided_at = now()
+   WHERE credential_kind = p_cred_kind AND credential_id = p_cred AND event_id = e.id AND status = 'pending';
+  SELECT count(*) INTO v_open FROM public.exos_mcp_publish_requests
+   WHERE credential_kind = p_cred_kind AND credential_id = p_cred AND status = 'pending' AND expires_at > now();
+  IF v_open >= 10 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'rate_limited', 'retry_after_seconds', 1800,
+      'message', 'too many publish reviews are waiting; finish or let some expire first');
+  END IF;
+  v_exp := now() + interval '30 minutes';
+  INSERT INTO public.exos_mcp_publish_requests (org_id, event_id, credential_kind, credential_id, actor, digest, expires_at)
+  VALUES (p_org, e.id, p_cred_kind, p_cred, v_actor, p_digest, v_exp)
+  RETURNING id INTO v_id;
+  RETURN jsonb_build_object('ok', true, 'status', 'pending', 'request_id', v_id, 'event_id', e.id, 'expires_at', v_exp);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_mcp_publish_request(uuid, text, uuid, text, text, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_publish_request(uuid, text, uuid, text, text, uuid, text) TO service_role;
+
+-- Where a request stands, for the credential that made it (else NULL).
+CREATE OR REPLACE FUNCTION public.exos_mcp_publish_status(
+  p_org uuid, p_cred_kind text, p_cred uuid, p_bearer_hash text, p_resource text, p_request uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE r public.exos_mcp_publish_requests%ROWTYPE;
+BEGIN
+  IF public._exos_mcp_credential(p_org, p_cred_kind, p_cred, p_bearer_hash, p_resource) IS NULL THEN RETURN NULL; END IF;
+  SELECT * INTO r FROM public.exos_mcp_publish_requests
+   WHERE id = p_request AND org_id = p_org AND credential_kind = p_cred_kind AND credential_id = p_cred;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  IF r.status = 'pending' AND r.expires_at <= now() THEN
+    UPDATE public.exos_mcp_publish_requests SET status = 'expired', decided_at = now() WHERE id = r.id;
+    r.status := 'expired';
+  END IF;
+  RETURN jsonb_build_object('request_id', r.id, 'event_id', r.event_id, 'status', r.status, 'expires_at', r.expires_at,
+                            'decided_at', r.decided_at);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_mcp_publish_status(uuid, text, uuid, text, text, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_publish_status(uuid, text, uuid, text, text, uuid) TO service_role;
+
+-- The review page (signed in). Only the credential's own user, still an
+-- owner or manager of the org; anyone else, and an unknown id, get P0002.
+CREATE OR REPLACE FUNCTION public._exos_mcp_review_row(p_request uuid, p_lock boolean)
+RETURNS public.exos_mcp_publish_requests
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE r public.exos_mcp_publish_requests%ROWTYPE;
+BEGIN
+  IF p_lock THEN
+    SELECT * INTO r FROM public.exos_mcp_publish_requests WHERE id = p_request FOR UPDATE;
+  ELSE
+    SELECT * INTO r FROM public.exos_mcp_publish_requests WHERE id = p_request;
+  END IF;
+  IF r.id IS NULL OR auth.uid() IS NULL OR r.actor <> auth.uid()
+     OR NOT public.exos_has_org_role(r.org_id, ARRAY['owner', 'manager']) THEN
+    RAISE EXCEPTION 'publish request not found' USING ERRCODE = 'P0002';
+  END IF;
+  RETURN r;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_mcp_review_row(uuid, boolean) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.exos_mcp_publish_review(p_request uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE r public.exos_mcp_publish_requests%ROWTYPE; v_app text;
+BEGIN
+  r := public._exos_mcp_review_row(p_request, false);
+  IF r.status = 'pending' AND r.expires_at <= now() THEN
+    UPDATE public.exos_mcp_publish_requests SET status = 'expired', decided_at = now() WHERE id = r.id;
+    r.status := 'expired';
+  END IF;
+  IF r.credential_kind = 'oauth' THEN
+    SELECT a.name INTO v_app FROM public.exos_oauth_grants g JOIN public.exos_oauth_apps a ON a.id = g.app_id
+     WHERE g.id = r.credential_id;
+  END IF;
+  RETURN jsonb_build_object(
+    'request', jsonb_build_object('id', r.id, 'status', r.status, 'expires_at', r.expires_at, 'created_at', r.created_at,
+                                  'via', r.credential_kind, 'app', v_app),
+    'state', public.exos_mcp_event_state(r.org_id, r.event_id),
+    'fee', public.exos_mcp_fee_outcome(r.org_id, r.event_id),
+    'unchanged', public._exos_mcp_event_digest(r.event_id) = r.digest);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_mcp_publish_review(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_publish_review(uuid) TO authenticated, service_role;
+
+-- The person's Publish click. Publishes through the dashboard's own
+-- exos_publish_event as the signed-in user, only while the request is pending
+-- and the event is exactly what was previewed (else changed / expired /
+-- blocked, recorded). Answers { ok, status, event_id, blockers? }.
+CREATE OR REPLACE FUNCTION public.exos_mcp_publish_approve(p_request uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE r public.exos_mcp_publish_requests%ROWTYPE; v_out jsonb; v_id uuid;
+BEGIN
+  r := public._exos_mcp_review_row(p_request, true);
+  IF r.status <> 'pending' THEN
+    RETURN jsonb_build_object('ok', false, 'status', r.status, 'event_id', r.event_id);
+  END IF;
+  IF r.expires_at <= now() THEN
+    UPDATE public.exos_mcp_publish_requests SET status = 'expired', decided_at = now() WHERE id = r.id;
+    RETURN jsonb_build_object('ok', false, 'status', 'expired', 'event_id', r.event_id);
+  END IF;
+  PERFORM 1 FROM public.exos_events WHERE id = r.event_id FOR UPDATE;
+  IF public._exos_mcp_event_digest(r.event_id) IS DISTINCT FROM r.digest THEN
+    UPDATE public.exos_mcp_publish_requests SET status = 'changed', decided_at = now() WHERE id = r.id;
+    PERFORM public._exos_mcp_log(r.org_id, r.credential_kind, r.credential_id, r.actor, 'publish_event', r.event_id::text,
+                                 'refused', 'changed', r.event_id);
+    RETURN jsonb_build_object('ok', false, 'status', 'changed', 'event_id', r.event_id);
+  END IF;
+  v_out := public.exos_publish_event(r.event_id);
+  IF (v_out ->> 'published')::boolean IS NOT TRUE THEN
+    UPDATE public.exos_mcp_publish_requests SET status = 'blocked', decided_at = now() WHERE id = r.id;
+    PERFORM public._exos_mcp_log(r.org_id, r.credential_kind, r.credential_id, r.actor, 'publish_event', r.event_id::text,
+                                 'blocked', 'blockers', r.event_id);
+    RETURN jsonb_build_object('ok', false, 'status', 'blocked', 'event_id', r.event_id, 'blockers', v_out -> 'blockers');
+  END IF;
+  UPDATE public.exos_mcp_publish_requests SET status = 'published', decided_at = now() WHERE id = r.id;
+  v_id := public._exos_mcp_log(r.org_id, r.credential_kind, r.credential_id, r.actor, 'publish_event', r.event_id::text,
+                               'done', NULL, r.event_id);
+  PERFORM public._exos_audit(r.org_id, 'mcp.write', 'mcp_write', v_id::text, r.event_id,
+    jsonb_build_object('tool', 'publish_event', 'route', 'publish-event', 'credential', r.credential_kind,
+                       'status', 'done', 'approved', 'review_page'),
+    NULL, NULL, NULL, r.actor, CASE WHEN r.credential_kind = 'api_key' THEN r.credential_id END, 'mcp');
+  RETURN jsonb_build_object('ok', true, 'status', 'published', 'event_id', r.event_id);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_mcp_publish_approve(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_mcp_publish_approve(uuid) TO authenticated;

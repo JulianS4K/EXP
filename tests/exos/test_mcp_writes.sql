@@ -28,6 +28,20 @@
 --       API write log (source mcp, credential)
 --   M16 exos_mcp_event_state: own event with blockers; another org's is NULL
 --   M17 a failed MCP write spends its token and is logged failed
+--   X1  the audience: an OAuth token writes only on the API it was issued for
+--       (exos-api's URL on REST; exos-mcp's organizer URL through MCP); one for
+--       another resource, or none, can't write; authorize accepts only Exos
+--       resources (invalid_target)
+--   X2  the grant caps its tokens: a narrowed grant stops the live token's
+--       writes at once; re-consenting with fewer scopes revokes the grant's tokens
+--   X3  a content member (events:write in scope, not owner / manager) is refused
+--       before anything counts; refusals don't count toward the org cap; the
+--       per-credential attempt cap stops a flood without logging it
+--   P   publishing waits for the person: a review request bound to the event's
+--       digest; only the credential's user (owner / manager) can review and
+--       approve; a changed event, an expired request and blockers are refused
+--       and recorded; publish_event can't take a confirm token
+--   R   refusals are logged (refused + reason), blocked publishes as blocked
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -49,14 +63,16 @@ INSERT INTO public.exos_platform_settings (key, value) VALUES ('free_tier_max_ca
 INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('cc130000-0000-0000-0000-0000000000a1','cc13-owner@x.com',now()),
   ('cc130000-0000-0000-0000-0000000000a2','cc13-manager@x.com',now()),
-  ('cc130000-0000-0000-0000-0000000000a5','cc13-other@x.com',now());
+  ('cc130000-0000-0000-0000-0000000000a5','cc13-other@x.com',now()),
+  ('cc130000-0000-0000-0000-0000000000a3','cc13-content@x.com',now());
 INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
   ('cc130000-0000-0000-0000-000000000001','CC13 Org','cc13-org','cc130000-0000-0000-0000-0000000000a1'),
   ('cc130000-0000-0000-0000-000000000002','CC13 Other','cc13-other','cc130000-0000-0000-0000-0000000000a5');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('cc130000-0000-0000-0000-000000000001','cc130000-0000-0000-0000-0000000000a1','owner'),
   ('cc130000-0000-0000-0000-000000000001','cc130000-0000-0000-0000-0000000000a2','manager'),
-  ('cc130000-0000-0000-0000-000000000002','cc130000-0000-0000-0000-0000000000a5','owner');
+  ('cc130000-0000-0000-0000-000000000002','cc130000-0000-0000-0000-0000000000a5','owner'),
+  ('cc130000-0000-0000-0000-000000000001','cc130000-0000-0000-0000-0000000000a3','content');
 INSERT INTO public.exos_api_keys(id,org_id,name,key_prefix,key_hash,scopes,created_by) VALUES
   ('cc130000-0000-0000-0000-0000000000f1','cc130000-0000-0000-0000-000000000001','k1','sk_live_cc13','cc13hash1',
    ARRAY['events:write'],'cc130000-0000-0000-0000-0000000000a1');
@@ -73,31 +89,54 @@ INSERT INTO public.exos_personal_tokens(id,user_id,org_id,name,key_prefix,key_ha
   ('cc130000-0000-0000-0000-0000000000c4','cc130000-0000-0000-0000-0000000000a1','cc130000-0000-0000-0000-000000000001',
    'p4','exos_pat_cc4',pg_temp.h('exos_pat_cc13_p4'),ARRAY['events:write'],NULL),
   ('cc130000-0000-0000-0000-0000000000c5','cc130000-0000-0000-0000-0000000000a1','cc130000-0000-0000-0000-000000000001',
-   'p5','exos_pat_cc5',pg_temp.h('exos_pat_cc13_p5'),ARRAY['events:write'],now() - interval '1 minute');
+   'p5','exos_pat_cc5',pg_temp.h('exos_pat_cc13_p5'),ARRAY['events:write'],now() - interval '1 minute'),
+  ('cc130000-0000-0000-0000-0000000000c6','cc130000-0000-0000-0000-0000000000a3','cc130000-0000-0000-0000-000000000001',
+   'p6','exos_pat_cc6',pg_temp.h('exos_pat_cc13_p6'),ARRAY['events:read','events:write'],NULL);
+-- The resources (RFC 8707) an Exos OAuth token may be for: _exos_oauth_resources()'s default.
+CREATE FUNCTION pg_temp.api() RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'https://hzrizjeaxlqcxfrtczpq.supabase.co/functions/v1/exos-api' $$;
+CREATE FUNCTION pg_temp.mcp() RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'https://hzrizjeaxlqcxfrtczpq.supabase.co/functions/v1/exos-mcp/organizer' $$;
 INSERT INTO public.exos_oauth_apps(id,client_id,name,redirect_uris,scopes,client_type,source) VALUES
   ('cc130000-0000-0000-0000-0000000000d1','exos_app_cc1300000000000000000001','CC13 Assistant',ARRAY['https://claude.ai/api/mcp/auth_callback'],
+   ARRAY['events:read','events:write'],'public','dcr'),
+  ('cc130000-0000-0000-0000-0000000000d3','exos_app_cc1300000000000000000003','CC13 Capped',ARRAY['https://a.example/cb'],
+   ARRAY['events:read','events:write'],'public','dcr'),
+  ('cc130000-0000-0000-0000-0000000000d7','exos_app_cc1300000000000000000007','CC13 Reconsent',ARRAY['https://b.example/cb'],
    ARRAY['events:read','events:write'],'public','dcr');
 INSERT INTO public.exos_oauth_grants(id,app_id,user_id,org_id,scopes) VALUES
   ('cc130000-0000-0000-0000-0000000000d2','cc130000-0000-0000-0000-0000000000d1','cc130000-0000-0000-0000-0000000000a1',
+   'cc130000-0000-0000-0000-000000000001',ARRAY['events:read','events:write']),
+  ('cc130000-0000-0000-0000-0000000000d4','cc130000-0000-0000-0000-0000000000d3','cc130000-0000-0000-0000-0000000000a1',
+   'cc130000-0000-0000-0000-000000000001',ARRAY['events:read','events:write']),
+  ('cc130000-0000-0000-0000-0000000000d8','cc130000-0000-0000-0000-0000000000d7','cc130000-0000-0000-0000-0000000000a1',
    'cc130000-0000-0000-0000-000000000001',ARRAY['events:read','events:write']);
-INSERT INTO public.exos_oauth_tokens(token_hash,kind,app_id,grant_id,family_id,user_id,org_id,scopes,expires_at) VALUES
-  (pg_temp.h('exos_oat_cc13_o1'),'access','cc130000-0000-0000-0000-0000000000d1','cc130000-0000-0000-0000-0000000000d2',
-   gen_random_uuid(),'cc130000-0000-0000-0000-0000000000a1','cc130000-0000-0000-0000-000000000001',
-   ARRAY['events:read','events:write'],now() + interval '1 hour');
+-- o1: for exos-api (REST). o2: for exos-mcp. o3: for another server. o4: no resource.
+-- o5 under grant d4 (X2 cap), o7 under grant d8 (X2 re-consent).
+INSERT INTO public.exos_oauth_tokens(token_hash,kind,app_id,grant_id,family_id,user_id,org_id,scopes,expires_at,resource)
+SELECT pg_temp.h('exos_oat_cc13_' || t.n), 'access', t.app::uuid, t.g::uuid, gen_random_uuid(), 'cc130000-0000-0000-0000-0000000000a1',
+       'cc130000-0000-0000-0000-000000000001', ARRAY['events:read','events:write'], now() + interval '1 hour', t.res
+  FROM (VALUES ('o1', 'cc130000-0000-0000-0000-0000000000d1', 'cc130000-0000-0000-0000-0000000000d2', pg_temp.api()),
+               ('o2', 'cc130000-0000-0000-0000-0000000000d1', 'cc130000-0000-0000-0000-0000000000d2', pg_temp.mcp()),
+               ('o3', 'cc130000-0000-0000-0000-0000000000d1', 'cc130000-0000-0000-0000-0000000000d2', 'https://evil.example/mcp'),
+               ('o4', 'cc130000-0000-0000-0000-0000000000d1', 'cc130000-0000-0000-0000-0000000000d2', NULL),
+               ('o5', 'cc130000-0000-0000-0000-0000000000d3', 'cc130000-0000-0000-0000-0000000000d4', pg_temp.api()),
+               ('o7', 'cc130000-0000-0000-0000-0000000000d7', 'cc130000-0000-0000-0000-0000000000d8', pg_temp.api())) t(n, app, g, res);
 
 -- Org 2's draft (M10).
 INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,venue_name,total_tickets,created_by) VALUES
   ('cc130000-0000-0000-0000-0000000000e9','cc130000-0000-0000-0000-000000000002','CC13 Elsewhere','cc13-else','draft',
    now() + interval '5 days','America/New_York','Hall',10,'cc130000-0000-0000-0000-0000000000a5');
 
--- A user-token write (p = the token's text, t = pat / oauth).
-CREATE FUNCTION pg_temp.tw(p text, t text, a text, tgt text, args jsonb DEFAULT '{}', idem text DEFAULT NULL)
+-- A user-token write (p = the token's text, t = pat / oauth), as exos-api
+-- sends it: an OAuth token's audience is exos-api's URL.
+CREATE FUNCTION pg_temp.tw(p text, t text, a text, tgt text, args jsonb DEFAULT '{}', idem text DEFAULT NULL,
+                           res text DEFAULT NULL)
 RETURNS jsonb LANGUAGE sql AS $$
-  SELECT public.exos_api_write(NULL, a, tgt, args, idem, pg_temp.h(p), t)
+  SELECT public.exos_api_write(NULL, a, tgt, args, idem, pg_temp.h(p), t, NULL, 'api',
+                               CASE WHEN t = 'oauth' THEN coalesce(res, pg_temp.api()) END)
 $$;
-CREATE FUNCTION pg_temp.tst(p text, t text, a text, tgt text, args jsonb DEFAULT '{}') RETURNS text LANGUAGE plpgsql AS $$
+CREATE FUNCTION pg_temp.tst(p text, t text, a text, tgt text, args jsonb DEFAULT '{}', res text DEFAULT NULL) RETURNS text LANGUAGE plpgsql AS $$
 BEGIN
-  PERFORM pg_temp.tw(p, t, a, tgt, args);
+  PERFORM pg_temp.tw(p, t, a, tgt, args, NULL, res);
   RETURN 'ok';
 EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE;
 END $$;
@@ -112,17 +151,21 @@ DECLARE f text;
 BEGIN
   ASSERT to_regprocedure('public.exos_api_write(uuid,text,text,jsonb,text)') IS NULL, 'M1 the five-argument exos_api_write is gone';
   FOREACH f IN ARRAY ARRAY[
-    'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text)',
-    'public.exos_mcp_confirm_issue(uuid,text,uuid,text,text,text,text,jsonb,text)',
-    'public.exos_mcp_write(text,uuid,text,uuid,text,text,text,text,jsonb)',
+    'public.exos_api_write(uuid,text,text,jsonb,text,text,text,uuid,text,text)',
+    'public.exos_mcp_confirm_issue(uuid,text,uuid,text,text,text,text,text,jsonb,text)',
+    'public.exos_mcp_write(text,uuid,text,uuid,text,text,text,text,text,jsonb)',
     'public.exos_mcp_event_state(uuid,uuid)', 'public.exos_mcp_fee_outcome(uuid,uuid)',
-    'public._exos_api_user_token_actions()'] LOOP
+    'public.exos_mcp_publish_request(uuid,text,uuid,text,text,uuid,text)',
+    'public.exos_mcp_publish_status(uuid,text,uuid,text,text,uuid)',
+    'public._exos_api_user_token_actions()', 'public._exos_oauth_resources()', 'public._exos_oauth_grant_cap(text[],uuid)'] LOOP
     ASSERT has_function_privilege('service_role', f, 'EXECUTE'), 'M1 service_role runs ' || f;
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'),
       'M1 no client runs ' || f;
   END LOOP;
-  FOREACH f IN ARRAY ARRAY['public._exos_mcp_credential(uuid,text,uuid,text)', 'public._exos_mcp_tool_action(text)',
-                           'public._exos_tg_api_writes_cred()'] LOOP
+  FOREACH f IN ARRAY ARRAY['public._exos_mcp_credential(uuid,text,uuid,text,text)', 'public._exos_mcp_tool_action(text)',
+                           'public._exos_tg_api_writes_cred()', 'public._exos_mcp_log(uuid,text,uuid,uuid,text,text,text,text,uuid)',
+                           'public._exos_mcp_attempts_over(text,uuid)', 'public._exos_mcp_event_digest(uuid)',
+                           'public._exos_mcp_review_row(uuid,boolean)'] LOOP
     ASSERT NOT has_function_privilege('anon', f, 'EXECUTE') AND NOT has_function_privilege('authenticated', f, 'EXECUTE'),
       'M1 helper not client-callable: ' || f;
   END LOOP;
@@ -132,7 +175,14 @@ BEGIN
      AND NOT has_table_privilege('authenticated', 'public.exos_mcp_writes', 'INSERT')
      AND NOT has_table_privilege('anon', 'public.exos_mcp_writes', 'SELECT'), 'M1 MCP write log: SELECT only';
   ASSERT (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_mcp_writes'::regclass)
-     AND (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_mcp_confirms'::regclass), 'M1 RLS on';
+     AND (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_mcp_confirms'::regclass)
+     AND (SELECT relrowsecurity FROM pg_class WHERE oid = 'public.exos_mcp_publish_requests'::regclass), 'M1 RLS on';
+  ASSERT NOT has_table_privilege('authenticated', 'public.exos_mcp_publish_requests', 'SELECT'), 'M1 publish requests: RPCs only';
+  -- The review page's two functions: signed in only, never anon.
+  FOREACH f IN ARRAY ARRAY['public.exos_mcp_publish_review(uuid)', 'public.exos_mcp_publish_approve(uuid)'] LOOP
+    ASSERT has_function_privilege('authenticated', f, 'EXECUTE') AND NOT has_function_privilege('anon', f, 'EXECUTE'),
+      'M1 signed in only: ' || f;
+  END LOOP;
   RAISE NOTICE 'M1 ok';
 END $$;
 
@@ -277,12 +327,12 @@ DECLARE
   args jsonb := pg_temp.ev('CC13 MCP Night', 80);
   r jsonb; v_id uuid; m public.exos_mcp_writes%ROWTYPE;
 BEGIN
-  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-1'));
-  r := public.exos_mcp_write(pg_temp.h('confirm-1'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-1'));
+  r := public.exos_mcp_write(pg_temp.h('confirm-1'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT (r ->> 'ok')::boolean, 'M13 a confirmed write runs: ' || r::text;
   v_id := (r -> 'result' ->> 'id')::uuid;
   ASSERT (SELECT status FROM public.exos_events WHERE id = v_id) = 'draft', 'M13 the draft exists';
-  r := public.exos_mcp_write(pg_temp.h('confirm-1'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-1'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'confirm_used', 'M13 reuse refused: ' || r::text;
   ASSERT (SELECT count(*) FROM public.exos_events WHERE name = 'CC13 MCP Night') = 1, 'M13 written once';
   -- M15: the logs.
@@ -299,56 +349,56 @@ BEGIN
     'M15 API write log: source mcp, the credential';
 
   -- Expired.
-  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-2'));
+  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-2'));
   UPDATE public.exos_mcp_confirms SET expires_at = now() - interval '1 second' WHERE token_hash = pg_temp.h('confirm-2');
-  r := public.exos_mcp_write(pg_temp.h('confirm-2'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-2'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'confirm_expired', 'M13 expired refused: ' || r::text;
 
   -- Changed args: refused and burned.
-  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-3'));
-  r := public.exos_mcp_write(pg_temp.h('confirm-3'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL,
+  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-3'));
+  r := public.exos_mcp_write(pg_temp.h('confirm-3'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL,
                              pg_temp.ev('CC13 MCP Night', 800));
   ASSERT r ->> 'error' = 'confirm_mismatch', 'M13 changed args refused: ' || r::text;
-  r := public.exos_mcp_write(pg_temp.h('confirm-3'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-3'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'confirm_used', 'M13 a mismatch burns the token';
   -- Another tool with the same token.
-  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-4'));
+  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-4'));
   BEGIN
-    r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'publish_event', 'event.create', NULL, args);
+    r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'publish_event', 'event.create', NULL, args);
     RAISE EXCEPTION 'M13 a tool and an action that do not belong together must be refused';
   EXCEPTION WHEN invalid_parameter_value THEN NULL;
   END;
   -- Another credential's token: the OAuth token presents p1's confirmation.
-  r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'oauth', o1, pg_temp.h('exos_oat_cc13_o1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'oauth', o1, pg_temp.h('exos_oat_cc13_o2'), pg_temp.mcp(), 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'confirm_invalid', 'M13 another credential''s token refused: ' || r::text;
-  r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-4'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT (r ->> 'ok')::boolean, 'M13 ...which stays usable by its own credential';
   -- An unknown token.
-  r := public.exos_mcp_write(pg_temp.h('nope'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('nope'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'confirm_invalid', 'M13 an unknown token refused';
   -- A credential that doesn't check out: refused before anything.
   BEGIN
-    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_wrong'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-5'));
+    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_wrong'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-5'));
     RAISE EXCEPTION 'M13 issue with a bad bearer must be refused';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   BEGIN
-    PERFORM public.exos_mcp_confirm_issue('cc130000-0000-0000-0000-000000000002', 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-6'));
+    PERFORM public.exos_mcp_confirm_issue('cc130000-0000-0000-0000-000000000002', 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-6'));
     RAISE EXCEPTION 'M13 issue for another org must be refused';
   EXCEPTION WHEN insufficient_privilege THEN NULL;
   END;
   -- A revoked credential between the two calls.
-  PERFORM public.exos_mcp_confirm_issue(org, 'api_key', 'cc130000-0000-0000-0000-0000000000f1', NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-7'));
+  PERFORM public.exos_mcp_confirm_issue(org, 'api_key', 'cc130000-0000-0000-0000-0000000000f1', NULL, NULL, 'create_event_draft', 'event.create', NULL, args, pg_temp.h('confirm-7'));
   UPDATE public.exos_api_keys SET revoked_at = now() WHERE id = 'cc130000-0000-0000-0000-0000000000f1';
-  r := public.exos_mcp_write(pg_temp.h('confirm-7'), org, 'api_key', 'cc130000-0000-0000-0000-0000000000f1', NULL, 'create_event_draft', 'event.create', NULL, args);
+  r := public.exos_mcp_write(pg_temp.h('confirm-7'), org, 'api_key', 'cc130000-0000-0000-0000-0000000000f1', NULL, NULL, 'create_event_draft', 'event.create', NULL, args);
   ASSERT r ->> 'error' = 'credential', 'M13 a key revoked after the preview: refused: ' || r::text;
   UPDATE public.exos_api_keys SET revoked_at = NULL WHERE id = 'cc130000-0000-0000-0000-0000000000f1';
 
   -- M17: a failed write (another org's event) spends its token and is logged.
-  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'publish_event', 'event.publish',
-                                        'cc130000-0000-0000-0000-0000000000e9', '{}', pg_temp.h('confirm-8'));
-  r := public.exos_mcp_write(pg_temp.h('confirm-8'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'publish_event', 'event.publish',
-                             'cc130000-0000-0000-0000-0000000000e9', '{}');
+  PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'add_ticket_type', 'ticket_type.create',
+                                        'cc130000-0000-0000-0000-0000000000e9', '{"ticket_type": {"name": "x", "price": 0, "capacity": 5}}', pg_temp.h('confirm-8'));
+  r := public.exos_mcp_write(pg_temp.h('confirm-8'), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'add_ticket_type', 'ticket_type.create',
+                             'cc130000-0000-0000-0000-0000000000e9', '{"ticket_type": {"name": "x", "price": 0, "capacity": 5}}');
   ASSERT r ->> 'error' = 'write_failed' AND r ->> 'code' = 'P0002', 'M17/M10 another org''s event through MCP: not found: ' || r::text;
   ASSERT (SELECT status = 'failed' AND error_code = 'P0002' FROM public.exos_mcp_writes WHERE id = (r ->> 'write_id')::uuid), 'M17 logged failed';
   ASSERT (SELECT used_at IS NOT NULL FROM public.exos_mcp_confirms WHERE token_hash = pg_temp.h('confirm-8')), 'M17 token spent';
@@ -363,13 +413,13 @@ DECLARE
   org uuid := 'cc130000-0000-0000-0000-000000000001';
   r jsonb; n int; i int;
 BEGIN
-  SELECT count(*) INTO n FROM public.exos_mcp_writes WHERE org_id = org AND created_at > now() - interval '1 hour';
+  SELECT count(*) INTO n FROM public.exos_mcp_writes WHERE org_id = org AND status = 'done' AND created_at > now() - interval '1 hour';
   INSERT INTO public.exos_platform_settings (key, value) VALUES ('mcp_writes_per_hour', to_jsonb(n + 2))
     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
   FOR i IN 1..3 LOOP
-    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL,
+    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL,
                                           pg_temp.ev('CC13 Cap ' || i, 5), pg_temp.h('cap-' || i));
-    r := public.exos_mcp_write(pg_temp.h('cap-' || i), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), 'create_event_draft', 'event.create', NULL,
+    r := public.exos_mcp_write(pg_temp.h('cap-' || i), org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'create_event_draft', 'event.create', NULL,
                                pg_temp.ev('CC13 Cap ' || i, 5));
     IF i <= 2 THEN
       ASSERT (r ->> 'ok')::boolean, 'M14 under the cap: ' || r::text;
@@ -383,6 +433,229 @@ BEGIN
   ASSERT (SELECT count(*) FROM public.exos_mcp_writes WHERE org_id = 'cc130000-0000-0000-0000-000000000002') = 0, 'M14 org 2 untouched';
   DELETE FROM public.exos_platform_settings WHERE key = 'mcp_writes_per_hour';
   RAISE NOTICE 'M14 ok';
+END $$;
+
+-- X1 -----------------------------------------------------------------------------
+DO $$
+DECLARE org uuid := 'cc130000-0000-0000-0000-000000000001'; g uuid := 'cc130000-0000-0000-0000-0000000000d2'; r jsonb;
+BEGIN
+  -- REST: only a token issued for exos-api writes there.
+  ASSERT pg_temp.tst('exos_oat_cc13_o1', 'oauth', 'event.create', NULL, pg_temp.ev('X1 api', 5)) = 'ok', 'X1 an API token writes on the API';
+  ASSERT pg_temp.tst('exos_oat_cc13_o2', 'oauth', 'event.create', NULL, pg_temp.ev('X1 mcp', 5)) = '42501', 'X1 an MCP token replayed at exos-api is refused';
+  ASSERT pg_temp.tst('exos_oat_cc13_o3', 'oauth', 'event.create', NULL, pg_temp.ev('X1 evil', 5)) = '42501', 'X1 another server''s token is refused';
+  ASSERT pg_temp.tst('exos_oat_cc13_o4', 'oauth', 'event.create', NULL, pg_temp.ev('X1 none', 5)) = '42501', 'X1 a token with no resource can''t write';
+  ASSERT pg_temp.tst('exos_oat_cc13_o3', 'oauth', 'event.create', NULL, pg_temp.ev('X1 evil 2', 5), 'https://evil.example/mcp') = '42501',
+    'X1 a resource outside the Exos list is refused even when the caller names it';
+  ASSERT pg_temp.tst('exos_oat_cc13_o1', 'oauth', 'event.create', NULL, pg_temp.ev('X1 lie', 5), pg_temp.mcp()) = '42501',
+    'X1 the caller''s audience must be the token''s';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_events WHERE name IN ('X1 mcp', 'X1 evil', 'X1 none', 'X1 evil 2', 'X1 lie')), 'X1 nothing written';
+  -- MCP: only the token issued for exos-mcp.
+  BEGIN
+    PERFORM public.exos_mcp_confirm_issue(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o1'), pg_temp.mcp(), 'create_event_draft', 'event.create', NULL, pg_temp.ev('X1m', 5), pg_temp.h('x1-a'));
+    RAISE EXCEPTION 'X1 an API token through MCP must be refused';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.exos_mcp_confirm_issue(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o4'), pg_temp.mcp(), 'create_event_draft', 'event.create', NULL, pg_temp.ev('X1m', 5), pg_temp.h('x1-b'));
+    RAISE EXCEPTION 'X1 a token with no resource must not write through MCP';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.exos_mcp_confirm_issue(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o3'), 'https://evil.example/mcp', 'create_event_draft', 'event.create', NULL, pg_temp.ev('X1m', 5), pg_temp.h('x1-c'));
+    RAISE EXCEPTION 'X1 another server''s token must not write through MCP';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  PERFORM public.exos_mcp_confirm_issue(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o2'), pg_temp.mcp(), 'create_event_draft', 'event.create', NULL, pg_temp.ev('X1 via MCP', 5), pg_temp.h('x1-d'));
+  r := public.exos_mcp_write(pg_temp.h('x1-d'), org, 'oauth', g, pg_temp.h('exos_oat_cc13_o2'), pg_temp.mcp(), 'create_event_draft', 'event.create', NULL, pg_temp.ev('X1 via MCP', 5));
+  ASSERT (r ->> 'ok')::boolean, 'X1 the MCP token writes through MCP: ' || r::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_api_writes WHERE credential_kind = 'oauth' AND source = 'mcp' AND credential_id = g), 'X1 logged as the grant, source mcp';
+  -- Authorize: only Exos resources.
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  BEGIN
+    PERFORM public.exos_oauth_authorize_approve('exos_app_cc1300000000000000000001', 'https://claude.ai/api/mcp/auth_callback',
+      'events:read events:write', org, repeat('A', 43), 'S256', 'https://evil.example/mcp');
+    RAISE EXCEPTION 'X1 authorize must refuse a foreign resource';
+  EXCEPTION WHEN invalid_parameter_value THEN
+    ASSERT SQLERRM LIKE 'invalid_target%', 'X1 invalid_target: ' || SQLERRM;
+  END;
+  BEGIN
+    PERFORM public.exos_oauth_authorize_approve('exos_app_cc1300000000000000000001', 'https://claude.ai/api/mcp/auth_callback',
+      'events:read events:write', org, repeat('A', 43), 'S256', pg_temp.mcp() || '/');
+    RAISE EXCEPTION 'X1 authorize must match a resource exactly';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
+  r := public.exos_oauth_authorize_approve('exos_app_cc1300000000000000000001', 'https://claude.ai/api/mcp/auth_callback',
+    'events:read events:write', org, repeat('A', 43), 'S256', pg_temp.mcp());
+  ASSERT r ->> 'code' IS NOT NULL, 'X1 the MCP resource is accepted';
+  r := public.exos_oauth_authorize_approve('exos_app_cc1300000000000000000001', 'https://claude.ai/api/mcp/auth_callback',
+    'events:read events:write', org, repeat('A', 43), 'S256', pg_temp.api());
+  ASSERT r ->> 'code' IS NOT NULL, 'X1 the API resource is accepted';
+  PERFORM set_config('app.uid', '', true);
+  -- The same scopes again kept the grant's tokens.
+  ASSERT pg_temp.tst('exos_oat_cc13_o1', 'oauth', 'event.create', NULL, pg_temp.ev('X1 still', 5)) = 'ok', 'X1 same scopes: tokens kept';
+  RAISE NOTICE 'X1 ok';
+END $$;
+
+-- X2 -----------------------------------------------------------------------------
+DO $$
+DECLARE org uuid := 'cc130000-0000-0000-0000-000000000001'; r jsonb;
+BEGIN
+  ASSERT pg_temp.tst('exos_oat_cc13_o5', 'oauth', 'event.create', NULL, pg_temp.ev('X2 before', 5)) = 'ok', 'X2 o5 writes before';
+  -- The grant narrows (as the dashboard's disconnect-a-scope would): the live token follows at once.
+  UPDATE public.exos_oauth_grants SET scopes = ARRAY['events:read'] WHERE id = 'cc130000-0000-0000-0000-0000000000d4';
+  ASSERT pg_temp.tst('exos_oat_cc13_o5', 'oauth', 'event.create', NULL, pg_temp.ev('X2 after', 5)) = '42501', 'X2 a narrowed grant stops the token''s writes';
+  ASSERT public.exos_api_token_auth(pg_temp.h('exos_oat_cc13_o5'), 'oauth') -> 'scopes' = '["events:read"]'::jsonb, 'X2 the token reads as the grant allows';
+  -- A refresh in that family gets the grant's scopes, not the family's.
+  INSERT INTO public.exos_oauth_tokens(token_hash,kind,app_id,grant_id,family_id,user_id,org_id,scopes,expires_at,resource)
+  SELECT pg_temp.h('exos_ort_cc13_r5'), 'refresh', app_id, grant_id, family_id, user_id, org_id, scopes, now() + interval '1 day', resource
+    FROM public.exos_oauth_tokens WHERE token_hash = pg_temp.h('exos_oat_cc13_o5');
+  r := public.exos_oauth_refresh(pg_temp.h('exos_ort_cc13_r5'), 'exos_app_cc1300000000000000000003', NULL, NULL);
+  ASSERT r ->> 'scope' = 'events:read', 'X2 the refresh is capped by the grant: ' || r::text;
+  ASSERT (public.exos_oauth_introspect(pg_temp.h('exos_ort_cc13_r5'), 'exos_app_cc1300000000000000000003', NULL) ->> 'active')::boolean IS NOT TRUE,
+    'X2 the used refresh token is inactive';
+  -- Re-consenting with fewer scopes revokes the grant's tokens.
+  ASSERT pg_temp.tst('exos_oat_cc13_o7', 'oauth', 'event.create', NULL, pg_temp.ev('X2 o7', 5)) = 'ok', 'X2 o7 writes before';
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  r := public.exos_oauth_authorize_approve('exos_app_cc1300000000000000000007', 'https://b.example/cb', 'events:read', org, repeat('A', 43), 'S256', NULL);
+  PERFORM set_config('app.uid', '', true);
+  ASSERT (SELECT scopes FROM public.exos_oauth_grants WHERE id = 'cc130000-0000-0000-0000-0000000000d8') = ARRAY['events:read'], 'X2 the grant narrowed';
+  ASSERT (SELECT revoked_at IS NOT NULL FROM public.exos_oauth_tokens WHERE token_hash = pg_temp.h('exos_oat_cc13_o7')), 'X2 its live token revoked';
+  ASSERT public.exos_api_token_auth(pg_temp.h('exos_oat_cc13_o7'), 'oauth') IS NULL, 'X2 the old token no longer authenticates';
+  ASSERT pg_temp.tst('exos_oat_cc13_o7', 'oauth', 'event.create', NULL, pg_temp.ev('X2 o7 after', 5)) = '42501', 'X2 nor writes';
+  RAISE NOTICE 'X2 ok';
+END $$;
+
+-- X3 -----------------------------------------------------------------------------
+DO $$
+DECLARE org uuid := 'cc130000-0000-0000-0000-000000000001'; p6 uuid := 'cc130000-0000-0000-0000-0000000000c6';
+        r jsonb; n_done int; n6 int; i int;
+BEGIN
+  SELECT count(*) INTO n_done FROM public.exos_mcp_writes WHERE org_id = org AND status = 'done';
+  ASSERT pg_temp.tst('exos_pat_cc13_p6', 'pat', 'event.create', NULL, pg_temp.ev('X3 rest', 5)) = '42501', 'X3 REST: content can''t create';
+  BEGIN
+    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p6, pg_temp.h('exos_pat_cc13_p6'), NULL, 'create_event_draft', 'event.create', NULL, pg_temp.ev('X3', 5), pg_temp.h('x3-a'));
+    RAISE EXCEPTION 'X3 a content member must be refused at issue';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_mcp_confirms WHERE credential_id = p6)
+     AND NOT EXISTS (SELECT 1 FROM public.exos_mcp_writes WHERE credential_id = p6), 'X3 nothing stored or counted at issue';
+  r := public.exos_mcp_write(pg_temp.h('x3-a'), org, 'pat', p6, pg_temp.h('exos_pat_cc13_p6'), NULL, 'create_event_draft', 'event.create', NULL, pg_temp.ev('X3', 5));
+  ASSERT r ->> 'error' = 'role', 'X3 a content member''s write is refused: ' || r::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mcp_writes WHERE credential_id = p6 AND status = 'refused' AND reason = 'role'), 'X3 the refusal is logged';
+  -- The per-credential cap: a flood stops, and past the cap isn't logged.
+  SELECT count(*) INTO n6 FROM public.exos_mcp_writes WHERE credential_id = p6;
+  INSERT INTO public.exos_platform_settings (key, value) VALUES ('mcp_attempts_per_hour', to_jsonb(n6 + 2))
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  FOR i IN 1..4 LOOP
+    r := public.exos_mcp_write(pg_temp.h('x3-a'), org, 'pat', p6, pg_temp.h('exos_pat_cc13_p6'), NULL, 'create_event_draft', 'event.create', NULL, pg_temp.ev('X3', 5));
+  END LOOP;
+  ASSERT r ->> 'error' = 'rate_limited', 'X3 over the credential''s cap: ' || r::text;
+  ASSERT (SELECT count(*) FROM public.exos_mcp_writes WHERE credential_id = p6) = n6 + 2, 'X3 past the cap nothing more is logged';
+  DELETE FROM public.exos_platform_settings WHERE key = 'mcp_attempts_per_hour';
+  -- None of it counts toward the org's cap.
+  ASSERT (SELECT count(*) FROM public.exos_mcp_writes WHERE org_id = org AND status = 'done') = n_done, 'X3 the org cap is untouched';
+  RAISE NOTICE 'X3 ok';
+END $$;
+
+-- P ------------------------------------------------------------------------------
+DO $$
+DECLARE
+  org uuid := 'cc130000-0000-0000-0000-000000000001'; p1 uuid := 'cc130000-0000-0000-0000-0000000000c1';
+  g uuid := 'cc130000-0000-0000-0000-0000000000d2';
+  e uuid; e2 uuid; e3 uuid; st jsonb; r jsonb; v jsonb; rid uuid; m public.exos_mcp_writes%ROWTYPE;
+BEGIN
+  e := (pg_temp.tw('exos_pat_cc13_p1', 'pat', 'event.create', NULL, pg_temp.ev('P Night', 50)
+        || '{"ticket_types": [{"name": "RSVP", "price": 0, "capacity": 50}]}') ->> 'id')::uuid;
+  st := public.exos_mcp_event_state(org, e);
+  ASSERT st ->> 'digest' ~ '^[0-9a-f]{64}$' AND jsonb_array_length(st -> 'blockers') = 0, 'P publishable, with a digest';
+  -- publish_event can't take a confirm token.
+  BEGIN
+    PERFORM public.exos_mcp_confirm_issue(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, 'publish_event', 'event.publish', e::text, '{}', pg_temp.h('p-x'));
+    RAISE EXCEPTION 'P publish_event must not take a confirm token';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
+  -- A stale digest is refused (and logged).
+  r := public.exos_mcp_publish_request(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, e, repeat('0', 64));
+  ASSERT r ->> 'error' = 'changed', 'P a stale preview is refused: ' || r::text;
+  r := public.exos_mcp_publish_request(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, e, st ->> 'digest');
+  ASSERT (r ->> 'ok')::boolean AND r ->> 'status' = 'pending', 'P a review is requested: ' || r::text;
+  rid := (r ->> 'request_id')::uuid;
+  ASSERT (SELECT status FROM public.exos_events WHERE id = e) = 'draft', 'P nothing published by the assistant';
+  ASSERT public.exos_mcp_publish_status(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, rid) ->> 'status' = 'pending', 'P pending';
+  ASSERT public.exos_mcp_publish_status(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o2'), pg_temp.mcp(), rid) IS NULL, 'P another credential sees nothing';
+  -- Only the credential's own user reviews.
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a2', true);
+  BEGIN
+    PERFORM public.exos_mcp_publish_review(rid);
+    RAISE EXCEPTION 'P another member must not see the review';
+  EXCEPTION WHEN no_data_found THEN NULL;
+  END;
+  BEGIN
+    PERFORM public.exos_mcp_publish_approve(rid);
+    RAISE EXCEPTION 'P another member must not approve';
+  EXCEPTION WHEN no_data_found THEN NULL;
+  END;
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  v := public.exos_mcp_publish_review(rid);
+  ASSERT (v ->> 'unchanged')::boolean AND v -> 'request' ->> 'status' = 'pending' AND v -> 'request' ->> 'via' = 'pat'
+     AND v -> 'state' -> 'event' ->> 'name' = 'P Night', 'P the review shows the event: ' || v::text;
+  -- The event changes after the preview: the review says so and Publish refuses.
+  UPDATE public.exos_ticket_tiers SET price = 99 WHERE event_id = e;
+  ASSERT NOT (public.exos_mcp_publish_review(rid) ->> 'unchanged')::boolean, 'P a changed event shows as changed';
+  r := public.exos_mcp_publish_approve(rid);
+  ASSERT r ->> 'status' = 'changed' AND (SELECT status FROM public.exos_events WHERE id = e) = 'draft', 'P a changed event isn''t published: ' || r::text;
+  UPDATE public.exos_ticket_tiers SET price = 0 WHERE event_id = e;
+  -- A fresh request, approved by the person: published.
+  PERFORM set_config('app.uid', '', true);
+  st := public.exos_mcp_event_state(org, e);
+  rid := (public.exos_mcp_publish_request(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, e, st ->> 'digest') ->> 'request_id')::uuid;
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  r := public.exos_mcp_publish_approve(rid);
+  ASSERT (r ->> 'ok')::boolean AND r ->> 'status' = 'published', 'P the person publishes: ' || r::text;
+  ASSERT (SELECT status FROM public.exos_events WHERE id = e) = 'published', 'P published';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_public_events WHERE id = e), 'P public now';
+  ASSERT (public.exos_mcp_publish_approve(rid) ->> 'ok')::boolean IS NOT TRUE, 'P a request publishes once';
+  PERFORM set_config('app.uid', '', true);
+  ASSERT public.exos_mcp_publish_status(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, rid) ->> 'status' = 'published', 'P the assistant reads it back';
+  SELECT * INTO m FROM public.exos_mcp_writes WHERE event_id = e AND status = 'done';
+  ASSERT m.tool = 'publish_event' AND m.route_id = 'publish-event' AND m.credential_id = p1 AND m.actor = 'cc130000-0000-0000-0000-0000000000a1', 'P logged done';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE action = 'mcp.write' AND entity_id = m.id::text AND source = 'mcp'
+                   AND changes ->> 'approved' = 'review_page'), 'P audited';
+  -- Blockers: a paid event without Stripe Connect is refused and logged blocked.
+  e2 := (pg_temp.tw('exos_pat_cc13_p1', 'pat', 'event.create', NULL, pg_temp.ev('P Paid', 50)
+         || '{"ticket_types": [{"name": "GA", "price": 20, "capacity": 50}]}') ->> 'id')::uuid;
+  r := public.exos_mcp_publish_request(org, 'pat', p1, pg_temp.h('exos_pat_cc13_p1'), NULL, e2, public.exos_mcp_event_state(org, e2) ->> 'digest');
+  ASSERT r ->> 'error' = 'blocked' AND EXISTS (SELECT 1 FROM jsonb_array_elements(r -> 'blockers') b WHERE b ->> 'code' = 'stripe_not_connected'),
+    'P paid without Connect: blocked: ' || r::text;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mcp_writes WHERE event_id = e2 AND status = 'blocked' AND reason = 'blockers'), 'P logged blocked';
+  -- An expired request.
+  e3 := (pg_temp.tw('exos_pat_cc13_p1', 'pat', 'event.create', NULL, pg_temp.ev('P Late', 50)
+         || '{"ticket_types": [{"name": "RSVP", "price": 0, "capacity": 50}]}') ->> 'id')::uuid;
+  rid := (public.exos_mcp_publish_request(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o2'), pg_temp.mcp(), e3,
+          public.exos_mcp_event_state(org, e3) ->> 'digest') ->> 'request_id')::uuid;
+  ASSERT rid IS NOT NULL, 'P the MCP OAuth token can ask';
+  ASSERT public.exos_mcp_publish_request(org, 'oauth', g, pg_temp.h('exos_oat_cc13_o1'), pg_temp.mcp(), e3,
+          public.exos_mcp_event_state(org, e3) ->> 'digest') ->> 'error' = 'credential', 'P the API token can''t ask through MCP';
+  UPDATE public.exos_mcp_publish_requests SET expires_at = now() - interval '1 second' WHERE id = rid;
+  PERFORM set_config('app.uid', 'cc130000-0000-0000-0000-0000000000a1', true);
+  ASSERT public.exos_mcp_publish_approve(rid) ->> 'status' = 'expired', 'P an expired request isn''t published';
+  PERFORM set_config('app.uid', '', true);
+  ASSERT (SELECT status FROM public.exos_events WHERE id = e3) = 'draft', 'P still a draft';
+  RAISE NOTICE 'P ok';
+END $$;
+
+-- R ------------------------------------------------------------------------------
+DO $$
+DECLARE org uuid := 'cc130000-0000-0000-0000-000000000001'; w text;
+BEGIN
+  FOREACH w IN ARRAY ARRAY['credential', 'role', 'confirm_invalid', 'confirm_used', 'confirm_expired', 'confirm_mismatch',
+                           'rate_limited', 'changed'] LOOP
+    ASSERT EXISTS (SELECT 1 FROM public.exos_mcp_writes WHERE org_id = org AND status = 'refused' AND reason = w), 'R refusal logged: ' || w;
+  END LOOP;
+  ASSERT EXISTS (SELECT 1 FROM public.exos_mcp_writes WHERE org_id = org AND status = 'blocked'), 'R blocked publish logged';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_org_audit WHERE org_id = org AND action = 'mcp.write' AND changes ->> 'status' = 'refused'),
+    'R refusals stay out of the append-only org audit';
+  RAISE NOTICE 'R ok';
 END $$;
 
 -- M16 + M9 (grant) ---------------------------------------------------------------------
