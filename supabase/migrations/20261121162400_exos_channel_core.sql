@@ -7,7 +7,8 @@
 --           C: FUNCTION _exos_cred_providers, _exos_cred_managed,
 --              _exos_integration_put, _exos_integration_drop, _exos_cred_legacy,
 --              _exos_cred_copy, _exos_cred_backfill, _exos_tg_cred_mirror,
---              _exos_tg_org_secrets_distribution (internal: no client grant)
+--              _exos_tg_org_secrets_distribution, _exos_tg_org_secrets_distribution_drop,
+--              _exos_tg_integration_vault_drop (internal: no client grant)
 --           C: FUNCTION exos_integration_secret (service role: the one decrypt)
 --           W: TABLE exos_org_integrations (+ copied_from; the provider CHECK
 --              now takes the managed providers too)
@@ -17,10 +18,13 @@
 --              lists the providers Integrations offers, not the copies)
 --           W: TRIGGERS on exos_eventbrite_accounts, exos_dice_connections,
 --              exos_org_ad_credentials, exos_discord_links (copy into the
---              store) and exos_org_secrets (distribution moves to Vault)
+--              store), exos_org_secrets (distribution moves to Vault; a
+--              deleted row drops it) and exos_org_integrations (a deleted row
+--              drops its Vault secret: no secret outlives its row)
 --           C: TABLE exos_channel_audit (RLS: owner / manager read their org),
---              FUNCTION _exos_channel_audit_scrub, exos_channel_audit_record
---              (service role)
+--              FUNCTION _exos_channel_audit_scrub / _scrub_text / _path,
+--              exos_channel_audit_record, exos_channel_retention_sweep
+--              (service role; a daily cron is wanted, none is scheduled here)
 --           C: TABLE exos_channel_usage (RLS on, no client grant), FUNCTION
 --              exos_channel_usage_reserve / _read / _release (service role),
 --              exos_channel_usage_summary (authenticated, owner / manager)
@@ -66,8 +70,9 @@
 --    channel, op, method, path (query values dropped), live or dry run, the
 --    redacted request, a response summary, status and time. Owners and
 --    managers read their org's rows (the "What we'd send" panel); only
---    exos_channel_audit_record writes, scrubbing secret-named keys again and
---    keeping 30 days.
+--    exos_channel_audit_record writes, scrubbing secret-named keys and
+--    credential-looking text (the error and warnings too) again and keeping
+--    30 days for every org.
 -- 4. PLATFORM USAGE. exos_channel_usage counts what a platform's limits count
 --    (supabase/functions/_shared/channels/limits.ts: Luma sends, LinkedIn
 --    invites, pretix / Ticket Tailor tickets, Eventbrite emails) per org,
@@ -226,21 +231,40 @@ END $$;
 REVOKE ALL ON FUNCTION public._exos_integration_put(uuid, text, text, jsonb, text, text, uuid, text, boolean, text)
   FROM PUBLIC, anon, authenticated, service_role;
 
+-- Drops the store row and, always, its Vault secret (by id and by name):
+-- also when the row is already gone (an org delete cascades the store rows
+-- before the old tables' triggers get here). True when a row was removed.
 CREATE OR REPLACE FUNCTION public._exos_integration_drop(p_org_id uuid, p_provider text)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE v_secret uuid;
+DECLARE
+  v_secret uuid;
+  v_found  boolean;
 BEGIN
   DELETE FROM public.exos_org_integrations WHERE org_id = p_org_id AND provider = p_provider RETURNING secret_id INTO v_secret;
-  IF NOT FOUND THEN
-    RETURN false;
-  END IF;
+  v_found := FOUND;
   PERFORM public._exos_vault_drop(v_secret, 'exos_integration:' || p_org_id::text || ':' || p_provider);
-  RETURN true;
+  RETURN v_found;
 END $$;
 REVOKE ALL ON FUNCTION public._exos_integration_drop(uuid, text) FROM PUBLIC, anon, authenticated, service_role;
+
+-- Any store row that goes (a remove, a failed copy, an org delete's cascade)
+-- takes its Vault secret with it: no secret outlives its row.
+CREATE OR REPLACE FUNCTION public._exos_tg_integration_vault_drop()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  PERFORM public._exos_vault_drop(OLD.secret_id, 'exos_integration:' || OLD.org_id::text || ':' || OLD.provider);
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_integration_vault_drop() FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS exos_org_integrations_vault_drop ON public.exos_org_integrations;
+CREATE TRIGGER exos_org_integrations_vault_drop AFTER DELETE ON public.exos_org_integrations
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_integration_vault_drop();
 
 -- A managed provider's credential as its OLD table holds it (the fallback
 -- and the copy's source). No row: nothing connected there.
@@ -403,6 +427,22 @@ REVOKE ALL ON FUNCTION public._exos_tg_org_secrets_distribution() FROM PUBLIC, a
 DROP TRIGGER IF EXISTS exos_org_secrets_distribution_vault ON public.exos_org_secrets;
 CREATE TRIGGER exos_org_secrets_distribution_vault BEFORE INSERT OR UPDATE OF distribution ON public.exos_org_secrets
   FOR EACH ROW EXECUTE FUNCTION public._exos_tg_org_secrets_distribution();
+
+-- The row itself deleted (by hand, or an org delete): the Lysted value goes
+-- too, store row and Vault secret.
+CREATE OR REPLACE FUNCTION public._exos_tg_org_secrets_distribution_drop()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  PERFORM public._exos_integration_drop(OLD.org_id, 'lysted');
+  RETURN NULL;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_org_secrets_distribution_drop() FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS exos_org_secrets_distribution_drop ON public.exos_org_secrets;
+CREATE TRIGGER exos_org_secrets_distribution_drop AFTER DELETE ON public.exos_org_secrets
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_org_secrets_distribution_drop();
 
 -- The data copy: every connected credential in the old stores, into the
 -- store (Vault copies), and the plain distribution values into Vault. Re-run
@@ -573,8 +613,44 @@ CREATE POLICY exos_channel_audit_sel ON public.exos_channel_audit FOR SELECT TO 
 COMMENT ON TABLE public.exos_channel_audit IS
   'Every request the channel core planned (dry run) or sent to a channel: method, path (no query values), the redacted payload, a response summary. Owner / manager read their org''s rows; written only by exos_channel_audit_record; 30 days. mig 20261121162400.';
 
+-- Credentials out of free text: auth schemes with their value, JWTs, known
+-- token prefixes (Stripe, Slack, GitHub, Google, Meta) and secret-named
+-- query parameters, wherever they sit in the string. Best effort: the edge
+-- function redacts first (gatedHttp.ts); this is the second pass.
+CREATE OR REPLACE FUNCTION public._exos_channel_audit_scrub_text(p text)
+RETURNS text LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE WHEN p IS NULL THEN NULL ELSE
+    regexp_replace(regexp_replace(regexp_replace(regexp_replace(p,
+      '\m(bearer|basic)\s+[^\s",;]{6,}|\m(token|apikey)\s+[A-Za-z0-9._~+/=-]{16,}', '[redacted]', 'gi'),
+      'eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}(\.[A-Za-z0-9_-]*)?', '[redacted]', 'g'),
+      '\m((sk|rk|pk)_(live|test)_|whsec_|xox[abprs]-|gh[pousr]_|github_pat_|ya29\.|EAA[A-Za-z0-9]{8}|AKIA)[A-Za-z0-9_.-]{6,}', '[redacted]', 'g'),
+      '([?&;]|\m)([A-Za-z0-9_.-]*(token|secret|passw|pwd|signature|credential|jwt|api[_-]?key|apikey|access[_-]?key|private[_-]?key|auth)[A-Za-z0-9_.-]*|key|sig)=[^&\s"#]*',
+      '\1\2=[redacted]', 'gi')
+  END
+$$;
+REVOKE ALL ON FUNCTION public._exos_channel_audit_scrub_text(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._exos_channel_audit_scrub_text(text) TO authenticated, service_role;
+
+-- A path as the audit keeps it: no fragment, no query values (names only;
+-- a bare parameter, which could itself be a secret, as …), and credentials
+-- in a path segment scrubbed as text.
+CREATE OR REPLACE FUNCTION public._exos_channel_audit_path(p text)
+RETURNS text LANGUAGE sql IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT left(regexp_replace(regexp_replace(
+           public._exos_channel_audit_scrub_text(regexp_replace(coalesce(p, ''), '#.*$', '')),
+           '([?&][^=&#]*)=[^&#]*', '\1=…', 'g'),
+           '([?&])[^=&#]+(?=&|$)', '\1…', 'g'), 500)
+$$;
+REVOKE ALL ON FUNCTION public._exos_channel_audit_path(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public._exos_channel_audit_path(text) TO authenticated, service_role;
+
 -- Secret-named keys and auth-looking strings out, at any depth (the edge
--- function redacts first; this is the second pass).
+-- function redacts first; this is the second pass). The key pattern is
+-- gatedHttp.ts SECRET_KEY.
 CREATE OR REPLACE FUNCTION public._exos_channel_audit_scrub(p jsonb, p_depth integer DEFAULT 0)
 RETURNS jsonb LANGUAGE plpgsql IMMUTABLE
 SET search_path = public, pg_temp
@@ -589,7 +665,14 @@ BEGIN
   CASE jsonb_typeof(p)
     WHEN 'object' THEN
       RETURN coalesce((SELECT jsonb_object_agg(e.k, CASE
-                 WHEN e.k ~* '(authorization|cookie|token|secret|password|passwd|api[_-]?key|client[_-]?secret|signature|credential)'
+                 WHEN e.k ~* '(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)'
+                   THEN to_jsonb('[redacted]'::text)
+                 -- A bare "key" is a secret unless it is a short targeting key
+                 -- (geo "US" / "US:10001", a numeric id), as gatedHttp.ts secretEntry.
+                 WHEN e.k ~* '^key$'
+                      AND NOT (jsonb_typeof(e.v) = 'number'
+                               OR (jsonb_typeof(e.v) = 'string'
+                                   AND (e.v #>> '{}') ~ '^([A-Z]{2}(:[A-Za-z0-9 ._-]{1,40})?|[0-9]{1,12})$'))
                    THEN to_jsonb('[redacted]'::text)
                  ELSE public._exos_channel_audit_scrub(e.v, p_depth + 1) END)
                FROM jsonb_each(p) e(k, v)), '{}'::jsonb);
@@ -597,7 +680,7 @@ BEGIN
       RETURN coalesce((SELECT jsonb_agg(public._exos_channel_audit_scrub(a.v, p_depth + 1) ORDER BY a.o)
                FROM jsonb_array_elements(p) WITH ORDINALITY a(v, o)), '[]'::jsonb);
     WHEN 'string' THEN
-      RETURN CASE WHEN (p #>> '{}') ~* '^\s*(bearer|basic|token)\s+\S{6,}' THEN to_jsonb('[redacted]'::text) ELSE p END;
+      RETURN to_jsonb(public._exos_channel_audit_scrub_text(p #>> '{}'));
     ELSE
       RETURN p;
   END CASE;
@@ -625,7 +708,7 @@ BEGIN
   END IF;
   FOR s IN SELECT v FROM jsonb_array_elements(p_steps) WITH ORDINALITY a(v, o) WHERE a.o <= 50 ORDER BY a.o LOOP
     BEGIN
-      v_path := regexp_replace(coalesce(s ->> 'path', ''), '([?&][^=&#]*)=[^&#]*', '\1=…', 'g');
+      v_path := public._exos_channel_audit_path(s ->> 'path');
       v_req := public._exos_channel_audit_scrub(CASE WHEN jsonb_typeof(s -> 'request') IN ('object', 'array') THEN s -> 'request' END);
       IF v_req IS NOT NULL AND pg_column_size(v_req) > 24000 THEN
         v_req := jsonb_build_object('truncated', true, 'bytes', pg_column_size(v_req));
@@ -640,14 +723,18 @@ BEGIN
                    THEN public._exos_channel_audit_scrub(s -> 'response') END,
               CASE WHEN (s ->> 'status') ~ '^[0-9]{1,3}$' THEN (s ->> 'status')::int END,
               CASE WHEN jsonb_typeof(s -> 'ok') = 'boolean' THEN (s ->> 'ok')::boolean END,
-              left(s ->> 'error', 200),
-              CASE WHEN jsonb_typeof(s -> 'warnings') = 'array' AND pg_column_size(s -> 'warnings') <= 4000 THEN s -> 'warnings' END);
+              left(public._exos_channel_audit_scrub_text(s ->> 'error'), 200),
+              CASE WHEN jsonb_typeof(s -> 'warnings') = 'array' AND pg_column_size(s -> 'warnings') <= 4000
+                   THEN public._exos_channel_audit_scrub(s -> 'warnings') END);
       v_n := v_n + 1;
     EXCEPTION WHEN others THEN
       RAISE WARNING 'exos_channel_audit_record: step skipped (%)', SQLSTATE;
     END;
   END LOOP;
-  DELETE FROM public.exos_channel_audit WHERE org_id = p_org_id AND at < now() - interval '30 days';
+  -- 30 days, for every org (not only this one): a bounded batch per write;
+  -- exos_channel_retention_sweep does the rest from a daily cron.
+  DELETE FROM public.exos_channel_audit
+   WHERE id IN (SELECT a.id FROM public.exos_channel_audit a WHERE a.at < now() - interval '30 days' ORDER BY a.at LIMIT 500);
   RETURN v_n;
 END $$;
 REVOKE ALL ON FUNCTION public.exos_channel_audit_record(uuid, jsonb) FROM PUBLIC, anon, authenticated;
@@ -712,6 +799,11 @@ BEGIN
      OR char_length(v_scope) > 200 OR p_n IS NULL OR p_n NOT BETWEEN 1 AND 100000 OR p_live IS NULL
      OR (p_dedupe IS NOT NULL AND p_dedupe !~ '^[0-9a-f]{16,128}$') THEN
     RAISE EXCEPTION 'exos_channel_usage_reserve: bad arguments' USING ERRCODE = '22023';
+  END IF;
+  -- The sum below must see what committed while this waited for the lock:
+  -- only READ COMMITTED gives that (a REPEATABLE READ snapshot would overshoot).
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'exos_channel_usage_reserve: needs READ COMMITTED' USING ERRCODE = '0A000';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_usage:' || p_org_id::text || ':' || p_platform || ':'
                                                  || p_metric || ':' || v_scope, 0));
@@ -803,7 +895,28 @@ END $$;
 REVOKE ALL ON FUNCTION public.exos_channel_usage_summary(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.exos_channel_usage_summary(uuid) TO authenticated, service_role;
 
--- ROLLBACK (manual): drop the triggers *_cred_mirror*, exos_org_secrets_distribution_vault;
+-- Retention for the whole table, whether or not an org writes again: audit
+-- rows 30 days, usage rows 400 days. Service role; meant for a daily cron
+-- (none is scheduled here: crons are operator-gated, scripts/rollout-prod.sh).
+-- Returns {audit, usage} rows removed.
+CREATE OR REPLACE FUNCTION public.exos_channel_retention_sweep()
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE v_a int; v_u int;
+BEGIN
+  DELETE FROM public.exos_channel_audit WHERE at < now() - interval '30 days';
+  GET DIAGNOSTICS v_a = ROW_COUNT;
+  DELETE FROM public.exos_channel_usage WHERE at < now() - interval '400 days';
+  GET DIAGNOSTICS v_u = ROW_COUNT;
+  RETURN jsonb_build_object('audit', v_a, 'usage', v_u);
+END $$;
+REVOKE ALL ON FUNCTION public.exos_channel_retention_sweep() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.exos_channel_retention_sweep() TO service_role;
+
+-- ROLLBACK (manual): drop the triggers *_cred_mirror*, exos_org_secrets_distribution_vault,
+-- exos_org_secrets_distribution_drop, exos_org_integrations_vault_drop;
 -- drop the functions above (re-create exos_save_integration / exos_remove_integration /
 -- exos_list_integrations from 20261016090000); DELETE FROM exos_org_integrations WHERE
 -- copied_from IS NOT NULL (and their Vault secrets exos_integration:<org>:<managed provider>);

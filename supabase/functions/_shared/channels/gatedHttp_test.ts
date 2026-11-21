@@ -4,8 +4,8 @@
 // (block / cap / warn) and the usage counters it spends.
 import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import {
-  assertNoSecretsInUrl, createGatedHttp, decideLive, GatedHttpRefused, redact, redactHeaders, writeFlagName,
-  type GatedHttpOptions,
+  assertNoSecretsInUrl, createGatedHttp, decideLive, GatedHttpRefused, pathProblem, redact, redactHeaders, resolvedPath,
+  writeFlagName, type GatedHttpOptions,
 } from "./gatedHttp.ts";
 import { memoryAuditSink, rpcAuditSink } from "./audit.ts";
 import { memoryUsageCounter } from "./usage.ts";
@@ -151,6 +151,76 @@ Deno.test("credentials never in URLs", async () => {
   assertEquals(calls.length, 0);
   assertThrows(() => createGatedHttp(opts({ base: "http://api.example.com" })), GatedHttpRefused, "https URL");
   assertThrows(() => createGatedHttp(opts({ base: `https://api.example.com/${SECRET}` })), GatedHttpRefused);
+});
+
+Deno.test("encoded dot segments: refused before any fetch, and never matched against the allowlist", async () => {
+  for (const p of ["/%2e%2e/%2e%2e/admin", "/events/%2e%2e/publish", "/events/%2E%2e/publish", "/v1/%2e/event/create",
+                   "/v1/event%2fcreate", "/v1/event%2Fcreate", "/v1/%5c/x", "/v1/./event/create", "/v1/event/create/..", "/v1\\x"]) {
+    assert(pathProblem(p) !== null, p);
+    assertEquals(resolvedPath("https://api.example.com/api/v1", p), null, p);
+  }
+  assertEquals(resolvedPath("https://api.example.com/api/v1", "/events/e1/publish?x=1"), "/events/e1/publish");
+  assertEquals(resolvedPath("https://api.example.com", "/v1/event/create"), "/v1/event/create");
+  // Normalized by the URL into something else: refused.
+  assertEquals(resolvedPath("https://api.example.com", "/v1/é"), null);
+  const on = (k: string) => (k === "EXOS_PRETIX_WRITES" ? "on" : undefined);
+  const rule = { channel: "pretix", env: on, orgWritesEnabled: true, writes: [{ method: "POST" as const, path: /^\/events\/[^/]+\/publish$/ }] };
+  // The rule's [^/]+ would match "%2e%2e" as text; the resolved path is /api/v1/publish.
+  const d = decideLive({ ...rule, base: "https://h.test/api/v1" }, "POST", "/events/%2e%2e/publish");
+  assert(!d.allowed && !d.live, "an encoded dot segment never matches");
+  assert(!decideLive(rule, "POST", "/events/%2e%2e/publish").allowed, "without a base too");
+  assert(decideLive({ ...rule, base: "https://h.test/api/v1" }, "POST", "/events/e1/publish").live, "a plain path still does");
+  const { f, calls } = fakeFetch([{ status: 200 }]);
+  const http = createGatedHttp(opts({ fetch: f, base: "https://api.example.com/api", channel: "pretix", env: on, orgWritesEnabled: true,
+    writes: [{ method: "POST", path: /^\/events\/[^/]+\/publish$/ }] }));
+  for (const p of ["/%2e%2e/%2e%2e/admin", "/events/%2e%2e/publish", "/events/%2E%2E/publish", "/events/x%2Fy/publish"]) {
+    await assertRejects(() => http.request("POST", p, { body: {} }), GatedHttpRefused, "bad path");
+    await assertRejects(() => http.get(p), GatedHttpRefused, "bad path");
+  }
+  await assertRejects(() => http.asFetch()("https://api.example.com/api/%2e%2e/admin"), GatedHttpRefused);
+  assertEquals(calls.length, 0, "nothing was fetched");
+});
+
+Deno.test("redaction by pattern: body keys, header names, query names", async () => {
+  assertEquals(redact({ key: "k", private_key: "p", access_key: "a", pass: "x", pwd: "y", jwt: "j", passphrase: "z",
+                        monkey: "kept", keys: ["kept"], passenger: "kept" }),
+    { key: "[redacted]", private_key: "[redacted]", access_key: "[redacted]", pass: "[redacted]", pwd: "[redacted]", jwt: "[redacted]",
+      passphrase: "[redacted]", monkey: "kept", keys: ["kept"], passenger: "kept" });
+  // A bare "key" keeps a short targeting key (Meta / Reddit geo keys, numeric ids); anything else is redacted.
+  assertEquals(redact({ zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] }),
+    { zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] });
+  for (const v of ["K-LEAK", "sk_live_abcdefghijklmnop", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012", "us:10001", "US:" + "x".repeat(41), "1234567890123", { a: 1 }, true]) {
+    assertEquals((redact({ key: v }) as Record<string, unknown>).key, "[redacted]", JSON.stringify(v));
+  }
+  assertEquals(redactHeaders({ "X-Auth-Key": "a", "X-Shopify-Access-Token": "b", "X-Hub-Signature-256": "c", "X-Session-Id": "d",
+                               "Content-Type": "application/json", Accept: "json" }),
+    { "X-Auth-Key": "[redacted]", "X-Shopify-Access-Token": "[redacted]", "X-Hub-Signature-256": "[redacted]", "X-Session-Id": "[redacted]",
+      "Content-Type": "application/json", Accept: "json" });
+  for (const q of ["api_token", "access_key", "auth_token", "refresh_token", "private_token", "X-Amz-Signature", "X-Amz-Credential",
+                   "client_secret", "apiKey", "jwt", "sig", "auth", "key", "password", "id_token"]) {
+    assertThrows(() => assertNoSecretsInUrl(`https://x.test/a?${q}=zzz`, []), GatedHttpRefused, undefined, q);
+  }
+  for (const q of ["page", "pageToken", "nextPageToken", "page_token", "cursor", "event_id", "monkey"]) {
+    assertNoSecretsInUrl(`https://x.test/a?${q}=zzz`, []);
+  }
+  assertThrows(() => assertNoSecretsInUrl("https://x.test/a?%ZZ=1&token=2", []), GatedHttpRefused);
+  // The audit step carries the redacted headers.
+  const audit = memoryAuditSink();
+  const http = createGatedHttp(opts({ audit, headers: { "X-Shopify-Access-Token": "shpat_abcdef", Accept: "json" }, secrets: [] }));
+  await http.get("/v1/event/get");
+  const step = audit.steps[0] as { request: { headers: Record<string, string> } };
+  assertEquals(step.request.headers["X-Shopify-Access-Token"], "[redacted]");
+  assertEquals(step.request.headers.Accept, "json");
+});
+
+Deno.test("a redirect is final: never retried as a network failure", async () => {
+  const { f, calls } = fakeFetch([new TypeError("Fetch failed: redirect was blocked (redirect: error)")]);
+  const r = await createGatedHttp(opts({ fetch: f })).get("/v1/event/get");
+  assertEquals(r.error, "REDIRECT");
+  assertEquals(calls.length, 1);
+  const net = fakeFetch([new TypeError("connection reset"), { status: 200, body: {} }]);
+  assert((await createGatedHttp(opts({ fetch: net.f })).get("/v1/event/get")).ok, "a plain network failure is still retried");
+  assertEquals(net.calls.length, 2);
 });
 
 Deno.test("redaction: secret headers, secret-named keys and every secret value", () => {

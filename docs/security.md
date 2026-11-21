@@ -1258,7 +1258,11 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   (`_exos_cred_backfill`, re-run safe; prod had none on 2026-11-21).
 - **`exos_org_secrets.distribution` first.** It was plain jsonb (Lysted / Automatiq seller ids), readable by owner
   and finance. A BEFORE trigger now moves every written value to Vault (provider `lysted`) and leaves a stub
-  `{in_vault, enabled}`; a stub written back keeps the stored secret, NULL removes it. Nothing server-side read it.
+  `{in_vault, enabled}`; a stub written back keeps the stored secret, NULL removes it, and deleting the row (or the
+  org) drops it too. Nothing server-side read it.
+- **No secret outlives its row.** Every `exos_org_integrations` delete (a remove, a failed copy, an org delete's
+  cascade) drops its Vault secret (AFTER DELETE trigger), and `_exos_integration_drop` always drops the Vault copy
+  by id and name, even when the row is already gone.
 - **The write.** `exos_save_integration` (owner / manager; returns the last four characters, never the secret)
   writes through `_exos_integration_put`, the same core the copies use, and logs `integration.save` /
   `integration.remove` to the org audit log: the provider, whether a new credential was given and the setting
@@ -1272,39 +1276,76 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   out only with the org's switch AND `EXOS_<ID>_WRITES=on` AND the adapter's method + path allowlist (reusing
   `writesLive` from `model.ts`); all default off. A write off the allowlist throws whatever the switches. A dry run
   sends nothing, records the exact payload and returns a stand-in. Reads are retried under `_shared/retry.ts`; a
-  write is sent once unless its rule is marked idempotent; an SSRF guard's refusal is never retried. Credentials go
-  in headers only: a URL holding a secret value (raw or URL-encoded) or a credential-named query parameter is
-  refused before anything is sent. Every request is an audit step with credential headers, secret-named keys and
-  every secret value redacted.
+  write is sent once unless its rule is marked idempotent; an SSRF guard's refusal and a redirect are never
+  retried. A path is plain or refused before anything is sent: no `.` / `..` / empty segment, no backslash, and no
+  percent-encoded dot, slash or backslash (`%2e%2e` would resolve as `..`); the allowlist is matched on the path
+  the URL really resolves to under the base (`resolvedPath`), never on the raw text. Credentials go in headers
+  only: a URL holding a secret value (raw or URL-encoded) or a query parameter named like a credential (by
+  pattern: `*token*`, `*secret*`, `*signature*`, `api_key`, `access_key`, `X-Amz-*`, ...; paging cursors such as
+  `pageToken` excepted) is refused. Every request is an audit step with credential headers (any name with token,
+  secret, key, auth, signature, cookie, password or session), secret-named keys (`SECRET_KEY`: also
+  `private_key`, `access_key`, `pass`, `pwd`, `jwt`; a bare `key` unless its value is a short targeting key such as
+  Meta's geo `US:10001` or a numeric id, `secretEntry`) and every secret value redacted. Redaction is best effort:
+  adapters still send credentials only in headers.
 - **`exos_channel_audit`**: RLS, SELECT for owner / manager of the row's org (finance, scanners and other orgs read
   nothing), no client writes. Only `exos_channel_audit_record` (service role) writes: it drops query values from
-  the path, scrubs secret-named keys and auth-looking strings again, caps sizes, skips a malformed step without
-  raising, and keeps 30 days. GatedHttp's database sink writes every write step and a read only when asked (the
+  the path (a fragment and bare parameters too, names kept), scrubs secret-named keys (the same `SECRET_KEY`
+  pattern) and, in every string, the error and the warnings, auth schemes with their value, JWTs, known token
+  prefixes and secret-named query values; caps sizes, skips a malformed step without raising, and keeps 30 days
+  for every org (each write trims a batch; `exos_channel_retention_sweep`, service role, is for a daily cron). GatedHttp's database sink writes every write step and a read only when asked (the
   credential test). The organizer sees the planned writes as **What we'd send** (Org settings).
 - **Limits** (`_shared/channels/limits.ts`, the single table) and **`exos_channel_usage`**: RLS on, no client grant;
   `exos_channel_usage_reserve` (service role) takes a per-key advisory lock, so two passes can't both spend the
-  last of a budget; planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
+  last of a budget, and refuses anything but READ COMMITTED (a REPEATABLE READ snapshot would sum stale rows); planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
   owner / manager only (42501 otherwise).
 
 ### The ads phase, dry run only (mig 20261121190500)
 
-Nothing new is callable by anon (H3 unchanged), and nothing is sent to an ad platform (operator
-2026-11-21: "For the APIs build and keep read only till build is complete"). Tests:
-`tests/exos/test_ads.sql` (AD1-AD5), `_shared/ads/ads_test.ts`, `src/components/BoostEventPanel.test.tsx`;
+Nothing new is callable by anon (H3 unchanged), and nothing this phase adds can send to an ad
+platform: both of its senders are pinned off in code (operator 2026-11-21: "For the APIs build and
+keep read only till build is complete"). Tests: `tests/exos/test_ads.sql` (AD1-AD9),
+`tests/exos/race_audience_cap.sh`, `_shared/ads/ads_test.ts`, `src/components/BoostEventPanel.test.tsx`;
 docs/marketing-conversions.md "Ads" has the platforms and the operator steps.
+
+**What can send today, exactly.** The older server-side conversions drain (`exos-conversions-drain`,
+mig 20260930100000: Meta, TikTok, GA4, Google Ads, Reddit, Snap) sends a queued Purchase when
+`EXOS_CONVERSIONS_LIVE=true` and the org's credential for that platform is enabled; it is not
+scheduled (no cron) and the flag is off. That path predates this phase and is unchanged in how it is
+gated; this phase changes only Reddit's payload on it (`PURCHASE`, the Reddit email hash). X rows
+(new here) never send: `X_CONVERSIONS_PINNED_OFF` (`_shared/conversions/xDrain.ts`) hands the `x_ads`
+GatedHttp an org switch of false whatever the flags say. `exos-ads` (audiences, campaigns) never
+sends: `ADS_WRITES_PINNED_OFF`. Lifting either pin is a reviewed code change plus the CLAUDE.md write
+exception for that platform.
 
 - **Every ad write behind GatedHttp.** The four adapters (`meta_ads`, `reddit_ads`,
   `google_customer_match`, `x_ads`) each list exactly their write paths (no DELETE, nothing retried);
   anything else is refused. `exos-ads` pins the org's switch off (`ADS_WRITES_PINNED_OFF`) and hands
   GatedHttp a fetch that refuses every call, so a plan never reaches a platform whatever the flags.
   A stand-in id (`planned_<kind>`) lets a chain be planned; `liveSafe` refuses to send one live.
-  X conversions go out only through `x_ads` with `EXOS_CONVERSIONS_LIVE=true`, Exos's X app keys, the
-  org's switch and `EXOS_X_ADS_WRITES=on` (all off).
-- **Hashed people only, and not in the audit.** `exos_ads_audience_source` (service role only)
-  returns consenting buyers' and fans' email / phone; `exos-ads` hashes them at once
-  (`hashedIds.ts`) and the builder re-checks the consent flag. A batch of hashes is recorded in
-  `exos_channel_audit` as a count (`RequestOptions.auditBody`), never the hashes. Each call is
-  logged in `exos_audience_exports` (20 a day per org).
+  X conversions are pinned off in code (`X_CONVERSIONS_PINNED_OFF`); behind the pin they would need
+  `EXOS_CONVERSIONS_LIVE=true`, Exos's X app keys, the org's switch and `EXOS_X_ADS_WRITES=on` (all
+  off). The X step's audit row records the shape, never its hashed email or click id (`auditBody`).
+  While pinned, `exos-ads` reads credentials through `exos_ads_credential_meta` (service role:
+  `has_secret`, never the secret), so a dry run decrypts nothing.
+- **Hashes only, and not in the audit.** `exos_ads_audience_source` (service role only) returns
+  SHA-256 hashes (`em`, `em_google`, `em_reddit`, `ph`, `ph_digits`), built in SQL by the outbox's
+  helpers: no raw email or phone leaves Postgres. The builder keeps only 64-hex values and re-checks
+  the consent flag. A batch of hashes is recorded in `exos_channel_audit` as a count
+  (`RequestOptions.auditBody`), never the hashes. More than 100,000 people: the first 100,000, and
+  the answer says `truncated` with the `total`.
+- **Whose "yes" counts** (review of #138, B2; the same rule now in `exos_org_audience_export`, live on
+  prod). A guest can start a checkout with anyone's email, so a "yes" counts only from an order that
+  was paid or issued (fulfilled, partly or fully refunded) whose email was proven or never needed
+  proof (`_exos_consent_grant_ok`: no `exos_order_proofs` row that isn't `proven`); the buyer rows
+  need the same. A "no" counts from any checkout (it can only take someone out); the latest counted
+  choice per email and per account wins, and at the same moment a "no" wins. A fan is in only on a
+  "yes" that came with an order not fully refunded. Tombstoned (deleted) and banned accounts are out,
+  and `exos_delete_my_account` deletes the person's fan rows (by account and by confirmed email) and
+  gives their earlier finished guest checkouts under that email the tombstone address.
+- **Throttles, shared and atomic.** The source and the hashed CSV export share 3 a minute
+  (`exos_rate_hit('audience:<org>')`) and 20 a day per org, counted in `exos_audience_exports` under
+  a per-org advisory lock held to commit (`_exos_audience_daily_gate`), so parallel pulls can't pass
+  20 (`race_audience_cap.sh`: exactly 20 logged).
 - **The planner's context** (`exos_ads_campaign_context`): owner / manager only (42501 otherwise),
   booleans for which ad credentials are connected, never a secret or a credential's ids, and no map
   pin for a secret / TBA location.

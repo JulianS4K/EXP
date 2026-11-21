@@ -9,12 +9,12 @@ import { buildReddit, REDDIT_MAX_EVENTS, REDDIT_TRACKING_TYPE, redditBatches } f
 import { MAX_AGE_MS, type ConversionRow } from "../conversions/common.ts";
 import { buildX } from "../conversions/x.ts";
 import { buildConversionRequest, plannedOnly } from "../conversions/send.ts";
-import { drainXRow } from "../conversions/xDrain.ts";
+import { drainXRow, X_CONVERSIONS_PINNED_OFF } from "../conversions/xDrain.ts";
 import { oauth1Header, parseXTokenSecret } from "../oauth1.ts";
-import { buildAudience, googleMembers, metaRows, redditRows } from "./audience.ts";
+import { buildAudience, googleMembers, metaRows, redditRows, rowHashes } from "./audience.ts";
 import { adGeo, cityZips, AD_CITIES } from "./geo.ts";
 import { boostConfig, planCampaign, type CampaignEventInput } from "./planner.ts";
-import { ADS_WRITES_PINNED_OFF, planAudienceSync, planBoost } from "./run.ts";
+import { ADS_WRITES_PINNED_OFF, PINNED_SECRET_STAND_IN, planAudienceSync, planBoost } from "./run.ts";
 import { createGatedHttp, GatedHttpRefused, type WriteRule } from "../channels/gatedHttp.ts";
 import { memoryAuditSink } from "../channels/audit.ts";
 import { memoryUsageCounter } from "../channels/usage.ts";
@@ -23,7 +23,7 @@ import type { ChannelAdapter, ChannelCtx, OrgCredential } from "../channels/adap
 import { metaAdsAdapter, metaAdsHttp, META_ADS_WRITES } from "../channels/adapters/metaAds.ts";
 import { redditAdsAdapter, redditAdsHttp, REDDIT_ADS_WRITES, REDDIT_AUDIENCE_WARNINGS } from "../channels/adapters/redditAds.ts";
 import { googleCustomerMatchAdapter, googleCustomerMatchHttp, GOOGLE_CUSTOMER_MATCH_WRITES } from "../channels/adapters/googleCustomerMatch.ts";
-import { xAdsAdapter, X_ADS_WRITES } from "../channels/adapters/xAds.ts";
+import { xAdsAdapter, xAdsHttp, X_ADS_WRITES } from "../channels/adapters/xAds.ts";
 import { ensureRegistry, ADAPTERS } from "../channels/registry.ts";
 import { adapterProblems } from "../channels/adapter.ts";
 
@@ -86,6 +86,18 @@ Deno.test("Reddit email normalization: lower case, +tag and local-part dots drop
   assertEquals(h.em, "c80b0350166dc95925839c9a933d146f114df43e24c5179cab83ede4431754c3", "the plain hash keeps the tag");
 });
 
+Deno.test("Reddit email: the SQL edges (tests/exos/test_ads.sql AD8 has the same vectors)", async () => {
+  // ASCII whitespace trimmed (tab, newline), as Postgres btrim(p, E' \t\n\r\x0b\x0c').
+  assertEquals(await sha256Hex(normalizeEmailReddit("\tJ.o.e+tag@Example.com\n")!), "2481f36dfc515ca76451aaadf1399026942a01ee50c6d0a61988b43cef039bc2");
+  assertEquals(normalizeEmailReddit("jo e@example.com"), null, "whitespace inside");
+  assertEquals(normalizeEmailReddit("joe@exa\tmple.com"), null, "a tab inside");
+  assertEquals(normalizeEmailReddit("a@b@example.com"), null, "two @ (the SQL splits at the first, JS used the last: both refuse now)");
+  assertEquals(normalizeEmailReddit("@example.com"), null);
+  assertEquals(normalizeEmailReddit("...@example.com"), null, "no local part left");
+  // A Unicode space is not trimmed by either side (JS trim() would): kept, so both hash the same bytes.
+  assertEquals(normalizeEmailReddit("joe@example.com\u00a0"), "joe@example.com\u00a0");
+});
+
 const row = (over: Partial<ConversionRow> = {}, payload: Partial<ConversionRow["payload"]> = {}): ConversionRow => ({
   id: "r1", platform: "reddit", event_name: "Purchase", event_id_dedupe: "cs_test_1", occurred_at: "2026-11-21T11:00:00Z",
   value_cents: 5000, currency: "usd",
@@ -118,19 +130,24 @@ Deno.test("Reddit CAPI: PURCHASE (UPPER_SNAKE), the Reddit hash, metadata.value,
 
 // ---- the audience builder ---------------------------------------------------
 
-Deno.test("audience builder: consent-filtered, hashed, deduped (a later row fills the phone); nothing raw", async () => {
+Deno.test("audience builder: hashed rows from SQL, consent-filtered, deduped (a later row fills the phone); raw keys ignored", async () => {
+  const a = await hashedIdentifiers({ email: "a@x.com", phone: "2125550100" });
+  const p = await hashedIdentifiers({ phone: "+44 20 7946 0958" });
   const b = await buildAudience([
-    { email: "A@x.com", ad_consent: "granted" },
-    { email: " a@x.com", phone: "2125550100", ad_consent: "granted" },
-    { email: "b@x.com", ad_consent: "denied" },
-    { email: "c@x.com" },
-    { phone: "+44 20 7946 0958", ad_consent: "granted" },
-    { email: "nope", ad_consent: "granted" },
+    { em: a.em, em_google: a.em_google, em_reddit: a.em_reddit, ad_consent: "granted" },
+    { em: a.em, ph: a.ph, ph_digits: a.ph_digits, ad_consent: "granted" },
+    { em: (await hashedIdentifiers({ email: "b@x.com" })).em, ad_consent: "denied" },
+    { em: (await hashedIdentifiers({ email: "c@x.com" })).em },
+    { ph: p.ph, ph_digits: p.ph_digits, ad_consent: "granted" },
+    // Not hashes: a raw address / a short value never pass as identifiers.
+    { email: "raw@x.com", phone: "2125550199", em: "raw@x.com", ad_consent: "granted" } as any,
+    { em: "abc", ad_consent: "granted" },
   ]);
-  assertEquals(b.counts, { rows: 6, noConsent: 2, noIdentifier: 1, duplicates: 1, members: 2, withEmail: 1, withPhone: 2 });
+  assertEquals(b.counts, { rows: 7, noConsent: 2, noIdentifier: 2, duplicates: 1, members: 2, withEmail: 1, withPhone: 2 });
   assertEquals(b.members[0].em, await sha256Hex("a@x.com"));
   assertEquals(b.members[0].ph, await sha256Hex("+12125550100"));
-  assert(!JSON.stringify(b).includes("@") && !JSON.stringify(b).includes("2125550100"), "nothing raw");
+  assert(!JSON.stringify(b).includes("@") && !JSON.stringify(b).includes("2125550199"), "nothing raw");
+  assertEquals(rowHashes({ em: "A".repeat(64) }), {}, "upper-case hex is not what the SQL writes");
   assertEquals(metaRows(b.members)[0], [b.members[0].em!, b.members[0].ph_digits!]);
   assertEquals(metaRows(b.members)[1][0], "", "Meta: a missing value is empty");
   assertEquals(googleMembers(b.members)[0].userData.userIdentifiers, [{ emailAddress: b.members[0].em_google }, { phoneNumber: b.members[0].ph }]);
@@ -354,16 +371,20 @@ Deno.test("exos-ads passes: pinned dry run (even with the org's switch and every
   assertEquals(ADS_WRITES_PINNED_OFF, true, "the build gate");
   const { f, calls } = stubFetch();
   const rpcCalls: string[] = [];
+  // While pinned the pass reads exos_ads_credential_meta (has_secret, no
+  // secret): nothing is decrypted for a dry run.
   const store: Record<string, unknown> = {
-    ads_meta_api: { provider: "ads_meta_api", status: "connected", config: { ad_account_id: "123", page_id: "456" }, secret: "meta-SECRET-tok", writes_enabled: true, source: "store" },
-    ads_meta: { provider: "ads_meta", status: "connected", config: { pixel_id: "123456789012345" }, secret: "capi", writes_enabled: true, source: "store" },
+    ads_meta_api: { provider: "ads_meta_api", status: "connected", config: { ad_account_id: "123", page_id: "456" }, has_secret: true, writes_enabled: true, source: "store" },
+    ads_meta: { provider: "ads_meta", status: "connected", config: { pixel_id: "123456789012345" }, has_secret: true, writes_enabled: true, source: "store" },
     ads_reddit_api: null, ads_reddit: null,
   };
+  const em = async (e: string) => (await hashedIdentifiers({ email: e })).em;
+  const srcRows = [{ em: await em("a@x.com"), ad_consent: "granted" }, { em: await em("b@x.com"), ad_consent: "granted" }];
   const rpc = async (fn: string, args: Record<string, unknown>) => {
     rpcCalls.push(fn);
-    if (fn === "exos_integration_secret") return { data: store[String(args.p_provider)] ?? null, error: null };
+    if (fn === "exos_ads_credential_meta") return { data: store[String(args.p_provider)] ?? null, error: null };
     if (fn === "exos_ads_audience_source") {
-      return { data: { count: 2, rows: [{ email: "a@x.com", ad_consent: "granted" }, { email: "b@x.com", ad_consent: "granted" }] }, error: null };
+      return { data: { count: 2, total: 3, truncated: true, rows: srcRows }, error: null };
     }
     if (fn === "exos_channel_audit_record") return { data: null, error: null };
     if (fn.startsWith("exos_channel_usage")) return { data: { ok: true, live: 0, planned: 0 }, error: null };
@@ -372,6 +393,9 @@ Deno.test("exos-ads passes: pinned dry run (even with the org's switch and every
   const deps = { orgId: "org-1", rpc, env: ON, fetch: f, appBase: "https://exos.example", now: () => NOW };
   const a = await planAudienceSync(deps, { channel: "meta_ads", actor: "u1" });
   assertEquals(a.audience.members, 2);
+  assertEquals([a.audience.total, a.audience.truncated], [3, true]);
+  assert(a.result.warnings.some((w) => w.includes("only the first 2 of 3")), "a truncated pull is said, never silent");
+  assertEquals(rpcCalls.includes("exos_integration_secret"), false, "no secret is decrypted for a pinned dry run");
   assertEquals(a.result.planned, true);
   assertEquals(a.steps.every((s) => !s.live), true);
   const boost = await planBoost(deps, { event: EVENT, channels: ["meta_ads", "reddit_ads"], dailyBudgetCents: 2000 });
@@ -384,7 +408,7 @@ Deno.test("exos-ads passes: pinned dry run (even with the org's switch and every
   assert(reddit.result.warnings.some((w) => w.includes("isn't connected")));
   assertEquals((reddit.steps[0].path), "/api/v3/ad_accounts/planned_account/campaigns", "a not-connected plan uses a placeholder");
   assert(rpcCalls.includes("exos_channel_audit_record"), "the steps go to What we'd send");
-  assert(!JSON.stringify(boost).includes("meta-SECRET-tok") && !JSON.stringify(a).includes("meta-SECRET-tok"));
+  assert(!JSON.stringify(boost).includes(PINNED_SECRET_STAND_IN) && !JSON.stringify(a).includes(PINNED_SECRET_STAND_IN), "the stand-in is redacted too");
 });
 
 Deno.test("the live path (stub fetch, both switches on) uses the returned ids; a placeholder is never sent live", async () => {
@@ -453,7 +477,7 @@ Deno.test("X conversions: the request shape (twclid + hashed_email, conversion_i
   assertEquals([plannedOnly("x"), plannedOnly("x", { xConfigured: true })], [true, false]);
 });
 
-Deno.test("X drain step: dry run unless EXOS_CONVERSIONS_LIVE, the app keys AND the x_ads GatedHttp switches; signed only then", async () => {
+Deno.test("X drain step: pinned off in code (S3); behind the pin, dry run unless EXOS_CONVERSIONS_LIVE, the app keys AND the x_ads GatedHttp switches", async () => {
   const ctx = { appBase: "", now: NOW };
   const app = { consumerKey: "ck-1234", consumerSecret: "cs-SECRET-9999" };
   const { f, calls } = stubFetch(() => ({ data: { conversions_processed: 1 } }));
@@ -463,12 +487,26 @@ Deno.test("X drain step: dry run unless EXOS_CONVERSIONS_LIVE, the app keys AND 
   assert(a.result === "skipped" && a.planned && !JSON.stringify(a.planned).includes("x-tsec-5678"), "planned, no token");
   assertEquals((await drainXRow(XROW, XCRED, d({ live: true }))).result, "skipped", "no app keys: planned only");
   const b = await drainXRow(XROW, XCRED, d({ live: true, app }));
-  assertEquals([b.result, "error" in b && b.error.startsWith("dry-run: the x_ads writes are off")], ["skipped", true]);
+  assertEquals([b.result, "error" in b && b.error], ["skipped", "dry-run: X conversions are pinned off in code (build phase)"], "planned by GatedHttp: the pin");
   assertEquals((await drainXRow(XROW, { ...XCRED, writesEnabled: false }, d({ live: true, app, env: ON }))).result, "skipped", "the org's switch off");
   assertEquals(calls.length, 0, "nothing sent so far");
-  const audit = memoryAuditSink();
-  const c = await drainXRow(XROW, XCRED, d({ live: true, app, env: ON, audit }));
-  assertEquals(c.result, "sent");
+  // Every flag on: still only planned, the code pin (S3).
+  assertEquals(X_CONVERSIONS_PINNED_OFF, true, "the build gate");
+  const pinned = await drainXRow(XROW, XCRED, d({ live: true, app, env: ON }));
+  assertEquals([pinned.result, "error" in pinned && pinned.error], ["skipped", "dry-run: X conversions are pinned off in code (build phase)"]);
+  assertEquals(calls.length, 0, "the pin holds with every flag on");
+  assertEquals((await drainXRow(XROW, null, d({ live: true, app, env: ON }))).result, "skipped", "not connected");
+});
+
+Deno.test("X sender behind the pin (adapter, both GatedHttp switches on, stub fetch): signed, sent once, the audit holds no key and no identifier", async () => {
+  const app = { consumerKey: "ck-1234", consumerSecret: "cs-SECRET-9999" };
+  const { f, calls } = stubFetch(() => ({ data: { conversions_processed: 1 } }));
+  const built = buildX(XROW, { config: { pixel_id: "o8z6j", event_id: "tw-o8z6j-o8z6k" }, secret: XCRED.secret! }, { appBase: "", now: NOW });
+  assert(built.ok);
+  if (!built.ok) return;
+  const { ctx, audit } = ctxFor(xAdsHttp(XCRED, app), XCRED, f, { env: ON, org: true });
+  const r = await xAdsAdapter.sendConversion!(ctx, { pixelId: "o8z6j", body: built.request.body, app }) as any;
+  assertEquals(r.ok, true);
   assertEquals(calls.length, 1);
   assertEquals(calls[0].url, "https://ads-api.x.com/12/measurement/conversions/o8z6j");
   assertStringIncludes(calls[0].headers.get("authorization")!, 'oauth_consumer_key="ck-1234"');
@@ -476,5 +514,6 @@ Deno.test("X drain step: dry run unless EXOS_CONVERSIONS_LIVE, the app keys AND 
   assertEquals(calls[0].body.conversions[0].conversion_id, "cs_test_1");
   const rec = JSON.stringify(audit.steps);
   assert(!rec.includes("x-tok-1234") && !rec.includes("x-tsec-5678") && !rec.includes("cs-SECRET-9999"), "the audit holds no key");
-  assertEquals((await drainXRow(XROW, null, d({ live: true, app, env: ON }))).result, "skipped", "not connected");
+  assert(!rec.includes("a".repeat(64)) && !rec.includes("tw-1"), "the audit holds no hashed email or click id (auditBody)");
+  assertStringIncludes(rec, "1 conversion with hashed identifiers, not recorded");
 });
