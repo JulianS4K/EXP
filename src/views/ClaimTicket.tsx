@@ -9,6 +9,7 @@ import { Event, Transfer } from '../types';
 import { ShieldCheck, ArrowRight, XCircle, CheckCircle2 } from 'lucide-react';
 import { queueEmail, queueTicketIssued } from '../lib/mail';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { useToast } from '../context/ToastContext';
 import { useT } from '../context/LanguageContext';
 
@@ -32,6 +33,7 @@ import { useT } from '../context/LanguageContext';
 // returns the display fields without any emails.
 
 export default function ClaimTicket() {
+  const motionGate = useMotionGate();
   const { transferId } = useParams();
   // The key from the emailed link (mig 20260929010000): lets any account claim.
   const [search] = useSearchParams();
@@ -167,7 +169,7 @@ export default function ClaimTicket() {
         </div>
 
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={motionGate.enter({ opacity: 0, y: 20 })}
           animate={{ opacity: 1, y: 0 }}
           className="bg-[#111] border border-white/10 overflow-hidden mb-8"
         >

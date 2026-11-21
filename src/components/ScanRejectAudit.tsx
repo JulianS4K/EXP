@@ -94,10 +94,10 @@ export default function ScanRejectAudit({ eventId, eventTitle }: { eventId: stri
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
         <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-rose-500" aria-hidden="true" /> Refused scans
+          <ShieldAlert className="w-4 h-4 text-rose-700" aria-hidden="true" /> Refused scans
         </h2>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{rows.length} total</span>
+          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{rows.length} total</span>
           <button
             type="button"
             onClick={exportCsv}
@@ -111,11 +111,11 @@ export default function ScanRejectAudit({ eventId, eventTitle }: { eventId: stri
       </div>
 
       {loading ? (
-        <p className="px-5 py-6 text-xs text-slate-300 font-bold uppercase tracking-widest animate-pulse">Loading…</p>
+        <p className="px-5 py-6 text-xs text-slate-500 font-bold uppercase tracking-widest animate-pulse">Loading…</p>
       ) : error ? (
-        <p className="px-5 py-6 text-xs text-rose-500">{error}</p>
+        <p className="px-5 py-6 text-xs text-rose-700">{error}</p>
       ) : rows.length === 0 ? (
-        <p className="px-5 py-6 text-xs text-slate-400 font-bold uppercase tracking-widest">No refusals yet.</p>
+        <p className="px-5 py-6 text-xs text-slate-500 font-bold uppercase tracking-widest">No refusals yet.</p>
       ) : (
         <>
           {stale && (
@@ -136,22 +136,22 @@ export default function ScanRejectAudit({ eventId, eventTitle }: { eventId: stri
               <li key={r.id} className="px-5 py-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-bold text-slate-800 truncate">{REASON_LABEL[r.reason] ?? r.reason}</p>
-                  <span className="text-[10px] font-mono text-slate-300 shrink-0">
+                  <span className="text-[10px] font-mono text-slate-500 shrink-0">
                     {r.rejectedAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 font-mono truncate">
+                <p className="text-[11px] text-slate-500 font-mono truncate">
                   {r.ticketIdAttempted || '—'}
                   <span className="uppercase tracking-tighter"> · {r.source}</span>
                 </p>
                 {(r.wrongEventTitle || r.reasonDetail) && (
-                  <p className="text-[10px] text-slate-400 italic truncate">{r.wrongEventTitle ?? r.reasonDetail}</p>
+                  <p className="text-[10px] text-slate-500 italic truncate">{r.wrongEventTitle ?? r.reasonDetail}</p>
                 )}
               </li>
             ))}
           </ul>
           {rows.length > RECENT && (
-            <p className="px-5 py-2 text-[10px] text-slate-400 text-center">
+            <p className="px-5 py-2 text-[10px] text-slate-500 text-center">
               Showing {RECENT} of {rows.length} — export the CSV for the full log.
             </p>
           )}

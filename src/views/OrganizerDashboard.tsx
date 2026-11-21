@@ -8,6 +8,7 @@ import AccessDenied from '../components/AccessDenied';
 import { Link } from 'react-router-dom';
 import { Plus, Settings, Users, BarChart3, ChevronRight, Music, MapPin, Calendar, CheckCircle2, Download, Megaphone, Search, Sparkles, Repeat, Flag, Landmark, Share2, Handshake, PieChart, Heart, FileText, Inbox, Receipt } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { formatCurrency } from '../lib/utils';
 import { formatInTz } from '../lib/datetime';
 import SalesChart from '../components/SalesChart';
@@ -19,6 +20,7 @@ import { orgTypeDefaults, parseOrgType } from '../lib/eventLocation';
 type StatusFilter = 'all' | 'draft' | 'published' | 'cancelled';
 
 export default function OrganizerDashboard() {
+  const motionGate = useMotionGate();
   const { user, isAdmin } = useAuth();
   const { orgs, activeOrg, activeRole } = useOrganization();
   const [events, setEvents] = useState<Event[]>([]);
@@ -241,7 +243,7 @@ export default function OrganizerDashboard() {
             // tickets sold) we can wire one in.
           ].map((stat, idx) => (
             <motion.div 
-              initial={{ opacity: 0, y: 5 }}
+              initial={motionGate.enter({ opacity: 0, y: 5 })}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.05 }}
               key={idx} 

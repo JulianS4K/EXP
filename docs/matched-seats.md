@@ -54,6 +54,11 @@ the ticket shows the spot, address, note, time and first names, and each
 member gets an email; members who opted in to the organizer's texts also get
 an SMS (through `exos_sms_outbox`; dry run unless `EXOS_SMS_LIVE=on`).
 
+A guest who bought without an account holds a ticket parked on the organizer
+until they claim it. Matching treats it as the guest's: it's keyed by the claim
+email, the reveal email goes to that address, and it gets no SMS (mig
+`20261109110000`).
+
 After the meeting time, for 30 days, members can mark **meet again**. A pick
 is shown to both only when it is mutual. Members can also **report** someone
 to the organizer and **block** them: a member's block applies to every

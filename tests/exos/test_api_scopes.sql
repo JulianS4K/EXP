@@ -1,6 +1,7 @@
 -- ============================================================================
 -- Partner API scopes (mig 20261027090000). Self-contained (a5 prefix), rolled back.
---   S1 vocabulary: 20 scopes (me:read / me:write since mig 20261105110000), the same list as _shared/api/scopes.ts
+--   S1 vocabulary: 21 scopes (me:read / me:write since mig 20261105110000, audit:read since
+--      mig 20261109100000), the same list as _shared/api/scopes.ts
 --   S2 create with scopes: cleaned (deduped, vocabulary order); unknown and
 --      empty lists refused
 --   S3 the old (org, name) form still makes a `read` key
@@ -36,13 +37,15 @@ BEGIN
   -- S1
   -- 18 since the build-phase integration (mig 20261101000000): + refunds:write
   -- (mig 20261031110000) and fans:read / fans:write (mig 20261031120000);
-  -- 20 since the fan API (mig 20261105110000): + me:read / me:write.
-  IF cardinality(public.exos_api_scope_names()) <> 20
+  -- 20 since the fan API (mig 20261105110000): + me:read / me:write;
+  -- 21 since the org audit log (mig 20261109100000): + audit:read.
+  IF cardinality(public.exos_api_scope_names()) <> 21
      OR (public.exos_api_scope_names())[1] <> 'events:read'
      OR (public.exos_api_scope_names())[4] <> 'refunds:write'
      OR (public.exos_api_scope_names())[5] <> 'fans:read'
-     OR (public.exos_api_scope_names())[18] <> 'me:read'
-     OR (public.exos_api_scope_names())[20] <> 'org:admin' THEN
+     OR (public.exos_api_scope_names())[18] <> 'audit:read'
+     OR (public.exos_api_scope_names())[19] <> 'me:read'
+     OR (public.exos_api_scope_names())[21] <> 'org:admin' THEN
     RAISE EXCEPTION 'S1 FAIL: %', public.exos_api_scope_names();
   END IF;
   RAISE NOTICE 'S1 ok: % scopes', cardinality(public.exos_api_scope_names());

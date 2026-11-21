@@ -22,13 +22,14 @@ export type ConfigurableRole = (typeof CONFIGURABLE_ROLES)[number];
 
 /**
  * The most a role can ever be given, from its dashboard permissions. Must
- * equal exos_role_scope_ceiling() in mig 20261104180000.
+ * equal exos_role_scope_ceiling() in its latest migration (20261109100000:
+ * audit:read for the owner and finance only).
  */
 export const ROLE_SCOPE_CEILING: Record<OrgRole, readonly Scope[]> = {
   owner: [
     'events:read', 'events:write', 'orders:read', 'refunds:write', 'fans:read', 'fans:write', 'tickets:read',
     'tickets:write', 'checkin:write', 'booking:read', 'booking:write', 'finance:read', 'finance:write', 'commerce:read',
-    'commerce:write', 'webhooks:read', 'webhooks:write', 'org:admin',
+    'commerce:write', 'webhooks:read', 'webhooks:write', 'audit:read', 'org:admin',
   ],
   manager: [
     'events:read', 'events:write', 'orders:read', 'refunds:write', 'fans:read', 'fans:write', 'tickets:read',
@@ -37,7 +38,7 @@ export const ROLE_SCOPE_CEILING: Record<OrgRole, readonly Scope[]> = {
   ],
   finance: [
     'events:read', 'orders:read', 'refunds:write', 'fans:read', 'tickets:read', 'booking:read', 'finance:read',
-    'finance:write', 'commerce:read',
+    'finance:write', 'commerce:read', 'audit:read',
   ],
   content: ['events:read', 'events:write', 'booking:read'],
   scanner: ['events:read', 'tickets:read', 'checkin:write'],

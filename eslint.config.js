@@ -42,12 +42,4 @@ export default [
     },
     linterOptions: { reportUnusedDisableDirectives: 'off' },
   },
-  {
-    // Known gap, organizer-only: the create / edit event forms have 45 visible
-    // labels not tied to their inputs (most inputs carry an aria-label with the
-    // same text, so they are still named). Warn here; `lint:a11y` caps the
-    // warnings (--max-warnings) so the count can only go down.
-    files: ['src/views/CreateEvent.tsx', 'src/views/EditEvent.tsx'],
-    rules: { 'jsx-a11y/label-has-associated-control': ['warn', { depth: 4 }] },
-  },
 ];

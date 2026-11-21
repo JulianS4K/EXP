@@ -10,6 +10,9 @@
 //   * A `:write` scope covers the `:read` scope of the same resource.
 //   * `refunds:write` (mig 20261031110000) is the only scope that can refund;
 //     no other scope implies it.
+//   * `audit:read` (mig 20261109100000) reads the org audit log (GET
+//     /v1/audit); owner and finance credentials by default, and no other
+//     role can be given it.
 //   * `me:read` / `me:write` (mig 20261105110000) are USER scopes: the
 //     token's own user's tickets, orders, transfers and profile (/v1/me/…).
 //     Only a personal access token, an account token or an OAuth token can
@@ -42,6 +45,7 @@ export const SCOPES = [
   'commerce:write',
   'webhooks:read',
   'webhooks:write',
+  'audit:read',
   'me:read',
   'me:write',
   'org:admin',
@@ -71,6 +75,7 @@ export const SCOPE_INFO: Record<Scope, { label: string; description: string }> =
   'commerce:write': { label: 'Manage memberships and gift cards', description: 'Create and change those products and issue gift cards.' },
   'webhooks:read': { label: 'Read webhooks', description: 'Webhook endpoints and the event types they receive (never the signing secret).' },
   'webhooks:write': { label: 'Manage webhooks', description: 'Add, change and remove webhook endpoints.' },
+  'audit:read': { label: 'Read the audit log', description: 'Who changed what in the organization: inventory, money and access changes and exports (never card data, buyer emails or phones).' },
   'me:read': { label: 'Read your account', description: 'Your own tickets (with the live rotating barcode), orders, transfers, memberships, passes, refund requests, wallet passes and profile. User tokens only.' },
   'me:write': { label: 'Act on your account', description: 'Transfer, claim and cancel your tickets, ask for refunds, edit your profile and email preferences. User tokens only.' },
   'org:admin': { label: 'Organization admin', description: 'Organization settings and members.' },

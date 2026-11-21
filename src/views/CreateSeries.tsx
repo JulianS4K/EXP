@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { ArrowLeft, CalendarRange, Loader2, Repeat, Trash2 } from 'lucide-react';
 import { getEventForEdit } from '../lib/events';
 import {
@@ -41,6 +42,7 @@ const LBL = 'block text-[10px] font-black text-slate-400 uppercase tracking-wide
 const INPUT = 'px-2 py-1.5 border border-slate-200 rounded text-sm bg-white';
 
 export default function CreateSeries() {
+  const motionGate = useMotionGate();
   const { eventId } = useParams<{ eventId: string }>();
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
@@ -184,7 +186,7 @@ export default function CreateSeries() {
     setWeekdays((w) => (w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort()));
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="bg-[#f2f4f7] min-h-screen">
+    <motion.div initial={motionGate.enter({ opacity: 0 })} animate={{ opacity: 1 }} className="bg-[#f2f4f7] min-h-screen">
       <div className="max-w-5xl mx-auto px-4 py-12">
         <Link to={`/dashboard/event/${event.id}`} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-6 transition-all">
           <ArrowLeft size={14} /> Back to report

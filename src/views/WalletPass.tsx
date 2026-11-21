@@ -27,6 +27,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { ArrowLeft, Sun, Lock } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 import { getTicket, syncServerClock } from '../lib/tickets';
 import { Event, Ticket } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -35,6 +36,7 @@ import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { formatInTz, isWithinHoursBefore } from '../lib/datetime';
 
 export default function WalletPass() {
+  const motionGate = useMotionGate();
   const { ticketId } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -229,7 +231,7 @@ export default function WalletPass() {
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={motionGate.enter({ opacity: 0 })}
       animate={{ opacity: 1 }}
       className="wall grain min-h-screen text-white flex flex-col"
     >

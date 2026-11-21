@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigationType } from 'react-router-dom';
 import { lazy, Suspense, ReactNode, useEffect } from 'react';
+import { MotionConfig } from 'motion/react';
 import { AuthProvider } from './context/AuthContext';
 import { OrganizationProvider } from './context/OrganizationContext';
 import { ToastProvider } from './context/ToastContext';
@@ -86,6 +87,7 @@ const OrgOffers = lazy(() => import('./views/OrgOffers'));
 const OfferEditor = lazy(() => import('./views/OfferEditor'));
 const OrgFinance = lazy(() => import('./views/OrgFinance'));
 const OrgLedger = lazy(() => import('./views/OrgLedger'));
+const OrgActivity = lazy(() => import('./views/OrgActivity')); // claude/exos-org-audit
 const OfferRespond = lazy(() => import('./views/OfferRespond'));
 const SettlementPublic = lazy(() => import('./views/SettlementPublic'));
 const TicketCountsOptOut = lazy(() => import('./views/TicketCountsOptOut'));
@@ -177,6 +179,9 @@ function ChromeLayout({ children }: { children: ReactNode }) {
 export default function App() {
   return (
     <ErrorBoundary>
+      {/* Reduced motion (OS setting): motion turns transforms off below this;
+          fade-ins are skipped per element with useMotionGate (lib/motion.ts). */}
+      <MotionConfig reducedMotion="user">
       {/* basename matches vite base '/bridge/' so client routes resolve under
           the unified-shell prefix (app.py /bridge → static/bridge/). */}
       <Router basename={((import.meta as any).env?.BASE_URL ?? '/').replace(/\/$/, '')}>
@@ -253,6 +258,7 @@ export default function App() {
                     <Route path="/orgs/:orgId/offers/:offerId" element={<OfferEditor />} />
                     <Route path="/orgs/:orgId/finance" element={<OrgFinance />} />
                     <Route path="/orgs/:orgId/finance/ledger" element={<OrgLedger />} />
+                    <Route path="/orgs/:orgId/activity" element={<OrgActivity />} />
                     <Route path="/orgs/:orgId/fans" element={<OrgFans />} />
                     <Route path="/orgs/:orgId/memberships" element={<OrgMemberships />} />
                     <Route path="/orgs/:orgId/giving" element={<OrgGiving />} />
@@ -302,6 +308,7 @@ export default function App() {
         </ToastProvider>
         </LanguageProvider>
       </Router>
+      </MotionConfig>
     </ErrorBoundary>
   );
 }

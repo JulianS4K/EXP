@@ -94,7 +94,7 @@ the code-side evidence; GTM turns it into a VPAT 2.5 (WCAG edition). It lives he
 |---|---|---|
 | axe-core 4.14 (`@axe-core/playwright`) on the built app, mocked backend | Any `serious` or `critical` violation of the `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` rules. `moderate` / `minor` ones and axe's "needs review" count are printed | `tests/smoke/a11y.mjs`, run by `npm run smoke` (CI job "Browser smoke") |
 | Keyboard, in the same run | The first Tab stop is "Skip to content" and it moves focus into `<main>`; a seat in the seat list is picked with Enter | same |
-| `eslint-plugin-jsx-a11y` (recommended rules) on `src/` | Any error; warnings are capped (`--max-warnings`) so they can only go down | `npm run lint:a11y`, `eslint.config.js` (CI job "TypeScript") |
+| `eslint-plugin-jsx-a11y` (recommended rules) on `src/` | Any error or warning (`--max-warnings 0`) | `npm run lint:a11y`, `eslint.config.js` (CI job "TypeScript") |
 
 Lint deviations from the recommended set (`eslint.config.js` says why): `no-autofocus` is off (every autofocus follows
 a user action, such as a dialog or editor opening, or the door's scan box); `aria-role` ignores our components' own
@@ -102,15 +102,19 @@ a user action, such as a dialog or editor opening, or the door's scan box); `ari
 
 **Pages covered by axe:** the event page (`/e/:slug` → `/event/:id`, phone and desktop), the cookie banner, the seat
 picker (map, then list with a seat picked), checkout (the guest email dialog; back from Stripe to the confirmation),
-My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, and the Door app
-(`/door`, signed out and signed in).
+My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, the Door app
+(`/door`, signed out and signed in), and the staff door scanner (`/checkin/:eventId`). The scans run with the browser
+set to reduced motion.
 
 **Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /
 ES switch; the seat picker's list view has one toggle button per seat, named with section, row, seat, price and
 wheelchair / companion / restricted-view flags (the SVG map is `role="img"` and points to the list); errors are
 `role="alert"` (checkout email, checkout questions, seat picker) and toasts are a polite live region; the quantity
 is announced when it changes; the event countdown and the QR's 30-second rotation are `role="timer"`, so they aren't
-read out on every tick; the entry QR has a text name.
+read out on every tick; the entry QR has a text name. Reduced motion (the OS setting, WCAG 2.3.3): `MotionConfig
+reducedMotion="user"` at the app root turns slides and scaling off, and `useMotionGate` (`src/lib/motion.ts`) skips
+every fade-in, so content shows at full opacity at once; everyone else keeps the animations. The door scanner's small
+text is slate-500 on white and slate-600 on grey, and `brand-secondary-ink` (#B000B0) where the magenta is text.
 
 **Known exceptions:**
 
@@ -118,14 +122,9 @@ read out on every tick; the entry QR has a text name.
    Stripe's documents. The axe run excludes `iframe[src*="stripe.com"]` and nothing else. For those, cite Stripe's
    own Accessibility Conformance Report (VPAT) for Checkout, which Stripe provides on request; add it to the bid
    kit next to Stripe's AOC. The same goes for PayPal's buttons and windows on `/bridge/pay/paypal`.
-2. **Door scanner (`/checkin/:eventId`, staff only).** Scanned as *advisory* (printed, not failed): its small grey
-   labels (slate-300 / 400, and slate-500 on grey panels) are under 4.5:1. Needs a restyle of the scanner's small
-   text; then drop `advisory: true` in `tests/smoke/a11y.mjs`.
-3. **Create / edit event forms (organizer).** 45 visible labels aren't tied to their inputs with `for` / `id`
-   (most inputs carry an `aria-label` with the same text, so they are named). Warn-only in lint, capped at 45.
-4. **The seat map drawing** isn't operable by keyboard; the list view is the keyboard and screen-reader
+2. **The seat map drawing** isn't operable by keyboard; the list view is the keyboard and screen-reader
    equivalent, one toggle away.
-5. **What automation can't see** (roughly half of WCAG): a manual pass with VoiceOver (iOS / macOS) and NVDA,
+3. **What automation can't see** (roughly half of WCAG): a manual pass with VoiceOver (iOS / macOS) and NVDA,
    200% zoom and 320px reflow, focus order through dialogs, and captions on organizer-supplied event videos. That
    manual pass, or a third-party audit, is what turns this into a signed VPAT.
 

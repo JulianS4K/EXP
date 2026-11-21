@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "lint:a11y": "eslint src --max-warnings 45",
+    "lint:a11y": "eslint src --max-warnings 0",
     "start": "tsx server.ts",
     "test": "vitest run",
     "test:watch": "vitest",

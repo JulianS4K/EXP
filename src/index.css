@@ -12,6 +12,9 @@
   --color-brand-primary: #00FF00; /* Neon Green */
   --color-brand-secondary: #FF00FF; /* Neon Magenta */
   --color-brand-accent: #FF2A2A; /* Ransom Red */
+  /* Magenta for text on light backgrounds: #FF00FF is 2.8:1 on white;
+     this is 6:1 on white and 5.5:1 on #f2f4f7 (WCAG AA for any size). */
+  --color-brand-secondary-ink: #B000B0;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   /* Display = Anton (condensed ransom caps). Web fonts are loaded by the

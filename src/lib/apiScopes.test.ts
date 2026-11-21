@@ -34,8 +34,9 @@ describe('API scopes', () => {
   it('SCOPES equals exos_api_scope_names() in the migration, in order', () => {
     // 18 since the build-phase integration (mig 20261101000000): the base 15,
     // refunds:write (mig 20261031110000), fans:read / fans:write (mig 20261031120000);
-    // 20 since the fan API (mig 20261105110000): the user scopes me:read / me:write.
-    expect(SCOPES).toHaveLength(20);
+    // 20 since the fan API (mig 20261105110000): the user scopes me:read / me:write;
+    // 21 since the org audit log (mig 20261109100000): audit:read.
+    expect(SCOPES).toHaveLength(21);
     expect(sqlScopeNames()).toEqual([...SCOPES]);
   });
 

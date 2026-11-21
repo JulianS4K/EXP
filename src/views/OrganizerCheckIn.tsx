@@ -23,6 +23,7 @@ import { supabase } from '../lib/supabase';
 import { Ticket } from '../types';
 import { Search, CheckCircle2, XCircle, ArrowLeft, Loader2, User, Camera, ScanLine, Download, Wifi, WifiOff, RefreshCw, LogOut, Activity } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useMotionGate } from '../lib/motion';
 // html5-qrcode (~330KB) is loaded on demand when the scanner opens, so it
 // never ships on other routes or before the camera is actually needed.
 import type { Html5Qrcode } from 'html5-qrcode';
@@ -201,6 +202,7 @@ const IN_TRANSFER_TEXT =
 type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' | 'OUT'; addon?: boolean };
 
 export default function OrganizerCheckIn() {
+  const motionGate = useMotionGate();
   const { eventId } = useParams();
   const navigate = useNavigate();
   const { user, isAdmin } = useAuth();
@@ -1633,14 +1635,14 @@ export default function OrganizerCheckIn() {
       <div className="bg-[#f2f4f7] min-h-screen">
         <div className="max-w-xl mx-auto px-4 py-16 text-center">
           {eventLoad === 'loading' ? (
-            <Loader2 className="w-8 h-8 text-slate-400 animate-spin mx-auto" aria-label="Loading" />
+            <Loader2 className="w-8 h-8 text-slate-500 animate-spin mx-auto" aria-label="Loading" />
           ) : (
             <>
-              <WifiOff className="w-8 h-8 text-slate-400 mx-auto mb-4" aria-hidden="true" />
+              <WifiOff className="w-8 h-8 text-slate-500 mx-auto mb-4" aria-hidden="true" />
               <h1 className="text-xl font-bold text-slate-900 mb-2">
                 {eventLoad === 'missing' ? 'Event not found' : 'No saved copy of this event'}
               </h1>
-              <p className="text-sm text-slate-500 mb-6">
+              <p className="text-sm text-slate-600 mb-6">
                 {eventLoad === 'missing'
                   ? "This event doesn't exist or you're not door staff for it."
                   : "This device is offline and hasn't saved this event yet. Connect once and open this page to save the list for offline check-in."}
@@ -1686,21 +1688,21 @@ export default function OrganizerCheckIn() {
         .checkin-scanline { animation: checkinScanline 2s ease-in-out infinite alternate; }
       `}</style>
 
-      <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-3 md:mb-6 transition-colors">
+      <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 text-slate-600 hover:text-slate-900 text-[10px] font-black uppercase tracking-widest mb-3 md:mb-6 transition-colors">
         <ArrowLeft className="w-3.5 h-3.5" />
         Back to dashboard
       </button>
 
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 md:gap-4 mb-4 md:mb-8">
         <div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Door Check-In</p>
+          <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">Door Check-In</p>
           <span className="inline-flex items-baseline gap-3 flex-wrap">
             <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-slate-900">{event.title}</h1>
-            <span className="marker text-brand-secondary text-lg rotate-[-3deg] leading-none whitespace-nowrap">at the door ✦</span>
+            <span className="marker text-brand-secondary-ink text-lg rotate-[-3deg] leading-none whitespace-nowrap">at the door ✦</span>
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-           <div className={`flex items-center space-x-2 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest ${effectiveOffline ? 'bg-red-50 text-red-500 border border-red-200' : 'bg-emerald-50 text-emerald-500 border border-emerald-200'}`}>
+           <div className={`flex items-center space-x-2 px-3 py-2 rounded text-[10px] font-black uppercase tracking-widest ${effectiveOffline ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
               {effectiveOffline ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
               <span>{isOffline ? 'Offline' : serverDown ? 'No server' : 'Online'}</span>
            </div>
@@ -1787,7 +1789,7 @@ export default function OrganizerCheckIn() {
       {checkinLists && checkinLists.length > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-end gap-4">
           <div className="min-w-0 flex-1">
-            <label htmlFor="door-list" className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">
+            <label htmlFor="door-list" className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
               Check-in list
             </label>
             <select
@@ -1803,7 +1805,7 @@ export default function OrganizerCheckIn() {
               ))}
               <option value={NO_LIST}>Any ticket, no list</option>
             </select>
-            <p className="text-[11px] text-slate-500 mt-1">
+            <p className="text-[11px] text-slate-600 mt-1">
               {activeList
                 ? `${activeList.tierIds ? `${activeList.tierIds.length} ticket type${activeList.tierIds.length === 1 ? '' : 's'}` : 'All ticket types'} · ${
                     activeList.allowReentry ? 'people can leave and come back (scan them out)' : 'one entry per ticket'
@@ -1821,7 +1823,7 @@ export default function OrganizerCheckIn() {
                   aria-checked={direction === d}
                   onClick={() => chooseDirection(d)}
                   className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
-                    direction === d ? (d === 'exit' ? 'bg-sky-600 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-500 hover:text-slate-900'
+                    direction === d ? (d === 'exit' ? 'bg-sky-600 text-white shadow-sm' : 'bg-white text-slate-900 shadow-sm') : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
                   {d === 'entry' ? 'Entry' : 'Exit'}
@@ -1846,7 +1848,7 @@ export default function OrganizerCheckIn() {
               modeTouchedRef.current = true;
               setMode(m);
             }}
-            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+            className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mode === m ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
           >
             {m === 'tickets' ? 'Tickets' : m === 'sell' ? 'Sell' : `Guest list${doorExtras ? ` (${doorExtras.guests.length})` : ''}`}
           </button>
@@ -1898,7 +1900,7 @@ export default function OrganizerCheckIn() {
                   setScanning(false);
                 }}
                 aria-label="Stop the QR code scanner"
-                className="mt-4 w-full py-4 text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-colors"
+                className="mt-4 w-full py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 transition-colors"
               >
                 Abort Scanning
               </button>
@@ -1915,7 +1917,7 @@ export default function OrganizerCheckIn() {
 
              <div className="relative">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-100"></div></div>
-                <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-300"><span className="bg-white px-4">Manual Entry — no camera?</span></div>
+                <div className="relative flex justify-center text-[9px] uppercase font-bold tracking-widest text-slate-500"><span className="bg-white px-4">Manual Entry — no camera?</span></div>
              </div>
 
              <form
@@ -1945,7 +1947,7 @@ export default function OrganizerCheckIn() {
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                 />
-                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
                 <button
                   type="submit"
                   className="absolute right-4 top-1/2 -translate-y-1/2 bg-slate-900 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-slate-800 transition-colors"
@@ -1957,10 +1959,10 @@ export default function OrganizerCheckIn() {
                const matches = rosterMatches<OfflineTicketEntry>(offlineRegistry, searchId);
                if (searchId.trim().length < 2 || isFullTicketId(searchId)) return null;
                if (Object.keys(offlineRegistry).length === 0) {
-                 return <p className="text-xs text-slate-500 px-2">Tap “Download for offline” to search by name.</p>;
+                 return <p className="text-xs text-slate-600 px-2">Tap “Download for offline” to search by name.</p>;
                }
                if (matches.length === 0) {
-                 return <p className="text-xs text-slate-500 px-2">No one on the list matches “{searchId.trim()}”.</p>;
+                 return <p className="text-xs text-slate-600 px-2">No one on the list matches “{searchId.trim()}”.</p>;
                }
                return (
                  <ul className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden" aria-label="Matching tickets">
@@ -1968,11 +1970,11 @@ export default function OrganizerCheckIn() {
                      <li key={id} className="flex items-center gap-3 px-4 py-3">
                        <div className="min-w-0 flex-1">
                          <p className="font-bold text-slate-900 text-sm truncate">{entry.name || 'Unnamed'}</p>
-                         <p className="text-[11px] text-slate-500 truncate">
+                         <p className="text-[11px] text-slate-600 truncate">
                            {entry.tier} · …{id.slice(-6)}
                          </p>
                          {entry.parked && !entry.used && !entry.voided && (
-                           <p className="text-[11px] text-slate-400 truncate">
+                           <p className="text-[11px] text-slate-500 truncate">
                              Not claimed yet{entry.claimEmailMasked ? ` · ${entry.claimEmailMasked}` : ''}
                            </p>
                          )}
@@ -1981,9 +1983,9 @@ export default function OrganizerCheckIn() {
                          )}
                        </div>
                        {entry.voided ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-red-500">Void</span>
+                         <span className="text-[10px] font-black uppercase tracking-widest text-red-700">Void</span>
                        ) : doneHere(entry) ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">
                            {activeList?.allowReentry ? 'Inside' : 'In'}
                          </span>
                        ) : nameAccess === 'allowed' ? (
@@ -2006,11 +2008,11 @@ export default function OrganizerCheckIn() {
                            Admit…
                          </button>
                        ) : nameAccess === 'needs-manager' ? (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title="This event lets only owners and managers check people in by name">
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title="This event lets only owners and managers check people in by name">
                            Ask a manager
                          </span>
                        ) : (
-                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-400" title="Check-in by name is off for this event: scan their live code">
+                         <span className="text-[10px] font-black uppercase tracking-widest text-slate-500" title="Check-in by name is off for this event: scan their live code">
                            Scan code
                          </span>
                        )}
@@ -2027,18 +2029,18 @@ export default function OrganizerCheckIn() {
           {status === 'searching' && (
             <motion.div 
               key="searching"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              initial={motionGate.enter({ opacity: 0 })} animate={{ opacity: 1 }} exit={motionGate.leave({ opacity: 0 })}
               className="flex flex-col items-center justify-center py-10"
             >
               <Loader2 className="w-12 h-12 text-brand-primary animate-spin mb-4" />
-              <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Verifying Ticket...</p>
+              <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Verifying Ticket...</p>
             </motion.div>
           )}
 
           {status === 'success' && foundTicket && (
             <motion.div 
               key="success"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-green-50/50 p-8 rounded-[2.5rem] border border-green-100 flex flex-col items-center text-center"
             >
               <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-green-200">
@@ -2076,18 +2078,18 @@ export default function OrganizerCheckIn() {
                     <div className="flex items-center space-x-3 text-left">
                        <User className="text-green-500 w-5 h-5" />
                        <div>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Attendee</p>
+                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Attendee</p>
                           <p className="font-bold text-slate-900">{buyerName}</p>
                        </div>
                     </div>
                  </div>
                  <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{foundTicket.tierName || 'Standard Admission'}</p>
                  </div>
                  {seatByTicket[foundTicket.id] && (
                    <div className="p-4 bg-white rounded-2xl border border-green-50 text-left" data-testid="door-seat">
-                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
+                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Seat</p>
                      <p className="font-bold text-slate-900">{seatByTicket[foundTicket.id]}</p>
                    </div>
                  )}
@@ -2095,9 +2097,9 @@ export default function OrganizerCheckIn() {
                    const tb = tableByTicket[foundTicket.id];
                    return (
                      <div className="p-4 bg-white rounded-2xl border border-green-50 text-left">
-                       <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Table</p>
+                       <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Table</p>
                        <p className="font-bold text-slate-900">{tb.label || 'Not assigned yet'}</p>
-                       <p className="text-xs text-slate-500 mt-1">
+                       <p className="text-xs text-slate-600 mt-1">
                          {tableSummary({ partySize: tb.partySize, minSpendCents: tb.minSpendCents, sectionLabel: tb.sectionLabel }, event?.currency || 'USD')}
                        </p>
                      </div>
@@ -2110,7 +2112,7 @@ export default function OrganizerCheckIn() {
           {status === 'by-name' && nameFor && (
             <motion.div
               key="by-name"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-green-50/50 p-8 rounded-[2.5rem] border border-green-100 flex flex-col items-center text-center"
             >
               <h2 className="text-2xl font-bold text-green-900 mb-1 leading-none uppercase tracking-tight">
@@ -2121,17 +2123,17 @@ export default function OrganizerCheckIn() {
               </p>
               <div className="w-full max-w-sm space-y-2 mb-4 text-left">
                 <div className="p-4 bg-white rounded-2xl border border-green-50">
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Name</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Name</p>
                   <p className="font-bold text-slate-900">{nameFor.name || 'Name not given'}</p>
                   {nameFor.unclaimed && (
-                    <p className="text-xs text-slate-500 mt-1">
+                    <p className="text-xs text-slate-600 mt-1">
                       Not claimed yet{nameFor.emailMasked ? ` · ${nameFor.emailMasked}` : ''}. Checking in closes the claim link.
                     </p>
                   )}
                 </div>
                 {nameFor.tier && (
                   <div className="p-4 bg-white rounded-2xl border border-green-50">
-                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Ticket Type</p>
                     <p className="font-bold text-slate-900">{nameFor.tier}</p>
                   </div>
                 )}
@@ -2169,7 +2171,7 @@ export default function OrganizerCheckIn() {
           {status === 'needs-reason' && overrideFor && (
             <motion.div
               key="needs-reason"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-sky-50/60 p-8 rounded-[2.5rem] border border-sky-200 flex flex-col items-center text-center"
             >
               <h2 className="text-2xl font-bold text-sky-900 mb-1 leading-none uppercase tracking-tight">Manual override</h2>
@@ -2213,7 +2215,7 @@ export default function OrganizerCheckIn() {
           {status === 'already-used' && (
             <motion.div 
               key="already-used"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-orange-50/50 p-8 rounded-[2.5rem] border border-orange-100 flex flex-col items-center text-center"
             >
               <div className="w-20 h-20 bg-orange-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-orange-200">
@@ -2226,7 +2228,7 @@ export default function OrganizerCheckIn() {
                 {usedInfo?.inside ? 'No exit since their last entry on this list' : 'Ticket already checked in'}
               </p>
               
-              <p className="text-slate-500 text-sm font-medium mb-4">
+              <p className="text-slate-600 text-sm font-medium mb-4">
                 Checked in at: <br />
                 <strong>
                   {usedInfo?.at
@@ -2239,7 +2241,7 @@ export default function OrganizerCheckIn() {
               </p>
               
               <div className="w-full p-4 bg-white rounded-2xl border border-orange-100 text-left">
-                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mb-1">Attendee Name</p>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mb-1">Attendee Name</p>
                  <p className="font-bold text-slate-900">{buyerName}</p>
               </div>
             </motion.div>
@@ -2248,7 +2250,7 @@ export default function OrganizerCheckIn() {
           {status === 'not-found' && (
             <motion.div
               key="not-found"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-red-50/50 p-8 rounded-[2.5rem] border border-red-100 flex flex-col items-center text-center relative"
             >
               <div className="w-20 h-20 bg-red-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-red-200">
@@ -2274,7 +2276,7 @@ export default function OrganizerCheckIn() {
           {status === 'invalid-barcode' && (
             <motion.div
               key="invalid-barcode"
-              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+              initial={motionGate.enter({ scale: 0.9, opacity: 0 })} animate={{ scale: 1, opacity: 1 }}
               className="bg-amber-50/50 p-8 rounded-[2.5rem] border border-amber-200 flex flex-col items-center text-center"
             >
               <div className="w-20 h-20 bg-amber-500 rounded-full flex items-center justify-center text-white mb-6 shadow-lg shadow-amber-200">
@@ -2310,15 +2312,15 @@ export default function OrganizerCheckIn() {
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
               <p className="disp text-3xl tracking-tight text-green-600" style={{ transform: 'skewX(-3deg)' }}>{insideVenue}</p>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">In</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">In</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
               <p className="disp text-3xl tracking-tight text-slate-900" style={{ transform: 'skewX(-3deg)' }}>{event.ticketsSold}</p>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">Sold</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Sold</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 text-center">
               <p className="disp text-3xl tracking-tight text-rose-500" style={{ transform: 'skewX(-3deg)' }}>{rejectCount}</p>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">Rejects</p>
+              <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Rejects</p>
             </div>
           </div>
 
@@ -2337,19 +2339,19 @@ export default function OrganizerCheckIn() {
             <dl className="px-5 pb-4 space-y-2 text-xs">
               {health.lines.map((l) => (
                 <div key={l.label} className="flex items-baseline justify-between gap-3">
-                  <dt className="text-slate-400 font-bold uppercase tracking-widest text-[10px] shrink-0">{l.label}</dt>
+                  <dt className="text-slate-500 font-bold uppercase tracking-widest text-[10px] shrink-0">{l.label}</dt>
                   <dd className={`font-bold text-right ${levelCls(l.level)}`}>{l.value}</dd>
                 </div>
               ))}
             </dl>
             {conflicts.length > 0 && (
               <div className="px-5 pb-4">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Refused on upload</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Refused on upload</p>
                 <ul className="space-y-1.5 max-h-48 overflow-y-auto" aria-label="Scans the server refused on upload">
                   {conflicts.map((c, i) => (
                     <li key={`${c.ticketId}-${c.at}-${i}`} className="text-xs text-slate-700">
                       <span className="font-bold">{c.name || `…${c.ticketId.slice(-6)}`}</span>{' '}
-                      <span className="text-slate-500">
+                      <span className="text-slate-600">
                         · {conflictText(c)} · admitted {eventTime(c.scannedAt, event?.timezone)}
                       </span>
                     </li>
@@ -2358,7 +2360,7 @@ export default function OrganizerCheckIn() {
                 <button
                   type="button"
                   onClick={() => setConflicts([])}
-                  className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900"
+                  className="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-900"
                 >
                   Clear
                 </button>
@@ -2387,10 +2389,10 @@ export default function OrganizerCheckIn() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
               <h2 className="text-sm font-black text-slate-900 uppercase tracking-widest">Scan log</h2>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">live</span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">live</span>
             </div>
             {recentScans.length === 0 ? (
-              <p className="px-5 py-6 text-xs text-slate-400 font-bold uppercase tracking-widest">No scans yet.</p>
+              <p className="px-5 py-6 text-xs text-slate-500 font-bold uppercase tracking-widest">No scans yet.</p>
             ) : (
               <ul className="divide-y divide-slate-50 max-h-[420px] overflow-y-auto">
                 {recentScans.map((scan) => {
@@ -2400,12 +2402,12 @@ export default function OrganizerCheckIn() {
                   return (
                     <li key={scan.key} className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : out ? 'bg-sky-50 text-sky-600' : undone ? 'bg-slate-100 text-slate-400' : 'bg-rose-50 text-rose-500'}`}>
+                        <span className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${ok ? 'bg-green-50 text-green-600' : out ? 'bg-sky-50 text-sky-600' : undone ? 'bg-slate-100 text-slate-500' : 'bg-rose-50 text-rose-600'}`}>
                           {ok ? <CheckCircle2 className="w-4 h-4" /> : out ? <LogOut className="w-4 h-4" /> : undone ? <RefreshCw className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : out ? `${scan.name} · out` : undone ? `${scan.name} · undone` : 'Rejected'}</p>
-                          <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
+                          <p className="text-[11px] text-slate-500 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
                         </div>
                         {ok && undoKey !== scan.key && (scan.addon
                           ? addonUndoAccess({ manager: canOverride, scannedByMe: true, scannedAt: scan.time.getTime(), now: Date.now() }) === 'allowed'
@@ -2414,12 +2416,12 @@ export default function OrganizerCheckIn() {
                             type="button"
                             onClick={() => { setUndoKey(scan.key); setUndoReason(''); }}
                             data-testid={scan.addon ? 'addon-undo' : undefined}
-                            className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900 shrink-0"
+                            className="text-[10px] font-black uppercase tracking-widest text-slate-600 hover:text-slate-900 shrink-0"
                           >
                             Undo
                           </button>
                         ) : null}
-                        <span className="text-[10px] font-mono text-slate-300 shrink-0">{eventTime(scan.time.getTime(), event?.timezone)}</span>
+                        <span className="text-[10px] font-mono text-slate-500 shrink-0">{eventTime(scan.time.getTime(), event?.timezone)}</span>
                       </div>
                       {undoKey === scan.key ? (
                         <form
@@ -2447,7 +2449,7 @@ export default function OrganizerCheckIn() {
                             type="button"
                             onClick={() => setUndoKey(null)}
                             aria-label="Keep this check-in"
-                            className="px-2 text-slate-400 hover:text-slate-700"
+                            className="px-2 text-slate-500 hover:text-slate-700"
                           >
                             <XCircle className="w-4 h-4" />
                           </button>

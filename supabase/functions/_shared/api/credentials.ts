@@ -70,7 +70,7 @@ export const ROLE_SCOPES: Record<OrgRole, readonly Scope[]> = {
   ],
   finance: [
     'events:read', 'orders:read', 'tickets:read', 'booking:read', 'finance:read', 'finance:write', 'commerce:read',
-    'me:read', 'me:write',
+    'audit:read', 'me:read', 'me:write',
   ],
   // me:* is the token's own user (mig 20261105110000): every role may grant it.
   content: ['events:read', 'events:write', 'booking:read', 'me:read', 'me:write'],

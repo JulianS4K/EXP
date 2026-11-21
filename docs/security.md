@@ -78,7 +78,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_event_questions` (mig 20261106110000) | OK (anon + authenticated) | The checkout questions of a **published** event, as its event page asks them: label, help text, kind, options, required, per order / per ticket, ticket types and limits, plus each table ticket type's party size. Never hidden or archived questions, answer counts or answers; a draft answers an empty list unless the caller can edit the event (the builder's preview). In the H3 allowlist. Answers (`exos_question_answers`) have no anon access: RLS lets owner / manager / finance read the org's, the buyer their own (`buyer_uid`), and door staff of the event (`exos_can_door_event`) per-ticket answers only; writes go through `exos_record_checkout_answers` (service role), `exos_claim_free_tickets_answered` (the signed-in claimer), `exos_rsvp_record_answers` (service role) and `exos_door_set_ticket_answers` (door staff). The cores (`_exos_validate_answers*`, `_exos_record_answers`, `_exos_question_*`, `_exos_answers_for`, `_exos_event_answer_rows`) are service role only. Security review 2026-11-05: in the partner API a tickets:read-only credential gets per-ticket answers only (order answers need the credential's orders:read scope; a user's or key creator's role never stands in for it; `_exos_answers_for(ids, p_include_order)`); the mint trigger attaches answers only to the order's buyer's tickets (or tickets parked on the org owner for a buyerless order or that buyer's own session), and the free claim / checkout refuse an order ref another buyer's answers hold; validation errors name only the validated event's questions and never an unknown one |
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 | `exos_ticket_link_location` (mig 20261105130000) | OK | The same 256-bit link key as `exos_ticket_link_view` (recomputed and compared; a wrong key and an unknown ticket give `{ ok: false }`). Answers that ticket's event location as the public sees it (mode, area, reveal time), plus a `secret_location` event's exact address only once its reveal time has passed and only for an active or used ticket. Read-only. docs/promoter-events.md |
-| `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the ticket type id. Never another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
+| `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the event and ticket type ids (also published only, since mig 20261109110000). Never another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -450,7 +450,9 @@ Nothing new is granted to anon. Points to review:
 - **Erasure.** `exos_delete_my_account` deletes the locations of the caller's
   own orders and of guest orders under their **confirmed** email, before any
   email is cleared (marker `exos: buyer location`). There is no other
-  retention sweep for order data to hook into.
+  retention sweep for order data to hook into. Whatever sweep comes later
+  must skip `exos_org_audit` (the org audit log, below): its rows are kept
+  for the life of the org and hold no buyer contact data to erase.
 - **Reports aggregate.** `exos_event_buyer_geo` / `exos_org_buyer_geo`
   (authenticated, owner / manager / finance or platform admin, else 42501)
   and `_exos_buyer_geo` (service role, exos-api `/v1/events/:id/buyer-locations`
@@ -578,11 +580,120 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   tickets. Apple add-on passes are static (no web service): the phone keeps
   showing a refunded pass's code, which the door refuses.
 
+### Org audit log (mig 20261109100000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **One writer, append-only.** `exos_org_audit` has RLS (owner / manager /
+  finance of the org, platform admins) and a SELECT grant only: no client
+  and no service-role write grant. UPDATE, DELETE and TRUNCATE raise in a
+  trigger (55000) for the table owner too. The only writer is `_exos_audit`
+  (definer, `search_path` pinned, service role only; never anon or
+  authenticated). It never raises: a failed write is a WARNING and the action
+  stands, as the journal does. No foreign keys, so deleting an event, a key
+  or the org leaves the log in place.
+- **What a row may hold.** Ids, the changed fields as `{field: [old, new]}`,
+  integer cents and a currency, a short reason. Field names that can carry
+  contact, card, secret or code data (`*email*`, `*phone*`, `*card*`,
+  `*secret*`, `*token*`, `*hash*`, `code`, `address`, …) are dropped before
+  the insert, and a CHECK refuses them (and anything shaped like an email)
+  in `changes` anyway. Text longer than 80 characters is stored as its
+  length, objects as "(changed)", and emails and phone numbers in short text
+  or a reason are masked. A create or delete names a few fields of the row,
+  never the whole row. A voucher's code and reserved email, an API key's
+  hash and prefix, a gift card's code are never logged.
+- **The actor.** `auth.uid()` (a dashboard user, or the key creator
+  `exos_api_write` acts as), or the `p_actor` a definer RPC is given, and the
+  actor's role in the org at the time. exos-api adds `X-Exos-Actor`
+  (`api_key:<id>`, `pat:<id>`, `oauth_app:<client id>`), `X-Exos-Actor-Uid`
+  and `X-Exos-Request-Id` to its PostgREST calls; `_exos_audit_actor` reads
+  them only when the request's role is `service_role`, so a browser (role
+  `authenticated`) can't name an actor or a request. An API key names its
+  creator only when the key belongs to the row's org. No actor: `service`,
+  or `cron` under pg_cron.
+- **Capture.** AFTER row triggers (`_exos_tg_audit_row`, definer) on the
+  tables the browser writes under RLS (`exos_events`, `exos_ticket_tiers`,
+  `exos_quotas`, `exos_quota_tiers`, `exos_vouchers`, `exos_org_memberships`)
+  and on `exos_holds`, `exos_api_keys`, `exos_org_role_scopes` and
+  `exos_order_edits`. Counters and system stamps (`sold`, `tickets_sold`,
+  `used_count`, `last_used_at`, reminders, sync state) never reach the
+  function (the trigger's WHEN). Money and access actions log from inside
+  their definer RPCs (34 marker patches, `/* exos: audit <action> */`):
+  refund claims, refund-ask declines, fee adjustments, comp batches and the
+  comp budget, ticket and printout voids, POS voids / refunds / paid-outs /
+  drawer close and recount, gift card void and reissue, offline donation
+  refunds and deletes, payouts (mark, cancel, instant), promoter settle /
+  payout / cancel, settlements (update, finalize, reopen), member approve /
+  reject, invite approval, OAuth app deletes, voucher issue, price steps,
+  channel prices, and the fans and audience exports. Each call sits on the
+  action's success path, after its replay checks, so a retried or
+  concurrent action logs once (`tests/exos/race_org_audit.sh`).
+  `exos_set_org_comp_budget` and `exos_void_ticket` predate 20260926, so
+  their patches skip with a NOTICE when prod's body lacks the anchor.
+- **Reading it.** `exos_org_audit_list` (authenticated: owner / manager /
+  finance or admin, else 42501 before anything is read) pages the org's rows
+  newest first with event, member, group and date filters; it names a
+  member by email (as `exos_order_edit_log` does), a key by its name, a
+  platform admin as "Exos support". `exos_audit_export` (authenticated, the
+  same roles, 30 a minute) records an `export.run` for a CSV the browser
+  built (the log itself, donations, price disclosures, attendees); the org
+  is the one named or the event's, and an event of another org is P0002.
+  `GET /v1/audit` (`audit:read`, owner and finance credentials by default,
+  never a manager, content or scanner role's) reads the key's org only.
+- **Out of scope.** Door scans (`exos_checkins` records them) and buyer
+  self-service (transfers, refund asks, profile edits).
+
 ### Search path
+
+### Hygiene 2026-11-09 (mig 20261109110000)
+
+The should-fix items of the Applier's Supabase advisor sweep, Exos objects only.
+Nothing new is callable by anon (H3 unchanged); tests in
+`tests/exos/test_security_hygiene.sql`.
+
+- `exos_paste_probe` (a test table left in prod, one row) is dropped.
+- **Sequences.** Supabase's default privileges give anon, authenticated and
+  service_role USAGE, SELECT and UPDATE on every new sequence in `public`, so
+  anon could `setval()` an Exos id sequence. Anon's (and PUBLIC's) are revoked
+  on every `exos_*` sequence. The default privileges themselves stay: they're
+  per schema, and `public` is shared with Terminal-2, whose future sequences
+  would lose the grants too. So **a migration that creates an `exos_*`
+  sequence (a `serial` / `bigserial` / identity column) must revoke anon's**:
+  `REVOKE ALL ON SEQUENCE public.<seq> FROM PUBLIC, anon`. The harness carries
+  the same default privileges (`prereq_supabase.sql`), S3 fails on an
+  anon-usable `exos_*` sequence, and `scripts/verify-prod.sh` checks prod
+  ("anon on exos sequences").
+- **`_exos_site_error(jsonb)`, `_exos_door_code_loose(text)`**: no anon or
+  PUBLIC EXECUTE; authenticated and service_role keep it. Their callers are
+  definer functions (`exos_set_org_site`, `exos_door_code_lookup`) and the
+  index `exos_guest_list_entries_loose_code_idx`, which runs the helper as
+  the writing role: only definer functions and the service role write guest
+  list entries.
+- **RLS initplan.** 43 policies on `exos_*` tables called `auth.uid()` /
+  `auth.jwt()` per row; they now call `(select auth.uid())`, evaluated once
+  per statement. The rewrite only wraps bare calls (ALTER POLICY, so name,
+  command, roles and permissive flag can't change); S4 compares every policy
+  with a snapshot taken just before the migration and what five users see
+  and may insert under the old and new expressions. New policies: write
+  `(select auth.uid())`. `exos_has_org_role(org_id, …)` takes a row's column
+  and can't be hoisted; it stays as it is.
+- **Not changed, on purpose.** `exos_run_channel_splits_each(integer)` has no
+  pinned `search_path`: it's a procedure that commits after each event, and a
+  procedure with a `SET` clause can't `COMMIT`, so pinning it would break the
+  hourly channel-split cron. It's `SECURITY INVOKER`, only its owner can
+  `CALL` it and every name in it is schema-qualified; the advisor's finding
+  for it is accepted. The advisor's `multiple_permissive_policies` (30
+  table / command pairs, all `authenticated` SELECT: a staff policy next to a
+  holder or public one) are left for a later, separate change.
+- Matched seats: a guest's ticket parked on the organizer is keyed, mailed and
+  (not) texted as the guest's (`docs/matched-seats.md`).
+
 ### Search path
 
 `exos_platform_fee_bps()` (a plain `SELECT 300`) was the one Exos function
-without a pinned `search_path`; it now has `public, pg_temp`.
+without a pinned `search_path`; it now has `public, pg_temp`. The one other
+unpinned Exos routine, `exos_run_channel_splits_each`, can't be pinned (see
+"Hygiene 2026-11-09").
 
 ### SECURITY DEFINER views (8, by design)
 

@@ -100,6 +100,9 @@ describe('the seat page read', () => {
       event: { name: 'Fall Party', starts_at: '2026-11-20T23:00:00Z', venue_name: 'Elsewhere', image_url: null, currency: 'USD' },
     }, 0);
     expect(v).toMatchObject({ seatNo: 2, seats: 4, state: 'waiting', groupStatus: 'open', paid: 1, open: 3, event: { name: 'Fall Party', currency: 'USD' } });
+    // An unpublished event: no ids, no event block.
+    const gone = toSeatView({ seat_no: 1, seats: 2, state: 'paid', deadline: '2026-11-09T12:30:00Z', event_id: null, tier_id: null, event: null }, 0);
+    expect(gone).toMatchObject({ eventId: '', tierId: '', event: null, state: 'paid' });
     expect(SEAT_TOKEN_RE.test('0123456789abcdef0123456789abcdef')).toBe(true);
     expect(SEAT_TOKEN_RE.test('0123456789ABCDEF0123456789abcdef')).toBe(false);
   });

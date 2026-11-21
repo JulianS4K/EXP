@@ -51,3 +51,12 @@ CREATE OR REPLACE FUNCTION public.cron_should_fire(p_jobname text) RETURNS boole
 -- Supabase lets the API roles use the auth schema (auth.uid() / auth.jwt() in
 -- policies and invoker functions, e.g. phase-2's exos_is_admin()).
 GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
+
+-- Supabase's default privileges on sequences (FOR ROLE postgres, IN SCHEMA
+-- public): every new sequence comes with USAGE, SELECT and UPDATE for anon,
+-- authenticated and service_role, as in prod. Migrations revoke anon's
+-- (20261109110000 for the older ones); test_security_hygiene.sql S3 fails on
+-- an exos_* sequence anon can still use. Tables and functions are left
+-- without default grants: the chain grants those explicitly.
+ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO anon, authenticated, service_role;
