@@ -16,7 +16,10 @@
 // URL. Posh documents no request signature, so there is nothing else to
 // check (if a signature header turns up, the log keeps header NAMES so it
 // can be found and added). Limits: 64 KB per body, 120 deliveries a minute
-// per URL (exos_rate_hit). Nothing is ever sent to Posh.
+// per URL (exos_rate_hit). A token that isn't a live hook is refused (404)
+// after a limit per caller network (30 a minute), so made-up tokens can't
+// each open a rate-limit row of their own (_shared/posh/bucket.ts). Nothing
+// is ever sent to Posh.
 //
 // Deploy with --no-verify-jwt (Posh sends no Supabase JWT). Secrets:
 // SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (platform), CRON_SECRET (replay).
@@ -25,9 +28,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { detectKind, extractOrder, parseBody, redact, route, sha256Hex } from "../_shared/posh/payload.ts";
+import { poshRateBucket } from "../_shared/posh/bucket.ts";
 
 const MAX_BODY = 64 * 1024;
-const PER_MINUTE = 120;
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...headers } });
@@ -62,12 +65,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (text === null) return json({ error: "body too large" }, 413);
 
   const tokenHash = await sha256Hex(r.token);
-  const { data: allowed, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: `posh:${tokenHash.slice(0, 40)}`, p_limit: PER_MINUTE });
+  // Is it a live hook? Unknown tokens share their caller network's bucket.
+  const { data: hook, error: hookErr } = await sb.from("exos_posh_hooks").select("org_id")
+    .eq("token_hash", tokenHash).eq("status", "active").maybeSingle();
+  if (hookErr) {
+    console.error("exos-posh-webhook: hook lookup failed (refusing)", redactError(hookErr));
+    return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
+  }
+  const rl = await poshRateBucket(tokenHash, !!hook, (h) => req.headers.get(h));
+  const { data: allowed, error: rlErr } = await sb.rpc("exos_rate_hit", { p_bucket: rl.bucket, p_limit: rl.limit });
   if (rlErr) {
     console.error("exos-posh-webhook: rate limiter error (refusing)", redactError(rlErr));
     return json({ error: "temporarily unavailable" }, 503, { "Retry-After": "30" });
   }
   if (allowed === false) return json({ error: "rate limit exceeded" }, 429, { "Retry-After": "60" });
+  if (!hook) return json({ error: "not found" }, 404);
 
   const body = parseBody(text, req.headers.get("content-type"));
   if (!body) return json({ error: "expected a JSON body" }, 400);

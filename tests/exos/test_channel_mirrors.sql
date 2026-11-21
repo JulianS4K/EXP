@@ -179,8 +179,10 @@ BEGIN
   SELECT * INTO r FROM public.exos_luma_inventory_apply(pg_temp.u('e1'),
     '[{"id":"ttype-GA1","sold":5},{"id":"ttype-VIP1","sold":0}]', now()) x WHERE x.tier_id = pg_temp.u('d1');
   ASSERT (SELECT sold FROM public.exos_ticket_tiers WHERE id = pg_temp.u('d1')) = 5, 'C6: Luma sales took Exos seats';
-  -- 95 free raw; 8 held for Luma: shared 87 - pack 4 = 83, + hold 8 = 91; target 5 + 91.
-  ASSERT r.target_capacity = 96, 'C6: target ' || r.target_capacity;
+  -- 95 free raw; 8 held for Luma: shared 87 - pack 4 = 83. Eventbrite sells GA
+  -- too (C4), so the 83 are split (mig 20261121100000): ceil(83 / 2) = 42,
+  -- + hold 8 = 50; target 5 + 50.
+  ASSERT r.target_capacity = 55, 'C6: target ' || r.target_capacity;
   ASSERT r.oversold = 0 AND NOT r.writes_enabled, 'C6: switch off';
   -- Same read again: nothing counted twice.
   PERFORM public.exos_luma_inventory_apply(pg_temp.u('e1'), '[{"id":"ttype-GA1","sold":5},{"id":"ttype-VIP1","sold":0}]', now() + interval '1 second');

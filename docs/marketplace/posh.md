@@ -74,7 +74,9 @@ the event is **sold on Exos**, Posh is only a listing.
   be spotted on the first real delivery and checked from then on. The token does appear in
   the edge function's request logs.
 - **Limits**: 64 KB body (413), 120 deliveries a minute per URL (`exos_rate_hit`, 429; 503 if
-  the limiter errors).
+  the limiter errors). A token that isn't a live hook is answered 404 after a limit of 30 a minute
+  per caller network (IPv4 /24, IPv6 /48; `_shared/posh/bucket.ts`), so made-up tokens share one
+  bucket instead of each opening a rate-limit row (mig 20261121100000 branch).
 - `/<token>/pending` is the same URL with a hint, for an organizer who gives Pending Order
   Created its own URL. The payload's own type field wins over the hint.
 - `/replay/<log id>` (header `x-cron-secret`) re-runs a logged delivery through the parser,

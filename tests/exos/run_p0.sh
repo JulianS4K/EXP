@@ -293,7 +293,8 @@ for m in \
   20261118100000_exos_drop_list \
   20261118110000_exos_own_cron_helpers \
   20261118120000_exos_waiting_room \
-  20261119130000_exos_mcp_writes; do
+  20261119130000_exos_mcp_writes \
+  20261121100000_exos_channel_risks; do
   apply "$m"
 done
 # The resale rules (migs 20261014140000, 20261029090000: over the free tier
@@ -546,7 +547,8 @@ for m in \
          20261118100000_exos_drop_list \
          20261118110000_exos_own_cron_helpers \
          20261118120000_exos_waiting_room \
-         20261119130000_exos_mcp_writes; do
+         20261119130000_exos_mcp_writes \
+         20261121100000_exos_channel_risks; do
   $PSQL -f "$MIG/$m.sql"
 done
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_idempotent.sql"
@@ -703,5 +705,7 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_own_cron_
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_waiting_room.sql"
 # claude/exos-mcp-writes (mig 20261119130000): event writes from AI assistants: exos_api_write takes a personal / OAuth token (re-resolved in SQL with the live role, grant-capped, only event.create / ticket_type.create / event.publish; every other action still needs a key), the OAuth audience (a token writes only where it was issued for; authorize accepts only Exos resources), a narrowed consent stops the old tokens, confirm tokens (single use, 10 minutes, bound to credential, tool and exact args), owner / manager only before anything counts, the hourly org cap (done writes only) and per-credential attempts, refusals logged, publishing only by the person on the review page (digest-bound, own user only, changed / expired / blocked refused), the MCP write log + org audit (source mcp), drafts invisible until published, 150 free tier / 151 standard, another org refused (race: race_idem.sh in CI)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_mcp_writes.sql"
+# claude/exos-channel-risks (mig 20261121100000): before Eventbrite / Luma writes go live: one promise across platforms (an event on Eventbrite AND Luma never offers the same free seats twice, per ticket type and per house; the shared pool split; one platform unchanged; one lock per event), a link to another external event refused at set and recorded as a conflict at mark (the new id kept, no link written, cleared by the next save), the pending create (lease, 2-minute in-flight, first time + slug kept, cleared once synced), a Luma ack keeps its steps, created classes + first capacities (race: race_channel_promise.sh, by hand)
+psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_channel_risks.sql"
 # claude/exos-e2e-sim (wave 10): one org driven end to end across waves 1-9 (setup, sales, after-sale), the invariants after every step (journal balanced, sold = live tickets, pools, an order record per ticket, journal = settlement, one audit row per action, no PII, cross-org RLS); mig 20261111100000 (one audit row per price-step change). Races: race_full.sh (CI, after this script)
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/sim_full.sql"

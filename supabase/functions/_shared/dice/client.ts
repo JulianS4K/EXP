@@ -16,6 +16,8 @@
 // header (never in a URL, never logged). Error text is ours or DICE's
 // GraphQL error code, never a response body.
 
+import { backoffMs as sharedBackoffMs } from "../retry.ts";
+
 export const DICE_ENDPOINT = "https://partners-endpoint.dice.fm/graphql";
 /** The only GraphQL operation type this client may send. */
 export const ALLOWED_OPERATIONS: ReadonlySet<string> = new Set(["query"]);
@@ -155,16 +157,9 @@ export function isDiceTokenShaped(t: unknown): t is string {
   return typeof t === "string" && /^[A-Za-z0-9._~+/=-]{16,2048}$/.test(t);
 }
 
-/** Wait before retry `attempt` (1-based): Retry-After when DICE sends one, else exponential with jitter. */
+/** Wait before retry `attempt` (1-based): Retry-After when DICE sends one, else exponential with jitter (_shared/retry.ts). */
 export function backoffMs(attempt: number, retryAfter: string | null, random: () => number = Math.random): number {
-  if (retryAfter) {
-    const secs = Number(retryAfter);
-    if (Number.isFinite(secs) && secs >= 0) return Math.min(secs * 1000, BACKOFF_MAX_MS);
-    const at = Date.parse(retryAfter);
-    if (Number.isFinite(at)) return Math.min(Math.max(at - Date.now(), 0), BACKOFF_MAX_MS);
-  }
-  const base = Math.min(BACKOFF_BASE_MS * 2 ** (attempt - 1), BACKOFF_MAX_MS);
-  return Math.round(base / 2 + random() * (base / 2));
+  return sharedBackoffMs(attempt, retryAfter, random, BACKOFF_BASE_MS, BACKOFF_MAX_MS);
 }
 
 const retryable = (status: number) => status === 429 || status === 0 || (status >= 500 && status <= 599);

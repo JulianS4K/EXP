@@ -14,6 +14,11 @@
 //      exos-eventbrite-sync's inventory pass, which picks up the classes this
 //      creates.)
 //   3. Luma-primary events: add queued comp guests on Luma.
+// A live create is recorded first (exos_channel_create_begin) and looked up
+// on the next pass before it is sent again; a mirror whose event is linked to
+// another external event (a conflict, recorded by exos_channel_mark) makes no
+// call until the organizer resolves it (mig 20261121100000). GETs are retried
+// on 429 / 5xx (Retry-After honoured); POSTs never are.
 // Writes go only to _shared/channels/{eventbrite,luma}.ts's allowlists, and
 // only when the org's switch AND the operator's flag are on
 // (EXOS_EVENTBRITE_WRITES / EXOS_LUMA_WRITES = "on"); otherwise the pass
@@ -32,9 +37,10 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
-import { contentHash, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncResult, writesLive } from "../_shared/channels/model.ts";
+import { contentHash, lumaEnabled, makeIo, mirrorEvent, type StepRecord, type SyncHooks, type SyncResult, writesLive } from "../_shared/channels/model.ts";
 import { EB_API, EB_WRITES, ebStandIn, syncEventbrite } from "../_shared/channels/eventbrite.ts";
-import { capacityUpdate, compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, lumaTicketCounts, syncLuma } from "../_shared/channels/luma.ts";
+import { compBody, LUMA_BASE, LUMA_WRITES, lumaStandIn, syncLuma } from "../_shared/channels/luma.ts";
+import { lumaInventory } from "../_shared/channels/lumaInventory.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 100_000;
@@ -127,51 +133,41 @@ async function pass(sb: SupabaseClient, c: Claimed) {
     : makeIo({ fetch, base: LUMA_BASE, headers: { "x-luma-api-key": secret }, live, allowed: LUMA_WRITES, steps, standIn: lumaStandIn });
   const hash = await contentHash(ev);
   const m = p.mirror ?? {};
+  // A link to another external event: nothing is sent until it is resolved
+  // (exos_channel_set clears it).
+  const conflict = typeof m.external_meta?.conflict === "string" ? m.external_meta.conflict : null;
+  if (conflict) {
+    await mark(sb, c, { state: "error", error: `conflict: ${conflict}. Unlink one of them, then save the channel again.`.slice(0, 300) });
+    return { state: "conflict" };
+  }
+  const hooks: SyncHooks = {
+    async beginCreate(marker) {
+      const { data, error } = await sb.rpc("exos_channel_create_begin", {
+        p_event_id: c.event_id, p_provider: c.provider, p_lease: c.lease_id, p_marker: marker,
+      });
+      if (error) return { ok: false, reason: "error" };
+      return (data ?? { ok: false }) as { ok: boolean; reason?: string };
+    },
+  };
 
   // 1. Details (skipped when Exos has nothing new for this platform).
   let result: SyncResult;
   if (m.external_id && m.status === "synced" && m.last_hash === hash) {
     result = { state: "synced", hash };
   } else {
-    result = c.provider === "eventbrite" ? await syncEventbrite(io, ev, p, steps, hash) : await syncLuma(io, ev, p, steps, hash);
+    result = c.provider === "eventbrite" ? await syncEventbrite(io, ev, p, steps, hash, hooks) : await syncLuma(io, ev, p, steps, hash, hooks);
   }
   const marked = await mark(sb, c, result);
   if (marked.error) throw marked.error;
+  if ((marked.data as { conflict?: string | null } | null)?.conflict) return { state: "conflict" };
   if (c.provider !== "luma") return { state: result.state };
 
   // 2. Luma's shared count, and 3. comps (the event must exist there).
   const lumaId = result.external_id ?? m.external_id;
   if (!lumaId || result.state === "error") return { state: result.state };
-  const inv = await lumaInventory(sb, io, c.event_id, lumaId, live);
+  const inv = await lumaInventory(sb, io, steps, c.event_id, lumaId, live);
   const comps = p.event?.primary_source === "luma" ? await lumaComps(sb, io, c.event_id, lumaId, live) : 0;
   return { state: result.state, inventory: inv, comps };
-}
-
-async function lumaInventory(sb: SupabaseClient, io: ReturnType<typeof makeIo>, eventId: string, lumaId: string, live: boolean) {
-  const readAt = new Date().toISOString();
-  const { counts, complete, error } = await lumaTicketCounts(io, lumaId);
-  if (!complete) return { ok: false, error };
-  const { data: links } = await sb.from("exos_luma_ticket_links")
-    .select("luma_ticket_type_id, luma_capacity").eq("event_id", eventId).eq("luma_event_id", lumaId).eq("active", true);
-  const current = new Map<string, number | null>(((links ?? []) as any[]).map((l) => [l.luma_ticket_type_id, l.luma_capacity]));
-  const rows = [...current.keys()].map((id) => ({ id, sold: counts.get(id) ?? 0 }));
-  const { data, error: e2 } = await sb.rpc("exos_luma_inventory_apply", { p_event_id: eventId, p_counts: rows, p_read_at: readAt });
-  if (e2) return { ok: false, error: "apply failed" };
-  let sent = 0;
-  for (const r of (data ?? []) as any[]) {
-    if (r.skip_reason) continue;
-    const body = capacityUpdate(r.luma_ticket_type_id, r.target_capacity, current.get(r.luma_ticket_type_id) ?? null);
-    if (!body) continue;
-    const steps: StepRecord[] = [];
-    const res = await io.req("POST", "/v1/events/ticket-types/update", body);
-    await sb.rpc("exos_luma_inventory_ack", {
-      p_event_id: eventId, p_ticket_type_id: r.luma_ticket_type_id,
-      p_plan: { dry_run: !live, path: "/v1/events/ticket-types/update", body, steps },
-      p_sent: live, p_capacity: r.target_capacity, p_error: res.ok ? null : `Luma: ${res.error ?? "failed"}`,
-    });
-    if (live && res.ok) sent++;
-  }
-  return { ok: true, sent };
 }
 
 async function lumaComps(sb: SupabaseClient, io: ReturnType<typeof makeIo>, eventId: string, lumaId: string, live: boolean) {

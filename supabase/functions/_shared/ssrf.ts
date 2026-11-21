@@ -12,6 +12,12 @@
 // between the lookups. Mitigations: URLs are set only by authenticated org
 // owners/managers, redirects are disabled at the call site (redirect: "manual"),
 // and literal IPs + internal names are refused outright.
+// guardedFetch() narrows the window to one request: it re-checks each URL
+// immediately before sending it, so a check done once before a loop of page
+// reads (minutes, for a long sync) no longer covers the later requests. The
+// connection can't be pinned to the checked address: Supabase's edge runtime
+// fetch has no resolver or "connect to this IP" option, so the last
+// milliseconds between our lookup and fetch()'s remain.
 
 export async function urlIsBlocked(
   rawUrl: string,
@@ -38,6 +44,30 @@ export async function urlIsBlocked(
     if (isPrivateIp(ip)) return `private ip ${ip}`;
   }
   return null;
+}
+
+export class SsrfBlocked extends Error {
+  constructor(reason: string) {
+    super(`blocked address (${reason})`);
+    this.name = "SsrfBlocked";
+  }
+}
+
+/**
+ * fetch for organizer-supplied URLs: every request's URL goes through
+ * urlIsBlocked right before it is sent (throws SsrfBlocked otherwise), and
+ * redirects are never followed (a 3xx comes back as it is).
+ */
+export function guardedFetch(
+  f: typeof fetch = fetch,
+  resolve: (host: string) => Promise<string[]> = resolveAll,
+): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const why = await urlIsBlocked(url, resolve);
+    if (why) throw new SsrfBlocked(why);
+    return f(input, { ...init, redirect: init?.redirect === "error" ? "error" : "manual" });
+  }) as typeof fetch;
 }
 
 async function resolveAll(host: string): Promise<string[]> {

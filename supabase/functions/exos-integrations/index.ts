@@ -7,8 +7,10 @@
 // check-in list's public attendee feed. Luma: guests with the calendar's API
 // key. Twilio / Telnyx: an account read to
 // check the credentials (sending is the SMS drain's job, with consent).
-// Organizer-supplied addresses go through the SSRF guard; redirects are not
-// followed. Secrets never leave the server.
+// Organizer-supplied addresses go through the SSRF guard on every request
+// (guardedFetch: checked right before each one is sent, not once per pass);
+// redirects are not followed. Reads that get a 429 / 5xx are tried again
+// (_shared/retry.ts; Retry-After honoured). Secrets never leave the server.
 //
 // Routes (POST JSON, under /functions/v1/exos-integrations):
 //   /test  {org, provider}           owner / manager / finance: checks the saved
@@ -28,7 +30,8 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import { parseRedirectOrigins } from "../_shared/redirects.ts";
-import { urlIsBlocked } from "../_shared/ssrf.ts";
+import { guardedFetch, urlIsBlocked } from "../_shared/ssrf.ts";
+import { retryingGetFetch } from "../_shared/retry.ts";
 import { baseUrl, SLUG } from "../_shared/backends/rows.ts";
 import { cursorString, parseCursor, pretixItems, pretixOrdersPage } from "../_shared/backends/pretix.ts";
 import { hiEventsAttendeesPage, hiEventsList } from "../_shared/backends/hievents.ts";
@@ -38,6 +41,11 @@ import { lumaEvent, lumaGuestsPage } from "../_shared/backends/luma.ts";
 // Luma is plugged in but off until the operator sets EXOS_LUMA_ENABLED=on: no Luma API call is made.
 const lumaOn = () => Deno.env.get("EXOS_LUMA_ENABLED") === "on";
 const LUMA_OFF = "Luma is switched off for now.";
+
+// Reads of a fixed provider host (Luma), and of an organizer-supplied one
+// (pretix, hi.events, the credential tests): each try re-checked by the SSRF guard.
+const readFetch = retryingGetFetch(fetch);
+const orgFetch = retryingGetFetch(guardedFetch(fetch));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CRON_BUDGET_MS = 100_000;
@@ -84,7 +92,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (cfg.error || !cfg.data) return json({ error: "Not found." }, 404, cors);
       const c = cfg.data as { config: Record<string, unknown>; secret: string | null };
       if (provider === "luma" && !lumaOn()) return json({ ok: null, account_name: null, error: LUMA_OFF }, 200, cors);
-      const res = await testProvider(fetch, provider, c.config ?? {}, c.secret ?? null, (u) => urlIsBlocked(u));
+      const res = await testProvider(orgFetch, provider, c.config ?? {}, c.secret ?? null, (u) => urlIsBlocked(u));
       if (res.ok !== null) {
         await sb.rpc("exos_integration_mark", {
           p_org_id: org, p_provider: provider, p_ok: res.ok, p_error: res.error ?? null, p_account_name: res.name ?? null,
@@ -101,6 +109,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!BACKENDS.includes(provider)) return json({ error: "pretix, hievents or luma" }, 400, cors);
       if (provider === "luma" && !lumaOn()) return json({ error: LUMA_OFF }, 400, cors);
       if (!SLUG.test(ref)) return json({ error: "That id doesn't look right." }, 400, cors);
+      // The caller's role first, as exos-eventbrite-sync does: nothing of the
+      // org's (its saved credentials, the provider's answer) is read for a
+      // caller who can't link, so /link can't tell a stranger whether an org
+      // has an integration or a ref exists there. exos_backend_status checks
+      // the event's org; can_manage is owner / manager.
+      const st = await sbUser.rpc("exos_backend_status", { p_event_id: event });
+      if (st.error || (st.data as { can_manage?: boolean } | null)?.can_manage !== true) {
+        return json({ error: "Owner or manager only.", reason: "forbidden" }, 403, cors);
+      }
       const org = await eventOrg(sb, event);
       if (!org) return json({ error: "event not found" }, 404, cors);
       const check = await checkRef(sb, org, provider, ref);
@@ -167,12 +184,12 @@ async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: 
   if (!c) return { ok: false, error: `Connect ${PROVIDER_NAME[provider]} in Integrations first.` };
   if (provider === "luma") {
     if (!c.secret) return { ok: false, error: "Paste the Luma API key in Integrations first." };
-    return lumaEvent(fetch, c.secret, ref);
+    return lumaEvent(readFetch, c.secret, ref);
   }
   if (provider === "pretix") {
     const base = baseUrl(c.config.base_url ?? "https://pretix.eu");
     if (!base || await urlIsBlocked(base)) return { ok: false, error: "The pretix address isn't usable." };
-    const r = await fetch(`${base}/api/v1/organizers/${encodeURIComponent(String(c.config.organizer ?? ""))}/events/${encodeURIComponent(ref)}/`,
+    const r = await orgFetch(`${base}/api/v1/organizers/${encodeURIComponent(String(c.config.organizer ?? ""))}/events/${encodeURIComponent(ref)}/`,
       { method: "GET", headers: { Authorization: `Token ${c.secret ?? ""}`, Accept: "application/json" }, redirect: "manual" });
     if (r.status === 404) return { ok: false, error: "pretix has no event with that short name." };
     if (!r.ok) return { ok: false, error: `pretix answered ${r.status}.` };
@@ -182,7 +199,7 @@ async function checkRef(sb: SupabaseClient, org: string, provider: string, ref: 
   }
   const base = baseUrl(c.config.base_url);
   if (!base || await urlIsBlocked(base)) return { ok: false, error: "The hi.events address isn't usable." };
-  return hiEventsList(fetch, base, ref);
+  return hiEventsList(orgFetch, base, ref);
 }
 
 async function syncOne(sb: SupabaseClient, event: string) {
@@ -211,10 +228,10 @@ async function syncClaimed(sb: SupabaseClient, c: Claimed, deadline: number) {
       const pcfg = { base, organizer: String(cfg.config.organizer ?? ""), token: cfg.secret ?? "" };
       const passStart = new Date().toISOString();
       const cur = parseCursor(c.sync_cursor);
-      const items = await pretixItems(fetch, pcfg, c.external_ref);
+      const items = await pretixItems(orgFetch, pcfg, c.external_ref);
       let page = cur.page;
       for (let i = 0; i < PAGES_PER_RUN && Date.now() < deadline; i++) {
-        const p = await pretixOrdersPage(fetch, pcfg, c.external_ref, cur.since, page, items);
+        const p = await pretixOrdersPage(orgFetch, pcfg, c.external_ref, cur.since, page, items);
         if (p.status >= 400) throw new Error(`pretix answered ${p.status}`);
         const more = p.next;
         // Done: the next pass reads what changed since this pass began.
@@ -230,7 +247,7 @@ async function syncClaimed(sb: SupabaseClient, c: Claimed, deadline: number) {
       const key = cfg.secret ?? "";
       let cursor = c.sync_cursor || null;
       for (let i = 0; i < PAGES_PER_RUN && Date.now() < deadline; i++) {
-        const p = await lumaGuestsPage(fetch, key, c.external_ref, cursor);
+        const p = await lumaGuestsPage(readFetch, key, c.external_ref, cursor);
         if (p.status >= 400) throw new Error(`Luma answered ${p.status}`);
         if (p.next && p.next.length > 200) throw new Error("Luma page cursor too long to store");
         // No "changed since" either: each pass reads every page; done starts over.
@@ -245,7 +262,7 @@ async function syncClaimed(sb: SupabaseClient, c: Claimed, deadline: number) {
     if (!base || await urlIsBlocked(base)) throw new Error("hi.events address blocked");
     let page = Math.max(1, Number(c.sync_cursor ?? "1") || 1);
     for (let i = 0; i < PAGES_PER_RUN && Date.now() < deadline; i++) {
-      const p = await hiEventsAttendeesPage(fetch, base, c.external_ref, page);
+      const p = await hiEventsAttendeesPage(orgFetch, base, c.external_ref, page);
       if (p.status >= 400) throw new Error(`hi.events answered ${p.status}`);
       // hi.events has no "changed since": each pass reads every page; done starts over at 1.
       const r = await apply(p.rows, p.next ? "more" : "done", p.next ? String(page + 1) : "1");

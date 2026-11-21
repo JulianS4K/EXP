@@ -8,8 +8,18 @@
 // Writes are limited to EB_WRITES (below) and go out only when the org's
 // switch and EXOS_EVENTBRITE_WRITES=on are both set; otherwise the plan is
 // recorded (dry run). No orders, attendees, check-ins, webhooks or prices of
-// classes Exos didn't create.
-import { firstCapacity, type Io, type MirrorEvent, type MirrorTier, type SyncResult, type StepRecord, textToHtml } from "./model.ts";
+// classes Exos didn't create: a class Exos adopted (one of the same name it
+// found on the event, or one the organizer mapped) on an event Exos didn't
+// create gets no update at all from here, only the inventory sync's
+// capacity (mig 20261121100000).
+//
+// A live create is recorded first (hooks.beginCreate, mig 20261121100000);
+// a pass that finds one recorded looks the event up by the name and start it
+// sent, created since then, before it creates again.
+import {
+  beginRefused, firstCapacity, type Io, type MirrorEvent, type MirrorTicket, type MirrorTier, type PendingCreate, pendingCreate,
+  type StepRecord, type SyncHooks, type SyncResult, textToHtml, utc,
+} from "./model.ts";
 
 export const EB_API = "https://www.eventbriteapi.com/v3";
 
@@ -62,13 +72,18 @@ export function ebVenueBody(ev: MirrorEvent) {
   };
 }
 
-/** Create body for a class Exos makes; update bodies leave capacity to the inventory sync. */
+/**
+ * Create body for a class Exos makes; update bodies (classes Exos created
+ * only) leave capacity to the inventory sync. `capacity`, as the spec's
+ * Ticket Class Create has it (`quantity_total` is deprecated there; the
+ * inventory writer sends `capacity` too).
+ */
 export function ebClassBody(t: MirrorTier, ev: MirrorEvent, create: boolean) {
   const base: Record<string, unknown> = { name: t.name.slice(0, 50), hidden: t.hidden };
   if (t.description) base.description = t.description.slice(0, 2500);
   if (create) {
     base.free = t.free;
-    base.quantity_total = firstCapacity(t, ev.pack);
+    base.capacity = firstCapacity(t, ev.pack);
   }
   if (!t.free) base.cost = `${ev.currency},${t.priceCents}`;
   return { ticket_class: base };
@@ -77,7 +92,7 @@ export function ebClassBody(t: MirrorTier, ev: MirrorEvent, create: boolean) {
 const fail = (steps: StepRecord[], what: string, error?: string): SyncResult =>
   ({ state: "error", error: `Eventbrite: ${what} (${error ?? "failed"})`.slice(0, 300), plan: { steps } });
 
-export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, steps: StepRecord[], hash: string): Promise<SyncResult> {
+export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, steps: StepRecord[], hash: string, hooks?: SyncHooks): Promise<SyncResult> {
   const mirror = payload?.mirror ?? {};
   const meta: Record<string, any> = { ...(mirror.external_meta ?? {}) };
   let id: string | null = typeof mirror.external_id === "string" ? mirror.external_id : null;
@@ -110,8 +125,29 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
     meta.venue_key = ev.venueQuery;
   }
 
+  let recovered = false;
   if (!id) {
     if (mirror.mode === "link") return fail(steps, "no event to link");
+    // A create recorded by an earlier pass: find it before creating again.
+    const pending = pendingCreate(meta);
+    if (pending && io.live) {
+      const found = await ebFindCreated(io, meta.organization_id, pending);
+      if (found.error) return fail(steps, "couldn't check for the event an earlier pass created", found.error);
+      if (found.ids.length > 1) {
+        return fail(steps, `${found.ids.length} events on Eventbrite match the one an earlier pass created: link the right one`);
+      }
+      if (found.ids.length === 1) {
+        id = found.ids[0];
+        url = found.url ?? url;
+        recovered = true;
+      }
+    }
+  }
+  if (!id) {
+    if (io.live && hooks) {
+      const b = await hooks.beginCreate({ name: ev.name, start: ev.startUtc });
+      if (!b.ok) return fail(steps, `didn't create the event: ${beginRefused(b.reason)}`, b.reason);
+    }
     const r = await io.req("POST", `/organizations/${meta.organization_id}/events/`, ebEventBody(ev, venueId));
     if (!r.ok || typeof r.body?.id !== "string") return fail(steps, "couldn't create the event", r.error);
     id = r.body.id;
@@ -123,13 +159,20 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
   }
   const eventId = id as string;
 
-  // Ticket classes: one per mirrored Exos ticket type.
+  // Ticket classes: one per mirrored Exos ticket type. Exos owns (and so
+  // updates, price included) the classes of an event it created here, and
+  // those it created on a linked one; any other class it adopted is left
+  // alone (its capacity is the inventory sync's).
+  const ownEvent = mirror.mode === "create" || recovered;
   const maps = new Map<string, string>((payload?.maps ?? []).map((m: any) => [String(m.tier_id), String(m.external_ticket_id)]));
-  const tickets: { tier_id: string; external_ticket_id: string; name: string }[] = [];
+  const createdMaps = new Set<string>((payload?.maps ?? []).filter((m: any) => m?.created === true).map((m: any) => String(m.tier_id)));
+  const tickets: MirrorTicket[] = [];
   const todo = ev.tiers.filter((t) => !t.skip);
   let existing: any[] | null = null;
   for (const t of todo) {
     let classId = maps.get(t.id) ?? null;
+    let created = ownEvent || createdMaps.has(t.id);
+    let capacity: number | undefined;
     if (!classId && eventId !== "0") {
       // A linked event (or a retry after a partial pass): reuse a class of the same name.
       if (!existing) {
@@ -137,17 +180,23 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
         existing = r.ok && Array.isArray(r.body?.ticket_classes) ? r.body.ticket_classes : [];
       }
       const same = (existing ?? []).find((c: any) => typeof c?.name === "string" && c.name.trim() === t.name.slice(0, 50) && typeof c.id === "string");
-      if (same) classId = same.id;
+      if (same) {
+        classId = same.id;
+        created = ownEvent;
+      }
     }
     if (!classId) {
-      const r = await io.req("POST", `/events/${eventId}/ticket_classes/`, ebClassBody(t, ev, true));
+      const body = ebClassBody(t, ev, true);
+      const r = await io.req("POST", `/events/${eventId}/ticket_classes/`, body);
       if (!r.ok || typeof r.body?.id !== "string") return fail(steps, `couldn't add the ticket "${t.name}"`, r.error);
       classId = r.body.id;
-    } else if (changed) {
+      created = true;
+      capacity = body.ticket_class.capacity as number;
+    } else if (changed && created) {
       const r = await io.req("POST", `/events/${eventId}/ticket_classes/${classId}/`, ebClassBody(t, ev, false));
       if (!r.ok) return fail(steps, `couldn't update the ticket "${t.name}"`, r.error);
     }
-    tickets.push({ tier_id: t.id, external_ticket_id: classId as string, name: t.name });
+    tickets.push({ tier_id: t.id, external_ticket_id: classId as string, name: t.name, created, ...(capacity !== undefined ? { capacity } : {}) });
   }
 
   if (ev.status === "published" && !meta.published) {
@@ -161,6 +210,7 @@ export async function syncEventbrite(io: Io, ev: MirrorEvent, payload: any, step
 function done(io: Io, steps: StepRecord[], id: string | null, url: string | null, meta: Record<string, unknown>,
               hash: string, tickets: SyncResult["tickets"]): SyncResult {
   if (!io.live) return { state: "dry_run", plan: { steps } };
+  delete meta.pending_create;   // mark clears it once the mirror has its id
   return {
     state: "synced",
     ...(id ? { external_id: id } : {}),
@@ -170,4 +220,28 @@ function done(io: Io, steps: StepRecord[], id: string | null, url: string | null
     plan: { steps },
     tickets,
   };
+}
+
+/**
+ * The event an earlier pass may have created (its pending create): the
+ * org's events with the name it sent (name_filter), the same start, created
+ * since that pass's first try (less 5 minutes of clock skew). GET only.
+ * `error` when the list couldn't be read: then nothing is created.
+ */
+export async function ebFindCreated(io: Io, orgId: string, pending: PendingCreate): Promise<{ ids: string[]; url?: string; error?: string }> {
+  const name = typeof pending.name === "string" ? pending.name.trim() : "";
+  const start = typeof pending.start === "string" ? utc(pending.start) : "";
+  if (!name || !start || !/^[0-9]{1,24}$/.test(String(orgId))) return { ids: [], error: "no record of what was sent" };
+  const since = Date.parse(pending.first ?? pending.at ?? "") - 5 * 60_000;
+  const q = new URLSearchParams({ name_filter: name, status: "all", time_filter: "all", order_by: "created_desc", page_size: "50" });
+  const r = await io.req("GET", `/organizations/${orgId}/events/?${q}`);
+  if (!r.ok) return { ids: [], error: r.error ?? "failed" };
+  const events: any[] = Array.isArray(r.body?.events) ? r.body.events : [];
+  const hits = events.filter((e) =>
+    typeof e?.id === "string" && /^[0-9]{1,24}$/.test(e.id)
+    && String(e?.name?.text ?? "").trim() === name
+    && utc(String(e?.start?.utc ?? "")) === start
+    && (!Number.isFinite(since) || !e?.created || Date.parse(e.created) >= since));
+  const url = hits.length === 1 && typeof hits[0].url === "string" && hits[0].url.startsWith("https://") ? hits[0].url : undefined;
+  return { ids: hits.map((e) => e.id), url };
 }

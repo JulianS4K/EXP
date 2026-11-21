@@ -1159,6 +1159,36 @@ new for authenticated (the review page, below). Points to review:
 - Tests: `tests/exos/test_mcp_writes.sql` (M1-M17, X1-X3, P, R), `tests/exos/race_idem.sh`,
   `src/lib/mcp/mcpWrites.test.ts`, `supabase/functions/_shared/mcp/discovery_test.ts`.
 
+### Channel risks before Eventbrite / Luma writes (mig 20261121100000)
+
+Nothing new is callable by anon or authenticated (H3 unchanged): `_exos_channel_outstanding`,
+`_exos_channel_share_cap` and `exos_channel_create_begin` are service role only. Every write to Eventbrite and Luma
+stays a dry run unless the org's switch AND `EXOS_EVENTBRITE_WRITES` / `EXOS_LUMA_WRITES=on`; no write path was added
+(`EB_WRITES`, `LUMA_WRITES` unchanged), and the details pass now sends less: no update at all for an Eventbrite class
+Exos adopted.
+
+- **One promise across platforms.** Both inventory applies take `pg_advisory_xact_lock` on the event before any row
+  lock, and cap each class's share by what the OTHER platform can still sell (its capacity there, or its target if
+  higher, less sold), splitting the shared pool evenly between the platforms that sell the ticket type (house cap
+  too). With one platform the cap equals the old share.
+- **Conflicts.** `exos_channel_set` refuses an event linked to another Eventbrite event, another Luma event or another
+  ticket backend (23505); `exos_channel_mark` records a link that turns up meanwhile as a conflict (the new external
+  id is kept so it is never created twice; no link or mapping is written) and exos-channel-sync sends nothing for that
+  mirror until the next save.
+- **Creates.** A live create is recorded (`exos_channel_create_begin`: the lease, refused under 2 minutes after the
+  last try) and looked up on the next pass (Eventbrite: name + start + creation time; Luma: Exos's own slug, which
+  Luma refuses to reuse) before it is sent again. Reads retry 429 / 5xx with backoff (`_shared/retry.ts`); a POST is
+  never re-sent.
+- **Edge functions in the same change.** exos-integrations `/link` checks the caller's role (`exos_backend_status`,
+  owner / manager) before it reads the org's credentials or asks the provider, and every request to an
+  organizer-supplied host is re-checked by the SSRF guard just before it is sent (`guardedFetch`; the connection
+  can't be pinned in the edge runtime, so the last milliseconds of DNS rebinding remain). exos-posh-webhook buckets
+  unknown tokens per caller network instead of per token hash. The partner key prefers `X-Shared-Key` / Bearer over
+  `?shared_key=`.
+- Tests: `tests/exos/test_channel_risks.sql` (R1-R5), `tests/exos/race_channel_promise.sh` (by hand),
+  `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
+  `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)
