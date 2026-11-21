@@ -343,9 +343,9 @@ fulfilled (or partly refunded) order who granted **advertising** consent at chec
 whose latest advertising choice there (by email or account) is granted on an order that wasn't fully
 refunded. A "yes" counts only from a paid or issued order with no open or lost dispute, whose email
 the person proved: the email code for that very address, or their own account with the same address
-and a verified email (a Google / Apple sign-in whose provider verified it, or a confirmation mail
-answered; an account Supabase marked confirmed at sign-up with "Confirm email" off doesn't count until
-it proves the email by code). A stranger can type anyone's email into a guest checkout and prove their own phone, so an
+and a verified email (a Google / Apple sign-in whose provider verified it, or, once the operator has
+turned on Supabase Auth's "Confirm email" and set `auth_confirm_email_on`, a confirmation mail
+answered; until then an email/password account's "yes" doesn't count). A stranger can type anyone's email into a guest checkout and prove their own phone, so an
 SMS proof never makes a "yes", and nor does an organizer's correction of the address. Guest orders
 from before proofs (Nov 2026) don't count as a "yes". A "no" counts from any checkout,
 the latest counted choice wins, and at the same moment a "no" wins. Anyone unsubscribed from
