@@ -114,6 +114,24 @@ describe('marketCategory', () => {
   });
 });
 
+describe('eventReadiness: categories the marketplaces may refuse', () => {
+  const base = {
+    name: 'Night Out', primary_performer_name: 'Host', starts_at: '2026-11-07T02:00:00Z', timezone: 'America/New_York',
+    venue_name: 'Blue Room', venue_address: { city: 'Brooklyn', region: 'NY', country: 'US' }, currency: 'USD',
+  };
+  const refused = (over: Record<string, unknown>) =>
+    eventReadiness({ ...base, ...over }, [{ name: 'GA' }], ['stubhub'])[0].warnings.some((w) => w.includes('may be refused'));
+  it('warns for other, food & drink, community and business, not for the marketplace categories', () => {
+    expect(refused({ category: 'Food', genres: ['Tasting'] })).toBe(true);
+    expect(refused({ category: 'Tech', genres: ['Conference'] })).toBe(true);
+    expect(refused({ category: 'Tech', genres: ['Meetup'] })).toBe(true);
+    expect(refused({ category: 'Tech', genres: ['AI'] })).toBe(true);
+    for (const [category, genres] of [['Music', ['Jazz']], ['Nightlife', ['Club']], ['Comedy', []], ['Arts', ['Theatre']], ['Sports', []], ['Nightlife', ['Festival']]] as const) {
+      expect(refused({ category, genres: [...genres] }), category).toBe(false);
+    }
+  });
+});
+
 describe('eventReadiness', () => {
   const ev = {
     name: 'Late Night Jazz', primary_performer_name: 'Trio', category: 'Music', starts_at: '2026-11-07T02:00:00Z',

@@ -565,7 +565,7 @@ boards and venues that agree.
 **Promote page → Playbook** shows, for the event's category, where to advertise (Meta / Instagram and TikTok first:
 about half of Gen Z find events on Instagram and 3 in 10 on TikTok), creative tips, poster and QR guidance, and the ad
 rules to know: Google's event ticket certification, 21+ targeting for alcohol (and TikTok's disclaimer and nobody
-under 25 on screen), dating-ad rules a "singles night" can trigger, Snap's ban on strip clubs and burlesque, and NYC's
+under 25 on screen), dating or singles angles needing the platform's dating-ads approval first, Snap's ban on strip clubs and burlesque, and NYC's
 flyer rule. It's static: `src/lib/promoPlaybook.ts`, with its sources in the file's header.
 
 ### Tracking links and the weekly channel report

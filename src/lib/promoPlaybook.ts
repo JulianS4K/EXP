@@ -44,7 +44,7 @@ const GOOGLE = { name: 'Google Search', why: 'People already searching for the a
 
 const POLICY = {
   alcohol: 'Alcohol in the ad (open bar, drink specials, tastings): target 21+ on Meta, Snap and Pinterest; on TikTok add a drink-responsibly line and show nobody under 25.',
-  dating: 'A "singles night" or "meet someone" angle can trigger dating-ad rules on Meta and Google (approval first). Sell the party, not the dating.',
+  dating: 'Dating or singles angles ("singles night", "meet someone") need the platform\'s approval first (Meta and Google dating ads policies); without it, don\'t run a dating angle.',
   snap: 'Snap bans ads for strip clubs and burlesque: skip Snap for those shows.',
   google: 'Google Ads: selling tickets needs Google\'s "Event ticket sales" certification before ads run.',
 };

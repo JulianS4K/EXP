@@ -104,8 +104,9 @@ SET search_path = public, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION public._exos_print_placement_slug(text) FROM PUBLIC, anon, authenticated;
 
+-- Shapes a row the caller already holds: no definer rights needed.
 CREATE OR REPLACE FUNCTION public._exos_print_placement_row(p public.exos_print_placements)
-RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER
+RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER
 SET search_path = public, pg_temp AS $$
   SELECT jsonb_build_object('id', p.id, 'event_id', p.event_id, 'name', p.name, 'slug', p.slug, 'created_at', p.created_at)
 $$;
@@ -140,12 +141,15 @@ DECLARE
   v_n    integer := 1;
   v_row  public.exos_print_placements%ROWTYPE;
 BEGIN
-  -- Lock the event so two adds can't take the same slug or pass the cap together.
-  SELECT e.org_id INTO v_org FROM public.exos_events e WHERE e.id = p_event_id FOR UPDATE;
+  -- The role check first (no lock), then a per-event advisory lock so two
+  -- adds can't take the same slug or pass the cap together. Nothing on
+  -- exos_events is locked, so tier inserts and other event writes never wait.
+  SELECT e.org_id INTO v_org FROM public.exos_events e WHERE e.id = p_event_id;
   IF v_org IS NULL
      OR NOT (public.exos_is_admin() OR public.exos_has_org_role(v_org, ARRAY['owner', 'manager'])) THEN
     RAISE EXCEPTION 'exos_print_placement_add: not authorized' USING ERRCODE = '42501';
   END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('exos_print_placements:' || p_event_id::text, 0));
   IF length(v_name) < 1 OR length(v_name) > 80 THEN
     RAISE EXCEPTION 'exos_print_placement_add: name the spot (up to 80 characters), e.g. Poster - Bedford Ave' USING ERRCODE = '22023';
   END IF;
@@ -171,12 +175,16 @@ GRANT EXECUTE ON FUNCTION public.exos_print_placement_add(uuid, text) TO authent
 
 -- Owner / manager (or admin): remove a placement. Its sales stay in the
 -- reports (they are keyed by the utm_content on the checkout, not this row).
+-- Authorized on the event's CURRENT org (as list and add), not the org_id
+-- stamped at insert: after an event moves orgs, the new owner manages it.
 CREATE OR REPLACE FUNCTION public.exos_print_placement_remove(p_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = public, pg_temp AS $$
 DECLARE v_org uuid;
 BEGIN
-  SELECT p.org_id INTO v_org FROM public.exos_print_placements p WHERE p.id = p_id;
+  SELECT e.org_id INTO v_org
+    FROM public.exos_print_placements p JOIN public.exos_events e ON e.id = p.event_id
+   WHERE p.id = p_id;
   IF v_org IS NULL
      OR NOT (public.exos_is_admin() OR public.exos_has_org_role(v_org, ARRAY['owner', 'manager'])) THEN
     RAISE EXCEPTION 'exos_print_placement_remove: not authorized' USING ERRCODE = '42501';

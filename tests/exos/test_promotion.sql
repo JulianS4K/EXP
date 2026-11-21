@@ -13,6 +13,9 @@
 --       own key, labelled Partiful; the old mappings and labels unchanged
 --       (cpc, qr / print, meta paid_social, organic)
 --   PR7 grants + search_path on the new functions
+--   PR8 an event that moves orgs: its new owner lists, adds and removes the
+--       placements; the old org can't (authorized through the event, not
+--       the org_id stamped at insert); add takes no lock on exos_events
 -- Self-contained ids b7160000-…; runs after the full run_p0.sh chain.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -231,6 +234,32 @@ BEGIN
   ASSERT (SELECT count(*) FROM pg_proc WHERE proname IN ('exos_print_placements', 'exos_print_placement_add', 'exos_print_placement_remove')
           AND prosecdef) = 3, 'PR7: three definer RPCs';
   RAISE NOTICE 'OK  PR7 grants + search_path';
+END $$;
+
+-- PR8 ---------------------------------------------------------------------
+UPDATE public.exos_events SET org_id = pg_temp.u('000000000002') WHERE id = pg_temp.u('0000000000e1');
+SET LOCAL ROLE authenticated;
+SELECT pg_temp.act('b7160000-0000-0000-0000-0000000000a1');
+SELECT set_config('pr.mv_old_list', pg_temp.refused($$SELECT public.exos_print_placements(pg_temp.u('0000000000e1'))$$, 'not authorized')::text, true);
+SELECT set_config('pr.mv_old_rm', pg_temp.refused(format('SELECT public.exos_print_placement_remove(%L)',
+  (current_setting('pr.p1')::jsonb->>'id')), 'not authorized')::text, true);
+SELECT pg_temp.act('b7160000-0000-0000-0000-0000000000a5');
+SELECT set_config('pr.mv_new_list', public.exos_print_placements(pg_temp.u('0000000000e1'))::text, true);
+SELECT set_config('pr.mv_new_rm', public.exos_print_placement_remove((current_setting('pr.p1')::jsonb->>'id')::uuid)::text, true);
+SELECT set_config('pr.mv_new_add', public.exos_print_placement_add(pg_temp.u('0000000000e1'), 'Moved spot')::text, true);
+RESET ROLE;
+DO $$
+BEGIN
+  ASSERT current_setting('pr.mv_old_list')::boolean AND current_setting('pr.mv_old_rm')::boolean, 'PR8: old org refused';
+  ASSERT jsonb_array_length(current_setting('pr.mv_new_list')::jsonb) = 6, 'PR8: new owner lists';
+  ASSERT current_setting('pr.mv_new_rm')::boolean, 'PR8: new owner removes';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_print_placements WHERE id = (current_setting('pr.p1')::jsonb->>'id')::uuid), 'PR8: removed';
+  ASSERT current_setting('pr.mv_new_add')::jsonb->>'slug' = 'moved-spot', 'PR8: new owner adds';
+  ASSERT position('FOR UPDATE' in pg_get_functiondef('public.exos_print_placement_add(uuid,text)'::regprocedure)) = 0
+     AND position('pg_advisory_xact_lock' in pg_get_functiondef('public.exos_print_placement_add(uuid,text)'::regprocedure)) > 0,
+    'PR8: add takes an advisory lock, not a row lock on the event';
+  ASSERT NOT (SELECT prosecdef FROM pg_proc WHERE proname = '_exos_print_placement_row'), 'PR8: row helper is invoker';
+  RAISE NOTICE 'OK  PR8 moved event: managed by its new org only; no event row lock';
 END $$;
 
 \echo 'test_promotion: all passed'

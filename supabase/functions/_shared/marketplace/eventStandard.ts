@@ -159,6 +159,9 @@ export function marketSection(tier: StandardTierInput): string {
   return unshout(name).slice(0, 60);
 }
 
+/** The categories the marketplaces list (the rest may be refused). */
+const MARKETPLACE_CATEGORIES: ReadonlySet<MarketCategory> = new Set(['concerts', 'nightlife', 'comedy', 'theater', 'sports', 'festivals']);
+
 const GENRE_CATEGORY: Array<[RegExp, MarketCategory]> = [
   [/comedy|stand[\s-]*up|improv|sketch|open\s*mic/i, 'comedy'],
   // "drag" as a word: "Dungeons & Dragons" is a game night, not a drag show.
@@ -252,7 +255,9 @@ export function eventReadiness(
   if ((category === 'concerts' || category === 'comedy') && !performer) {
     common.warnings.push('Add the headliner: marketplaces match concerts and comedy by performer.');
   }
-  if (category === 'other') {
+  // Exos's own buckets (food & drink, community, business) aren't marketplace
+  // categories either: same warning as "other".
+  if (!MARKETPLACE_CATEGORIES.has(category)) {
     common.warnings.push('Marketplaces list concerts, nightlife, comedy, theater, festivals and sports; this category may be refused.');
   }
   if (title && txt(ev.name) && title !== collapse(txt(ev.name))) {

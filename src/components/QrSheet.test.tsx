@@ -47,7 +47,7 @@ describe('PromoPlaybookPanel', () => {
     expect(playbookFor('concerts', cityById('nyc')).geo).toBe('Ads in New York City: target about 10 miles around the venue (DMA New York (501)).');
     expect(PLAYBOOK.nightlife.policy.join(' ')).toMatch(/21\+.*under 25/);
     expect(PLAYBOOK.nightlife.policy.join(' ')).toMatch(/Snap bans/);
-    expect(PLAYBOOK.community.policy.join(' ')).toMatch(/dating-ad rules/);
+    expect(PLAYBOOK.community.policy.join(' ')).toMatch(/need the platform's approval first \(Meta and Google dating ads policies\); without it, don't run a dating angle/);
     expect(PLAYBOOK.concerts.policy.join(' ')).toMatch(/Event ticket sales/);
     render(<PromoPlaybookPanel category="food_drink" city={cityById('nyc')} />);
     expect(screen.getByRole('heading', { level: 2, name: /Playbook: Food & Drink/ })).toBeTruthy();
