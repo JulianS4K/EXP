@@ -93,7 +93,10 @@
 -- exos_channel_set, so nothing tells an org about another org's events. Locks:
 -- the event (exos_channel_set:), the mirror row, then the id
 -- (exos_channel_ext:); mark takes the mirror row, then the id.
--- exos_channel_remove also waits for a pass that holds the lease.
+-- exos_channel_remove also waits for a pass that holds the lease. A
+-- verification belongs to its id: a re-link in place clears it (trigger
+-- _exos_tg_channel_verified_reset on the three tables); pretix / hi.events
+-- refs (read from an address the org supplies) are never verified.
 --
 -- Built from the live bodies: every patch is a counted text replacement on
 -- pg_get_functiondef (supabase/README.md rule 4), checked against the body
@@ -178,8 +181,46 @@ ALTER TABLE public.exos_eventbrite_links ADD COLUMN IF NOT EXISTS verified_at ti
 ALTER TABLE public.exos_backend_links ADD COLUMN IF NOT EXISTS verified_at timestamptz;
 -- A mirror synced live has written with the org's credentials; a Luma backend
 -- link that synced read the guest list, which needs the calendar's key.
+-- (Keyed on the mirror being in step now with a synced hash: synced_at alone
+-- may date from before the id changed.)
 UPDATE public.exos_channel_mirrors SET external_verified_at = synced_at
- WHERE external_verified_at IS NULL AND external_id IS NOT NULL AND synced_at IS NOT NULL;
+ WHERE external_verified_at IS NULL AND external_id IS NOT NULL AND synced_at IS NOT NULL
+   AND status = 'synced' AND last_hash IS NOT NULL;
+
+-- A verification belongs to the id it was made for: an update that changes
+-- the external id (a re-link: exos_eventbrite_link / exos_backend_link
+-- upsert in place) clears it, unless that same update sets it (mark).
+CREATE OR REPLACE FUNCTION public._exos_tg_channel_verified_reset()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'exos_channel_mirrors' THEN
+    IF NEW.external_id IS DISTINCT FROM OLD.external_id AND NEW.external_verified_at IS NOT DISTINCT FROM OLD.external_verified_at THEN
+      NEW.external_verified_at := NULL;
+    END IF;
+  ELSIF TG_TABLE_NAME = 'exos_eventbrite_links' THEN
+    IF NEW.eb_event_id IS DISTINCT FROM OLD.eb_event_id AND NEW.verified_at IS NOT DISTINCT FROM OLD.verified_at THEN
+      NEW.verified_at := NULL;
+    END IF;
+  ELSE
+    IF (NEW.provider IS DISTINCT FROM OLD.provider OR NEW.external_ref IS DISTINCT FROM OLD.external_ref)
+       AND NEW.verified_at IS NOT DISTINCT FROM OLD.verified_at THEN
+      NEW.verified_at := NULL;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+REVOKE ALL ON FUNCTION public._exos_tg_channel_verified_reset() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS exos_channel_mirrors_verified_reset ON public.exos_channel_mirrors;
+CREATE TRIGGER exos_channel_mirrors_verified_reset BEFORE UPDATE ON public.exos_channel_mirrors
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_channel_verified_reset();
+DROP TRIGGER IF EXISTS exos_eventbrite_links_verified_reset ON public.exos_eventbrite_links;
+CREATE TRIGGER exos_eventbrite_links_verified_reset BEFORE UPDATE ON public.exos_eventbrite_links
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_channel_verified_reset();
+DROP TRIGGER IF EXISTS exos_backend_links_verified_reset ON public.exos_backend_links;
+CREATE TRIGGER exos_backend_links_verified_reset BEFORE UPDATE ON public.exos_backend_links
+  FOR EACH ROW EXECUTE FUNCTION public._exos_tg_channel_verified_reset();
 UPDATE public.exos_backend_links SET verified_at = last_ok_at
  WHERE verified_at IS NULL AND provider = 'luma' AND last_ok_at IS NOT NULL;
 
@@ -210,8 +251,12 @@ GRANT EXECUTE ON FUNCTION public.exos_channel_external_taken(uuid, text, text[])
 
 -- The edge functions mark a door link / ticket backend link verified once a
 -- read with the org's credentials proved the event is the org's
--- (exos-eventbrite-sync /link, exos-integrations /link). Only the link as it
--- now is: a changed link isn't verified by an older read.
+-- (exos-eventbrite-sync /link: the event is one of the token's Eventbrite
+-- organizations'; exos-integrations /link: a Luma event the key's calendar
+-- manages). Only Eventbrite and Luma: a pretix / hi.events ref is read from
+-- an address the org supplies, which proves nothing. Only the link as it now
+-- is: a changed link isn't verified by an older read (and the trigger above
+-- clears it on a re-link).
 CREATE OR REPLACE FUNCTION public.exos_channel_link_verified(p_event_id uuid, p_provider text, p_ref text)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER
@@ -221,9 +266,11 @@ BEGIN
   IF p_provider = 'eventbrite' THEN
     UPDATE public.exos_eventbrite_links SET verified_at = coalesce(verified_at, now())
      WHERE event_id = p_event_id AND eb_event_id = p_ref;
-  ELSE
+  ELSIF p_provider = 'luma' THEN
     UPDATE public.exos_backend_links SET verified_at = coalesce(verified_at, now())
-     WHERE event_id = p_event_id AND provider = p_provider AND external_ref = p_ref;
+     WHERE event_id = p_event_id AND provider = 'luma' AND external_ref = p_ref;
+  ELSE
+    RETURN false;
   END IF;
   RETURN FOUND;
 END $$;
@@ -390,12 +437,22 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, 
     PERFORM pg_advisory_xact_lock(hashtextextended('exos_channel_ext:' || p_provider || ':' || m.external_id, 0));
     IF m.external_id = ANY (public.exos_channel_external_taken(p_event_id, p_provider, ARRAY[m.external_id])) THEN
       v_taken := true;
-      v_conflict := initcap(p_provider) || ' event ' || m.external_id || ' already belongs to another Exos event';
+      -- This org's own other event: say so. Another org's: the same words as
+      -- an event not on this account (exos-channel-sync notOnAccount).
+      v_conflict := CASE
+        WHEN EXISTS (SELECT 1 FROM public.exos_channel_mirrors x
+                      WHERE x.org_id = m.org_id AND x.provider = p_provider AND x.external_id = m.external_id AND x.event_id <> p_event_id)
+          OR (p_provider = 'eventbrite' AND EXISTS (SELECT 1 FROM public.exos_eventbrite_links l
+                      WHERE l.org_id = m.org_id AND l.eb_event_id = m.external_id AND l.event_id <> p_event_id))
+          OR (p_provider = 'luma' AND EXISTS (SELECT 1 FROM public.exos_backend_links b
+                      WHERE b.org_id = m.org_id AND b.provider = 'luma' AND b.external_ref = m.external_id AND b.event_id <> p_event_id))
+        THEN initcap(p_provider) || ' event ' || m.external_id || ' already belongs to another Exos event'
+        ELSE CASE p_provider WHEN 'eventbrite' THEN 'Eventbrite' ELSE 'Luma' END || ': that event wasn''t found on this account' END;
       SELECT x.external_id INTO v_orig FROM public.exos_channel_mirrors x WHERE x.event_id = p_event_id AND x.provider = p_provider;
       m.external_id := v_orig;   -- not kept: it isn't this event's
       v_state := 'error';
-      p_result := p_result || jsonb_build_object('error', left('conflict: ' || v_conflict
-        || '. Link the right event, or remove the channel and add it again.', 300));
+      p_result := p_result || jsonb_build_object('error', CASE WHEN v_conflict LIKE '%wasn''t found on this account' THEN v_conflict
+        ELSE left('conflict: ' || v_conflict || '. Link the right event, or remove the channel and add it again.', 300) END);
     ELSIF p_provider = 'eventbrite' THEN
       SELECT 'this event is already linked to Eventbrite event ' || l.eb_event_id INTO v_conflict
         FROM public.exos_eventbrite_links l WHERE l.event_id = p_event_id AND l.eb_event_id <> m.external_id;
@@ -405,7 +462,7 @@ SELECT pg_temp.exos_patch_n('public.exos_channel_mark(uuid, text, uuid, bigint, 
         FROM public.exos_backend_links b
        WHERE b.event_id = p_event_id AND (b.provider <> 'luma' OR b.external_ref <> m.external_id);
     END IF;
-    IF v_conflict IS NOT NULL THEN
+    IF v_conflict IS NOT NULL AND NOT v_taken THEN   -- (a taken id has its own error, above)
       v_state := 'error';
       p_result := p_result || jsonb_build_object('error', left('conflict: ' || v_conflict || '; ' || p_provider || ' event '
         || m.external_id || ' is kept on this mirror. Unlink one of them, then save the channel again.', 300));
