@@ -26,8 +26,15 @@ FILES=("$FILE")
 for l in "${LATER[@]}"; do FILES+=("$DIR/../../supabase/migrations/$l.sql"); done
 patches=0; notices=0
 for f in "${FILES[@]}"; do
+  # A missing file or a re-apply that errors fails the check (never counted as done).
+  [ -f "$f" ] || { echo "reapply_check $NAME: no such migration file: $f"; exit 1; }
   n=$(grep -c "^SELECT pg_temp\.exos_patch_n(" "$f" || true)
-  m=$(psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -q -f "$f" 2>&1 >/dev/null | grep -c 'already patched' || true)
+  if ! err=$(psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -q -f "$f" 2>&1 >/dev/null); then
+    echo "reapply_check $NAME: $(basename "$f") failed on re-apply:"
+    printf '%s\n' "$err" | grep -m5 -E 'ERROR|FATAL' || printf '%s\n' "$err" | tail -5
+    exit 1
+  fi
+  m=$(printf '%s\n' "$err" | grep -c 'already patched' || true)
   patches=$((patches + n)); notices=$((notices + m))
 done
 [ "${#LATER[@]}" -gt 0 ] && NAME="$NAME (then ${LATER[*]})"

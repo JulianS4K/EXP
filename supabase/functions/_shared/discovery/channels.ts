@@ -103,7 +103,7 @@ export const DISCOVERY_CHANNELS: readonly DiscoveryChannel[] = [
   {
     id: 'meetup', name: 'Meetup', kind: 'manual', region: 'global',
     submissionUrl: 'https://www.meetup.com', verified: false, submitter: 'organizer',
-    notes: "Events live in the organizer's own Meetup group, so the organizer posts it. Meetup's GraphQL API has createEvent, but only for a group organizer with Meetup Pro and an approved OAuth client. Exos plans it (a draft, then published) as a dry run under Post / list this event; nothing is sent until the operator allows that write.",
+    notes: "Events live in the organizer's own Meetup group, so the organizer posts it. Meetup's GraphQL API has createEvent, but only for a group organizer with Meetup Pro and an approved OAuth client. Exos plans it as a draft (publishing it is a separate, confirmed step) as a dry run under Post / list this event; nothing is sent until the operator allows that write.",
   },
   {
     id: 'songkick', name: 'Songkick', kind: 'manual', region: 'global',

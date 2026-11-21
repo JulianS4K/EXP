@@ -119,7 +119,7 @@ BEGIN
   c := pg_temp.cred('ig_publish');
   ASSERT c ->> 'source' = 'store' AND c ->> 'secret' = 'ig-token-so1-SECRET' AND c -> 'config' ->> 'ig_user_id' = '17841400000000001'
      AND (c ->> 'writes_enabled')::boolean, 'SL2: the service role reads ig_publish, got ' || coalesce(c::text, 'null');
-  ASSERT pg_temp.cred('google_business') IS NULL, 'SL2: a managed row with no secret reads NULL (the Google connection is borrowed in TS)';
+  ASSERT pg_temp.cred('google_business') IS NULL, 'SL2: a managed row with no secret reads NULL (Business Profile never borrows the Google Ads secret)';
   ASSERT pg_temp.cred('tiktok_publish') IS NULL AND pg_temp.cred('tiktok_publish', 2) ->> 'secret' = 'tt-token-other-SECRET',
     'SL2: per org';
 END $$;
@@ -155,10 +155,11 @@ BEGIN
   ASSERT jsonb_array_length(e -> 'tiers') = 1 AND (e -> 'tiers' -> 0 ->> 'name') = 'GA', 'SL3: public tiers only';
   ASSERT (c -> 'connected' ->> 'ig_publish')::boolean AND (c -> 'connected' ->> 'meetup')::boolean
      AND (c -> 'connected' ->> 'linkedin')::boolean AND NOT (c -> 'connected' ->> 'tiktok_publish')::boolean
-     AND (c -> 'connected' ->> 'google_business')::boolean, 'SL3: connected booleans, got ' || (c -> 'connected');
+     AND NOT (c -> 'connected' ->> 'google_business')::boolean,
+     'SL3: connected booleans (Business Profile has no secret of its own: the Google Ads connection does not count), got ' || (c -> 'connected');
   ASSERT c -> 'facts' ->> 'meetup_plan' = 'starter' AND NOT (c -> 'facts' ->> 'meetup_pro_network')::boolean
      AND (c -> 'facts' ->> 'linkedin_org_page')::boolean AND (c -> 'facts' ->> 'gbp_verified_days')::int = 90
-     AND NOT (c -> 'facts' ->> 'gbp_own_connection')::boolean, 'SL3: facts, got ' || (c -> 'facts');
+     AND NOT (c -> 'facts' ? 'gbp_own_connection'), 'SL3: facts, got ' || (c -> 'facts');
   ASSERT c::text NOT LIKE '%SECRET%' AND c::text NOT LIKE '%17841400000000001%' AND c::text NOT LIKE '%5551234%'
      AND c::text NOT LIKE '%9988776655%' AND c::text NOT LIKE '%social-hall-nyc%', 'SL3: no secret, no account id';
   RAISE NOTICE 'OK  SL3 the context: the event, venue org, booleans and non-secret facts';

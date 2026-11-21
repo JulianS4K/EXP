@@ -17,14 +17,14 @@
 //
 // ACCESS. The Business Profile APIs need Google's access request form
 // (Google Business Profile API: "request access"; the project's quota is 0
-// until Google approves). The credential REUSES the Google connection:
-// the same Google OAuth client and exos-oauth-google flow, with the
-// https://www.googleapis.com/auth/business.manage scope added (not built).
-// Provider google_business in the store (managed) holds config account_id,
-// location_id, verified_at (YYYY-MM-DD) and, once that flow exists, the
-// refresh token; until then the Connect Google Ads token (ads_google_ads) is
-// what a live send would refresh, and it only works if that sign-in granted
-// business.manage. A live send swaps the refresh token for an access token;
+// until Google approves). The credential is Business Profile's OWN: its own
+// sign-in on the existing Google OAuth client with
+// https://www.googleapis.com/auth/business.manage alone (not built;
+// _shared/social/apps.ts), never the Google Ads connection, which never
+// carries that scope. Provider google_business in the store (managed) holds
+// config account_id, location_id, verified_at (YYYY-MM-DD) and its own
+// refresh token. A live send would swap that refresh token for an access
+// token;
 // a dry run never calls Google, so the header holds a placeholder.
 //
 // VERIFIED (the v4 localPosts resource is the public, documented one): the
