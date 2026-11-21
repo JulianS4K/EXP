@@ -17,7 +17,7 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('8f000000-0000-0000-0000-000000000001','8f000000-0000-0000-0000-0000000000a0','owner');
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
-  ('8f000000-0000-0000-0000-0000000000e1','8f000000-0000-0000-0000-000000000001','GO Show','published','2027-01-01T02:00:00Z','Hall',100,0,ARRAY['gotickets']);
+  ('8f000000-0000-0000-0000-0000000000e1','8f000000-0000-0000-0000-000000000001','GO Show','published',(date_trunc('day', now()) + interval '41 days 02:00:00'),'Hall',100,0,ARRAY['gotickets']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('8f000000-0000-0000-0000-0000000000d1','8f000000-0000-0000-0000-0000000000e1','GA',50,10,0);
 

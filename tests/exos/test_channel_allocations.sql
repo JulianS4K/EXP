@@ -43,8 +43,8 @@ INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
   ('4e000000-0000-0000-0000-000000000001','4e000000-0000-0000-0000-0000000000a0','owner');
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
-  ('4e000000-0000-0000-0000-0000000000e1','4e000000-0000-0000-0000-000000000001','Show','published','2027-01-01T02:00:00Z','Hall',15,0,ARRAY['stubhub','seatgeek']),
-  ('4e000000-0000-0000-0000-0000000000e2','4e000000-0000-0000-0000-000000000001','Tight cap','published','2027-01-02T02:00:00Z','Hall',5,0,ARRAY['stubhub']);
+  ('4e000000-0000-0000-0000-0000000000e1','4e000000-0000-0000-0000-000000000001','Show','published',(date_trunc('day', now()) + interval '41 days 02:00:00'),'Hall',15,0,ARRAY['stubhub','seatgeek']),
+  ('4e000000-0000-0000-0000-0000000000e2','4e000000-0000-0000-0000-000000000001','Tight cap','published',(date_trunc('day', now()) + interval '42 days 02:00:00'),'Hall',5,0,ARRAY['stubhub']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('4e000000-0000-0000-0000-0000000000d1','4e000000-0000-0000-0000-0000000000e1','GA',50,10,0),
   ('4e000000-0000-0000-0000-0000000000d2','4e000000-0000-0000-0000-0000000000e1','VIP',150,5,0),
@@ -195,8 +195,8 @@ BEGIN
 END $$;
 -- A7-A12: a fresh event with two ticket types on both marketplaces ----------------
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
-  ('4e000000-0000-0000-0000-0000000000e3','4e000000-0000-0000-0000-000000000001','Grid','published','2027-02-01T02:00:00Z','Hall',30,0,ARRAY['stubhub','seatgeek']),
-  ('4e000000-0000-0000-0000-0000000000e4','4e000000-0000-0000-0000-000000000001','Draft grid','draft','2027-02-02T02:00:00Z','Hall',10,0,ARRAY['seatgeek']);
+  ('4e000000-0000-0000-0000-0000000000e3','4e000000-0000-0000-0000-000000000001','Grid','published',(date_trunc('day', now()) + interval '72 days 02:00:00'),'Hall',30,0,ARRAY['stubhub','seatgeek']),
+  ('4e000000-0000-0000-0000-0000000000e4','4e000000-0000-0000-0000-000000000001','Draft grid','draft',(date_trunc('day', now()) + interval '73 days 02:00:00'),'Hall',10,0,ARRAY['seatgeek']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('4e000000-0000-0000-0000-0000000000d4','4e000000-0000-0000-0000-0000000000e3','GA',40,20,0),
   ('4e000000-0000-0000-0000-0000000000d5','4e000000-0000-0000-0000-0000000000e3','VIP',120,10,0),
@@ -356,7 +356,7 @@ BEGIN
 END $$;
 -- A13 --------------------------------------------------------------------------
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks) VALUES
-  ('4e000000-0000-0000-0000-0000000000e5','4e000000-0000-0000-0000-000000000001','Std','published','2027-03-01T02:00:00Z','Hall',10,0,ARRAY['stubhub']);
+  ('4e000000-0000-0000-0000-0000000000e5','4e000000-0000-0000-0000-000000000001','Std','published',(date_trunc('day', now()) + interval '100 days 02:00:00'),'Hall',10,0,ARRAY['stubhub']);
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('4e000000-0000-0000-0000-0000000000d7','4e000000-0000-0000-0000-0000000000e5','GA',40,10,0);
 DO $$
@@ -384,7 +384,7 @@ BEGIN
 END $$;
 -- A14-A16: pools ------------------------------------------------------------------
 INSERT INTO public.exos_events(id,org_id,name,status,starts_at,venue_name,total_tickets,tickets_sold,distribution_networks,purchase_limits) VALUES
-  ('4e000000-0000-0000-0000-0000000000e6','4e000000-0000-0000-0000-000000000001','Pools','published','2027-04-01T02:00:00Z','Hall',20,0,ARRAY['stubhub','gametime'],'{"maxPerOrder":2}');
+  ('4e000000-0000-0000-0000-0000000000e6','4e000000-0000-0000-0000-000000000001','Pools','published',(date_trunc('day', now()) + interval '131 days 02:00:00'),'Hall',20,0,ARRAY['stubhub','gametime'],'{"maxPerOrder":2}');
 INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold) VALUES
   ('4e000000-0000-0000-0000-0000000000d8','4e000000-0000-0000-0000-0000000000e6','GA',40,20,0);
 CREATE OR REPLACE FUNCTION pg_temp.pool(p_ch text) RETURNS text LANGUAGE sql AS $$
