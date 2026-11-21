@@ -13,6 +13,8 @@ import {
 } from '../../lib/journal';
 import { getSalesTax, getTrialBalance, listJournalLines } from '../../lib/journalApi';
 import SalesTaxTable from './SalesTaxTable';
+import { journalWorkbook } from '../../lib/financeWorkbooks';
+import { saveXlsx } from '../../lib/xlsxDownload';
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -53,6 +55,24 @@ export default function JournalPanel({ orgId, orgName, canView }: { orgId?: stri
     downloadCsv(csvFileName(['journal', orgName, fromDay, toDay]), toCsv(JOURNAL_CSV_HEADER, journalCsvRows(lines)));
   };
 
+  // claude/exos-attendance-report: Journal + Trial balance + Sales tax as one workbook, logged as export.run.
+  const exportJournalXlsx = async () => {
+    setBusy(true);
+    setCsvError(null);
+    const lines = await listJournalLines(orgId, period);
+    if (!lines) {
+      setBusy(false);
+      setCsvError("The journal couldn't be read. Try again.");
+      return;
+    }
+    try {
+      await saveXlsx(['journal', orgName, fromDay, toDay], journalWorkbook(journalCsvRows(lines), tb ?? [], tax ?? []),
+        { orgId, kind: 'journal' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="mt-10" aria-labelledby="journal-h">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
@@ -77,6 +97,10 @@ export default function JournalPanel({ orgId, orgName, canView }: { orgId?: stri
           <button type="button" onClick={() => void exportJournal()} disabled={busy}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
             <Download size={14} aria-hidden="true" /> {busy ? 'Preparing…' : 'Journal CSV'}
+          </button>
+          <button type="button" onClick={() => void exportJournalXlsx()} disabled={busy}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+            <Download size={14} aria-hidden="true" /> {busy ? 'Preparing…' : 'Journal XLSX'}
           </button>
         </div>
       </div>
@@ -128,7 +152,7 @@ export default function JournalPanel({ orgId, orgName, canView }: { orgId?: stri
         <div className="bg-white rounded-2xl border border-slate-200 p-5">
           <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Sales tax by jurisdiction</h3>
           {tax === undefined ? <p className="text-sm text-slate-400">Loading…</p>
-            : <SalesTaxTable rows={tax} fileParts={[orgName, fromDay, toDay]} />}
+            : <SalesTaxTable rows={tax} fileParts={[orgName, fromDay, toDay]} orgId={orgId} />}
         </div>
       )}
     </section>

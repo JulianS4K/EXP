@@ -30,7 +30,7 @@ export default function EventSalesTax({ event, canView }: { event: Event; canVie
         Tax collected on this event's sales, by the venue's location and the tax rule, less tax on refunds. Exos doesn't file or
         remit sales tax: the rates are the ones you set.
       </p>
-      <SalesTaxTable rows={rows} fileParts={[event.title]} />
+      <SalesTaxTable rows={rows} fileParts={[event.title]} orgId={event.orgId} eventId={event.id} />
     </section>
   );
 }

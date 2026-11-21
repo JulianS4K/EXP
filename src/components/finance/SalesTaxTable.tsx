@@ -8,10 +8,17 @@ import { csvFileName, downloadCsv, toCsv } from '../../lib/csv';
 import {
   jurisdictionLabel, SALES_TAX_CSV_HEADER, salesTaxCsvRows, salesTaxTotals, taxRateLabel, type SalesTaxRow,
 } from '../../lib/journal';
+import { salesTaxSheet } from '../../lib/financeWorkbooks';
+import { saveXlsx } from '../../lib/xlsxDownload';
 
-export default function SalesTaxTable({ rows, fileParts }: { rows: SalesTaxRow[]; fileParts: Array<string | undefined | null> }) {
+export default function SalesTaxTable({ rows, fileParts, orgId, eventId }: {
+  rows: SalesTaxRow[]; fileParts: Array<string | undefined | null>;
+  /** For the XLSX's export.run log (claude/exos-attendance-report): the org, or the event. */
+  orgId?: string | null; eventId?: string | null;
+}) {
   const totals = salesTaxTotals(rows);
   const exportCsv = () => downloadCsv(csvFileName(['sales-tax', ...fileParts]), toCsv(SALES_TAX_CSV_HEADER, salesTaxCsvRows(rows)));
+  const exportXlsx = () => void saveXlsx(['sales-tax', ...fileParts], [salesTaxSheet(rows)], { orgId, eventId, kind: 'sales_tax' });
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">No sales tax in this period.</p>;
   }
@@ -21,10 +28,16 @@ export default function SalesTaxTable({ rows, fileParts }: { rows: SalesTaxRow[]
         <p className="text-xs text-slate-500">
           {totals.map((t) => `${formatCents(t.netCents, t.currency)} net (${formatCents(t.collectedCents, t.currency)} collected, ${formatCents(t.refundedCents, t.currency)} refunded)`).join(' · ')}
         </p>
-        <button type="button" onClick={exportCsv}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
-          <Download size={14} aria-hidden="true" /> Sales tax CSV
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={exportCsv}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <Download size={14} aria-hidden="true" /> Sales tax CSV
+          </button>
+          <button type="button" onClick={exportXlsx}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <Download size={14} aria-hidden="true" /> Sales tax XLSX
+          </button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm" aria-label="Sales tax by jurisdiction">

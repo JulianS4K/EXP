@@ -184,7 +184,7 @@ export default function CheckoutQuestionsForm({ questions, ticketTiers, value, o
           ))}
         </div>
       )}
-      <p className={dark ? 'type text-[10px] text-white/40 mt-3' : 'text-[11px] text-slate-400 mt-3'}>
+      <p className={dark ? 'type text-[10px] text-white/40 mt-3' : 'text-[11px] text-slate-600 mt-3'}>
         <span aria-hidden="true">*</span> required. The organizer sees your answers.
       </p>
     </section>

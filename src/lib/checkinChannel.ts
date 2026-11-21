@@ -36,6 +36,8 @@ export interface RemoteCheckin {
   listId: string | null;
   direction: 'entry' | 'exit';
   forced: boolean;
+  /** Door time (offline scan time, else the server's), ms; absent when unreadable. */
+  at?: number;
 }
 
 /**
@@ -60,14 +62,17 @@ export function joinCheckinChannel(
       },
       (payload) => {
         const row = (payload.new ?? null) as
-          | { ticket_id?: string; list_id?: string | null; direction?: string; forced?: boolean }
+          | { ticket_id?: string; list_id?: string | null; direction?: string; forced?: boolean;
+              offline_scanned_at?: string | null; scanned_at?: string | null }
           | null;
         if (!row?.ticket_id) return;
+        const at = Date.parse(row.offline_scanned_at || row.scanned_at || '');
         onRemoteCheckIn({
           ticketId: row.ticket_id,
           listId: row.list_id ?? null,
           direction: row.direction === 'exit' ? 'exit' : 'entry',
           forced: row.forced === true,
+          ...(Number.isFinite(at) ? { at } : {}),
         });
       },
     )

@@ -20,6 +20,8 @@ import { getEventMoney, type EventMoneyData } from '../lib/settlementApi';
 import { SETTLEMENT_CSV_HEADER, settlementCsvRows, summarizeSettlement } from '../lib/settlement';
 import { formatDocNumber, invoicePath, invoicesBySession, type EventInvoiceRow } from '../lib/invoices';
 import { listEventInvoices } from '../lib/invoicesApi';
+import { settlementWorkbook } from '../lib/financeWorkbooks';
+import { saveXlsx } from '../lib/xlsxDownload';
 
 export default function SettlementPanel({ event, canView }: { event: Event; canView: boolean }) {
   const [data, setData] = useState<EventMoneyData | null>(null);
@@ -53,12 +55,15 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
       : 'Card fees';
   const hasMarketplace = s.marketplace.orders + s.marketplace.cancelledOrders > 0;
 
+  const orderRows = () => settlementCsvRows(data.orders, data.marketplace,
+    new Map([...invoicesBySession(invoices)].map(([sid, i]) => [sid, i.number])));
   const exportCsv = () => {
-    downloadCsv(
-      csvFileName(['settlement', event.title]),
-      toCsv(SETTLEMENT_CSV_HEADER, settlementCsvRows(data.orders, data.marketplace,
-        new Map([...invoicesBySession(invoices)].map(([sid, i]) => [sid, i.number])))),
-    );
+    downloadCsv(csvFileName(['settlement', event.title]), toCsv(SETTLEMENT_CSV_HEADER, orderRows()));
+  };
+  // claude/exos-attendance-report: the same rows as a workbook (Summary + Orders), logged as export.run.
+  const exportXlsx = () => {
+    void saveXlsx(['settlement', event.title], settlementWorkbook(s, orderRows()),
+      { orgId: event.orgId, eventId: event.id, kind: 'settlement' });
   };
 
   const stat = (label: string, value: string, hint?: string) => (
@@ -76,6 +81,7 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
           <Landmark className="w-4 h-4 text-slate-500" aria-hidden="true" />
           <h3 id="money-title" className="text-sm font-bold text-slate-700">Money</h3>
         </div>
+        <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={exportCsv}
@@ -84,6 +90,15 @@ export default function SettlementPanel({ event, canView }: { event: Event; canV
         >
           <Download size={12} aria-hidden="true" /> Orders CSV
         </button>
+        <button
+          type="button"
+          onClick={exportXlsx}
+          disabled={data.orders.length + data.marketplace.length === 0}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+        >
+          <Download size={12} aria-hidden="true" /> Orders XLSX
+        </button>
+        </div>
       </div>
       <p className="text-xs text-slate-400 mb-4">
         Once Stripe is connected (organization settings, Payments), Exos sales are paid out by Stripe directly to your account. Exos never holds that money.
