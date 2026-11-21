@@ -563,8 +563,10 @@ psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_replay_id
 # markers must be in the text they write; Applier review of #130).
 PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121100000_exos_channel_risks
 # The same for the ads migration (its two counted patches: exos_org_audience_export,
-# exos_delete_my_account; Applier review of #138).
-PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads
+# exos_delete_my_account; Applier review of #138). The social migration
+# replaces _exos_cred_managed / _exos_cred_providers in full after it, so it is
+# re-applied in the same check (reapply_check.sh: later migrations).
+PGHOST="$H" PGPORT="$P" PGUSER="$U" bash "$DIR/reapply_check.sh" "$DB" 20261121190500_exos_ads 20261121203000_exos_social_listings
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_wallet_passes.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_edge_p1.sql"
 psql -h "$H" -p "$P" -U "$U" -d "$DB" -v ON_ERROR_STOP=1 -f "$DIR/test_rpc_hardening.sql"
