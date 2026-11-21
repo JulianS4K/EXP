@@ -140,7 +140,8 @@ functions (below).
 
 Mig `20261107100000`. Door staff sell tickets at the door in the door app (`/checkin/:event`, the **Sell**
 tab), on a phone: pick a ticket type (its door price and what's left), the quantity, cash or comp, an
-optional name and email and the event's checkout questions (optional at the door), then confirm. The
+optional name and email and the event's checkout questions (the required ones too, unless the seller taps
+**Skip questions**, which is logged: `docs/checkout-questions.md` "Walk-up sales"), then confirm. The
 ticket goes over as a **one-time QR on the staff screen** for the buyer to photograph, on **paper**
 (any ticket printer, the 4 × 8 in PDF of "Printed tickets" in `docs/wallet.md`), or by **email**. Both
 the QR and the paper are print codes (`P-…`, `printed_via = 'pos'`), so a walk-up ticket scans like any

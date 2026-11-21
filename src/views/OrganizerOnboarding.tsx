@@ -382,9 +382,9 @@ export default function OrganizerOnboarding() {
             ) : (
               <>
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                  <p className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">
                     Logo (optional)
-                  </label>
+                  </p>
                   <label
                     htmlFor="ob-logo"
                     className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-black uppercase tracking-widest text-slate-600 cursor-pointer transition-all"

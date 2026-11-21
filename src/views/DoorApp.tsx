@@ -128,7 +128,7 @@ export default function DoorApp() {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
         <header className="space-y-3">
-          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-400">Exos · Door</p>
+          <p className="text-[11px] font-black uppercase tracking-[0.3em] text-slate-500">Exos · Door</p>
           <h1 className="text-3xl md:text-4xl font-black tracking-tight">The free door app for any event.</h1>
           <p className="text-slate-600 max-w-xl">
             Scan tickets sold on Exos, Eventbrite, Posh, DICE, Shotgun or RA. Check guests in by name. Works offline,
@@ -271,7 +271,7 @@ export default function DoorApp() {
           </>
         )}
 
-        <footer className="text-xs text-slate-400 pt-6 border-t border-slate-200">
+        <footer className="text-xs text-slate-500 pt-6 border-t border-slate-200">
           Part of Exos: Door is free. Selling tickets on Exos costs a fee per ticket sold, nothing else.
         </footer>
       </div>

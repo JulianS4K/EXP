@@ -62,7 +62,7 @@ export default function EventCountdown({ startsAt, doorsOpen }: Props) {
     : 'Starts in';
 
   return (
-    <span className="font-mono">
+    <span className="font-mono" role="timer">
       {verb} {past ? <>{label} ago</> : label}
     </span>
   );

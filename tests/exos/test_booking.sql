@@ -444,7 +444,9 @@ BEGIN
   ASSERT ok, 'B5: one doors row per event';
   UPDATE public.exos_show_activities SET starts_at = t0 - interval '90 minutes' WHERE id = doors;
   ASSERT (SELECT doors_at FROM public.exos_events WHERE id = ev) = t0 - interval '90 minutes', 'B5: moving the row moves doors_at';
-  -- Edit Event / the API move doors_at: the row follows.
+  -- Edit Event / the API move doors_at: the row follows. (Event edits are
+  -- owner / manager under phase-1's exos_events_upd policy, so the owner.)
+  PERFORM pg_temp.as_user('bb000000-0000-0000-0000-0000000000a1');
   UPDATE public.exos_events SET doors_at = t0 - interval '30 minutes' WHERE id = ev;
   ASSERT (SELECT starts_at FROM public.exos_show_activities WHERE id = doors) = t0 - interval '30 minutes', 'B5: doors_at moves the row';
   -- Scanner reads the schedule (door page header).

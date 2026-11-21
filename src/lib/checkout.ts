@@ -66,6 +66,10 @@ export async function startCheckout(input: {
   donation?: { campaign_id: string; amount_cents: number };
   /** Checkout questions' answers ({ order, tickets }, lib/checkoutQuestions.ts). */
   answers?: unknown;
+  /** Group buy v2 (mig 20261108120000): a seat link's token; the server picks the event, type and quantity. */
+  groupSeat?: string;
+  /** Group buy v2: the host covers every unpaid seat of this group. */
+  groupCover?: string;
 } & CheckoutRecordInput): Promise<string> {
   const { data, error } = await supabase.functions.invoke('exos-checkout', {
     body: {
@@ -83,6 +87,8 @@ export async function startCheckout(input: {
       gift_card_code: input.giftCardCode || undefined,
       donation: input.donation,
       answers: input.answers,
+      group_seat: input.groupSeat || undefined,
+      group_cover: input.groupCover || undefined,
       ...recordBody(input),
     },
   });

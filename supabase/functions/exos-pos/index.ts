@@ -49,7 +49,9 @@
 // Actions (POST JSON, at most 64 KB):
 //   { action: "mint_walkup", event_id, tier_id, quantity, order_key (UUID per
 //     sale), comp_quantity?, payment?: "cash" | "comp" | "card", device_id?, drawer_id?,
-//     buyer_name?, buyer_email?, answers?, comp_reason? } -> the order (pending for card)
+//     buyer_name?, buyer_email?, answers?, comp_reason?, skip_questions? } -> the order (pending for card)
+//     Required checkout questions must be answered unless skip_questions is
+//     true: the seller's explicit skip, logged in SQL (mig 20261108110000).
 //   { action: "card_payment", order_id, mode?: "reader" | "sdk", reader_device_id? }
 //     -> { order_id, card: { status, payment_intent, client_secret? (sdk) } }
 //   { action: "card_status" | "capture", order_id } -> { state, order?, decline_code? }
@@ -218,6 +220,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_event_id: ev, p_tier_id: tier, p_quantity: qty, p_order_key: key, p_comp_quantity: comp, p_payment: payment,
         p_device_id: dev, p_drawer_id: drawer, p_buyer_name: str("buyer_name", 80), p_buyer_email: str("buyer_email", 254),
         p_answers: answers, p_comp_reason: str("comp_reason", 200),
+        // The seller's explicit skip (the 13-argument sale, mig 20261108110000).
+        ...(p.skip_questions === true ? { p_skip_questions: true } : {}),
       });
     }
     case "void_order":
@@ -420,6 +424,7 @@ async function cardAction(
         const r = await core<unknown>("_exos_pos_walkup_begin_card", {
           p_actor: actor, p_event_id: ev, p_tier_id: tier, p_quantity: qty, p_order_key: okey, p_device_id: dev,
           p_buyer_name: h.str("buyer_name", 80), p_buyer_email: h.str("buyer_email", 254), p_answers: answers, p_live: live,
+          ...(p.skip_questions === true ? { p_skip_questions: true } : {}), // mig 20261108110000
         });
         return r instanceof Response ? r : json({ data: r.data });
       }

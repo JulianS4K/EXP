@@ -162,6 +162,18 @@ describe('summarizeSettlement', () => {
     expect(s.exos.organizerNetCents).toBe(3734);
   });
 
+  it('a $0 free claim / comp order (free_kind) is not a sale: not counted, not in the CSV', () => {
+    const s = summarizeSettlement({
+      orders: [order({ session_id: 'a', quantity: 2 }),
+               order({ session_id: 'zero_1', quantity: 3, gross_cents: 0, tax_cents: 0, application_fee_cents: 0, exos_fee_cents: 0,
+                       card_fee_est_cents: 0, organizer_net_cents: 0, free_kind: 'comp' })],
+    });
+    expect(s.exos.orders).toBe(1);
+    expect(s.exos.tickets).toBe(2);
+    expect(settlementCsvRows([order({ session_id: 'a' }), order({ session_id: 'zero_1', gross_cents: 0, free_kind: 'free_claim' })], [])
+      .map((r) => r[1])).toEqual(['a']);
+  });
+
   it('fee-free orders are counted', () => {
     const s = summarizeSettlement({ orders: [order({ fee_free: true, exos_fee_cents: 0, application_fee_cents: 146, organizer_net_cents: 3854 })] });
     expect(s.exos.feeFreeOrders).toBe(1);

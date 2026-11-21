@@ -14,8 +14,13 @@
 //   void     same night (12 hours) and before any scan: the seller or an
 //            owner / manager. After that: a refund, owner / manager; after a
 //            scan only with their override.
+//   questions (mig 20261108110000) the event's required checkout questions
+//            are required at the door too ("show only if" ones when shown;
+//            ones hidden from checkout never), unless the seller skips them,
+//            which the server logs (exos_pos_question_skips).
 
 import { lineTotals, type PosTaxRule } from './totals.ts';
+import { validateAnswers, type AnswerProblem, type QuestionDef } from '../questions.ts';
 
 /** How long after the sale a void is allowed ("same night"). Same as the SQL. */
 export const WALKUP_VOID_WINDOW_HOURS = 12;
@@ -140,4 +145,51 @@ export function paidOutProblem(amountCents: number, drawerCents: number, reason:
   const r = reason.trim().length;
   if (r < 3 || r > 300) return 'reason';
   return null;
+}
+
+// ── Checkout questions at the door (mig 20261108110000) ──────────────────────
+
+/** A question as the walk-up catalog lists it (hidden: not asked at checkout). */
+export type DoorQuestion = QuestionDef & { hidden?: boolean | null };
+
+/** The questions the door asks: all of them, but one hidden from checkout is
+ *  never required there (SQL _exos_pos_door_question_defs). */
+export function doorQuestions(qs: readonly DoorQuestion[]): QuestionDef[] {
+  return qs.map((q) => (q.hidden ? { ...q, required: false } : q));
+}
+
+export interface MissingAnswer {
+  question_id: string;
+  label: string;
+  /** 1-based ticket, or null for an order question. */
+  ticket: number | null;
+}
+
+/**
+ * The required questions a walk-up sale leaves unanswered, as the server
+ * counts them (_exos_pos_walkup_answers): only the questions shown for these
+ * answers (a "show only if" one its parent hides is never required). The
+ * sale needs these answered, or the seller's explicit skip.
+ */
+export function walkupMissingRequired(
+  qs: readonly DoorQuestion[],
+  ticketTiers: readonly string[],
+  body: unknown,
+): MissingAnswer[] {
+  const list = doorQuestions(qs);
+  if (list.length === 0 || ticketTiers.length === 0) return [];
+  const r = validateAnswers(list, body ?? {}, { ticketTiers, require: true });
+  const label = new Map(list.map((q) => [q.id, q.label]));
+  const problems: AnswerProblem[] = r.problems;
+  return problems
+    .filter((p) => p.code === 'required' && p.question_id)
+    .map((p) => ({ question_id: p.question_id as string, label: label.get(p.question_id as string) ?? '', ticket: p.ticket ?? null }));
+}
+
+/** One line for the seller: "2 required answers missing: Company, Size (ticket 2)". */
+export function missingAnswersText(missing: readonly MissingAnswer[]): string {
+  if (missing.length === 0) return '';
+  const names = missing.slice(0, 3).map((m) => (m.ticket ? `${m.label} (ticket ${m.ticket})` : m.label)).join(', ');
+  const more = missing.length > 3 ? ` and ${missing.length - 3} more` : '';
+  return `${missing.length} required answer${missing.length === 1 ? '' : 's'} missing: ${names}${more}`;
 }

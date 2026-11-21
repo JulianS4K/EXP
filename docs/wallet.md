@@ -234,6 +234,7 @@ iPhone -> GET  /apple/v1/devices/{device}/registrations/{passType}?passesUpdated
 | `POST /exos-wallet/pass` `{ticket_id, kind:"google"}` | Supabase JWT (holder) | `{ save_url, serial }` |
 | `POST /exos-wallet/reissue` `{ticket_id}` | Supabase JWT (holder) | `{ ok, code_epoch }` |
 | `POST /exos-wallet/season-pass` `{pass_id, kind}` | Supabase JWT (holder) | `.pkpass` (apple) / `{ save_url, serial }` (google); 404 `record_not_found` / `wallet_pass_unavailable` (voided, used up, past) |
+| `POST /exos-wallet/addon-pass` `{addon_pass_id, kind}` | Supabase JWT (holder) | `.pkpass` (apple) / `{ save_url, serial }` (google) of one add-on unit's entry code; 403 not yours, 409 `voided` (mig 20261108110000) |
 | `POST /exos-wallet/push` | `x-cron-secret` | summary; a dry run until pushes are configured |
 | `POST /exos-wallet/apple/v1/devices/{d}/registrations/{pt}/{serial}` | `ApplePass <token>` | 201 new / 200 known / 401 |
 | `DELETE` same path | `ApplePass <token>` | 200 / 401 |
@@ -249,6 +250,32 @@ card, not a door code: a pass is used by redeeming it for tickets, which carry t
 is a static generic pass (no barcode, no web service: adding it again shows the current admissions left); the Google
 card is a generic object sent whole inside the save JWT (nothing secret in it, no REST call). Same certificates and
 secrets as tickets; without them the route answers 503.
+
+## Add-on passes
+
+Mig `20261108110000`, `exos_wallet_addon_pass`, `_shared/wallet/addonPass.ts`. An add-on with its own entry code
+(DICE `Extra.hasSeparateAccessBarcode`, mig `20261107110000`: a VIP lounge, a merch pickup) has one code per unit,
+scanned at the add-on's own check-in list. **Apple allows one barcode per pass** (the `barcodes` array lists formats
+of the same message, and back fields can't be scanned), so the code can't ride on the ticket's pass: each unit gets
+**a pass of its own**, from `POST /exos-wallet/addon-pass`.
+
+| Pass | Code | Notes |
+|---|---|---|
+| Apple | `A-{pass}:{owner}:a{epoch}:{mac}` | the ticket's Apple MAC (`wallet-a:`) over the add-on pass's own secret; a static eventTicket pass with no web service |
+| Google | `A-{pass}:{owner}:g{epoch}:{totp}` | the ticket's TOTP key derivation over the pass's secret; an eventTicketObject under the event's class, stored server to server (the save link names only its id) |
+
+- The epoch is `exos_addon_passes.wallet_epoch`, set to 1 when the holder first asks for a pass; a code is accepted
+  only at the live epoch, for the live holder. A new holder (proof of email, guest claim) rotates the pass's secret,
+  so every earlier code dies; a refund voids the pass. Only the holder can get one (`42501` otherwise); a voided pass
+  gets none.
+- The door: `_exos_check_in_addon_pass` takes both (online, the offline replay and the API's check-in all use it).
+  The saved list (`exos_event_addon_passes`) carries `wa` (the Apple code's SHA-256), `wg` (the TOTP key) and `we`,
+  so an offline door checks them too (`verifyAddonWalletWithKeys`, `src/lib/barcode.ts`).
+- Static on purpose: no push or update path for add-on passes. A refunded or transferred add-on's Apple pass keeps
+  showing its code, which the door refuses; Google's object is left as stored. A reissue (a new epoch) isn't built.
+- No SPA button yet: wallets aren't configured in prod (every route answers 503 until they are).
+- Tests: `src/lib/wallet/addonPass.test.ts` (the codes against SQL vectors, the door check, both builders, the save
+  link), `tests/exos/test_dice_leftovers.sql` DL5.
 
 ## Operator setup
 

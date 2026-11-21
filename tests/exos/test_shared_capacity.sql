@@ -113,8 +113,9 @@ BEGIN
               (t ->> 'sold')::int, 100 + k)
       RETURNING id INTO v_tier;
       ids := ids || jsonb_build_object(t ->> 'key', v_tier);
-      INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, status, barcode_secret, price_paid, channel_source)
-      SELECT '5c500000-0000-0000-0000-0000000000e3', '5c500000-0000-0000-0000-000000000001', v_tier, 'x', 'active',
+      INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, status, barcode_secret, price_paid, channel_source)
+      SELECT '5c500000-0000-0000-0000-0000000000e3', '5c500000-0000-0000-0000-000000000001', v_tier, 'x',
+             '5c500000-0000-0000-0000-0000000000b1', '5c500000-0000-0000-0000-0000000000b1', 'active',
              gen_random_uuid()::text, 10, 'vibepass'
         FROM generate_series(1, (t ->> 'sold')::int);
       IF (t ->> 'held')::int > 0 THEN

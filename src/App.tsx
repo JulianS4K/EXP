@@ -19,6 +19,8 @@ const EventDetails = lazy(() => import('./views/EventDetails'));
 const CheckoutLink = lazy(() => import('./views/CheckoutLink'));
 const PayPalCheckout = lazy(() => import('./views/PayPalCheckout'));
 const SplitWithFriends = lazy(() => import('./views/SplitWithFriends'));
+const GroupPaySeat = lazy(() => import('./views/GroupPaySeat'));
+const GroupPayHost = lazy(() => import('./views/GroupPayHost'));
 const MailUnsubscribe = lazy(() => import('./views/MailUnsubscribe'));
 const RescheduleRefund = lazy(() => import('./views/RescheduleRefund'));
 const PromoterKit = lazy(() => import('./views/PromoterKit'));
@@ -156,8 +158,12 @@ function ChromeLayout({ children }: { children: ReactNode }) {
   }
   return (
     <div className="flex flex-col min-h-screen">
+      {/* WCAG 2.4.1: the first Tab stop skips the navbar. */}
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:bg-white focus:text-black focus:px-4 focus:py-2 focus:font-bold">
+        Skip to content
+      </a>
       <Navbar />
-      <main className="flex-grow">
+      <main id="main" tabIndex={-1} className="flex-grow focus:outline-none">
         <ErrorBoundary>{children}</ErrorBoundary>
       </main>
       <Footer />
@@ -188,6 +194,8 @@ export default function App() {
                     <Route path="/pay/paypal" element={<PayPalCheckout />} />
                     <Route path="/pay/paypal/return" element={<PayPalCheckout />} />
                     <Route path="/split/:sessionId" element={<SplitWithFriends />} />
+                    <Route path="/group-pay/seat/:token" element={<GroupPaySeat />} />
+                    <Route path="/group-pay/:groupId" element={<GroupPayHost />} />
                     <Route path="/unsubscribe" element={<MailUnsubscribe />} />
                     <Route path="/offer/:offerId" element={<OfferRespond />} />
                     <Route path="/settlement/:eventId" element={<SettlementPublic />} />

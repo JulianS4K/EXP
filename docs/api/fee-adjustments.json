@@ -2,7 +2,7 @@
   "file": "fee-adjustments",
   "name": "Fee changes",
   "order": 31.5,
-  "description": "Every change to the fees of an order after it was placed, as an append-only log (DICE's Adjustment { reason, processedAt, ticket, feesChange }). `fees_change_cents` is signed, in the order currency's minor unit: negative when fees went down. Reasons: `refund` (the buyer-fee part of the money a refund returned: the order's passed-on fees times refunded / paid, cumulative, so a retried or partial refund is never counted twice and a full refund returns exactly the order's buyer fees), `refund_reversed` (a refund that succeeded and then failed), `manual` (recorded by an owner, manager or finance member in the dashboard, with a note; the order's net fees never go below zero). `order_edit` and `fee_rule` are reserved: an order edit changes the buyer's contact details only, and a fee-rule change never touches a placed order (the order's fees are a snapshot taken when it was paid). Logging a change moves no money: refunds and payouts happen where they always have, and the order's fee snapshot is never rewritten. Rows are never edited or deleted; to undo a manual change, record the opposite one.",
+  "description": "Every change to the fees of an order after it was placed, as an append-only log (DICE's Adjustment { reason, processedAt, ticket, feesChange }). `fees_change_cents` is signed, in the order currency's minor unit: negative when fees went down. Reasons: `refund` (the buyer-fee part of the money a refund returned: the order's passed-on fees times refunded / paid, cumulative, so a retried or partial refund is never counted twice and a full refund returns exactly the order's buyer fees), `refund_reversed` (a refund that succeeded and then failed), `manual` (recorded by an owner, manager or finance member in the dashboard, or with POST /v1/orders/:id/adjustments, with a note; the order's net fees never go below zero). `order_edit` and `fee_rule` are reserved: an order edit changes the buyer's contact details only, and a fee-rule change never touches a placed order (the order's fees are a snapshot taken when it was paid). Logging a change moves no money: refunds and payouts happen where they always have, and the order's fee snapshot is never rewritten. Rows are never edited or deleted; to undo a manual change, record the opposite one.",
   "endpoints": [
     {
       "id": "get-order-fee-adjustments",
@@ -175,6 +175,129 @@
           "description": "No such event in the key's organization (or the id is malformed).",
           "example": {
             "error": "event not found"
+          }
+        }
+      ]
+    },
+    {
+      "id": "create-order-fee-adjustment",
+      "method": "POST",
+      "path": "/v1/orders/:id/adjustments",
+      "summary": "Record a manual fee change",
+      "description": "Adds one `manual` row to the order's fee-change log: a signed amount in integer cents (negative when the buyer's fees go down) and a note saying why. It records the change; it moves no money (a refund or payout is still done where it always is). Needs an organization API key whose creator is an owner, manager or finance member now (checked in the database, the same rule as the dashboard's Orders → Fees); a personal or OAuth token can't. The order must be placed (paid, partly or fully refunded), a ticket named must be on the order, and the order's net fees (its passed-on fees plus every change) never go below zero. An idempotency key is required, as the `Idempotency-Key` header or `idempotency_key` in the body: sending the same key again answers the first row with `duplicate: true` (still 201); the same key for a different order or amount is a 400. Rows are never edited or deleted: to undo a change, record the opposite one.",
+      "auth": "api_key",
+      "scope": "finance:write",
+      "parameters": [
+        {
+          "name": "id",
+          "location": "path",
+          "type": "string",
+          "required": true,
+          "description": "The order id (its checkout session id). Another organization's order answers 404.",
+          "example": "cs_live_a1B2c3"
+        },
+        {
+          "name": "Idempotency-Key",
+          "location": "header",
+          "type": "string",
+          "required": false,
+          "description": "8 to 100 letters, digits or `_ . : -`. Required unless `idempotency_key` is in the body; when both are sent they must match.",
+          "example": "adj-2026-11-08-0001"
+        },
+        {
+          "name": "fees_change_cents",
+          "location": "body",
+          "type": "integer",
+          "required": true,
+          "description": "The change in the order currency's minor unit, signed, not 0, at most 10,000,000 either way.",
+          "example": -150
+        },
+        {
+          "name": "note",
+          "location": "body",
+          "type": "string",
+          "required": true,
+          "description": "Why, 3 to 500 characters.",
+          "example": "Goodwill: late doors"
+        },
+        {
+          "name": "ticket_id",
+          "location": "body",
+          "type": "string (UUID)",
+          "required": false,
+          "description": "A ticket of this order, when the change is about one.",
+          "example": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        },
+        {
+          "name": "idempotency_key",
+          "location": "body",
+          "type": "string",
+          "required": false,
+          "description": "The idempotency key, when not sent as the header: 8 to 200 letters, digits or `: _ . -`.",
+          "example": "adj-2026-11-08-0001"
+        }
+      ],
+      "request_example": {
+        "fees_change_cents": -150,
+        "note": "Goodwill: late doors"
+      },
+      "responses": [
+        {
+          "status": 201,
+          "description": "Recorded (or, for a key sent before, the first row with `duplicate: true`).",
+          "example": {
+            "data": {
+              "id": "6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e50",
+              "order_id": "cs_live_a1B2c3",
+              "event_id": "3f6b2c1e-8a4d-4e2f-9b1a-7c5d0e9f2a14",
+              "ticket_id": null,
+              "reason": "manual",
+              "note": "Goodwill: late doors",
+              "fees_change_cents": -150,
+              "currency": "usd",
+              "refund_id": null,
+              "processed_at": "2026-11-08T19:15:40Z"
+            },
+            "duplicate": false
+          }
+        },
+        {
+          "status": 400,
+          "description": "A missing or malformed field, no idempotency key, a key used for another change, or a change that would take the order's fees below zero.",
+          "example": {
+            "error": "that would take the order's fees below zero (150 cents left)"
+          }
+        },
+        {
+          "status": 403,
+          "description": "The key lacks finance:write.",
+          "example": {
+            "error": "insufficient scope",
+            "required_scope": "finance:write"
+          },
+          "headers": {
+            "WWW-Authenticate": "Bearer error=\"insufficient_scope\", scope=\"finance:write\""
+          }
+        },
+        {
+          "status": 403,
+          "description": "Not an organization API key, or the key's creator is no longer an owner, manager or finance member.",
+          "example": {
+            "error": "only a key created by an organization owner or manager or finance can do this"
+          }
+        },
+        {
+          "status": 404,
+          "description": "No such order in the key's organization.",
+          "example": {
+            "error": "order not found"
+          }
+        },
+        {
+          "status": 409,
+          "description": "The order isn't placed yet (pending or abandoned).",
+          "example": {
+            "error": "only a placed order has fees to adjust"
           }
         }
       ]

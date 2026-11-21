@@ -47,7 +47,7 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
          ('$O','$OWN','owner'), ('$O','$MGR','manager'), ('$O','$SCAN','scanner');
        INSERT INTO exos_events(id,org_id,name,slug,status,starts_at,doors_at,total_tickets,created_by) VALUES
          ('$E','$O','Race door','race-door-e1','published',now() + interval '1 hour', now() - interval '1 hour', 0, '$OWN');
-       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity) VALUES ('$TIER','$E','GA',50,0);
+       INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity) VALUES ('$TIER','$E','GA',50,100);
        INSERT INTO exos_checkin_lists(id,event_id,name,allow_reentry) VALUES ('$LIST','$E','Pass-out',true);
        INSERT INTO exos_checkout_sessions(session_id,event_id,org_id,buyer_uid,quantity,amount_cents,status)
          VALUES ('cs_race_door','$E','$O','$HOLD',1,5000,'fulfilled');

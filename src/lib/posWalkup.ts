@@ -94,6 +94,8 @@ export interface WalkupOrder {
   /** A card sale's attempt (never card data: the PaymentIntent id and Stripe's decline code). */
   card?: { status: string; mode: 'reader' | 'sdk'; payment_intent: string | null; decline_code: string | null } | null;
   card_refund?: { status: string | null; amount_cents: number; error?: string } | null;
+  /** The seller skipped required checkout questions (mig 20261108110000; logged). */
+  questions_skipped?: boolean;
 }
 
 /** card_status / card_cancel: where a card sale is. */
@@ -131,6 +133,7 @@ const FRIENDLY: Record<string, string> = {
   'card-refund-in-app': 'A card sale is refunded to the card from the door app.',
   'not-card': "This sale isn't a card sale.",
   card_service: "The card service didn't answer: try again.",
+  'questions-required': 'Answer the required questions, or tap "Skip questions".',
 };
 
 /** A refusal as the door shows it. */
@@ -167,12 +170,15 @@ export function sellWalkup(input: {
   eventId: string; tierId: string; quantity: number; orderKey: string; compQuantity?: number;
   payment: 'cash' | 'comp'; drawerId?: string | null; buyerName?: string; buyerEmail?: string;
   answers?: unknown; compReason?: string;
+  /** The seller's explicit "skip questions": sell with required answers missing (logged). */
+  skipQuestions?: boolean;
 }): Promise<WalkupOrder> {
   return call<WalkupOrder>({
     action: 'mint_walkup', event_id: input.eventId, tier_id: input.tierId, quantity: input.quantity,
     order_key: input.orderKey, comp_quantity: input.compQuantity ?? 0, payment: input.payment,
     drawer_id: input.drawerId || undefined, buyer_name: input.buyerName?.trim() || undefined,
     buyer_email: input.buyerEmail?.trim() || undefined, answers: input.answers, comp_reason: input.compReason?.trim() || undefined,
+    ...(input.skipQuestions ? { skip_questions: true } : {}),
   });
 }
 
@@ -182,11 +188,13 @@ export function sellWalkup(input: {
 /** Start a card sale: the places are held for 5 minutes while the guest pays. */
 export function beginCardSale(input: {
   eventId: string; tierId: string; quantity: number; orderKey: string; buyerName?: string; buyerEmail?: string; answers?: unknown;
+  skipQuestions?: boolean;
 }): Promise<WalkupOrder> {
   return call<WalkupOrder>({
     action: 'mint_walkup', payment: 'card', event_id: input.eventId, tier_id: input.tierId, quantity: input.quantity,
     order_key: input.orderKey, comp_quantity: 0, buyer_name: input.buyerName?.trim() || undefined,
     buyer_email: input.buyerEmail?.trim() || undefined, answers: input.answers,
+    ...(input.skipQuestions ? { skip_questions: true } : {}),
   });
 }
 /** Send the pending sale's charge to a smart reader (server-driven). */

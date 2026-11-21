@@ -122,6 +122,19 @@
 // on every path: Stripe, PayPal, a full gift card, a guest's free claim. The
 // tickets take them as they're minted (a trigger), so nothing waits on the
 // browser. An event without questions changes nothing.
+
+// Group buy v2, "pay separately" (mig 20261108120000, docs/organizer-guide.md
+// "Group buys"): a body with group_seat (a seat link's token) buys exactly that
+// seat, one ticket of the group's type, as a normal order of the buyer's; a
+// body with group_cover (the group id, its host only) buys every unpaid seat.
+// Everything above applies unchanged (price, fees, codes, limits, questions,
+// guest proof) except the hold: instead of a new one, the checkout claims the
+// seat's hold (exos_group_claim; "seat already taken" for a second friend) and
+// attaches it to the order it records (exos_group_attach). A failure gives the
+// seat back to the group, not to sale (exos_group_unclaim). The order is
+// fulfilled only while the seat's hold is live and its own, so a payment after
+// the group's deadline fails and is auto-refunded. No seats, slots, add-ons,
+// gift cards or donations on a group seat; nothing here changes otherwise.
 import Stripe from "https://esm.sh/stripe@16?target=deno";
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { allInCents, effectiveTierPrice, voucherUnitPrice } from "../_shared/pricing.ts";
@@ -198,6 +211,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     in_app_browser?: string;
     // exos: checkout questions (mig 20261106110000): { order: {...}, tickets: [{...}] }.
     answers?: unknown;
+    // exos: group pay (mig 20261108120000): a seat link's token, or the group (host's cover).
+    group_seat?: string;
+    group_cover?: string;
   };
   // Streaming cap: a huge or endless body is never read in full.
   const raw = await readCapped(req, MAX_BODY_BYTES);
@@ -208,6 +224,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (!user && !guestEmail) return json({ error: "enter a valid email" }, 400);
   const buyerUid = user?.id ?? null;
   const buyerEmail = (user?.email ?? guestEmail ?? "").toLowerCase();
+  // exos: group pay — the seat (or the host's cover) decides the event, type and quantity
+  // (after the sign-in / guest-email checks: no database read for a stranger).
+  const groupIn = await groupCheckout(p, user?.id ?? null);
+  if ("error" in groupIn) return json(groupIn.error, groupIn.status);
+  const group = groupIn.ref;
+  // exos: group pay — a group seat's hold belongs to the group: a checkout that
+  // fails gives the seat back to the group (never to sale before the deadline).
+  // deno-lint-ignore no-explicit-any
+  const releaseHold = async (c: SupabaseClient<any, any, any>, id: string | null): Promise<void> => {
+    if (group && id) return await unclaimGroup(c, group, buyerUid, buyerEmail);
+    return await releaseCartHold(c, id);
+  };
   const { event_id, tier_id, success_url, cancel_url } = p;
   const embedded = p.ui_mode === "embedded";
   const usePayPal = p.processor === "paypal";
@@ -800,6 +828,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // timed ticket, are issued here for everyone (the free-claim RPC can't hold
   // seats or pick a slot).
   const freeGuest = lineItems.length === 0 && (!buyerUid || seated || timedSlot !== null);
+  // exos: group pay — a group seat is a paid order.
+  if (group && (lineItems.length === 0 || giftFull)) {
+    return json({ error: "a group seat is paid by card, Apple Pay, Google Pay or PayPal", reason: "group_free" }, 409);
+  }
   if (lineItems.length === 0 && !freeGuest) {
     return json({ error: "nothing to charge — use the free claim path" }, 400);
   }
@@ -885,12 +917,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // fulfillment. Held for 30 min; released here on failure, consumed at mint,
   // else swept by the exos_expire_holds cron.
   let holdId: string | null = null;
-  if (!bypassCapacity) {
+  if (!bypassCapacity || group) {
     // A hidden tier's hold re-checks the voucher (mig 20260925003000). Only
     // sent when needed, so public tiers work before that migration is applied.
     // A guest hold is also where the guest rate limits and the organizer's
     // guestCheckout switch are enforced (guests never bypass, see above).
-    const { data: hid, error: holdErr } = buyerUid
+    const { data: hid, error: holdErr } = group
+      // exos: group pay — the seat's own hold, claimed for this buyer.
+      ? await sb.rpc("exos_group_claim", {
+        p_token: group.seat, p_group_id: group.cover, p_buyer: buyerUid, p_email: buyerEmail,
+        p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
+      })
+      : buyerUid
       ? await sbUser.rpc("exos_create_hold", {
         p_event_id: event_id, p_tier_id: tier_id, p_quantity: quantity,
         ...(voucherUnlocksTier ? { p_voucher_code: voucherCode } : {}),
@@ -901,7 +939,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_voucher_code: voucherUnlocksTier ? voucherCode : null,
       });
     if (holdErr) {
-      return json({ error: holdErr.message || "not enough tickets available" }, 409);
+      return json({
+        error: holdErr.message || "not enough tickets available",
+        ...(group ? { reason: groupReason(holdErr.code) } : {}),
+      }, 409);
     }
     holdId = hid as string;
     // timed entry (mig 20261030150000): the hold also takes the slot places.
@@ -1104,6 +1145,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await releaseHold(sb, holdId);
       return json({ error: "could not record session" }, 500);
     }
+    // exos: group pay — the seat's hold now belongs to this order.
+    const pgErr = group ? await attachGroup(sb, sessionId, group) : null;
+    if (pgErr) {
+      await releaseHold(sb, holdId);
+      await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", sessionId).eq("status", "pending");
+      return json(pgErr, 409);
+    }
     // exos: checkout questions — on the order before the buyer approves.
     const pAnsErr = await recordAnswers(sb, sessionId, orderAnswers);
     if (pAnsErr) {
@@ -1228,6 +1276,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.error("exos-checkout: ledger insert failed", insErr);
     await releaseHold(sb, holdId);
     return json({ error: "could not record session" }, 500);
+  }
+  // exos: group pay — the seat's hold now belongs to this order; if the seat
+  // was taken meanwhile, nobody can pay on this page.
+  const sgErr = group ? await attachGroup(sb, session.id, group) : null;
+  if (sgErr) {
+    try { await stripe.checkout.sessions.expire(session.id); } catch (e) { console.error("exos-checkout: expire failed", e); }
+    await releaseHold(sb, holdId);
+    await sb.from("exos_checkout_sessions").update({ status: "expired" }).eq("session_id", session.id).eq("status", "pending");
+    return json(sgErr, 409);
   }
   // exos: checkout questions — on the pending order before the buyer pays, so a
   // buyer who pays and comes back later (or a late webhook) loses nothing.
@@ -1393,11 +1450,67 @@ async function recordAnswers(
   return error.code === "22023" ? String(error.message ?? "check your answers") : "could not save your answers, try again";
 }
 
+// exos: group pay (mig 20261108120000). A body's group_seat / group_cover,
+// checked and resolved to the group's event, type and quantity (written into
+// the body, so everything after prices exactly that). ref null: not a group order.
+type GroupRef = { seat: string | null; cover: string | null };
+const GROUP_REASONS: Record<string, string> = {
+  XG404: "group_link", XG403: "group_host", XG410: "group_closed", XG411: "group_paid",
+  XG409: "seat_taken", XG412: "group_changed", XG400: "group_link",
+};
+function groupReason(code: unknown): string {
+  return GROUP_REASONS[String(code ?? "")] ?? "group";
+}
+async function groupCheckout(
+  p: {
+    group_seat?: string; group_cover?: string; event_id?: string; tier_id?: string; quantity?: number;
+    seat_ids?: unknown; slot_id?: string; gift_card_code?: string; donation?: unknown; addons?: unknown[];
+  },
+  uid: string | null,
+): Promise<{ ref: GroupRef | null } | { error: Record<string, unknown>; status: number }> {
+  if (p.group_seat === undefined && p.group_cover === undefined) return { ref: null };
+  const seat = typeof p.group_seat === "string" && /^[0-9a-f]{32}$/.test(p.group_seat) ? p.group_seat : null;
+  const cover = typeof p.group_cover === "string" && /^[0-9a-f-]{36}$/i.test(p.group_cover) ? p.group_cover.toLowerCase() : null;
+  if ((seat === null) === (cover === null)) return { error: { error: "this group link isn't valid", reason: "group_link" }, status: 400 };
+  if (cover && !uid) return { error: { error: "sign in to cover the rest", reason: "group_host" }, status: 401 };
+  if (p.seat_ids !== undefined || p.slot_id || p.gift_card_code || p.donation || (Array.isArray(p.addons) && p.addons.length > 0)) {
+    return { error: { error: "a group seat is just the ticket: no seats, add-ons, gift cards or donations" }, status: 400 };
+  }
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+  const { data, error } = await sb.rpc("exos_group_checkout_ctx", { p_token: seat, p_group_id: cover, p_buyer: uid });
+  const ctx = data as { event_id?: string; tier_id?: string; quantity?: number } | null;
+  if (error || !ctx?.event_id || !ctx.tier_id || !ctx.quantity) {
+    return { error: { error: error?.message || "this group link isn't valid", reason: groupReason(error?.code) }, status: 409 };
+  }
+  p.event_id = ctx.event_id;
+  p.tier_id = ctx.tier_id;
+  p.quantity = ctx.quantity;
+  return { ref: { seat, cover } };
+}
+// The order just recorded takes the claimed seat(s)' holds; an error body if
+// the seat was taken meanwhile.
+// deno-lint-ignore no-explicit-any
+async function attachGroup(sb: SupabaseClient<any, any, any>, sessionId: string, g: GroupRef): Promise<Record<string, unknown> | null> {
+  const { error } = await sb.rpc("exos_group_attach", { p_session_id: sessionId, p_token: g.seat, p_group_id: g.cover });
+  if (!error) return null;
+  console.error("exos-checkout: group attach failed", error.message);
+  return { error: error.message || "seat already taken", reason: groupReason(error.code) };
+}
+// deno-lint-ignore no-explicit-any
+async function unclaimGroup(sb: SupabaseClient<any, any, any>, g: GroupRef, uid: string | null, email: string): Promise<void> {
+  try {
+    await sb.rpc("exos_group_unclaim", { p_token: g.seat, p_group_id: g.cover, p_buyer: uid, p_email: email || null });
+  } catch (e) {
+    console.error("exos-checkout: group unclaim failed (non-fatal)", e);
+  }
+}
+
 // Best-effort release of a reservation when checkout can't complete (Stripe
 // error, ledger insert failure). Never throws — a stuck hold self-expires via
-// the exos_expire_holds cron regardless.
+// the exos_expire_holds cron regardless. (A group seat's checkout calls
+// unclaimGroup instead: see the handler's releaseHold.)
 // deno-lint-ignore no-explicit-any
-async function releaseHold(sb: SupabaseClient<any, any, any>, holdId: string | null): Promise<void> {
+async function releaseCartHold(sb: SupabaseClient<any, any, any>, holdId: string | null): Promise<void> {
   if (!holdId) return;
   try {
     await sb.from("exos_cart_holds")

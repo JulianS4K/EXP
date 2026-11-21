@@ -125,7 +125,7 @@ export default function WaitlistCTA({ eventId, tierId, defaultEmail, defaultName
         className="w-full bg-black border-2 border-white/15 focus:border-brand-primary outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 px-3 py-2 text-sm font-bold"
       />
       <div className="flex items-center space-x-3">
-        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-white/40">{t('waitlist.qty')}</label>
+        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-white/60">{t('waitlist.qty')}</label>
         <input
           type="number"
           min={1}

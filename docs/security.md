@@ -78,6 +78,7 @@ client EXECUTE removed; **Fixed** = body patched in 20260929080000.
 | `exos_public_event_questions` (mig 20261106110000) | OK (anon + authenticated) | The checkout questions of a **published** event, as its event page asks them: label, help text, kind, options, required, per order / per ticket, ticket types and limits, plus each table ticket type's party size. Never hidden or archived questions, answer counts or answers; a draft answers an empty list unless the caller can edit the event (the builder's preview). In the H3 allowlist. Answers (`exos_question_answers`) have no anon access: RLS lets owner / manager / finance read the org's, the buyer their own (`buyer_uid`), and door staff of the event (`exos_can_door_event`) per-ticket answers only; writes go through `exos_record_checkout_answers` (service role), `exos_claim_free_tickets_answered` (the signed-in claimer), `exos_rsvp_record_answers` (service role) and `exos_door_set_ticket_answers` (door staff). The cores (`_exos_validate_answers*`, `_exos_record_answers`, `_exos_question_*`, `_exos_answers_for`, `_exos_event_answer_rows`) are service role only. Security review 2026-11-05: in the partner API a tickets:read-only credential gets per-ticket answers only (order answers need the credential's orders:read scope; a user's or key creator's role never stands in for it; `_exos_answers_for(ids, p_include_order)`); the mint trigger attaches answers only to the order's buyer's tickets (or tickets parked on the org owner for a buyerless order or that buyer's own session), and the free claim / checkout refuse an order ref another buyer's answers hold; validation errors name only the validated event's questions and never an unknown one |
 | `exos_ticket_link_view` (mig 20261031130000) | OK | A partner ticket's live link: the 256-bit key (`base64url(HMAC-SHA256(barcode_secret, 'ticket-link:<ticket>:<owner>'))`, from the URL fragment) is recomputed and compared; a wrong key and an unknown ticket give the same `{ ok: false }`. Answers the event's name, time and venue, the ticket type, attendee name, state and the current 30-second door code (signed in SQL with the day key; the secret never leaves the database). Read-only; a reissue or transfer kills the link |
 | `exos_ticket_link_location` (mig 20261105130000) | OK | The same 256-bit link key as `exos_ticket_link_view` (recomputed and compared; a wrong key and an unknown ticket give `{ ok: false }`). Answers that ticket's event location as the public sees it (mode, area, reveal time), plus a `secret_location` event's exact address only once its reveal time has passed and only for an active or used ticket. Read-only. docs/promoter-events.md |
+| `exos_group_seat_view` (mig 20261108120000) | OK (anon + authenticated; 128-bit link token) | A group-buy seat's page ("pay separately"). The token (32 hex, `gen_random_bytes(16)`) is format-checked; a malformed or unknown one answers NULL. Answers that seat's number and state, the group's size, deadline and paid / open counts, the event (published only: name, start, venue, image, currency) and the ticket type id. Never another seat's link or state, who is paying (no names, emails or ids), or the host; `group_id` only to the host. Paying goes through `exos-checkout`, which claims and attaches the seat with service-role calls (below). In the H3 allowlist |
 
 ### Callable by authenticated
 
@@ -134,6 +135,8 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_paypal_capture_gate`, `exos_paypal_record_capture`, `exos_record_paypal_remittance` (mig 20261031220000) | Service role | `exos-paypal` / `exos-checkout` only. The capture lands on the session found by its PayPal order id (never a caller-supplied session or org); ids, status and amount are format-checked; a capture whose amount or currency differs from the order is never fulfilled and is flagged for refund. `exos_record_payment` / `exos_record_refund` now tag the row with the session's processor (signatures and grants unchanged) |
 | `exos_org_payment_methods`, `exos_paypal_org_remittances`, `exos_paypal_order_owed`, `exos_paypal_org_balances` (mig 20261031220000) | OK | Payment-method switches: owner / manager write, finance reads (RLS). Owed / balances are `security_invoker` views over RLS tables, filtered to owner / manager / finance; hand payouts are service-role writes. `exos_public_payment_methods` (anon) is a published-event-only boolean |
 | `exos_bulk_create_transfers`, `exos_split_save`, `exos_split_get`, `exos_split_mark_paid`, `exos_split_nudged` (mig 20261031220000) | Signed in only | Split with friends. The caller must be the order's buyer (`buyer_uid = auth.uid()`) or the split's host; each transfer goes through `exos_create_transfer` (owner, active, not in transfer) and the bulk call is all or nothing (at most 50). Share amounts can't exceed what the order cost. The claim key is returned only to the sender, as `exos_transfer_claim_key` does. Split rows are the host's only (not org staff's: friends' phone numbers are the host's contacts) |
+| `exos_group_buy_start`, `exos_group_buy_get`, `exos_group_buy_mine`, `exos_group_buy_cancel` (mig 20261108120000) | Signed in only | Group buy v2. Start: the caller is the host; each of the N seats is a one-seat hold through `exos_create_hold` (its confirmed-email, sales-window, capacity, shared-capacity, house-cap and per-person checks, as the caller), ending at the 30-minute deadline; 2 to 10 seats and at most the event's maxPerOrder; public, paid, general-admission types only; one open group per host per event and 10 starts per host per hour (advisory lock per host). Get / cancel: the group's host only (42501 otherwise, so ids can't be probed); mine lists the caller's own. The host sees seat states and links, never who is paying. RLS: groups readable by the host and the org's owner / manager / finance; seat rows (tokens, the claimant's email) by platform admins only; no client writes |
+| `exos_group_checkout_ctx`, `exos_group_claim`, `exos_group_attach`, `exos_group_unclaim` (mig 20261108120000) | Service role | `exos-checkout` only. The claim takes the seat for the paying buyer at the point a checkout takes its hold (first claimant wins; the cover is the host's only); the attach links the seat's hold to the order just recorded and requires the same buyer, a live hold and the group's org / event / type / quantity; the unclaim gives a failed checkout's seat back to the group (only the claimant's own). `exos_fulfill_checkout` fulfils a group order only while each of its seats' holds is active, unexpired and attached to it (locked), so a payment after the deadline, after the host covered the seat or on an abandoned earlier checkout fails and is auto-refunded. The guard trigger on `exos_cart_holds` keeps a group hold at or before the deadline and ignores any release but the group's own before it |
 | `exos_event_from_template`, `exos_event_template_from_event`, `exos_event_delete`, `exos_rental_invoice_*` (create / update / issue / set_status / delete / prefix_set), `exos_inbound_set_status`, `exos_inbound_create_hold` (mig 20261102130000) | Signed in only | Each finds the row's org and checks the caller's role there with `_exos_fin_staff` (platform admins pass): templates to events, delete, holds: owner / manager; rental invoices: owner / manager / finance; reviewing submissions: owner / manager / content. 42501 for a row that isn't the caller's org, so ids can't be probed. Their `_exos_*` cores take the org explicitly and are service-role only (exos-api). Rental invoice numbers and totals are written only here: the table has no client INSERT / UPDATE, the trigger refuses a number set outside the issue, freezes issued invoices and refuses deleting one |
 | `exos_reconciliation_issues`, `exos_stripe_balance_txns`, `exos_reconciliation_runs` (tables, mig 20261001101000) | OK | Issues: RLS SELECT for platform admins and the org's owner / finance; org-less issues (a Stripe charge Exos has no row for) are admin only; no client writes. The Stripe snapshot and the runs: RLS on, no `anon` / `authenticated` grants (service role only) |
 | `_exos_queue_dispute_mail`, `_exos_dispute_raw`, `_exos_jscalar` (mig 20261001101000) | Internal | No client grant. The mail helper never raises (a failure is a WARNING), so it can't fail the webhook |
@@ -258,6 +261,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_ticket_print`, `exos_order_print`, `exos_ticket_print_void` (mig 20261105120000) | OK | Printed tickets. Print: owner / manager of the tickets' (one) org, at most 50 tickets, 60 a minute per member. The print code is in the answer only; `exos_ticket_print_codes` keeps its SHA-256 (RLS owner / manager read, no client writes). Void: the ticket's holder or an owner / manager; anyone else gets `P0002` as for a missing ticket. `_exos_print_*`, `_exos_order_print_ids`, `_exos_api_print` are service role only |
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
+| `exos_journal_trial_balance`, `exos_sales_tax_report` (mig 20261108100000) | OK | Money journal reads, authenticated: owner / manager / finance of the passed org (`exos_has_org_role`), platform admins, or the service role (exos-api, scoped to the key's org); anyone else `42501`. Every row read is filtered by that org (and the event, when given, must be the org's). Counts and cents only: no buyer email, name or order holder. The writers (`exos_journal_post_*`, `_exos_journal_post`, `_exos_journal_sync`, `_exos_journal_backfill`) are service role only and run from triggers on the money tables |
 | `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
 | `exos_staff_clock_in`, `exos_staff_clock_out`, `exos_staff_shift_close`, `exos_staff_shift_report` (mig 20261105120000) | OK | Clock in / out: the caller only, as an active member of the org (the role is kept on the shift). Close a forgotten shift (with a reason) and the report: owner / manager. `exos_staff_shifts`: RLS own rows for members, all for owner / manager, no client writes |
 | `exos_event_in_app_report` (mig 20261105140000) | OK | Checkouts started / paid / tickets / gross per in-app browser (Instagram, Facebook, ...) and per escape source, for one event: owner / manager / finance of the event's org (`exos_has_org_role`, event looked up first; an unknown event and a refused caller are the same 42501). Counts and money only, no buyers. No anon grant. `_exos_in_app_browser_from_ua` (pure) and the insert trigger `_exos_tg_checkout_in_app_browser` (invoker, reads only NEW) have no client grant; the new `exos_checkout_sessions.in_app_browser` column is read under the existing `exos_checkout_sel` RLS (the buyer and the org's owner / manager / finance) |
@@ -495,6 +499,84 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   event's questions; a parent id from another event or org is refused
   without echoing its label. Hidden answers are dropped server-side
   (`_exos_validate_answers_core`, markers `exos: conditional questions 1..4`).
+
+### Money journal and $0 orders (mig 20261108100000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **The journal is append-only and balanced.** `exos_journal_entries` /
+  `exos_journal_lines` refuse UPDATE, DELETE and TRUNCATE in a trigger, for
+  the owner and the service role too (no foreign keys, so no cascade either).
+  Clients read through RLS (owner / manager / finance of the org) and the
+  security-invoker view `exos_journal_rows`; nobody writes from a client or
+  with the service role's table grant. The only writer is
+  `_exos_journal_post` (definer, service role), which refuses an entry whose
+  lines don't sum to zero before inserting it; a deferred constraint trigger
+  checks every entry again at commit (lines balance, match the entry total,
+  and belong to the entry's org). Postings are idempotent on
+  (source_table, source_id, kind) and serialized per source with an
+  advisory lock (`tests/exos/race_money_journal.sh`). A posting failure in a
+  source trigger is a WARNING: it never undoes a sale, and the backfill
+  posts it later.
+- **$0 orders hold no secrets.** `_exos_tg_ticket_zero_order` (definer, no
+  client grant) records an `exos_checkout_sessions` row (`free_kind`,
+  `amount_cents = 0`, CHECK) for tickets minted without an order. The buyer
+  is the ticket's holder; a comp parked on a staff member (no account yet)
+  is recorded as the recipient's email (guest), never the staff member's
+  account, so the staff member can't read it as their own order. It issues
+  no invoice and moves no money.
+
+### DICE leftovers (mig 20261108110000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **POST /v1/orders/:id/adjustments** (`finance:write`, an organization API
+  key only: personal and OAuth tokens never write here). The scope gates
+  the route; the role is checked in SQL: `_exos_api_fee_adjustment`
+  (service role) runs `_exos_api_key_actor(org, key, owner / manager /
+  finance)` first, the dashboard's `exos_fee_adjustment_record` rule, so a
+  key whose creator lost the role, or a revoked key, is 403. Then the
+  existing core `_exos_fee_adjustment_add`: the order is looked up in the
+  key's org only (another org's order: 404 "order not found", nothing
+  echoed), integer cents, a note, never below zero, under the order's row
+  lock. An idempotency key is required (header or body); the unique
+  `(org_id, idempotency_key)` index makes a resend one row
+  (`tests/exos/race_dice_leftovers.sh` race 1). It moves no money.
+- **Walk-up questions.** The skip is an explicit argument of the 13-argument
+  `exos_pos_walkup_sell` (authenticated; the same role, rate limit and
+  idempotency checks as the 12-argument one, which it calls) and of the
+  service-role `_exos_pos_walkup_begin_card` overload. It reaches the begin
+  as a transaction-local setting (`exos.pos_skip_questions`) that only these
+  wrappers set and clear; PostgREST can't set it from a request. The skip
+  log `exos_pos_question_skips` has RLS (owner / manager / finance, door
+  staff of the event) and no client write grant.
+- **Undo an add-on scan.** `exos_undo_addon_check_in` (authenticated): owner
+  / manager / scanner of the pass's org (42501 otherwise, before anything is
+  read back), the event in the request, the per-event scanner scope; then an
+  owner / manager any time (every scan of the pass up to the undo goes), or
+  the scanner who made the pass's last entry, within 10 minutes of it, and
+  only that one scan goes (the gate and the delete cover the same row). The
+  scanner's window is measured on the server clock: an online call's undo
+  time is the server's whatever was sent, and a replayed offline undo must
+  also reach the server within 10 minutes + 1 hour (`v_grace`) of the scan,
+  so a back-dated `p_undone_at` can't stretch it. A reason is required. The
+  removed scans are kept in `exos_addon_pass_undos` (RLS as the skip log; no
+  client writes). The offline merge passes a client ref (unique: one undo
+  per ref; a ref of another pass is refused) and the time it was done (at
+  most 24 hours ago, never ahead), which only orders the undo against the
+  scans: scans after it stand.
+- **Add-on wallet codes.** `exos_wallet_addon_pass` (authenticated) answers
+  the pass's holder only (42501 for anyone else, the pass unnamed), never
+  for a voided pass, and returns the derived Apple code and Google TOTP key,
+  never `barcode_secret` (the holder can already read the secret through
+  `exos_my_addon_passes`). The door takes the codes in
+  `_exos_check_in_addon_pass` (marker `exos: addon wallet codes`): the live
+  holder and `exos_addon_passes.wallet_epoch` are checked before the MAC /
+  TOTP, and a new holder rotates the secret, which kills every earlier code.
+  Door phones get only the Apple code's SHA-256 and the Google TOTP key
+  (`exos_event_addon_passes`, marker `exos: addon wallet keys`), as for
+  tickets. Apple add-on passes are static (no web service): the phone keeps
+  showing a refunded pass's code, which the door refuses.
 
 ### Search path
 ### Search path

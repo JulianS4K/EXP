@@ -178,7 +178,11 @@ BEGIN
        'exos_api_public',
        -- checkout questions (mig 20261106110000): a published event's questions
        -- (labels, options, rules; never hidden / archived ones or answers)
-       'exos_public_event_questions');
+       'exos_public_event_questions',
+       -- claude/exos-group-pay: one group-buy seat by its 128-bit link token:
+       -- the event, the deadline, this seat's state and paid / open counts;
+       -- no people, emails or other seats' links (mig 20261108120000)
+       'exos_group_seat_view');
   ASSERT extra IS NULL, 'H3: unexpected anon-callable definer functions: ' || extra;
   RAISE NOTICE 'OK  H3 anon surface is the intended set';
 END $$;

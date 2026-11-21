@@ -143,9 +143,9 @@ export default function TransferTicket() {
           </div>
 
           <div className="bg-[#111] border border-white/10 p-9 mb-8">
-            <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">sent to</p>
+            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">sent to</p>
             <p className="disp text-3xl tracking-tight leading-none mb-8 break-all">{completedReceiverEmail}</p>
-            <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-2">claim link</p>
+            <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-2">claim link</p>
             <div className="bg-black border border-white/10 p-5 flex items-center justify-between gap-3 mb-6">
               <code className="type text-[11px] text-white/70 break-all flex-1">{claimUrl}</code>
               <button
@@ -159,7 +159,7 @@ export default function TransferTicket() {
                 {linkCopied ? 'COPIED' : 'COPY'}
               </button>
             </div>
-            <p className="type text-[12px] text-white/45 leading-relaxed">
+            <p className="type text-[12px] text-white/60 leading-relaxed">
               We've also queued an email to {completedReceiverEmail} with this link. Send the link directly via text or any other app. They can claim it into any Exos account; whoever claims the link first gets the ticket, so only send it to them.
             </p>
           </div>
@@ -195,7 +195,7 @@ export default function TransferTicket() {
                 <img src={event?.image} alt="" className="xerox w-full h-full object-cover" />
              </div>
              <div>
-                <p className="type text-[10px] text-white/30 uppercase tracking-widest mb-1">ticket details</p>
+                <p className="type text-[10px] text-white/60 uppercase tracking-widest mb-1">ticket details</p>
                 <h2 className="disp text-3xl tracking-tight leading-none mb-2">{event?.title}</h2>
                 <p className="type text-[11px] text-brand-primary uppercase tracking-widest">tier: {ticket.tierName || 'GENERAL'}</p>
              </div>
@@ -203,12 +203,14 @@ export default function TransferTicket() {
 
           <form onSubmit={handleTransfer} className="space-y-8">
             <div className="space-y-3">
-              <label className="type text-[10px] text-white/30 uppercase tracking-widest ml-1">recipient email</label>
+              <label htmlFor="transfer-email" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">recipient email</label>
               <div className="relative">
-                <UserPlus className="absolute left-5 top-1/2 -translate-y-1/2 text-brand-primary w-5 h-5" />
+                <UserPlus className="absolute left-5 top-1/2 -translate-y-1/2 text-brand-primary w-5 h-5" aria-hidden="true" />
                 <input
+                  id="transfer-email"
                   required
                   type="email"
+                  autoComplete="email"
                   placeholder="enter recipient email address"
                   className="type w-full bg-white/5 border border-white/10 py-5 pl-14 pr-6 text-white placeholder-white/35 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/60 focus:border-brand-primary transition-all text-base tracking-wide"
                   value={recipientEmail}
@@ -218,8 +220,9 @@ export default function TransferTicket() {
             </div>
 
             <div className="space-y-3">
-              <label className="type text-[10px] text-white/30 uppercase tracking-widest ml-1">recipient name (optional)</label>
+              <label htmlFor="transfer-name" className="type text-[10px] text-white/60 uppercase tracking-widest ml-1">recipient name (optional)</label>
               <input
+                id="transfer-name"
                 type="text"
                 maxLength={100}
                 autoComplete="off"
@@ -228,12 +231,12 @@ export default function TransferTicket() {
                 value={recipientName}
                 onChange={(e) => setRecipientName(e.target.value)}
               />
-              <p className="type text-[11px] text-white/35 ml-1">You'll get an email receipt now, and another when it's accepted, saying who claimed it.</p>
+              <p className="type text-[11px] text-white/60 ml-1">You'll get an email receipt now, and another when it's accepted, saying who claimed it.</p>
             </div>
 
             <div className="p-6 bg-black border border-white/5 flex items-start gap-4">
                <ShieldAlert className="w-6 h-6 text-brand-accent shrink-0" />
-               <p className="type text-[12px] text-white/45 leading-relaxed">Warning: Sending this ticket permanently removes it from your account. The recipient receives it instantly once you authorize. This cannot be undone.</p>
+               <p className="type text-[12px] text-white/60 leading-relaxed">Warning: Sending this ticket permanently removes it from your account. The recipient receives it instantly once you authorize. This cannot be undone.</p>
             </div>
 
             <button
