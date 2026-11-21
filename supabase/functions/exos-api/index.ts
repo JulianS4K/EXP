@@ -681,7 +681,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       // claude/exos-mcp-writes (mig 20261119130000): a user token's core writes
       // (USER_TOKEN_CORE_WRITES) go to exos_api_write with the token's hash.
       credKind: c.cred.kind, tokenHash: c.tokenHash, tokenOrg: c.switchOrg,
-      tokenResource: c.cred.kind === "oauth" ? c.cred.resource ?? null : null,
+      // The resource this call reached (exos-api's own canonical URL), never the
+      // token's claimed one: SQL holds the token's resource to it.
+      callerResource: exosResources(Deno.env.get("SUPABASE_URL") ?? "").api,
     });
   }
   // Membership products, memberships, imported attendees (mig 20261102100000).

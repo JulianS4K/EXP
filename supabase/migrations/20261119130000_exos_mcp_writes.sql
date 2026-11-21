@@ -750,7 +750,13 @@ AS $$
                'capacity', t.capacity, 'ticket_type', t.ticket_type, 'kind', t.kind, 'party_size', t.party_size,
                'visibility', t.visibility, 'sales_start', t.sales_start, 'sales_end', t.sales_end,
                'updated_at', t.updated_at) ORDER BY t.id)
-        FROM public.exos_ticket_tiers t WHERE t.event_id = e.id), '[]'::jsonb))::text, 'UTF8')), 'hex')
+        FROM public.exos_ticket_tiers t WHERE t.event_id = e.id), '[]'::jsonb),
+    -- What else the buyer pays (Applier #129 pass 2, info 2): add-ons and the
+    -- event's fee settings. Whole rows, so any column change is a new digest.
+    'add_ons', coalesce((SELECT jsonb_agg(to_jsonb(a) ORDER BY a.id)
+                           FROM public.exos_event_addons a WHERE a.event_id = e.id), '[]'::jsonb),
+    'fee_settings', (SELECT to_jsonb(f) FROM public.exos_event_fee_settings f WHERE f.event_id = e.id)
+    )::text, 'UTF8')), 'hex')
     FROM public.exos_events e WHERE e.id = p_event
 $$;
 REVOKE ALL ON FUNCTION public._exos_mcp_event_digest(uuid) FROM PUBLIC, anon, authenticated;

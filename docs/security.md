@@ -1156,8 +1156,23 @@ new for authenticated (the review page, below). Points to review:
   review page. For drafts it can at worst make the assistant ask for, and send, a confirm token for a draft the
   person didn't intend; the server instructions say to show every preview and send the token only after the person
   agreed, and to treat people's and organizers' text as content.
+- **The caller names its own resource.** exos-api passes its own canonical URL (`exosResources().api`) as
+  `p_token_resource`, and exos-mcp passes its own; neither ever passes the token's claimed resource, which would
+  turn the SQL check into "the token's resource is any Exos resource". `exos-api/tokenWrite_test.ts` pins it.
+- **The publish digest** covers the event row, every ticket type, the event's add-ons and its fee settings (whole
+  rows). Vouchers and check-in lists aren't in it: they don't change what the review page shows or what a buyer
+  is charged before a code is entered.
+- **Known limits, on purpose.** A pending review request can still be approved after its token or grant is
+  revoked: a signed-in owner or manager clicks it, so it's their act. Preview-step refusals (role, credential,
+  caps, the open-review limit) roll back and leave no `exos_mcp_writes` row; only confirm-step refusals are
+  logged. The 60-an-hour attempt cap is per credential, so an owner who mints more personal tokens gets more
+  attempts; the org's 20 done writes an hour still bounds what runs. Token writes over REST get the API's input
+  limits, the same as keys. A demotion committing in the same instant as a write isn't seen (as on the key path
+  and in the dashboard). `_exos_oauth_resources()` defaults to this project's URLs, so a branch or another
+  install without the `oauth_resources` setting fails closed.
 - Tests: `tests/exos/test_mcp_writes.sql` (M1-M17, X1-X3, P, R), `tests/exos/race_idem.sh`,
-  `src/lib/mcp/mcpWrites.test.ts`, `supabase/functions/_shared/mcp/discovery_test.ts`.
+  `src/lib/mcp/mcpWrites.test.ts`, `supabase/functions/_shared/mcp/discovery_test.ts`,
+  `supabase/functions/exos-api/tokenWrite_test.ts`.
 
 ### Search path
 
