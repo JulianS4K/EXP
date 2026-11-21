@@ -50,7 +50,7 @@
           "location": "query",
           "type": "string",
           "required": false,
-          "description": "Where the entry came from: checkout_sessions, order_refunds, fee_adjustments, disputes, marketplace_orders, org_payout_lines, promoter_commissions, pos_payments, pos_paid_outs, pos_reversals (card refunds at the door), gift_card_ledger, gift_card_redemptions, pos_drawer_sessions, org_instant_payouts or paypal_org_remittances.",
+          "description": "Where the entry came from: checkout_sessions, order_refunds, fee_adjustments, disputes, marketplace_orders, org_payout_lines, promoter_commissions, pos_payments, pos_paid_outs, pos_reversals (card refunds at the door), gift_card_ledger, gift_card_redemptions, pos_drawer_sessions, org_instant_payouts, paypal_org_remittances or stripe_org_payouts (Stripe's payouts from the connected account to the bank).",
           "example": "order_refunds"
         },
         {

@@ -177,6 +177,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_claim_invite` | OK | UUIDv4 invite token, expiry, verified email; never demotes an owner. With the org's `invite_approval` on (mig 20261104200000) it only requests: the membership waits disabled, or an existing member's role waits, until approved |
 | `exos_join_waitlist`, `exos_attach_referral`, `exos_my_referral_code`, `exos_my_referral_progress`, `exos_my_referral_stats`, `exos_redeem_referral_reward` | OK | Self (`auth.uid()`); the waitlist uses the session's verified email, not a passed one |
 | `exos_set_ticket_attendee`, `exos_set_ticket_access_needs`, `exos_wallet_issue_pass`, `exos_wallet_reissue` | OK | Ticket owner only |
+| `exos_wallet_addon_pass`, `exos_wallet_addon_reissue` (migs 20261108110000, 20261111140000) | OK | Add-on pass holder only; the reissue 5 a day per holder |
 | `exos_calendar_feed_token_create`, `_revoke`, `_status`, `exos_set_marketing_emails`, `exos_mark_notifications_read`, `exos_follow_org`, `exos_unfollow_org`, `exos_delete_my_account` | OK | Self-service on the caller's own rows. Account deletion touches rows keyed by the account's email (transfers' `receiver_email`, promoter email, unclaimed org invites, mail, waitlist) only when `auth.users.email_confirmed_at` is set (mig 20261102160000), so an unconfirmed sign-up with someone else's address can't erase or rewrite theirs; rows keyed by the caller's uid always go |
 | `exos_set_sales_count`, `exos_import_sales_counts`, `exos_delete_sales_count` (mig 20261030120000) | OK | Sales counts (tickets sold outside Exos): owner / manager / finance of the event's (or row's) org, or admin, looked up from the row (`_exos_sales_count_can`), never from an org id the caller passes. Everything goes through `_exos_sales_count_write` (internal), which validates, merges ticket types (50 at most), caps an event at 20 entries under a per-event advisory lock, and answers `unchanged` for a re-import of the same numbers. Counts and amounts only, no buyer data. Table `exos_sales_counts`: RLS SELECT for owner / manager / finance (and admin), no client INSERT / UPDATE / DELETE grant; `exos_sales_count_totals` is `security_invoker` |
 | `exos_api_sales_count_put`, `exos_api_sales_count_delete` (mig 20261030120000) | Service role | `exos-api` only (the first write routes, `finance:write`). The function resolves the org from the API key's hash and passes it; the RPC refuses an event or row of any other org (`P0002`, answered 404) |
@@ -265,6 +266,7 @@ Grouped by the check they rely on. All pin `search_path`.
 | `exos_pos_card_readers` and the card-at-the-door cores (mig 20261107130000) | OK | `exos_pos_card_readers`: door staff of the event (`_exos_pos_actor_role`), the org's active readers org-wide or set to that event, never another org's. Every other function (`_exos_pos_terminal_*`, `_exos_pos_walkup_begin_card`, `_exos_pos_card_*`, `_exos_pos_connected_account`) is service role only and takes the caller's id from `exos-pos` (JWT-verified): locations / readers owner or manager of the org; connection tokens door staff of the event; charge / cancel the seller or an owner / manager; each rate-limited before any Stripe call; a lookup outside the caller's event is `P0002`. The webhook path is signature-checked, ignores connected-account events, and is bound to the PaymentIntent recorded for the order its metadata names (`_exos_pos_card_complete` / `_fail` / `_capture_prepare` / `_refund_record` change nothing otherwise; a refund answer must also match the stored refund id), then gated on the order's state. A card tender (`exos.pos_card_ref`) and a card reversal (`exos.pos_card_reverse`) are possible only through these cores; the client RLS on `exos_pos_payments` still refuses card rows |
 | `exos_pos_walkup_sell`, `exos_pos_void_order`, `exos_pos_refund_order`, `exos_pos_paid_out`, `exos_pos_order_codes`, `exos_pos_order_email`, `exos_pos_walkup_catalog`, `exos_pos_recent_sales` (mig 20261107100000) | OK | Walk-up sales at the door, authenticated only. Every role check is in SQL against the event (`_exos_pos_actor_role` = `exos_can_door_event` for a given member): sell = door staff of the event; a comp = owner / manager (+ the comp budget); void = the seller or an owner / manager, 12 hours, before a scan; refund = owner / manager, an override after a scan (recorded); paid-out = owner / manager or the drawer's holder, never more than the drawer holds. Drawers are their holder's: cash in (a sale, a bar tender, a cash gift card), cash out (paid-out, void / refund) and closing need the member who opened it or an owner / manager naming it; nothing picks another member's drawer by itself. Handing tickets over (print codes, email) = the seller or an owner / manager, and only tickets the seller still holds (active, never checked in, `owner_id` = the seller) for everyone: no print codes for a claimed or scanned ticket (a live paper code would lock the buyer's app code out; buyers' tickets print only through `exos_ticket_print`); email gives an account the tickets only when its email is confirmed (else a claim link); email only ever moves tickets the seller still holds (active, never checked in, `owner_id` = the seller): never a claimed or scanned ticket, for anyone. An owner / manager may resend one sitting in the seller's own pending claim link (only transfers with `sender_id` = the seller are cancelled; the new link is from the seller). Rate limits per device (sales 30 a minute), per member (voids 20, paid-outs 20, emails 10, prints 60) before any lock or write. Idempotent on the client's order key; a key someone else used is `23505` with nothing about that sale. A card tender is refused (`0A000`) before anything is read; no card field exists. Another org's order or drawer is `P0002`. `_exos_pos_*` and `_exos_api_pos_*` are service role only (the API core takes the key and checks its creator is an owner or manager) |
 | `exos_journal_trial_balance`, `exos_sales_tax_report` (mig 20261108100000) | OK | Money journal reads, authenticated: owner / manager / finance of the passed org (`exos_has_org_role`), platform admins, or the service role (exos-api, scoped to the key's org); anyone else `42501`. Every row read is filtered by that org (and the event, when given, must be the org's). Counts and cents only: no buyer email, name or order holder. The writers (`exos_journal_post_*`, `_exos_journal_post`, `_exos_journal_sync`, `_exos_journal_backfill`) are service role only and run from triggers on the money tables |
+| `exos_stripe_org_payouts_record`, `exos_journal_post_stripe_org_payout`, `_exos_journal_gc_refund_fee` (mig 20261111130000) | Service role | `exos-reconcile-stripe` (cron secret) records each connected account's payouts as Stripe lists them (reads only at Stripe); the account must be the org's own connected account (`exos_org_secrets`), a payout id recorded for another org or account is never moved, fields are validated, at most 1,000 a call, status forward only. The posting functions run from triggers; `exos_sales_tax_report` (same readers as above) now reads its amounts from the org's journal lines |
 | `exos_membership_reserve`, `exos_membership_reservation_complete`, `exos_membership_reservation_cancel`, `exos_membership_set_capacity` (mig 20261105120000) | OK | Box-office memberships: owner / manager of the product's org (`_exos_membership_staff_org`). The capacity check and the reservation insert run under the product row lock. `exos_membership_reservations`: RLS owner / manager / finance read, no client writes. `exos_membership_capacity_left` and the `_exos_membership_*` cores are service role only |
 | `exos_staff_clock_in`, `exos_staff_clock_out`, `exos_staff_shift_close`, `exos_staff_shift_report` (mig 20261105120000) | OK | Clock in / out: the caller only, as an active member of the org (the role is kept on the shift). Close a forgotten shift (with a reason) and the report: owner / manager. `exos_staff_shifts`: RLS own rows for members, all for owner / manager, no client writes |
 | `exos_event_in_app_report` (mig 20261105140000) | OK | Checkouts started / paid / tickets / gross per in-app browser (Instagram, Facebook, ...) and per escape source, for one event: owner / manager / finance of the event's org (`exos_has_org_role`, event looked up first; an unknown event and a refused caller are the same 42501). Counts and money only, no buyers. No anon grant. `_exos_in_app_browser_from_ua` (pure) and the insert trigger `_exos_tg_checkout_in_app_browser` (invoker, reads only NEW) have no client grant; the new `exos_checkout_sessions.in_app_browser` column is read under the existing `exos_checkout_sel` RLS (the buyer and the org's owner / manager / finance) |
@@ -551,6 +553,34 @@ RLS as above). Points to review:
   commit; a failure there is a WARNING too, so it can't fail the commit of
   the sale or refund that wrote the ledger row.
 
+### Journal: Stripe payouts, the tax report, the owed gift card fee (mig 20261111130000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **Reads only at Stripe.** `exos-reconcile-stripe` (cron secret) now also
+  lists each connected account's payouts (`GET /v1/payouts` with the
+  `Stripe-Account` header, the platform's own Connect relationship). It never
+  creates, updates or cancels anything there (`src/lib/payouts/orgPayouts.test.ts`
+  checks the function makes list calls only). `EXOS_RECONCILE_PAYOUTS=off`
+  skips it.
+- **A payout lands only on its own org.** `exos_stripe_org_payouts_record`
+  (definer, service role only) refuses an account that isn't the org's
+  `exos_org_secrets.payments.connectedAccountId` (`42501`), skips a payout id
+  already recorded for another org or account, validates every field
+  (`po_` id, integer amount, currency, status allowlist), takes at most 1,000
+  rows a call and only moves a status forward. Paid / failed / canceled log
+  `payout.stripe_status` (service). `exos_stripe_org_payouts` is RLS on:
+  owner / finance of the org and platform admins read; no client writes.
+- **No double posting.** A payout posts once per payout id (synced, advisory
+  lock); an instant payout Exos sent posts only from
+  `exos_org_instant_payouts`, whichever row is written first
+  (`tests/exos/race_journal_payouts.sh`).
+- **The tax report reads the journal.** `exos_sales_tax_report` keeps its
+  reader check (owner / manager / finance, admins, service role) and its
+  org / event scoping; its amounts now come from the org's own journal
+  lines. The owed-fee hand-back (`_exos_journal_gc_refund_fee`, service
+  role) posts only for an order of the card's org.
+
 ### DICE leftovers (mig 20261108110000)
 
 Nothing new is granted to anon (H3 unchanged). Points to review:
@@ -602,6 +632,58 @@ Nothing new is granted to anon (H3 unchanged). Points to review:
   (`exos_event_addon_passes`, marker `exos: addon wallet keys`), as for
   tickets. Apple add-on passes are static (no web service): the phone keeps
   showing a refunded pass's code, which the door refuses.
+
+### Partner API leftovers (mig 20261111140000)
+
+Nothing new is granted to anon (H3 unchanged). Points to review:
+
+- **Reservation updates replace answers.** No new route: the partner's
+  `PUT /v1/public/confirms/:id/ticket_reservations/:token` and the
+  organizer's `PUT /v1/events/:id/organizer-reservations/:token` pass
+  `answers` to `_exos_partner_reservation_update` (service role), whose
+  `_exos_partner_res_lock` finds the reservation by token within the
+  partner's org and partner id (or the org's organizer channel): another
+  partner's, another org's or the other channel's reservation is P0002
+  (404), nothing named. `_exos_reservation_answers_replace` (service role
+  only) runs under that row lock, only while the reservation is active and
+  before `expires_at` with nothing attached (else EX409), checks the new set
+  with the reserve's rules first (partners: required ones required, hidden
+  ones refused; organizer: hidden allowed, never required; an unknown or
+  another event's question is refused without its label), then deletes the
+  reservation's own `po:<id>` answers and records the new set. Complete takes
+  the same lock, so a replacement can't race the mint into an unattached set
+  (`tests/exos/race_api_leftovers.sh`). One audit row per replacement:
+  counts only, never answer values.
+- **Partner order reads: only what the partner submitted.**
+  `_exos_partner_ticket_answers` and `_exos_partner_order_answers_json`
+  (service role only) are reached only through `_exos_partner_orders` /
+  `_exos_partner_order` with the partner's own id (the key resolves it;
+  `partner_id = p_partner_id` in SQL), so a partner sees its own completed
+  orders only, that reservation's tickets only, and never a question hidden
+  from checkout. Within that, an answer is returned only if the partner
+  itself submitted it: `exos_question_answers.partner_reservation_id` is set
+  by a BEFORE INSERT trigger (`_exos_tg_answer_partner_origin`) only for a
+  source `api` answer recorded for `po:<id>` of a partner reservation while
+  it is still active and before any ticket exists (reserve, comps, complete,
+  update), and a BEFORE UPDATE trigger only ever clears it, whenever an
+  answer's value, display, source, question or order is rewritten. The read
+  also requires source `api` and a row created at or before completion. So
+  answers added or rewritten later by the door, an organizer key or a later
+  holder (after a transfer or a claim) never reach the partner, even on a
+  question the partner answered (review 2026-11-09: the first version
+  returned every non-hidden answer on the tickets). Existing rows are
+  backfilled once, by the same rule. The organizer's read (no partner) is
+  unchanged: its answers still follow the credential's scopes.
+- **Add-on wallet reissue.** `exos_wallet_addon_reissue` (authenticated)
+  checks `auth.uid()`, takes a per-holder advisory lock, then answers the
+  pass's holder only (42501 for anyone else, the pass unnamed), and counts
+  the holder's reissues in the last 24 hours (5) before it changes anything;
+  exos-wallet checks the wallet's settings first and builds nothing until
+  the RPC has passed. It returns the derived codes, never `barcode_secret`.
+  The bumped `wallet_epoch` makes `_exos_addon_wallet_check` refuse every
+  earlier wallet code, online and on the offline replay.
+  `exos_addon_wallet_reissues`: RLS (the holder, owner / manager of the org),
+  SELECT only for clients, no sequence.
 
 ### Org audit log (mig 20261109100000)
 

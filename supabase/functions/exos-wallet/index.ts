@@ -14,6 +14,12 @@
 //        of one add-on unit with its own entry code (exos_wallet_addon_pass, mig
 //        20261108110000): the holder's own pass only; a pass per unit, since
 //        Apple allows one barcode per pass (_shared/wallet/addonPass.ts)
+//   POST /exos-wallet/addon-reissue { addon_pass_id, kind? } -> a new epoch for
+//        the add-on's wallet codes (every earlier one is refused at the door),
+//        then the fresh pass as /addon-pass answers it for that kind, or
+//        { ok, code_epoch, reissues_left } without a kind. The holder only, 5 a
+//        day per holder (exos_wallet_addon_reissue, mig 20261111140000): 429
+//        rate-limited, 409 voided / no-pass
 // Link holder (no account; the ticket's signed live link, mig 20261031130000):
 //   POST /exos-wallet/link-pass { ticket_id, link_key, kind } -> as /pass; the
 //        pass is the ticket owner's, checked in SQL by exos_ticket_link_wallet_issue
@@ -319,7 +325,7 @@ async function seasonPass(req: Request): Promise<Response> {
 
 // ── Holder: an add-on's entry code as a pass of its own ─────────────────
 
-async function addonPass(req: Request): Promise<Response> {
+async function addonPass(req: Request, reissue = false): Promise<Response> {
   // deno-lint-ignore no-explicit-any
   let body: any;
   try {
@@ -330,22 +336,36 @@ async function addonPass(req: Request): Promise<Response> {
   const passId = typeof body?.addon_pass_id === "string" ? body.addon_pass_id : "";
   const kind = body?.kind;
   if (!UUID_RE.test(passId)) return json({ error: "addon_pass_id required" }, 400);
-  if (kind !== "apple" && kind !== "google") return json({ error: "kind must be apple or google" }, 400);
+  // A reissue may come without a kind (rotate only: the holder adds the new
+  // pass afterwards); every other call names its wallet.
+  const rotateOnly = reissue && (kind === undefined || kind === null);
+  if (!rotateOnly && kind !== "apple" && kind !== "google") return json({ error: "kind must be apple or google" }, 400);
+  // The wallet's settings are checked before a reissue moves the epoch, so a
+  // 503 never leaves the holder with a dead code and no new pass.
   const a = kind === "apple" ? await apple() : null;
   const g = kind === "google" ? await google() : null;
-  if (!a && !g) return notConfigured();
+  if (!rotateOnly && !a && !g) return notConfigured();
 
   const sbUser = userClient(req);
   const { data: { user } } = await sbUser.auth.getUser();
   if (!user) return json({ error: "unauthorized" }, 401);
-  // The holder check is in SQL (42501 for anyone else, the pass unnamed).
-  const { data, error } = await sbUser.rpc("exos_wallet_addon_pass", { p_pass_id: passId });
+  // The holder check (42501 for anyone else, the pass unnamed) and, for a
+  // reissue, the daily limit are in SQL, before anything is built or stored.
+  const fn = reissue ? "exos_wallet_addon_reissue" : "exos_wallet_addon_pass";
+  const { data, error } = await sbUser.rpc(fn, { p_pass_id: passId });
   if (error) {
     if (error.code === "42501") return json({ error: "not your add-on" }, 403);
-    await reportError(FN, error, { phase: "addon-pass" });
-    return json({ error: "could not issue the pass" }, 500);
+    await reportError(FN, error, { phase: reissue ? "addon-reissue" : "addon-pass" });
+    return json({ error: reissue ? "could not reissue" : "could not issue the pass" }, 500);
   }
-  if (!data?.ok) return json({ error: data?.reason ?? "not-available" }, 409);
+  if (!data?.ok) {
+    if (data?.reason === "rate-limited") {
+      const retry = Math.max(1, Math.trunc(Number(data.retry_after_seconds) || 3600));
+      return json({ error: "rate-limited", limit: data.limit ?? null, retry_after_seconds: retry }, 429, { "Retry-After": String(retry) });
+    }
+    return json({ error: data?.reason ?? "not-available" }, 409);
+  }
+  if (rotateOnly) return json({ ok: true, code_epoch: data.code_epoch, reissues_left: data.reissues_left });
   const p = data.payload as AddonWalletPayload;
   try {
     if (a) {
@@ -462,6 +482,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return await seasonPass(req);
       case "addon-pass":
         return await addonPass(req);
+      case "addon-reissue":
+        return await addonPass(req, true);
       case "push":
         return await push(req);
       case "not-found":

@@ -1432,7 +1432,9 @@ async function handle(route: ApiRoute, c: Ctx): Promise<unknown | Response> {
       const token = await ownReservation(c, null);
       const r = await rpc(sb, "_exos_partner_reservation_update", {
         p_org_id: orgId, p_partner_id: null, p_token: token,
-        p_attrs: reservationAttrs(unwrapParams(c.body, "ticket_reservation")),
+        // exos: reservation answers update — replaced while open, never required (mig 20261111140000).
+        p_attrs: withAnswers(reservationAttrs(unwrapParams(c.body, "ticket_reservation")),
+          reservationAnswersParam(c.body, "ticket_reservation")),
       }) as Record<string, unknown>;
       if (r?.status === "expired") throw new ApiError(410, "this reservation expired; reserve again", { reason: "expired" });
       return { data: r };
@@ -2429,7 +2431,9 @@ async function partnerHandle(
     case "public-update-reservation": {
       const token = await partnerReservation(sb, p, eventId(), params.token);
       const r = await rpc(sb, "_exos_partner_reservation_update", {
-        p_org_id: org, p_partner_id: p.id, p_token: token, p_attrs: reservationAttrs(unwrapParams(body, "ticket_reservation")),
+        p_org_id: org, p_partner_id: p.id, p_token: token,
+        // exos: reservation answers update — replaced while open, required ones required (mig 20261111140000).
+        p_attrs: withAnswers(reservationAttrs(unwrapParams(body, "ticket_reservation")), reservationAnswersParam(body, "ticket_reservation")),
       }) as Record<string, unknown>;
       if (r?.status === "expired") throw new ApiError(410, "This reservation expired; reserve again.", { reason: "expired" });
       return r;

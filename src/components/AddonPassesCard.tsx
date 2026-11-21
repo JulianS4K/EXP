@@ -5,14 +5,15 @@
 // at the check-in list for that add-on. Hidden when there are none, offline,
 // or before the migration (exos_my_addon_passes missing). Each usable unit
 // gets "Add to … Wallet" (a pass of its own, mig 20261108110000) once the
-// wallet probe says that wallet is set up.
+// wallet probe says that wallet is set up, and "Reissue" once it is in a
+// wallet (a new wallet code; the old one stops working, mig 20261111140000).
 
 import { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { currentBucket, signAddonBarcode } from '../lib/barcode';
 import { secondsLeftInWindow, serverNow } from '../lib/serverClock';
 import { listMyAddonPasses, type AddonPass } from '../lib/addonPasses';
-import { addonWalletEligible } from '../lib/walletButtons';
+import { addonReissueEligible, addonWalletEligible } from '../lib/walletButtons';
 import { AddonWalletButtons, useAvailableWallets } from './WalletButtons';
 
 export default function AddonPassesCard({ eventId, ownerId }: { eventId: string; ownerId: string }) {
@@ -86,6 +87,7 @@ export default function AddonPassesCard({ eventId, ownerId }: { eventId: string;
                 kinds={wallets.kinds}
                 platform={wallets.platform}
                 onUnavailable={wallets.markUnavailable}
+                canReissue={addonReissueEligible(p)}
               />
             )}
           </li>

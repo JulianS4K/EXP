@@ -362,7 +362,8 @@ reversal vs. payout netting vs. invoicing the organizer).
 
 `exos-reconcile-stripe` (cron secret, **read-only at Stripe**; not deployed, not scheduled) compares the platform
 account's balance transactions with the Exos ledger. Pure diff: `supabase/functions/_shared/reconcile.ts`
-(`src/lib/reconcile.test.ts`); SQL: the same migration (tests R1–R2).
+(`src/lib/reconcile.test.ts`); SQL: the same migration (tests R1–R2). The same run also lists each connected
+account's payouts to its bank (reads only) for the money journal: `docs/journal.md` "Payouts to the bank".
 
 Each run:
 

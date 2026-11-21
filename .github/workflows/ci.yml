@@ -171,13 +171,13 @@ jobs:
       # Real parallel sessions against the run_p0 database. Only the race
       # scripts that hold one side's transaction open (pg_sleep) so the other
       # starts while it is uncommitted, and that passed 5 runs in a row
-      # locally: money journal, group pay, org audit, and the end-to-end races
-      # with the simulation's invariants. Each cleans up after itself. The
-      # other race_*.sh stay by hand (see their headers).
+      # locally: money journal, journal payouts, group pay, org audit, and the
+      # end-to-end races with the simulation's invariants. Each cleans up after
+      # itself. The other race_*.sh stay by hand (see their headers).
       - name: Exos race scripts (journal, group pay, audit, end-to-end)
         run: |
           set -e
-          for r in race_money_journal race_group_pay race_org_audit race_full; do
+          for r in race_money_journal race_journal_payouts race_group_pay race_org_audit race_full; do
             echo "::group::$r"
             bash "tests/exos/$r.sh" exos_p0_test
             echo "::endgroup::"

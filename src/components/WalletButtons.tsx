@@ -33,6 +33,9 @@ import {
   fetchGoogleSaveUrl,
   markWalletUnavailable,
   probeWallet,
+  reissueAddonPassApple,
+  reissueAddonPassGoogleUrl,
+  reissueAddonPassOnly,
   WalletUnavailableError,
 } from '../lib/walletApi';
 import { androidOpenInBrowserUrl, currentInAppState, IN_APP_LABEL } from '../lib/inAppBrowser';
@@ -121,48 +124,109 @@ async function deliverPass(
  * browser Apple's button is left out: the ticket's "open in Safari" escape on
  * the same page covers it.
  */
-export function AddonWalletButtons({ passId, name, kinds, platform, onUnavailable }: {
+export function AddonWalletButtons({ passId, name, kinds, platform, onUnavailable, canReissue = false }: {
   passId: string;
   /** The add-on as the holder sees it ("VIP lounge · 1 of 2"): part of each button's name. */
   name: string;
   kinds: WalletKind[];
   platform: WalletPlatform;
   onUnavailable: (kind: WalletKind) => void;
+  /** The unit is in a wallet (addonReissueEligible): offer "Reissue" (mig 20261111140000). */
+  canReissue?: boolean;
 }) {
   const { toast } = useToast();
-  const [busy, setBusy] = useState<WalletKind | null>(null);
+  const [busy, setBusy] = useState<WalletKind | 'reissue' | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [inApp] = useState(currentInAppState);
   const shown = kinds.filter((k) => !(k === 'apple' && inApp.kind && platform === 'ios'));
   if (shown.length === 0) return null;
+  const fail = (kind: WalletKind | null, err: unknown) => {
+    if (err instanceof WalletUnavailableError && kind) {
+      onUnavailable(kind);
+      toast({ kind: 'warn', message: `${kind === 'apple' ? 'Apple' : 'Google'} Wallet isn't available right now.` });
+    } else {
+      toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create the wallet pass.' });
+    }
+  };
   const add = async (kind: WalletKind) => {
     setBusy(kind);
     try {
       await deliverPass(kind, platform, inApp.kind, () => fetchAddonPassApple(passId), () => fetchAddonPassGoogleUrl(passId),
         `exos-addon-${passId.slice(0, 8)}.pkpass`);
     } catch (err) {
-      if (err instanceof WalletUnavailableError) {
-        onUnavailable(kind);
-        toast({ kind: 'warn', message: `${kind === 'apple' ? 'Apple' : 'Google'} Wallet isn't available right now.` });
+      fail(kind, err);
+    } finally {
+      setBusy(null);
+    }
+  };
+  // "My pass leaked": a new code for this add-on; the old wallet code stops
+  // working at the door. One wallet on this device: the new pass goes straight
+  // to it. Both (a desktop): rotate only, then the holder adds it again.
+  const reissue = async () => {
+    setBusy('reissue');
+    const only = shown.length === 1 ? shown[0] : null;
+    try {
+      if (only) {
+        await deliverPass(only, platform, inApp.kind, () => reissueAddonPassApple(passId), () => reissueAddonPassGoogleUrl(passId),
+          `exos-addon-${passId.slice(0, 8)}.pkpass`);
+        toast({ kind: 'success', message: 'Reissued: the old wallet code no longer works.' });
       } else {
-        toast({ kind: 'error', message: err instanceof Error ? err.message : 'Could not create the wallet pass.' });
+        await reissueAddonPassOnly(passId);
+        toast({ kind: 'success', message: 'Reissued: the old wallet code no longer works. Add the new pass to your wallet.' });
       }
+      setConfirming(false);
+    } catch (err) {
+      fail(only, err);
     } finally {
       setBusy(null);
     }
   };
   return (
-    <div className="flex flex-wrap justify-center gap-2" data-testid="addon-wallet-buttons">
-      {shown.map((kind) => (
+    <div className="flex flex-col items-center gap-2">
+      <div className="flex flex-wrap justify-center gap-2" data-testid="addon-wallet-buttons">
+        {shown.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => void add(kind)}
+            disabled={busy !== null}
+            aria-label={`${LABEL[kind]}: ${name}`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-black text-white border border-white/30 hover:border-white font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary px-3 py-2 text-xs"
+          >
+            <Wallet className="w-3.5 h-3.5" aria-hidden="true" />
+            {busy === kind ? 'Preparing…' : LABEL[kind]}
+          </button>
+        ))}
+      </div>
+      {canReissue && (confirming ? (
+        <div className="flex flex-wrap items-center justify-center gap-2 text-[11px]" role="group" aria-label={`Reissue wallet pass: ${name}`}>
+          <span className="type text-white/70">The old wallet code for this add-on will stop working.</span>
+          <button
+            type="button"
+            onClick={() => void reissue()}
+            disabled={busy !== null}
+            className="type underline text-white hover:text-brand-primary disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+          >
+            {busy === 'reissue' ? 'Reissuing…' : 'Reissue now'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={busy !== null}
+            className="type underline text-white/60 hover:text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
         <button
-          key={kind}
           type="button"
-          onClick={() => void add(kind)}
+          onClick={() => setConfirming(true)}
           disabled={busy !== null}
-          aria-label={`${LABEL[kind]}: ${name}`}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-black text-white border border-white/30 hover:border-white font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary px-3 py-2 text-xs"
+          aria-label={`Reissue wallet pass: ${name}`}
+          className="type text-[11px] underline text-white/60 hover:text-white disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary"
         >
-          <Wallet className="w-3.5 h-3.5" aria-hidden="true" />
-          {busy === kind ? 'Preparing…' : LABEL[kind]}
+          Reissue
         </button>
       ))}
     </div>
