@@ -35,6 +35,8 @@ import TicketMatchedGroup from '../components/TicketMatchedGroup';
 import { useT } from '../context/LanguageContext';
 import TicketSeats from '../components/seating/TicketSeats';
 import TicketPrintedNotice from '../components/TicketPrintedNotice';
+import StaticTicketPdfButton from '../components/StaticTicketPdfButton';
+import { isStaticTicket, STATIC_CODE_NOTE, staticTicketCode } from '../lib/staticTickets';
 
 export default function TicketDetail() {
   const motionGate = useMotionGate();
@@ -165,8 +167,32 @@ export default function TicketDetail() {
   const td_id = tickets[currentIndex]?.id;
   const td_secret = tickets[currentIndex]?.barcodeSecret;
   const td_uid = user?.uid;
+  // Static-code tickets (mig 20261121153000) show one code that never
+  // changes: derived once, no 30-second refresh. The holder is the ticket's
+  // owner (this page only lists the viewer's own tickets).
+  const td_static = tickets[currentIndex]?.codeMode === 'static';
+  const td_owner = tickets[currentIndex]?.ownerId || td_uid;
   useEffect(() => {
-    if (!td_id || !td_uid) return undefined;
+    if (!td_id || !td_uid || !td_static) return undefined;
+    let cancelled = false;
+    void staticTicketCode({ id: td_id, ownerId: td_owner, barcodeSecret: td_secret })
+      .then((code) => {
+        if (cancelled) return;
+        setBarcode(code ?? '');
+        setCodeError(!code);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBarcode('');
+          setCodeError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [td_id, td_secret, td_uid, td_static, td_owner]);
+  useEffect(() => {
+    if (!td_id || !td_uid || td_static) return undefined;
     let cancelled = false;
     let lastBucket = -1;
 
@@ -225,7 +251,7 @@ export default function TicketDetail() {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [td_id, td_secret, td_uid]);
+  }, [td_id, td_secret, td_uid, td_static]);
 
   const nextTicket = () => {
     if (currentIndex < tickets.length - 1) {
@@ -255,7 +281,9 @@ export default function TicketDetail() {
   const currentTicket = tickets[currentIndex];
   // Gate the scannable entry QR to within 24h of the event — before that the
   // code is useless at the door and showing it early only invites screenshots.
-  const qrUnlocked = isWithinHoursBefore(event.date?.toDate?.(), 24);
+  // A static code is in the confirmation email's PDF already: no reason to hide it here.
+  const isStatic = isStaticTicket(currentTicket);
+  const qrUnlocked = isStatic || isWithinHoursBefore(event.date?.toDate?.(), 24);
   const handleInstagramStory = async () => {
     await shareEventToStory(
       {
@@ -327,7 +355,7 @@ export default function TicketDetail() {
                     <div className={`relative p-5 bg-white border-[3px] border-black transition-transform duration-500 flex flex-col items-center w-full max-w-[300px] ${currentTicket.status === 'used' || currentTicket.status === 'voided' || (currentTicket as any).pendingTransferId ? 'opacity-20 grayscale' : 'group-hover:scale-[1.02]'}`}>
                       {qrUnlocked ? (
                         barcode ? (
-                          <QRCodeSVG value={barcode} size={220} level="H" includeMargin={false} fgColor="#000000" role="img" aria-label="Entry QR code. Show it at the door." />
+                          <QRCodeSVG value={barcode} size={220} level={isStatic ? 'M' : 'H'} includeMargin={false} fgColor="#000000" role="img" aria-label="Entry QR code. Show it at the door." />
                         ) : (
                           <div className="w-[220px] h-[220px] flex flex-col items-center justify-center text-center px-4 bg-slate-50 border border-dashed border-black/20" role="status">
                             <p className="type text-[11px] uppercase tracking-widest text-black/60">
@@ -407,6 +435,14 @@ export default function TicketDetail() {
                              Cancel the transfer to use this ticket again
                           </p>
                        </div>
+                    ) : isStatic ? (
+                       // Static code: no countdown. The code text (it can be typed at the door) and what it means.
+                       barcode ? (
+                         <div className="mt-6 flex flex-col items-center text-center max-w-[300px]">
+                           <p className="type text-[10px] text-black break-all leading-snug" aria-label="Entry code">{barcode}</p>
+                           <p className="type text-[11px] text-black/60 mt-3 leading-relaxed">{STATIC_CODE_NOTE}</p>
+                         </div>
+                       ) : null
                     ) : qrUnlocked && (
                        // No countdown while the code itself is still locked.
                        <div className="mt-7 flex flex-col items-center">
@@ -418,6 +454,15 @@ export default function TicketDetail() {
                        </div>
                     )}
                  </div>
+
+                 {/* Static-code tickets: the same PDF the confirmation email carries. */}
+                 <StaticTicketPdfButton
+                   tickets={[currentTicket]}
+                   event={event}
+                   viewerId={user?.uid}
+                   holder={user?.displayName || null}
+                   className="mb-6 flex flex-col items-center"
+                 />
 
                  {tickets.length > 1 && (
                    <div className="flex justify-between items-center my-8 pb-8 border-b border-white/5">

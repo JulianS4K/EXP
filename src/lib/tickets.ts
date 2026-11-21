@@ -47,6 +47,8 @@ export function mapTicket(row: any): Ticket {
     status: row.status,
     barcodeValue: '',
     barcodeSecret: row.barcode_secret ?? undefined,
+    // Fixed at issuance (mig 20261121153000); absent on older databases = rotating.
+    codeMode: row.code_mode === 'static' ? 'static' : 'rotating',
     tierId: row.tier_id ?? undefined,
     tierName: row.tier_name ?? undefined,
     orderId: row.order_ref ?? undefined,
@@ -108,7 +110,7 @@ const TICKET_COLS =
   'id, event_id, org_id, tier_id, tier_name, buyer_id, owner_id, ' +
   'status, price_paid, order_ref, channel_source, promoter_id, ' +
   'pending_transfer_id, transfer_id, voided_at, voided_by, voided_reason, released_at, ' +
-  'check_in_at, last_reissue_at, created_at, updated_at, attendee_name';
+  'check_in_at, last_reissue_at, created_at, updated_at, attendee_name, code_mode';
 
 const TICKET_WITH_EVENT = `${TICKET_COLS}, event:exos_events(*)`;
 
@@ -286,7 +288,7 @@ export async function getTicketForScan(ticketId: string): Promise<ScanTicket | n
     doorKeys = parseDoorKeys(keys.data);
   } else if (missingFn(keys.error)) {
     const [row] = await withBarcodeSecrets([tRow]);
-    if (row.barcode_secret) doorKeys = await doorKeysFromSecret(ticketId, row.owner_id ?? '', row.barcode_secret, Date.now());
+    if (row.barcode_secret) doorKeys = await doorKeysFromSecret(ticketId, row.owner_id ?? '', row.barcode_secret, Date.now(), null, row.code_mode);
   } else {
     throw keys.error;
   }

@@ -129,10 +129,82 @@ offline. The upload (`exos_check_in_offline`) then re-verifies at the scan time 
 the live epoch, and a stale code comes back as a **conflict** in the scan report, the same
 as a ticket transferred after the roster download (test W10).
 
+## Static codes
+
+Mig `20261121153000`. Operator, 2026-11-21: free-tier events get a PDF ticket, not
+rotating barcodes. Each ticket's **code mode** is fixed when it is issued
+(`exos_tickets.code_mode`):
+
+| Mode | Code | Who gets it |
+|---|---|---|
+| `rotating` | `T-` (30 s HMAC, above), wallet `W-` | events over the free tier (the paid tier), and every ticket issued before the migration |
+| `static` | `S-{ticket}:{32 base32 characters}`, one code that never changes | events at or under the free-tier cutoff when the ticket is issued |
+
+The mode comes from the fee's own rule (`exos_event_is_free_tier`: `max(max capacity, sold)`
+at or under `exos_free_tier_max_capacity()`), counting the ticket being issued, in the
+BEFORE INSERT trigger `exos_tickets_code_mode` (`_exos_ticket_code_mode`). It never
+changes after (`exos_tickets_code_mode_lock`). **Growth:** when an event grows past the
+cutoff (a bigger cap, or sales past it), tickets issued from then on rotate and the earlier
+ones keep their static code; the door takes both, per ticket. An insert that asks for
+`static` keeps it (the generic "static-code" door mode, for marketplace-allocated PDF
+tickets); an insert that skips triggers gets the column default, `rotating`.
+
+**The code.** `S-{ticket}:` then the first 160 bits of
+`HMAC-SHA256(barcode_secret, "static:{ticket}:{owner}")`, RFC 4648 base32 (A-Z, 2-7, no
+padding): 71 characters, a QR and a printable string. `_exos_static_code` in SQL;
+`supabase/functions/_shared/staticCodes.ts` mirrors it (one vector pins both). Nothing new
+is stored: it is derived from the ticket's read-gated secret and its holder, like the
+wallet codes. The `S-` prefix and the two-part shape keep it apart from every other code:
+it never parses as a four-part `T-` / `A-` code, nor they as it (`src/lib/staticCodes.test.ts`).
+
+| Rule | How |
+|---|---|
+| Single use | `exos_check_in_ticket` (both overloads) takes an `S-` code through the same atomic `active → used` flip as every code: the first scan wins, a second gets the usual "already checked in" (`used`) answer |
+| Static tickets only | A rotating ticket's `S-` code is refused (`barcode-rejected`), so the paid tier keeps its anti-screenshot property. A static ticket still takes its `T-` code (an app that hasn't reloaded) |
+| Voided on transfer and refund | A transfer changes the owner and the claim rotates the secret: the old code is refused and the new holder has a new one. A started transfer refuses it (`in-transfer`), a refund voids the ticket (`voided`) |
+| Printed tickets | A live `P-` paper refuses the static code too (`printed`) |
+| Typed at the door | The printed string typed in counts as a verified scan, not an override |
+
+**Where it shows.** The holder's ticket page (no countdown, no 24-hour lock: the code is
+already in the email) with **Download PDF ticket**, and the same button on My Tickets; the
+PDF is drawn in the browser by `_shared/print/tickets.ts` (`staticTicketsPdf`). Apple and
+Google passes carry the `S-` code (`_exos_wallet_payload.static_code`: Apple `barcodes`,
+Google a plain `barcode` instead of the TOTP). The partner / RSVP ticket link page shows it
+too (`exos_ticket_link_view.code_mode`).
+
+**The PDF in the confirmation email.** When a `ticket-issued` mail is queued (any path:
+checkout, comps, issue to email, box office, partner, RSVP), the trigger
+`exos_mail_ticket_pdfs_link` links it to the recipient's static tickets issued in the last
+10 minutes that no mail carries yet (`exos_mail_ticket_pdfs`, at most 20, with their holder).
+`exos-mail-drain` asks `exos_mail_ticket_pdf_rows` (service role) for the ones still live
+with that holder (not in transfer, not printed, event not cancelled), draws one 4 × 8 in
+page per ticket (QR, code text, event, date, venue, holder, ticket type) and attaches it as
+`tickets.pdf`, with a line in the mail saying so (`_shared/staticTicketMail.ts`). If that
+read fails the mail goes without the PDF; the app still shows the code.
+
+**Offline doors.** The door keys carry `s`, the SHA-256 of the static code, for a
+static-mode ticket only (as `wa` / `p` for the Apple and print codes). A door phone checks
+an `S-` code with it and can't make one: a leaked roster gives hashes, never codes. Two
+phones that both admitted the same static code offline: the first upload wins, the second
+is a `used` conflict in the scan report.
+
+| Threat | Static (`S-`) |
+|---|---|
+| Screenshot / photocopy shared ahead of the event | first scan wins; the copy is refused `used` (why the paid tier rotates) |
+| After a transfer | dead (new owner and secret) |
+| After a refund / release | dead (voided) |
+| Same code at two doors at once | the ticket row lock: one entry (`tests/exos/race_static_codes.sh`, CI) |
+| Lost door phone | hashes only: can't mint |
+
+Tests: `tests/exos/test_static_codes.sql` (ST1-ST9), `tests/exos/race_static_codes.sh`
+(CI), `src/lib/staticCodes.test.ts`, `src/lib/staticTickets.test.ts`,
+`src/views/TicketDetail.static.test.tsx`, `supabase/functions/_shared/staticCodes_test.ts`
+(PDF + wallet, Deno).
+
 ## Printed tickets
 
-Mig `20261105120000`. Exos has no static, copyable barcode, so a printed ticket doesn't
-print the ticket's own code: it prints a **one-time print code**,
+Mig `20261105120000`. A rotating ticket has no static, copyable barcode (static-mode
+tickets do: "Static codes" above), so a printed ticket doesn't print the ticket's own code: it prints a **one-time print code**,
 `P-{ticket}:{22 random characters}` (128 random bits, base64url). The code is in the
 answer of the call that prints it and nowhere else: `exos_ticket_print_codes` keeps only
 its SHA-256.

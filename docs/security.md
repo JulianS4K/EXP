@@ -1204,6 +1204,34 @@ Exos adopted.
   `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
   `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
 
+### Static door codes (mig 20261121153000)
+
+Nothing new is callable by anon or authenticated (H3 unchanged). `_exos_base32`, `_exos_static_code`,
+`_exos_static_code_canon`, `_exos_static_code_check`, `_exos_ticket_code_mode` and `exos_mail_ticket_pdf_rows` are
+service role only; the two trigger functions have no client EXECUTE. `exos_tickets.code_mode` is readable by
+`authenticated` (column grant) and never writable by a client; the mode is locked after issuance.
+`exos_mail_ticket_pdfs` is RLS on with no client grants.
+
+- **The code is a door credential, not stored.** `S-{ticket}:{base32(HMAC-SHA256(barcode_secret,
+  'static:{ticket}:{owner}'))[160 bits]}`: whoever can read the ticket's secret (its holder and buyer through the
+  gated view, the server) can make it, exactly as they can make the rotating code. The `static:` prefix keeps the MAC
+  apart from every other one made with the secret.
+- **A leaked roster can't mint.** The door keys get `s`, its SHA-256, for static-mode tickets only; the roster never
+  carries the code or the secret (ST6).
+- **Paid tier keeps its property.** `_exos_static_code_check` refuses an `S-` code unless the ticket's `code_mode` is
+  `static`, the code names this ticket, and it is the current holder's (ST4). A static ticket still accepts `T-`.
+- **Single use** is the existing atomic status flip (ST4, `race_static_codes.sh` in CI); offline duplicates resolve on
+  upload (ST7). Transfer (new owner + rotated secret) and refund (voided) kill the code (ST5).
+- **Email.** The drain reads the codes through `exos_mail_ticket_pdf_rows` only for tickets linked when the mail was
+  queued and still held by the same holder; a transfer between queue and send drops the page (ST9). Codes are never
+  written to `exos_mail`.
+- **Patched bodies** (counted marker patches, check against prod first): `exos_check_in_ticket` (both),
+  `_exos_door_keys`, `_exos_wallet_payload`, `exos_ticket_link_view` (2), `exos_phone_rsvp_verify`,
+  `_exos_partner_reservation_complete`. `exos_ticket_link_view` now also answers `code_mode`, and the static code for
+  a static ticket (same key check as before).
+- Tests: `tests/exos/test_static_codes.sql` (ST1-ST9), `tests/exos/race_static_codes.sh`, `src/lib/staticCodes.test.ts`,
+  `supabase/functions/_shared/staticCodes_test.ts`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)
