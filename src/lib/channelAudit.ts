@@ -44,6 +44,8 @@ export const CHANNEL_LABEL: Record<string, string> = {
   allevents: 'AllEvents', linkedin: 'LinkedIn', google_events: 'Google events',
   // The ads phase (mig 20261121190500): dry runs only.
   meta_ads: 'Meta Ads', reddit_ads: 'Reddit Ads', reddit: 'Reddit', google_customer_match: 'Google Customer Match', x_ads: 'X Ads',
+  // The social posting / listing phase (mig 20261121203000): dry runs only.
+  instagram: 'Instagram', tiktok: 'TikTok', google_business: 'Google Business Profile',
 };
 
 /** What an ad step does, in words ("What we'd send" and the Boost preview). */
@@ -58,6 +60,16 @@ export const AD_STEP_LABEL: Record<string, string> = {
   'audience.add_users': 'Upload hashed people to the audience',
   'audience.add_members': 'Upload hashed people to the list',
   'conversion.send': 'Report a purchase',
+  // Social posts and listings (mig 20261121203000).
+  'post.container': 'Upload the post (a container)',
+  'post.publish': 'Publish the post',
+  'post.creator_info': 'Check what the account may post',
+  'post.init': 'Post (TikTok pulls the image)',
+  'post.local_post': 'Post the event on the Business Profile',
+  'event.create_draft': 'Create the event (draft)',
+  'event.publish': 'Publish the draft',
+  'event.allocation': 'Set the attendee limit',
+  'event.create_on_page': 'Create the event on the page',
 };
 export const stepLabel = (op: string): string => AD_STEP_LABEL[op] ?? op;
 export const channelLabel = (id: string): string => CHANNEL_LABEL[id] ?? id;

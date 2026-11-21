@@ -1284,6 +1284,33 @@ docs/marketing-conversions.md "Ads" has the platforms and the operator steps.
 - **OAuth 1.0a** (`_shared/oauth1.ts`): the X keys are only ever in the signed `Authorization`
   header, which GatedHttp redacts; every key is also in its `secrets`.
 
+### Social posting and listing, dry run only (mig 20261121203000)
+
+Nothing new is callable by anon (H3 unchanged), and nothing is sent to a platform (operator 2026-11-21:
+"For the APIs build and keep read only till build is complete"). Tests: `tests/exos/test_social_listings.sql`
+(SL1-SL4), `_shared/social/social_test.ts`, `src/components/PostListPanel.test.tsx`; docs/social.md
+"Posting and listing APIs" has the platforms and the operator steps.
+
+- **Every write behind GatedHttp.** The five adapters (`instagram`, `tiktok`, `meetup`, `linkedin`,
+  `google_business`) each list exactly their write paths (POST only: no DELETE, no PATCH, nothing
+  retried); anything else is refused. Meetup's one GraphQL path takes only its two pinned mutation
+  documents (`WriteRule.body`): a create only as a DRAFT, an edit only with `eventId`, `publishStatus:
+  PUBLISHED` or `rsvpSettings`; a delete, a cancel or any other query is refused. `exos-social` pins the
+  org's switch off (`SOCIAL_WRITES_PINNED_OFF`) and hands GatedHttp a fetch that refuses every call.
+  Placeholder ids (`planned_<kind>`) are refused by `liveSafe` if writes were ever live.
+- **The post kit's context** (`exos_social_post_context`): owner / manager only (42501 otherwise; 22023
+  for another org's event); a secret / TBA location loses its venue name and address in SQL, and the kit
+  leaves them out again; booleans for which credentials are connected and a few non-secret facts (the
+  Meetup plan word, whether a Pro network and a LinkedIn page are set, the Business Profile's age in
+  days), never a secret or a credential's ids.
+- **New store providers** `ig_publish`, `tiktok_publish`, `meetup`, `linkedin`, `google_business` are
+  managed: the generic Integrations save / remove refuse them, only the service role decrypts them
+  (`exos_integration_secret`). Their connect flows are not built (`_shared/social/apps.ts`: one OAuth
+  app per vendor family). Business Profile borrows the Google connection's refresh token in TS
+  (`run.ts`), never in SQL.
+- **Limits** (`limits.ts`): a cap now trims only a request in its own metric, so one platform's budgets
+  (Meetup's attendees and GraphQL points) don't trim each other.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

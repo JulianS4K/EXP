@@ -39,7 +39,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 ```
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
-public feeds): `stripe-webhook`, `exos-ads`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
+public feeds): `stripe-webhook`, `exos-ads`, `exos-social`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
 `exos-commerce`, `exos-conversions-drain`, `exos-discord`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
 `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
 `exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,
@@ -72,6 +72,7 @@ everything else with `--no-verify-jwt`.
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
 | `X_ADS_CONSUMER_KEY`, `X_ADS_CONSUMER_SECRET`, `EXOS_X_ADS_WRITES` | X conversions (`docs/marketing-conversions.md` "X") | optional; without the keys X rows stay planned only, and they go out only with `EXOS_CONVERSIONS_LIVE=true`, `EXOS_X_ADS_WRITES=on` and the org's switch |
 | `EXOS_ADS_BOOST_PRICE_CENTS` | "Boost this event" (`exos-ads`) | what Exos charges for a boost, in cents; default `0` (free). Every ad write is a dry run whatever the flags (`docs/marketing-conversions.md` "Ads") |
+| `EXOS_TIKTOK_APP_AUDITED` | "Post / list this event" (`exos-social`) | `on` only once TikTok has audited your app; otherwise every TikTok post is planned as private (`SELF_ONLY`). Every post / listing write is a dry run whatever the flags (`docs/social.md` "Posting and listing APIs") |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 | `TURNSTILE_SECRET_KEY` | the waiting room's human check (`exos-wroom-join`) | your Cloudflare Turnstile widget's secret key; pair it with `VITE_TURNSTILE_SITE_KEY` below. Unset: organizers can't turn the check on (the toggle is greyed out) and `exos-wroom-join` answers 503 |
 

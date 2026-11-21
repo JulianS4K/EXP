@@ -7,7 +7,9 @@
 // org's switch is on (exos_org_integrations.writes_enabled, passed in) AND
 // the operator's EXOS_<ID>_WRITES=on AND the method + path is on the
 // adapter's allowlist. Every flag defaults off. A write that is not on the
-// allowlist is refused (thrown) whatever the switches; an allowed write with
+// allowlist (and, where the rule has one, its body check: Meetup's one
+// GraphQL path takes only its pinned mutations) is refused (thrown)
+// whatever the switches; an allowed write with
 // a switch off is a dry run: nothing is sent, the exact payload (secrets
 // redacted) is recorded, and a stand-in answer comes back. writesLive() is
 // the existing gate from model.ts, reused.
@@ -48,6 +50,13 @@ export interface WriteRule {
   path: RegExp;
   /** A PUT / DELETE the platform treats as idempotent may be retried. */
   idempotent?: boolean;
+  /**
+   * The body must pass this too (a GraphQL endpoint takes every operation on
+   * one path, so Meetup's allowlist pins the exact mutation documents). A
+   * write whose every matching rule has a `body` check that refuses it is
+   * refused like a path off the list.
+   */
+  body?: (body: unknown) => boolean;
 }
 
 export interface GatedHttpOptions {
@@ -160,6 +169,17 @@ export function decideLive(
   if (!org) reasons.push("the organization's switch is off");
   if (env !== "on") reasons.push(`${flag} is not on`);
   return { read: false, allowed, live: allowed && writesLive(org, env), flag, reasons };
+}
+
+/** A matching rule without a body check, or one whose check accepts the body. */
+export function bodyAllowed(writes: readonly WriteRule[], method: string, path: string, body: unknown): boolean {
+  const bare = path.split("?")[0];
+  const m = method.toUpperCase();
+  const hits = writes.filter((r) => r.method === m && r.path.test(bare));
+  return hits.some((r) => {
+    if (!r.body) return true;
+    try { return r.body(body) === true; } catch { return false; }
+  });
 }
 
 // ---- redaction ---------------------------------------------------------------
@@ -362,6 +382,10 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
     if (!d.allowed) {
       record({ op, method, path, live: false, request: reqRecord, ok: false, error: "NOT_ALLOWED" });
       throw new GatedHttpRefused(`gatedHttp: ${method} ${path.split("?")[0]} is not an allowed ${o.channel} write`);
+    }
+    if (!bodyAllowed(o.writes, method, path, ro.body)) {
+      record({ op, method, path, live: false, request: reqRecord, ok: false, error: "NOT_ALLOWED" });
+      throw new GatedHttpRefused(`gatedHttp: that ${method} ${path.split("?")[0]} body is not an allowed ${o.channel} write`);
     }
 
     // Limits, before anything is planned or sent.
