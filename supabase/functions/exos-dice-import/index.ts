@@ -45,7 +45,7 @@ import {
   connectOrg, DICE_DISABLED_MESSAGE, type DiceDb, diceImportEnabled, dryRunOrg, RUN_BUDGET_MS, syncClaimed, syncOrg,
 } from "../_shared/dice/run.ts";
 import { redactError } from "../_shared/log.ts";
-import { parseRedirectOrigins } from "../_shared/redirects.ts";
+import { corsAllowedOrigins } from "../_shared/corsOrigins.ts";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_BODY = 16 * 1024;
@@ -170,7 +170,8 @@ async function signedInUser(auth: string): Promise<string | null> {
 
 /** CORS for the SPA's fetch calls: only allow-listed origins are echoed. */
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = parseRedirectOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"));
+  // CORS only: the native app's origins may call, never be redirected to (_shared/corsOrigins.ts).
+  const allowed = corsAllowedOrigins(Deno.env.get("EXOS_REDIRECT_ORIGINS"), Deno.env.get("EXOS_CORS_EXTRA_ORIGINS"));
   if (!origin || !allowed.includes(origin)) return { vary: "Origin" };
   return {
     "Access-Control-Allow-Origin": origin,

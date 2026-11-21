@@ -163,11 +163,15 @@ devices before the first TestFlight / internal build.
    Google, add the iOS and web client ids to the authorized client ids.
 5. **Apple sign-in:** in Supabase → Auth → Apple, add the bundle id to the client ids; set
    `VITE_EXOS_APPLE_SIGN_IN=on`.
-6. **Edge function origins:** the app calls the edge functions from `capacitor://localhost` (iOS) and
-   `https://localhost` (Android). Functions that echo only allow-listed origins (`EXOS_REDIRECT_ORIGINS`)
-   need both added there, or their browser calls fail CORS in the app. That list also decides where
-   Stripe may send a buyer back; the app always sends web URLs, so the localhost entries are only reached
-   by CORS. Check each function the app uses on a device.
+6. **Edge function origins (CORS only):** the app calls the edge functions from `capacitor://localhost`
+   (iOS) and `https://localhost` (Android). Set the edge secret
+   `EXOS_CORS_EXTRA_ORIGINS=capacitor://localhost,https://localhost` (`_shared/corsOrigins.ts`; only those
+   two and `http://localhost` are accepted, no wildcard). It only widens the CORS answer of the ten
+   functions that echo allow-listed origins. **Do not** add localhost origins to `EXOS_REDIRECT_ORIGINS`
+   (or Supabase Auth's redirect URLs): that list decides where Stripe, OAuth and the waiting room may send
+   or accept a browser, and a localhost entry could hand a return URL to another app on the device. The
+   inventory of both lists is in `docs/security.md` "Allowed origins". Check each function the app uses
+   on a device.
 7. **Universal / App Links:** a custom domain whose root serves the Exos web app, serving
    `/.well-known/apple-app-site-association` and `/.well-known/assetlinks.json` (from the templates: team
    id, app id, the Play signing SHA-256) as `application/json`. That route on the domain root is a

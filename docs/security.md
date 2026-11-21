@@ -1269,6 +1269,40 @@ them to `security_invoker` to quiet the advisor: anon would then need SELECT
 on the base tables and EXECUTE on the helpers revoked above, which is exactly
 what these views avoid.
 
+### Allowed origins: redirects vs CORS (edge functions)
+
+Two settings, kept apart on purpose. `EXOS_REDIRECT_ORIGINS` decides where a
+browser may be **sent back to** (Stripe return pages, OAuth returns) and which
+hosts a Turnstile answer may come from; it is also allowed for CORS.
+`EXOS_CORS_EXTRA_ORIGINS` (`_shared/corsOrigins.ts`) is **CORS only**: it lets
+the native app's web views (`capacitor://localhost`, `https://localhost`,
+`http://localhost`, exactly those, no wildcard; `docs/native-apps.md`) call the
+functions below, and nothing is ever redirected or returned there. Never put a
+localhost origin in `EXOS_REDIRECT_ORIGINS`: another app on the device could
+then receive a return URL. The same goes for Supabase Auth's redirect URLs
+(dashboard).
+
+Every reader of `EXOS_REDIRECT_ORIGINS` (no SQL, SPA or server code reads either setting):
+
+| Where | What it decides | Reads `EXOS_CORS_EXTRA_ORIGINS` |
+|---|---|---|
+| `exos-checkout` | `success_url` / `cancel_url` (`isAllowedRedirect`), Embedded Checkout `return_url` (`isAllowedEmbedReturn`) | no |
+| `exos-connect-onboard` | Stripe Connect `return_url` / `refresh_url` | no |
+| `exos-promoter-payouts` | onboarding `return_url` / `refresh_url`; CORS answer | CORS answer only |
+| `exos-commerce` | billing portal `return_url`, `success_url` / `cancel_url` | no |
+| `exos-api` (`giving.ts`) | monthly gift `success_url` / `cancel_url` | no |
+| `exos-oauth-google` (`_shared/conversions/googleOAuth.ts` `returnAppUrl`) | where the Google Ads OAuth returns; CORS answer | CORS answer only |
+| `exos-eventbrite-oauth` (`_shared/eventbrite/oauth.ts` `returnAppUrl`) | where the Eventbrite OAuth returns; CORS answer | CORS answer only |
+| `exos-discord` (`returnAppUrl`) | where the Discord install returns; CORS answer | CORS answer only |
+| `exos-wroom-join` (`_shared/wroomJoin.ts` `allowedHosts`) | Turnstile answer hostnames | no |
+| `exos-dice-import`, `exos-event-import`, `exos-eventbrite-sync`, `exos-channel-sync`, `exos-integrations`, `exos-instant-payouts` | CORS answer | CORS answer only |
+
+`_shared/corsOrigins_test.ts` (CI) checks that the native origins pass CORS
+when listed, that a wildcard or another host is dropped, that the redirect,
+embed-return and Turnstile checks still refuse them, and that every read of
+`EXOS_CORS_EXTRA_ORIGINS` is the `corsAllowedOrigins(...)` line inside a
+`corsHeaders` function of exactly the ten functions above.
+
 ## Operator settings (dashboard, not code)
 
 These can't be set from a migration. Project: the shared Supabase project
