@@ -54,7 +54,7 @@ const PAYLOADS: Record<string, Record<string, unknown>> = {
   },
   'payout-sent': { org, amount_cents: 123456, currency: 'usd', period: 'Sep 1-15, 2026', reference: 'po_<1>', marketing: false },
   'payout-pending': { org, amount_cents: 50000, currency: 'eur', period: 'Sep 16-30', reference: null, marketing: false },
-  'fee-free-ending': { org, fee_free_until: '2026-10-12T00:00:00+00:00', stage: '14d', days_left: 14, fee_bps: 300, marketing: false },
+  'fee-free-ending': { org, fee_free_until: '2026-10-12T00:00:00+00:00', stage: '14d', days_left: 14, fee_bps: 200, marketing: false },
   'org-welcome': { org, fee_free_until: '2027-03-28T00:00:00+00:00', has_event: false, marketing: false },
   'signup-confirm': { org, form_title: 'Join <the> list', token: TOKEN, email_requested: true, sms_requested: true, marketing: false },
   'org-first-event': { org, has_event: false, marketing: true, unsubscribe_token: TOKEN },
@@ -309,7 +309,11 @@ describe('renderTemplate', () => {
     expect(ok('fee-free-ending').subject).toBe('Your Exos free months end in 14 days');
     const last = ok('fee-free-ending', { ...PAYLOADS['fee-free-ending'], stage: '1d', days_left: 1 });
     expect(last.subject).toBe('Your Exos free months end October 12, 2026');
-    expect(last.html).toContain('Exos keeps 3% of each sale');
+    expect(last.html).toContain('Exos keeps 2% of each sale');
+    // No rate in the payload: the coded default (EXOS_FEE_BPS, 2%).
+    const noRate: Record<string, unknown> = { ...PAYLOADS['fee-free-ending'] };
+    delete noRate.fee_bps;
+    expect(ok('fee-free-ending', noRate).html).toContain('Exos keeps 2% of each sale');
   });
 
   it('inventory and publish alerts link to the organizer tools', () => {

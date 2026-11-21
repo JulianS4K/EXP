@@ -5,10 +5,16 @@
 --      price x qty - proceeds
 --   F2 a later re-plan at a new price doesn't rewrite a past sale
 --   F3 exos_marketplace_fee_rates: the realized rate per store; service role only
---   F4 the Exos fee: 3% of the payout, and the organizer's net (40.00 -> 38.80)
+--   F4 the Exos fee: 2% of the payout (mig 20261121133000; 3% before), and the
+--      organizer's net (40.00 -> 39.20)
 --   F5 the first 6 months are free: a new org gets fee_free_until = signup +
 --      6 months; a sale inside it pays no Exos fee; members can read the
 --      date, nobody but the server can change it
+--   F6 a sale is priced once (mig 20261121133000): priced at 3%, then the rate
+--      moves to 2%; an unchanged re-poll (the upsert sets listing_ref) keeps
+--      2.40 / 77.60 and the stored rate; a real proceeds change re-prices at
+--      the stored 3%; a sale priced in the free months stays 0 after them; an
+--      older row with no stored rate keeps its fee when re-polled unchanged
 -- ============================================================================
 \set ON_ERROR_STOP on
 BEGIN;
@@ -70,17 +76,17 @@ BEGIN
   END IF;
   RAISE NOTICE 'F3 PASS: realized rate per store, service role only';
 
-  -- F4: 80.01 paid -> Exos 2.40 (2.4003), organizer 77.61; 42.75 -> 1.28 (1.2825), 41.47.
+  -- F4: 80.01 paid -> Exos 1.60 (1.6002), organizer 78.41; 42.75 -> 0.86 (0.855, half up), 41.89.
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-1';
-  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.61 THEN
+  IF m.exos_fee IS DISTINCT FROM 1.60 OR m.organizer_net IS DISTINCT FROM 78.41 THEN
     RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
   SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-2';
-  IF m.exos_fee IS DISTINCT FROM 1.28 OR m.organizer_net IS DISTINCT FROM 41.47 THEN
+  IF m.exos_fee IS DISTINCT FROM 0.86 OR m.organizer_net IS DISTINCT FROM 41.89 THEN
     RAISE EXCEPTION 'F4 FAIL: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
-  IF public.exos_platform_fee_bps() <> 300 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
-  RAISE NOTICE 'F4 PASS: Exos takes 3%% of every marketplace payout';
+  IF public.exos_platform_fee_bps() <> 200 THEN RAISE EXCEPTION 'F4 FAIL: rate'; END IF;
+  RAISE NOTICE 'F4 PASS: Exos takes 2%% of every marketplace payout';
 
   -- F5: back inside the free months, a new sale pays no Exos fee.
   UPDATE public.exos_org_billing SET fee_free_until = now() + interval '1 day' WHERE org_id = '7e000000-0000-0000-0000-000000000001';
@@ -89,7 +95,7 @@ BEGIN
   IF m.exos_fee IS DISTINCT FROM 0 OR m.organizer_net IS DISTINCT FROM 42.75 THEN
     RAISE EXCEPTION 'F5 FAIL: free months charged: exos % net %', m.exos_fee, m.organizer_net;
   END IF;
-  IF public.exos_org_fee_bps('7e000000-0000-0000-0000-000000000001', now() + interval '2 days') <> 300 THEN
+  IF public.exos_org_fee_bps('7e000000-0000-0000-0000-000000000001', now() + interval '2 days') <> 200 THEN
     RAISE EXCEPTION 'F5 FAIL: rate after the free months';
   END IF;
   -- A new org gets six months from signup.
@@ -108,5 +114,62 @@ BEGIN
     RAISE EXCEPTION 'F5 FAIL: organizers could change their free months';
   END IF;
   RAISE NOTICE 'F5 PASS: 6 months free from signup; organizers can see it, not change it';
+
+  -- F6: priced at 3% (the rate before mig 20261121133000), then the rate moves.
+  UPDATE public.exos_org_billing SET fee_free_until = now() - interval '1 day' WHERE org_id = '7e000000-0000-0000-0000-000000000001';
+  EXECUTE $f$CREATE OR REPLACE FUNCTION public.exos_platform_fee_bps() RETURNS integer LANGUAGE sql IMMUTABLE AS $b$ SELECT 300 $b$ $f$;
+  o := pg_temp.sale('7e-6', 2, '80.00');
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.60 OR m.exos_fee_bps IS DISTINCT FROM 300 THEN
+    RAISE EXCEPTION 'F6 FAIL: priced at 3%%: exos % net % bps %', m.exos_fee, m.organizer_net, m.exos_fee_bps;
+  END IF;
+  EXECUTE $f$CREATE OR REPLACE FUNCTION public.exos_platform_fee_bps() RETURNS integer LANGUAGE sql IMMUTABLE AS $b$ SELECT 200 $b$ $f$;
+  -- The poller re-sends the same sale (listing_ref set again: the fee trigger fires).
+  IF pg_temp.sale('7e-6', 2, '80.00') IS DISTINCT FROM o THEN RAISE EXCEPTION 'F6 FAIL: re-poll made a new row'; END IF;
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.60 OR m.exos_fee_bps IS DISTINCT FROM 300 THEN
+    RAISE EXCEPTION 'F6 FAIL: an unchanged re-poll re-priced the sale: exos % net % bps %', m.exos_fee, m.organizer_net, m.exos_fee_bps;
+  END IF;
+  -- A direct write of listing_ref (the trigger's column list) changes nothing either.
+  UPDATE public.exos_marketplace_orders SET listing_ref = listing_ref WHERE id = o;
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 2.40 THEN RAISE EXCEPTION 'F6 FAIL: listing_ref rewrite re-priced: %', m.exos_fee; END IF;
+  -- Real new proceeds: re-priced at the stored 3%, not today's 2%.
+  UPDATE public.exos_marketplace_orders SET proceeds = 70.00 WHERE id = o;
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 2.10 OR m.organizer_net IS DISTINCT FROM 67.90 OR m.exos_fee_bps IS DISTINCT FROM 300 THEN
+    RAISE EXCEPTION 'F6 FAIL: proceeds change: exos % net % bps %', m.exos_fee, m.organizer_net, m.exos_fee_bps;
+  END IF;
+  -- A new sale now pays 2%.
+  o := pg_temp.sale('7e-7', 2, '80.00');
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE id = o;
+  IF m.exos_fee IS DISTINCT FROM 1.60 OR m.organizer_net IS DISTINCT FROM 78.40 OR m.exos_fee_bps IS DISTINCT FROM 200 THEN
+    RAISE EXCEPTION 'F6 FAIL: new sale at 2%%: exos % net % bps %', m.exos_fee, m.organizer_net, m.exos_fee_bps;
+  END IF;
+  -- F5's sale was priced in the free months (0): the months are over now, and
+  -- a re-poll keeps it free.
+  PERFORM pg_temp.sale('7e-3', 1, '42.75');
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-3';
+  IF m.exos_fee IS DISTINCT FROM 0 OR m.exos_fee_bps IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'F6 FAIL: a free-months sale was re-priced: exos % bps %', m.exos_fee, m.exos_fee_bps;
+  END IF;
+  -- An older row with no stored rate (written before the migration, not
+  -- backfilled): an unchanged re-poll keeps its fee; new proceeds price it now.
+  UPDATE public.exos_marketplace_orders SET exos_fee_bps = NULL, exos_fee = 2.40, organizer_net = 77.60 WHERE external_order_id = '7e-7';
+  PERFORM pg_temp.sale('7e-7', 2, '80.00');
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-7';
+  IF m.exos_fee IS DISTINCT FROM 2.40 OR m.organizer_net IS DISTINCT FROM 77.60 OR m.exos_fee_bps IS NOT NULL THEN
+    RAISE EXCEPTION 'F6 FAIL: an unrated row re-priced on re-poll: exos % bps %', m.exos_fee, m.exos_fee_bps;
+  END IF;
+  UPDATE public.exos_marketplace_orders SET proceeds = 50.00 WHERE external_order_id = '7e-7';
+  SELECT * INTO m FROM public.exos_marketplace_orders WHERE external_order_id = '7e-7';
+  IF m.exos_fee IS DISTINCT FROM 1.00 OR m.exos_fee_bps IS DISTINCT FROM 200 THEN
+    RAISE EXCEPTION 'F6 FAIL: an unrated row with new proceeds: exos % bps %', m.exos_fee, m.exos_fee_bps;
+  END IF;
+  -- Nobody but the trigger writes the rate.
+  IF has_column_privilege('authenticated', 'public.exos_marketplace_orders', 'exos_fee_bps', 'UPDATE') THEN
+    RAISE EXCEPTION 'F6 FAIL: authenticated can set the rate';
+  END IF;
+  RAISE NOTICE 'F6 PASS: a marketplace sale is priced once (re-poll keeps it, new proceeds at the stored rate)';
 END $$;
 ROLLBACK;

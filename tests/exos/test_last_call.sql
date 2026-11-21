@@ -98,8 +98,8 @@ $$;
 DO $$
 BEGIN
   PERFORM pg_temp.act('d7000000-0000-0000-0000-0000000000a0');
-  PERFORM public.exos_set_resale_consent(pg_temp.u('e1'), true, '2026-10-29');
-  PERFORM public.exos_set_resale_consent(pg_temp.u('e2'), true, '2026-10-29');
+  PERFORM public.exos_set_resale_consent(pg_temp.u('e1'), true, '2026-11-21');
+  PERFORM public.exos_set_resale_consent(pg_temp.u('e2'), true, '2026-11-21');
   UPDATE public.exos_events SET distribution_networks = ARRAY['stubhub'] WHERE id = pg_temp.u('e1');
   ASSERT public.exos_set_channel_allocation(pg_temp.u('e1'), 'stubhub', pg_temp.u('d2'), 10) = 10, 'setup: allocation';
   PERFORM pg_temp.act(NULL);

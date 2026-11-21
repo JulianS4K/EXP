@@ -165,7 +165,7 @@ feed quantity             = what S4K's pool holds now (split − S4K sold)
 - Lowering the split gives S4K's unsold seats back to pool 1 at once.
   Raising it takes only seats free in pool 1 right now (refused with how many
   are). It can't go below what S4K already sold.
-- Only for events over the free tier (max capacity over 150) whose organizer
+- Only for events over the free tier (max capacity 150 or more) whose organizer
   opted in to resale (migs `20261014140000`, `20261029090000`,
   `docs/marketplace/README.md`): otherwise the route can't be chosen, the
   split refuses, and an S4K event that loses either leaves the feed and its

@@ -60,7 +60,7 @@ BEGIN
      AND (p.prosecdef OR p.proname = 'exos_platform_fee_bps')
      AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig, '{}')) c WHERE c LIKE 'search_path=%');
   ASSERT bad IS NULL, 'H1: functions without a pinned search_path: ' || bad;
-  ASSERT public.exos_platform_fee_bps() = 300, 'H1: exos_platform_fee_bps still answers';
+  ASSERT public.exos_platform_fee_bps() = 200, 'H1: exos_platform_fee_bps still answers (2% since mig 20261121133000)';
   RAISE NOTICE 'OK  H1 search_path pinned';
 END $$;
 

@@ -1768,7 +1768,7 @@ export default function CreateEvent() {
            </p>
            
            {(() => {
-             // Free tier (150 or less) and the resale opt-in (migs 20261014140000, 20261029090000).
+             // Free tier (under 150) and the resale opt-in (migs 20261014140000, 20261029090000).
              const caps = ticketTiers.map((t) => admissionsForTier(Number(t.capacity) || 0, t.table));
              const cap = eventMaxCapacity(Number(formData.totalTickets) || 0, caps);
              const bounded = eventCapacityBounded(Number(formData.totalTickets) || 0, caps);

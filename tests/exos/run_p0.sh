@@ -295,6 +295,7 @@ for m in \
   20261118120000_exos_waiting_room \
   20261119130000_exos_mcp_writes \
   20261121100000_exos_channel_risks \
+  20261121133000_exos_pricing_149_2pct \
   20261121153000_exos_static_codes \
   20261121162400_exos_channel_core \
   20261121190500_exos_ads \
@@ -553,6 +554,7 @@ for m in \
          20261118120000_exos_waiting_room \
          20261119130000_exos_mcp_writes \
          20261121100000_exos_channel_risks \
+         20261121133000_exos_pricing_149_2pct \
          20261121153000_exos_static_codes \
          20261121162400_exos_channel_core \
          20261121190500_exos_ads \

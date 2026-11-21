@@ -20,16 +20,16 @@ for grep (`text/`), machine-readable specs where the vendor publishes them
 (`openapi/`), and a README with the endpoint map.
 
 **Resale is for events over the free tier, opted in** (operator rules
-2026-10-14 and 2026-10-29, migs `20261014140000`, `20261029090000`): an event
-whose max capacity (its overall cap, never above what its capped ticket types
-add up to; else the capped types' sum; a table counts its party size) is 150
-or less is the **free tier** (no Exos fee, never resold), judged on the larger of
+2026-10-14, 2026-10-29 and 2026-11-21, migs `20261014140000`, `20261029090000`,
+`20261121133000`): an event whose max capacity (its overall cap, never above
+what its capped ticket types add up to; else the capped types' sum; a table
+counts its party size) is under 150 is the **free tier** (no Exos fee, never resold), judged on the larger of
 the max capacity and the tickets actually sold (`exos_event_tier_size`), so an
 event that sells past its cap (bypass vouchers, comps, box office) leaves it:
-the checkout counts sold + its own order (`exos_event_fee_terms`). Over 150, resale
+the checkout counts sold + its own order (`exos_event_fee_terms`). At 150 or more, resale
 needs an owner or manager's **opt-in for that event** (`exos_resale_consents`,
 `exos_set_resale_consent`), revoked by itself if the max capacity drops back
-to 150 or less. Until both hold, the marketplaces above (and TickPick, Tixel
+under 150. Until both hold, the marketplaces above (and TickPick, Tixel
 later) and the S4K route are off: nothing can be allocated, ticked
 marketplaces make no event rows, the auto split plans nothing, S4K can't be
 chosen and the feed leaves the event out; an event that loses either later
@@ -37,7 +37,7 @@ has its pools planned to 0 and its S4K pool released (withdrawing does it at
 once). Every path asks one function, `exos_resale_unlocked`. Eventbrite and
 Luma aren't resale and aren't affected. The numbers are operator settings
 (`exos_platform_settings`, service role): `free_tier_max_capacity` (default
-150), `free_tier_fee_bps` (0) and `resale_consent_required` (true); the old
+149, an inclusive maximum: under 150 is free), `free_tier_fee_bps` (0) and `resale_consent_required` (true); the old
 `resale_min_capacity` key is gone.
 
 **Last call** (spec §5, mig `20261029100000`): at 10 tickets left or fewer
@@ -53,7 +53,7 @@ happened go through.
 platform Exos can't sync (`primary_source = 'external'`, `primary_platform`
 DICE / Shotgun / RA / a box office) sells a block per ticket type: the block
 is the type's capacity, so the free-tier and resale rules above read the
-block (150 or less never resold; over 150 with the opt-in). For last call
+block (under 150 never resold; 150 or more with the opt-in). For last call
 Exos is the seller of its block: pools plan to 0, Exos keeps selling. At the
 release time (`block_release_at`, default 24 hours before doors) every pool
 plans to 0 (`block_released`), the auto split and the S4K feed leave the
@@ -119,9 +119,9 @@ see it and doesn't need it. An organizer's marketplace price in the grid still w
 
 Every sale records the per-ticket price its listing carried (`exos_marketplace_orders.list_unit_price`, from the
 plan entry's `unit_price` by `listing_ref`, set once) and `marketplace_fee` = listed price x quantity - proceeds.
-The Exos fee applies here too: 3% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
-to Exos, like the 3% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
-organizer 38.80 on a marketplace and 37.34 on Exos; the marketplace's fee already covers its card processing.
+The Exos fee applies here too: 2% of the payout (`exos_fee`, `organizer_net` = proceeds - exos_fee). That's net
+to Exos, like the 2% on an Exos checkout, where the organizer also pays Stripe's card fee. A 40.00 ticket pays the
+organizer 39.20 on a marketplace and 37.74 on Exos; the marketplace's fee already covers its card processing.
 `exos_marketplace_fee_rates` shows each store's realized rate over 180 days: it confirms the known rates, and once
 a store with an unknown rate sells, its rate goes into `SELLER_FEES`. TEvo proceeds are net of `order.fee`, and
 SeatGeek's sub-cent `total` is rounded to the cent.

@@ -271,7 +271,8 @@ BEGIN
 END $$;
 
 -- D9 free-tier cap ---------------------------------------------------------
--- e1 is capacity 100 (free tier, cutoff 150 by default: no settings row).
+-- e1 is capacity 100 (free tier, cutoff 149 by default: no settings row;
+-- under 150 is free since mig 20261121133000).
 -- It uses donyc (queued) + resident_advisor (submitted) = 2 manual channels.
 INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,venue_name,total_tickets,tickets_sold,created_by) VALUES
   ('d1500000-0000-0000-0000-0000000000e6','d1500000-0000-0000-0000-000000000001','DP Big','dp-big','published',now() + interval '20 days','America/New_York','Hall',500,0,'d1500000-0000-0000-0000-0000000000a1');
@@ -283,7 +284,7 @@ SELECT pg_temp.act('d1500000-0000-0000-0000-0000000000a1');
 SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'cityspark');
 SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'oh_my_rockness');
 SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'edmtrain');
-SELECT set_config('dp.cap6', pg_temp.refused($$SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'meetup')$$, 'free-tier events (capacity 150 or less) can go to at most 5 listing sites')::text, true);
+SELECT set_config('dp.cap6', pg_temp.refused($$SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'meetup')$$, 'free-tier events (capacity 149 or less) can go to at most 5 listing sites')::text, true);
 SELECT set_config('dp.cap_again', public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'donyc')::text, true);
 SELECT set_config('dp.cap_feed', pg_temp.refused($$SELECT public.exos_discovery_queue(pg_temp.u('0000000000e1'), 'calendar_ics')$$, 'is a feed')::text, true);
 SELECT set_config('dp.cap_ec', public.exos_discovery_event_channels(pg_temp.u('0000000000e1'))::text, true);
@@ -310,8 +311,22 @@ BEGIN
   ASSERT (ec->>'manual_cap')::int = 5 AND (ec->>'manual_used')::int = 5, 'D9: cap shown ' || (ec - 'channels' - 'event')::text;
   ASSERT current_setting('dp.cap_after')::jsonb->>'status' = 'queued', 'D9: withdrawing frees a slot';
   ASSERT current_setting('dp.big_ec')::jsonb->'manual_cap' = 'null'::jsonb
-     AND (current_setting('dp.big_ec')::jsonb->>'manual_used')::int = 6, 'D9: no cap over 150';
+     AND (current_setting('dp.big_ec')::jsonb->>'manual_used')::int = 6, 'D9: no cap over the free tier';
   ASSERT current_setting('dp.cap_set')::jsonb->>'status' = 'queued', 'D9: cutoff 50 -> a 100-cap event is uncapped';
+END $$;
+-- The line by default: 149 is the free tier (5 manual channels), 150 is not.
+INSERT INTO public.exos_events(id,org_id,name,slug,status,starts_at,timezone,venue_name,total_tickets,tickets_sold,created_by) VALUES
+  ('d1500000-0000-0000-0000-0000000000e7','d1500000-0000-0000-0000-000000000001','DP 149','dp-149','published',now() + interval '20 days','America/New_York','Hall',149,0,'d1500000-0000-0000-0000-0000000000a1'),
+  ('d1500000-0000-0000-0000-0000000000e8','d1500000-0000-0000-0000-000000000001','DP 150','dp-150','published',now() + interval '20 days','America/New_York','Hall',150,0,'d1500000-0000-0000-0000-0000000000a1');
+INSERT INTO public.exos_ticket_tiers(id,event_id,name,price,capacity,sold,visibility) VALUES
+  ('d1500000-0000-0000-0000-0000000000d7','d1500000-0000-0000-0000-0000000000e7','GA',40,149,0,'public'),
+  ('d1500000-0000-0000-0000-0000000000d8','d1500000-0000-0000-0000-0000000000e8','GA',40,150,0,'public');
+DO $$
+BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_platform_settings WHERE key = 'free_tier_max_capacity'), 'D9: no settings row';
+  ASSERT public._exos_discovery_free_tier_max() = 149, 'D9: default cutoff 149';
+  ASSERT public._exos_discovery_manual_cap(pg_temp.u('0000000000e7')) = 5, 'D9: 149 is the free tier (5 manual channels)';
+  ASSERT public._exos_discovery_manual_cap(pg_temp.u('0000000000e8')) IS NULL, 'D9: 150 is paid (no cap)';
 END $$;
 
 -- D10 manual minutes -------------------------------------------------------

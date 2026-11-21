@@ -33,10 +33,13 @@ describe('the AI facts registry', () => {
   it('computes the pricing claim from the fee module', () => {
     const ex = pricingExample();
     expect(ex.payoutCents).toBe(ex.priceCents - ex.exosCents - ex.cardCents);
-    expect(ex.payoutCents).toBe(3734);
+    expect(ex.exosCents).toBe(80); // 2% of 40.00
+    expect(ex.cardCents).toBe(146); // 2.9% + 30c
+    expect(ex.payoutCents).toBe(3774);
     const claim = PRODUCT_FACTS.find((f) => f.id === 'organizer-pricing')!.claim;
     expect(claim).toContain(`${EXOS_FEE_BPS / 100}%`);
-    expect(claim).toContain('$37.34');
+    expect(claim).toContain('$37.74');
+    expect(claim).toContain('Exos 2% of each sale');
     expect(claim).toContain(`${FEE_FREE_MONTHS} months`);
   });
 

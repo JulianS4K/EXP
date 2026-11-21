@@ -2,7 +2,7 @@
 
 Organizers and venues can add their own fees: "$2 facility fee per ticket", "3% service charge", "$1.50 per order".
 Each fee is either **passed on** (the buyer pays it, inside the all-in price) or **absorbed** (the organizer pays it out
-of revenue). This is not the Exos platform fee (3%, paid by the organizer, `_shared/platformFee.ts`), which is unchanged.
+of revenue). This is not the Exos platform fee (2%, paid by the organizer, `_shared/platformFee.ts`), which is unchanged by these.
 
 - **Code:** `supabase/functions/_shared/fees.ts` (the maths; `src/lib/fees.ts` is an identical copy),
   `_shared/pricing.ts` / `src/lib/pricing.ts` (`allInCents` / `allInPrice` fold the fees in),
@@ -98,6 +98,24 @@ totals (`fee_adjustments`); the API reads them (docs/api/fee-adjustments.json).
   tier names that tier's id; the id alone unlocks nothing.
 - `exos_effective_fee_rules`, `exos_record_order_fees`, `exos_tier_passed_on_fees` / `exos_addon_passed_on_fees`:
   service role only.
+
+## When the Exos rate changes (3% to 2%, mig 20261121133000)
+
+What each kind of sale charges after the rate moves (and when an event leaves the free tier):
+
+- **Checkout orders** keep the rate they were charged: each session records its `fee_bps`.
+- **Marketplace sales** are priced once: `exos_marketplace_orders.exos_fee_bps` holds the rate the sale was first
+  priced at. A re-poll of the same sale (exos-marketplace-sales re-checks known orders every run) keeps its fee to the
+  cent, and a real change of proceeds is re-priced at that stored rate, never at today's.
+- **Box office (POS) settlement** uses the rate at settlement time (`exos_pos_settlement_summary`): a night taken at 3%
+  but settled after the change records 2%. Not changed; whether to price a night at the rate of its sales is an
+  operator call.
+- **Stripe subscriptions** (memberships in exos-commerce, recurring donations in `_shared/recurringDonation.ts`) set
+  `application_fee_percent` when they are created, so a subscription made before the change keeps 3% on every renewal.
+  Not changed; moving existing subscriptions to 2% is an operator call.
+- **`EXOS_PLATFORM_FEE_BPS`** (env) is read by three places: exos-checkout, exos-commerce and
+  `_shared/recurringDonation.ts` (bundled by exos-commerce, exos-api and stripe-webhook). Leave it unset or 200: set to
+  300, those three would charge 3% while SQL, the MCP tools and the SPA say 2%.
 
 ## Not covered yet
 
