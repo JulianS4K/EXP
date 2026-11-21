@@ -4,12 +4,21 @@
 
 import { caps, registerAdapter, type ChannelAdapter } from "./adapter.ts";
 import { pretixAdapter } from "./adapters/pretix.ts";
+import { metaAdsAdapter } from "./adapters/metaAds.ts";
+import { redditAdsAdapter } from "./adapters/redditAds.ts";
+import { googleCustomerMatchAdapter } from "./adapters/googleCustomerMatch.ts";
+import { xAdsAdapter } from "./adapters/xAds.ts";
 
 const legacy = (id: string, label: string, home: string, c: Parameters<typeof caps>[0]): ChannelAdapter =>
   ({ id, label, status: "legacy", home, caps: caps(c) });
 
 export const ADAPTERS: readonly ChannelAdapter[] = [
   pretixAdapter,
+  // The ads phase (mig 20261121190500): dry run only, every write on an explicit allowlist.
+  metaAdsAdapter,
+  redditAdsAdapter,
+  googleCustomerMatchAdapter,
+  xAdsAdapter,
   legacy("eventbrite", "Eventbrite", "exos-channel-sync + _shared/channels/eventbrite.ts", {
     role: "primary", createEvent: true, ticketTypes: true, setCapacity: true, readAttendees: true }),
   legacy("luma", "Luma", "exos-channel-sync + _shared/channels/luma.ts", {

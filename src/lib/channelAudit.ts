@@ -42,7 +42,24 @@ export const CHANNEL_LABEL: Record<string, string> = {
   stubhub: 'StubHub', seatgeek: 'SeatGeek', vivid: 'Vivid Seats', tickpick: 'TickPick', gametime: 'Gametime',
   gotickets: 'GoTickets', evo: 'Ticket Evolution', meetup: 'Meetup', shotgun: 'Shotgun', tickettailor: 'Ticket Tailor',
   allevents: 'AllEvents', linkedin: 'LinkedIn', google_events: 'Google events',
+  // The ads phase (mig 20261121190500): dry runs only.
+  meta_ads: 'Meta Ads', reddit_ads: 'Reddit Ads', reddit: 'Reddit', google_customer_match: 'Google Customer Match', x_ads: 'X Ads',
 };
+
+/** What an ad step does, in words ("What we'd send" and the Boost preview). */
+export const AD_STEP_LABEL: Record<string, string> = {
+  'campaign.create': 'Create the campaign (paused)',
+  'adset.create': 'Create the ad set (paused)',
+  'ad_group.create': 'Create the ad group (paused)',
+  'creative.create': 'Create the ad creative',
+  'post.create': 'Create the ad post',
+  'ad.create': 'Create the ad (paused)',
+  'audience.create': 'Create the audience',
+  'audience.add_users': 'Upload hashed people to the audience',
+  'audience.add_members': 'Upload hashed people to the list',
+  'conversion.send': 'Report a purchase',
+};
+export const stepLabel = (op: string): string => AD_STEP_LABEL[op] ?? op;
 export const channelLabel = (id: string): string => CHANNEL_LABEL[id] ?? id;
 
 /** Planned writes, newest first, grouped by channel (channels in order of their latest plan). */
@@ -71,6 +88,8 @@ export function usageMeters(summary: UsageSummaryRow[], facts: Record<string, Li
       if (r.kind !== 'usage' || r.metric !== row.metric) continue;
       const t = thresholdFor(r, facts[row.platform] ?? {});
       if (t === null) continue;
+      // A per-minute rate (Reddit) isn't a budget the summary's windows can show.
+      if (r.window === 'minute' || r.window === 'quarter_hour') continue;
       const u = pick(row, r.window);
       // The plans are what switching on would add: "would use live + planned of M".
       const m: LimitMeter = { ruleId: r.id, platform: r.platform, metric: r.metric, window: r.window, threshold: t, live: u.live, planned: u.planned, would: u.planned };

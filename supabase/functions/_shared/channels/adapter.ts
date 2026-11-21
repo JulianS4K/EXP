@@ -99,7 +99,8 @@ export interface ChannelAdapter {
   readAttendees?(ctx: ChannelCtx, extEventId: string, cursor: string | null): Promise<Page<AttendeeRow>>;
   checkin?(ctx: ChannelCtx, extAttendeeId: string): Promise<unknown>;
   publishPost?(ctx: ChannelCtx, ev: ExosEvent, post: { text: string; url?: string }): Promise<unknown>;
-  syncAudience?(ctx: ChannelCtx, audience: { id: string; members: HashedIdentifiers[] }): Promise<unknown>;
+  /** members: hashed and consent-filtered by the one builder (_shared/ads/audience.ts); externalId: the platform's audience, when it exists. */
+  syncAudience?(ctx: ChannelCtx, audience: { id: string; name?: string; members: HashedIdentifiers[]; externalId?: string | null }): Promise<unknown>;
   createCampaign?(ctx: ChannelCtx, ev: ExosEvent, campaign: Record<string, unknown>): Promise<unknown>;
   readInsights?(ctx: ChannelCtx, ref: string): Promise<Record<string, number>>;
   sendConversion?(ctx: ChannelCtx, conversion: Record<string, unknown>): Promise<unknown>;

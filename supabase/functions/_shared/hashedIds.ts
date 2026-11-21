@@ -27,6 +27,20 @@ export function normalizeEmailGoogle(raw: unknown): string | null {
 }
 
 /**
+ * Reddit's rule (Conversions API and CUSTOMER_LIST audiences): lower case,
+ * trimmed, and in the local part everything from the first "+" on dropped
+ * and every dot removed, on every domain (not only gmail). SQL twin:
+ * _exos_email_sha256_reddit (mig 20261121190500).
+ */
+export function normalizeEmailReddit(raw: unknown): string | null {
+  const e = normalizeEmail(raw);
+  if (!e) return null;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at).split("+")[0].replace(/\./g, ""), domain = e.slice(at + 1);
+  return local && domain ? `${local}@${domain}` : null;
+}
+
+/**
  * E.164 digits with a leading +, or null. Numbers without a country code are
  * assumed US/Canada (10 digits -> +1). Meta and Snap want it without the +
  * (normalizePhone(…, false)).
@@ -47,10 +61,12 @@ export async function sha256Hex(s: string): Promise<string> {
 
 /** The hashed forms a platform may take; each present only when the input normalized. */
 export interface HashedIdentifiers {
-  /** sha256(lower(trim(email))): Meta, TikTok, Reddit, Snap, LinkedIn, Luma-style lists. */
+  /** sha256(lower(trim(email))): Meta, TikTok, Snap, X, LinkedIn, Luma-style lists. */
   em?: string;
   /** sha256 of Google's normalization (gmail dots dropped): GA4, Google Ads, Customer Match. */
   em_google?: string;
+  /** sha256 of Reddit's normalization (+tag and local-part dots dropped): Reddit CAPI, Reddit audiences. */
+  em_reddit?: string;
   /** sha256 of the E.164 phone with its +: GA4, TikTok. */
   ph?: string;
   /** sha256 of the E.164 digits without the +: Meta, Snap. */
@@ -62,10 +78,12 @@ export async function hashedIdentifiers(input: { email?: unknown; phone?: unknow
   const out: HashedIdentifiers = {};
   const email = normalizeEmail(input.email);
   const emailG = normalizeEmailGoogle(input.email);
+  const emailR = normalizeEmailReddit(input.email);
   const phone = normalizePhone(input.phone);
   const digits = normalizePhone(input.phone, false);
   if (email) out.em = await sha256Hex(email);
   if (emailG) out.em_google = await sha256Hex(emailG);
+  if (emailR) out.em_reddit = await sha256Hex(emailR);
   if (phone) out.ph = await sha256Hex(phone);
   if (digits) out.ph_digits = await sha256Hex(digits);
   return out;

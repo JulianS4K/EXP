@@ -17,10 +17,11 @@ Pieces:
 | Per-org credentials (public ids + a Vault-stored token) | `exos_org_ad_credentials`, RPCs `exos_set_ad_credential` / `exos_list_ad_credentials` |
 | Outbox | `exos_marketing_conversions`, filled by triggers on `exos_checkout_sessions` and `exos_order_refunds` |
 | Drain | `supabase/functions/exos-conversions-drain` (cron), `exos_conversions_claim_batch` / `exos_conversions_mark` |
-| Request builders (pure) | `supabase/functions/_shared/conversions/{meta,tiktok,ga4,reddit,snap,googleAds}.ts`, send loop `send.ts` |
+| Request builders (pure) | `supabase/functions/_shared/conversions/{meta,tiktok,ga4,reddit,snap,googleAds,x}.ts`, send loop `send.ts`, X step `xDrain.ts` |
 | Settings UI | Org settings → **Ads & conversions** (`AdConversionsSettings`, `lib/adCredentials.ts`), owner / manager |
 | Google Ads sign-in | `supabase/functions/exos-oauth-google`, `exos_oauth_states` + RPCs (mig `20260930102000`), pure helpers `_shared/conversions/googleOAuth.ts`, see [Google Ads](#google-ads) |
-| Tests | `tests/exos/test_marketing_conversions.sql`, `tests/exos/test_oauth_google.sql` (in `run_p0.sh`), `src/lib/marketingConversions.test.ts`, `src/lib/googleOAuth.test.ts`, `src/lib/googleAdsConnect.test.ts` |
+| Tests | `tests/exos/test_marketing_conversions.sql`, `tests/exos/test_oauth_google.sql`, `tests/exos/test_ads.sql` (in `run_p0.sh`), `src/lib/marketingConversions.test.ts`, `src/lib/googleOAuth.test.ts`, `src/lib/googleAdsConnect.test.ts`, `supabase/functions/_shared/ads/ads_test.ts` |
+| Ads (audiences, Boost this event, X), dry run only | see [Ads](#ads-dry-run-only) |
 
 ## When a conversion is queued
 
@@ -55,8 +56,9 @@ The outbox `payload` holds hashed or opaque data only:
 
 | Field | From | Notes |
 |---|---|---|
-| `em` | `sha256(lower(trim(buyer_email)))` | Meta, TikTok, Reddit, Snap |
+| `em` | `sha256(lower(trim(buyer_email)))` | Meta, TikTok, Snap, X |
 | `em_google` | same, with the dots of a gmail.com / googlemail.com local part removed | GA4 `user_data`, Google Ads (Google's normalization) |
+| `em_reddit` | Reddit's normalization: lower case, trimmed, and in the local part everything from the first `+` dropped and every dot removed (every domain) | Reddit; added to Reddit rows by a BEFORE INSERT trigger (`_exos_email_sha256_reddit`, mig `20261121190500`). A row queued before it has only `em`, which is sent instead |
 | `ad_ids` | `exos_checkout_sessions.ad_ids` | click ids (`fbclid`, `ttclid`, `gclid` / `gbraid` / `wbraid`, `rdt_cid`, `ScCid`) and browser ids (`fbp`, `fbc`, `ga_client_id`) |
 | `user_agent` | `exos_checkout_sessions.user_agent` | Meta requires it for website events |
 | `transaction_id` | the Stripe session id | the order id on every platform |
@@ -77,11 +79,12 @@ Per platform:
 | Meta Conversions API | `POST graph.facebook.com/v25.0/<pixel_id>/events` | `access_token` in the JSON body | `Purchase`, `action_source: website`, `event_id`, `user_data.em / fbp / fbc / client_user_agent`, `custom_data.value / currency / content_ids / order_id` | user agent; fbc is the `_fbc` cookie or `fb.1.<ms>.<fbclid>` |
 | TikTok Events API 2.0 | `POST business-api.tiktok.com/open_api/v1.3/event/track/` | `Access-Token` header | `Purchase`, `event_source: web`, `event_source_id` = pixel code, `user.email / ttclid / user_agent`, `properties.contents[]` | hashed email or `ttclid` |
 | GA4 Measurement Protocol | `POST www.google-analytics.com/mp/collect?measurement_id=…&api_secret=…` | `api_secret` query parameter (the protocol's design) | `purchase` / `refund` with `transaction_id`, `value`, `currency`, `items[]`; `user_data.sha256_email_address`; `consent` granted | the GA client id from `_ga` (captured with analytics consent); events at most 72 h old |
-| Reddit Conversions API v3 | `POST ads-api.reddit.com/api/v3/pixels/<pixel_id>/conversion_events` | `Authorization: Bearer` | `tracking_type: Purchase`, `metadata.conversion_id`, `click_id` = `rdt_cid` | hashed email or `rdt_cid` |
+| Reddit Conversions API v3 | `POST ads-api.reddit.com/api/v3/pixels/<pixel_id>/conversion_events` | `Authorization: Bearer` | `tracking_type: PURCHASE` (the v3 enum is UPPER_SNAKE: `PAGE_VISIT`, `ADD_TO_CART`, …; the browser pixel's PascalCase names are a different API), `metadata.conversion_id` / `value`, `click_id` = `rdt_cid`, `user.email` = `em_reddit`; at most 1,000 events a request (`redditBatches`) | hashed email or `rdt_cid` |
 | Snap Conversions API v3 | `POST tr.snapchat.com/v3/<pixel_id>/events?access_token=…` | `access_token` query parameter (as Snap documents it) | `PURCHASE`, `event_id`, `user_data.em / sc_click_id / client_user_agent` | hashed email or `ScCid` |
+| X Conversions API | `POST ads-api.x.com/12/measurement/conversions/<pixel_id>` | OAuth 1.0a `Authorization` header (HMAC-SHA1), signed per request by the `x_ads` adapter | `conversions[]`: `conversion_time`, `event_id` (`tw-<pixel>-<event>`), `identifiers` (`twclid`, `hashed_email`), `value`, `price_currency`, `number_items`, `conversion_id` | hashed email or `twclid`; see [X](#x-conversions) |
 | Google Ads (Data Manager API) | `POST datamanager.googleapis.com/v1/events:ingest` | `Authorization: Bearer` with an OAuth access token (from the org's refresh token, per run) | `adIdentifiers.gclid / gbraid / wbraid`, `conversionValue`, `transactionId`, `userData.userIdentifiers[].emailAddress` | hashed email or a click id; the Exos OAuth client configured, see [Google Ads](#google-ads) |
 
-Age limits (rows older are skipped): Meta, TikTok, Reddit and Snap 7 days, GA4 72 hours, Google
+Age limits (rows older are skipped): Meta, TikTok, Reddit, Snap and X 7 days, GA4 72 hours, Google
 Ads 90 days.
 
 Tokens are never stored in `exos_orgs.marketing` (public through `exos_public_orgs`), never
@@ -284,6 +287,107 @@ Applying the migration, setting the secrets and deploying need explicit operator
 developers.google.com was not reachable from the build environment; the scope and the
 no-developer-token point come from search-result summaries of the pages above, which agreed.
 
+## X conversions
+
+X rows join the outbox with mig `20261121190500` (`'x'` on the platform CHECK). They are queued by
+their own trigger (`exos_checkout_conversions_x`) under the same rules as the others (fulfilled,
+paid, `consent_marketing = 'granted'`) when the org's **`ads_x`** row in the channel-core credential
+store is on (`writes_enabled`, a secret, `config.pixel_id` and `config.event_id`). The store row is
+written by an X sign-in that is **not built yet** (operator step below); the generic Integrations
+save refuses `ads_x` (a managed provider).
+
+| Piece | Where |
+|---|---|
+| Builder | `_shared/conversions/x.ts` (`buildX`): the unsigned request stored in `payload_planned` |
+| Signing | `_shared/oauth1.ts` (OAuth 1.0a HMAC-SHA1; checked against the published test vector) |
+| Sender | the `x_ads` adapter (`_shared/channels/adapters/xAds.ts`) through GatedHttp, allowlist `POST /12/measurement/conversions/<pixel>` only |
+| Drain step | `_shared/conversions/xDrain.ts` (`drainXRow`), called by `exos-conversions-drain` |
+
+An X row is sent only when **all** of these hold, and none does today: `EXOS_CONVERSIONS_LIVE=true`
+on the drain; Exos's X app keys (`X_ADS_CONSUMER_KEY`, `X_ADS_CONSUMER_SECRET`; without them the row
+is "planned only"); and GatedHttp's decision for `x_ads` (the org's switch AND `EXOS_X_ADS_WRITES=on`).
+Otherwise the row is `skipped` with the reason, like the others. The org's token and token secret
+(`{"token","token_secret"}` in Vault) and the consumer secret never appear in `payload_planned`, an
+audit step or an error.
+
+Unverified (X's docs weren't readable from the build session): the `identifiers` shape, `value` as a
+number, the `12` version segment, the batch size (500) and the age window (held to 7 days).
+
+## Ads (dry run only)
+
+Operator 2026-11-21: "For the APIs build and keep read only till build is complete." The ads phase
+is built and **sends nothing**. Every ad-platform write goes through the channel core's GatedHttp
+(`docs/security.md`, "Channel core") on its adapter's explicit allowlist; a write off the list is
+refused (thrown); with the org's switch or the operator's `EXOS_<ID>_WRITES` off GatedHttp records the
+exact payload and returns a stand-in. On top of that, `exos-ads` pins the org's switch **off**
+(`_shared/ads/run.ts` `ADS_WRITES_PINNED_OFF`) and gives GatedHttp a fetch that refuses every call, so
+not even a read reaches a platform from it. Campaigns, ad sets / groups and ads are always created
+**PAUSED**. Hashed lists are summarized in the audit (`[2500 hashed rows (EMAIL_SHA256), not
+recorded]`), never stored.
+
+| Piece | Where |
+|---|---|
+| Migration | `20261121190500_exos_ads.sql` (Reddit hash + trigger, X rows, providers `ads_x` / `ads_meta_api` / `ads_reddit_api`, `exos_ads_campaign_context`, `exos_ads_audience_source`); test `tests/exos/test_ads.sql` (AD1-AD5) |
+| Audience builder | `_shared/ads/audience.ts` (consent filter, `hashedIds.ts`, dedupe, per-platform rows) |
+| Campaign planner | `_shared/ads/planner.ts` (one plan), `_shared/ads/geo.ts` (a small local city config; see below) |
+| Adapters | `_shared/channels/adapters/{metaAds,redditAds,googleCustomerMatch,xAds}.ts` (core, in the registry) |
+| Passes | `_shared/ads/run.ts`, edge function `exos-ads` (`/plan-audience`, `/plan-campaign`; owner / manager) |
+| UI | Edit event → **Boost this event** (`BoostEventPanel`), Org settings → **Ad audiences** (`AdAudienceSyncPanel`); every plan is also in **What we'd send** (`ChannelAuditPanel`) |
+| Tests | `_shared/ads/ads_test.ts` (in CI's Deno line), `src/components/BoostEventPanel.test.tsx` |
+
+**Who is on an audience.** `exos_ads_audience_source` (service role) returns the org's buyers with a
+fulfilled (or partly refunded) order who granted **advertising** consent at checkout, and its fans
+whose latest advertising choice there (by email or account) is granted. The latest choice wins (a
+later "no" removes an earlier "yes"); anyone unsubscribed from marketing mail, off the org's email
+list, discarded or deleted is left out. Joining the org's list or following it is not advertising
+consent. `exos-ads` hashes the emails / phones at once (`hashedIds.ts`: `em`, `em_google`,
+`em_reddit`, `ph`, `ph_digits`) and drops them; the builder checks the consent flag again. Every call
+is logged in `exos_audience_exports` and counts toward its 20 a day.
+
+**The price.** What Exos charges for a boost is `EXOS_ADS_BOOST_PRICE_CENTS`, default **0** (free at
+first). The ad budget is the organizer's daily budget, default $0 (the plan warns: a $0 campaign
+can't run).
+
+**Geo.** `geo.ts` keeps a small NYC config (boroughs, a starter ZIP list per borough, a 10-mile
+radius, subreddits) because the shared city config (`_shared/discovery/cities.ts`) is on the
+promotion branch, not this one; when they merge, point `adCityOf` at `cityOf` and move the ZIPs and
+communities there. Meta gets a radius around the venue when its pin is public (never for a secret or
+TBA location), else the city's ZIPs; Reddit has no radius, so it always gets the ZIP / borough list.
+
+### Per platform
+
+| Platform | Adapter (`EXOS_<ID>_WRITES`) | Credential (store provider) | Endpoints (all dry run) | Verified | Unverified |
+|---|---|---|---|---|---|
+| Meta Custom Audiences + campaigns | `meta_ads` (`EXOS_META_ADS_WRITES`) | `ads_meta_api`: a Marketing API token with `ads_management`; config `ad_account_id`, `page_id`, `pixel_id` (else the conversions pixel), `product_set_id` (optional, the catalog feed) | `POST /v25.0/act_<acct>/customaudiences`, `POST /v25.0/<audience>/users` (schema `EMAIL`, `PHONE`; 10,000 rows a request with `session`), `POST /v25.0/act_<acct>/campaigns` (`OUTCOME_SALES`, `PAUSED`), `/adsets` (`PAUSED`, `promoted_object` pixel + `PURCHASE`, radius or ZIP geo), `/adcreatives` (link ad, `BUY_TICKETS`), `/ads` (`PAUSED`); `GET /v25.0/<campaign>/insights` (stub) | the edges, the SHA-256 schema, `OUTCOME_SALES`, `PAUSED`, `BUY_TICKETS` (well-known public paths) | Advantage+ specifics (`advantage_audience`, campaign budget), the batch size and `session`, `picture`, the ~100-person minimum |
+| Google Customer Match | `google_customer_match` (`EXOS_GOOGLE_CUSTOMER_MATCH_WRITES`) | `ads_google_ads` (the **Connect Google Ads** refresh token, Data Manager scope; reused) + config `customer_id` / `login_customer_id`; the list id comes with the request | `POST datamanager.googleapis.com/v1/audienceMembers:ingest` (destinations, `audienceMembers[].userData.userIdentifiers` email / phone hashes, `consent`, `encoding: HEX`, `termsOfService`) | the Data Manager API (new Google Ads API adopters are refused since 2026-04-01, so nothing is built on the Ads API) | every field, 10,000 members a request, `termsOfService`, the list size Google needs; the list is made in Google Ads (Exos can't create it there) |
+| Reddit CUSTOMER_LIST + campaigns | `reddit_ads` (`EXOS_REDDIT_ADS_WRITES`); limits table `reddit` | `ads_reddit_api`: a Reddit Ads API OAuth token; config `ad_account_id`, `profile_id`, `pixel_id` (else the conversions pixel), `funding_instrument_id` | `POST /api/v3/ad_accounts/<acct>/custom_audiences` (`CUSTOMER_LIST`), `PATCH /api/v3/custom_audiences/<id>/users` (`EMAIL_SHA256`, Reddit-normalized, 2,500 rows a request), `POST …/campaigns` (`CONVERSIONS`, `PAUSED`), `POST …/ad_groups` (`PAUSED`, `optimization_goal: PURCHASE`, `conversion_pixel_id`, `targeting.geolocations` ZIP list + communities), `POST /api/v3/profiles/<profile>/structured_posts/jobs` (image, headline, CTA `BUY_TICKETS`; not the deprecated posts endpoint), `POST …/ads` (`PAUSED`) | from the brief: 2,500-row chunks of `EMAIL_SHA256`, 1,000+ matched users, up to 36 h to process, a 1-year expiry (all shown as warnings), the rate limits (writes 200 / min, reads 400 / min, targeting 100 / min, audience uploads 3,000 / 15 min) | the body shapes beyond the brief (`data` envelope, bid / goal fields, the `US-<zip>` geolocation code, the post job's answer, the insights read), whether the audience limit counts requests or rows (counted as requests) |
+| X conversions | `x_ads` (`EXOS_X_ADS_WRITES`) | `ads_x` + `X_ADS_CONSUMER_KEY` / `_SECRET` | `POST ads-api.x.com/12/measurement/conversions/<pixel>` | OAuth 1.0a signing (test vector) | see [X](#x-conversions) |
+
+`readInsights` is defined for Meta and Reddit and reads nothing until the org has a connected
+credential (then one GET through GatedHttp, counted against Reddit's read rate); no test calls a
+platform.
+
+### Before anything goes live (operator)
+
+1. **A CLAUDE.md write exception per platform.** CLAUDE.md's upstream rule makes third-party APIs
+   read-only; the existing exceptions (the organizer's own Eventbrite / Luma, PayPal, the SMS relay)
+   don't cover ad platforms. Each one (Meta, Google Data Manager audiences, Reddit, X conversions)
+   needs the operator's recorded decision naming the paths above, before any flag is turned on.
+2. **Remove the build pin** (`ADS_WRITES_PINNED_OFF` in `_shared/ads/run.ts`) and give `exos-ads` a
+   real fetch, in a reviewed change; then the per-org switch and `EXOS_<ID>_WRITES=on` decide.
+3. **App review and credentials.** Meta: a Business app with `ads_management` (Advanced Access
+   through App Review), Custom Audience terms accepted in each ad account, and a "Connect Meta Ads"
+   flow that writes `ads_meta_api` (not built). Google: the Data Manager scope on the existing OAuth
+   client (already requested) and Customer Match terms accepted in Google Ads. Reddit: a Reddit Ads
+   API app (developer access request) and a "Connect Reddit Ads" OAuth flow that writes
+   `ads_reddit_api` (not built). X: X Ads API access for the Exos developer app, its consumer key /
+   secret in the drain's env, and a "Connect X" (OAuth 1.0a three-legged) flow that writes `ads_x`
+   (not built).
+4. **Check every unverified field** above with each platform's test or validate mode.
+5. Apply `20261121190500` (after `20261121162400`), deploy `exos-ads` (new, `--no-verify-jwt`),
+   redeploy `exos-conversions-drain`, ship the SPA (`scripts/rollout-prod.sh`). Each needs explicit
+   operator permission.
+
 ## Security
 
 - `exos_org_ad_credentials` and `exos_marketing_conversions`: RLS on, no grants to `anon` or
@@ -311,9 +415,12 @@ developers.google.com, developers.snap.com) were not reachable from the build en
 builders follow search-result summaries of the official docs. Send one test per platform with a
 test code first, and check:
 
-- **Reddit** (least certain): the v3 path (`/api/v3/pixels/<pixel_id>/conversion_events` vs
-  `/conversions/events`) and the value field name (`value` vs `value_decimal`) differ between
-  integrator docs.
+- **Reddit**: confirmed by the operator's brief (2026-11-21): the path
+  `/api/v3/pixels/<pixel_id>/conversion_events`, the value in `metadata.value`, at most 1,000
+  events a request, a 7-day window, `conversion_id` dedupe, and UPPER_SNAKE tracking types
+  (`PURCHASE`; the builder sent `Purchase` before mig `20261121190500`). Still send one test with
+  `test_id` first.
+- **X**: every field (see [X](#x-conversions)).
 - **Snap**: the `/events/validate` path and the `PURCHASE` casing.
 - **Google Ads / Data Manager**: every field (`destinations[].operatingAccount`,
   `productDestinationId`, `encoding`, `adIdentifiers`, `eventSource`, `userData.userIdentifiers`,
@@ -336,6 +443,8 @@ test code first, and check:
   reference https://developers.google.com/analytics/devguides/collection/protocol/ga4/reference,
   user-provided data https://developers.google.com/analytics/devguides/collection/ga4/uid-data
 - Reddit Conversions API: https://business.reddithelp.com/s/article/Conversions-API
+- X Conversions API: https://developer.x.com/en/docs/x-ads-api/measurement/web-conversions/conversion-api;
+  OAuth 1.0a signing: https://developer.x.com/en/docs/authentication/oauth-1-0a/creating-a-signature
 - Snap Conversions API v3: https://developers.snap.com/api/marketing-api/Conversions-API/UsingTheAPI,
   https://developers.snap.com/marketing-api/Conversions-API/MigrationGuide
 - Google Data Manager API: https://developers.google.com/data-manager/api/reference/rest/v1/events/ingest,

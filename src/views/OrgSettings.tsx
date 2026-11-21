@@ -50,6 +50,7 @@ import RoleApiScopesPanel from '../components/RoleApiScopesPanel';
 import PartnerPresalePanel from '../components/PartnerPresalePanel';
 import DiscordPanel from '../components/DiscordPanel';
 import ChannelAuditPanel from '../components/ChannelAuditPanel';
+import AdAudienceSyncPanel from '../components/AdAudienceSyncPanel';
 
 // Hex-color validator — same shape as the ThemeContext sanitizer.
 // Mirrored here so we can give the user a fast field-level error
@@ -603,6 +604,8 @@ export default function OrgSettings() {
             {org.slug && (activeRole === 'owner' || activeRole === 'manager') && (
               <AudienceExportPanel orgId={org.id} orgSlug={org.slug} />
             )}
+            {/* Ad audiences: consenting fans and buyers, hashed, planned only (dry run, mig 20261121190500). */}
+            {(isAdmin || activeRole === 'owner' || activeRole === 'manager') && <AdAudienceSyncPanel orgId={org.id} />}
 
             {/* Seller details on receipts / credit notes (docs/invoices.md). Owner / manager / finance. */}
             {canSeeMoney(activeRole) && <OrgLegalSettings orgId={org.id} orgName={org.name} />}

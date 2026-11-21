@@ -1256,6 +1256,34 @@ added (operator 2026-11-21: "build and keep read only till build is complete"). 
   last of a budget; planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
   owner / manager only (42501 otherwise).
 
+### The ads phase, dry run only (mig 20261121190500)
+
+Nothing new is callable by anon (H3 unchanged), and nothing is sent to an ad platform (operator
+2026-11-21: "For the APIs build and keep read only till build is complete"). Tests:
+`tests/exos/test_ads.sql` (AD1-AD5), `_shared/ads/ads_test.ts`, `src/components/BoostEventPanel.test.tsx`;
+docs/marketing-conversions.md "Ads" has the platforms and the operator steps.
+
+- **Every ad write behind GatedHttp.** The four adapters (`meta_ads`, `reddit_ads`,
+  `google_customer_match`, `x_ads`) each list exactly their write paths (no DELETE, nothing retried);
+  anything else is refused. `exos-ads` pins the org's switch off (`ADS_WRITES_PINNED_OFF`) and hands
+  GatedHttp a fetch that refuses every call, so a plan never reaches a platform whatever the flags.
+  A stand-in id (`planned_<kind>`) lets a chain be planned; `liveSafe` refuses to send one live.
+  X conversions go out only through `x_ads` with `EXOS_CONVERSIONS_LIVE=true`, Exos's X app keys, the
+  org's switch and `EXOS_X_ADS_WRITES=on` (all off).
+- **Hashed people only, and not in the audit.** `exos_ads_audience_source` (service role only)
+  returns consenting buyers' and fans' email / phone; `exos-ads` hashes them at once
+  (`hashedIds.ts`) and the builder re-checks the consent flag. A batch of hashes is recorded in
+  `exos_channel_audit` as a count (`RequestOptions.auditBody`), never the hashes. Each call is
+  logged in `exos_audience_exports` (20 a day per org).
+- **The planner's context** (`exos_ads_campaign_context`): owner / manager only (42501 otherwise),
+  booleans for which ad credentials are connected, never a secret or a credential's ids, and no map
+  pin for a secret / TBA location.
+- **New store providers** `ads_x`, `ads_meta_api`, `ads_reddit_api` are managed: the generic
+  Integrations save / remove refuse them, only the service role decrypts them
+  (`exos_integration_secret`). Their connect flows are not built.
+- **OAuth 1.0a** (`_shared/oauth1.ts`): the X keys are only ever in the signed `Authorization`
+  header, which GatedHttp redacts; every key is also in its `secrets`.
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

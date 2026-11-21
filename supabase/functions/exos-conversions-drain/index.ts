@@ -1,6 +1,7 @@
 // exos-conversions-drain — send queued server-side ad conversions (Meta CAPI,
 // TikTok Events API, GA4 Measurement Protocol, Reddit, Snap, Google Ads via
-// the Data Manager API) from exos_marketing_conversions (mig 20260930100000).
+// the Data Manager API, X) from exos_marketing_conversions (mig 20260930100000;
+// X since mig 20261121190500).
 //
 // Cron-invoked (requireCronSecret), e.g. every 5 minutes; not scheduled yet
 // (docs/marketing-conversions.md has the cron.schedule call for the operator).
@@ -24,6 +25,12 @@
 // org per run (createAccessTokenCache), and sends with Authorization: Bearer.
 // No developer token: the Data Manager API doesn't take one. A revoked
 // refresh token (invalid_grant) fails the row with "reconnect Google Ads".
+// X rows (mig 20261121190500) take their credential from the channel-core
+// store (provider ads_x, exos_integration_secret) and, when live, go out only
+// through the x_ads adapter's GatedHttp (the org's switch AND
+// EXOS_X_ADS_WRITES=on) with Exos's X app keys (X_ADS_CONSUMER_KEY /
+// X_ADS_CONSUMER_SECRET); without the keys they are planned only
+// (_shared/conversions/xDrain.ts).
 //
 // Secrets: each org's token comes from Supabase Vault through the claim RPC
 // (service role only). It is sent only to the platform's pinned host
@@ -33,7 +40,8 @@
 // Env: CRON_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 //      EXOS_CONVERSIONS_LIVE ("true" to send), EXOS_APP_BASE_URL (https://…,
 //      for event_source_url; optional), GOOGLE_OAUTH_CLIENT_ID +
-//      GOOGLE_OAUTH_CLIENT_SECRET (Google Ads; optional).
+//      GOOGLE_OAUTH_CLIENT_SECRET (Google Ads; optional), X_ADS_CONSUMER_KEY +
+//      X_ADS_CONSUMER_SECRET and EXOS_X_ADS_WRITES (X; optional, all off).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { requireCronSecret } from "../_shared/cron-auth.ts";
@@ -41,6 +49,11 @@ import { redactError } from "../_shared/log.ts";
 import type { ConversionRow, Credential, Platform } from "../_shared/conversions/common.ts";
 import { buildConversionRequest, plannedOnly, redactRequest, scrubSecret, sendConversion } from "../_shared/conversions/send.ts";
 import { createAccessTokenCache, googleOAuthConfig, withBearer } from "../_shared/conversions/googleOAuth.ts";
+import { drainXRow } from "../_shared/conversions/xDrain.ts";
+import { xAppKeys } from "../_shared/channels/adapters/xAds.ts";
+import { loadCredential } from "../_shared/channels/credentials.ts";
+import { rpcAuditSink } from "../_shared/channels/audit.ts";
+import type { OrgCredential } from "../_shared/channels/adapter.ts";
 
 const MAX_ATTEMPTS = 6;
 const BATCH = 25;
@@ -68,6 +81,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const started = Date.now();
   const googleCfg = googleOAuthConfig((k) => Deno.env.get(k), false);
   const googleToken = googleCfg ? createAccessTokenCache(googleCfg, (u, i) => fetch(u, i)) : null;
+  const xApp = xAppKeys((k) => Deno.env.get(k));
+  // One store read per org per run for X rows.
+  const xCreds = new Map<string, Promise<OrgCredential | null>>();
+  const xCred = (org: string) => {
+    if (!xCreds.has(org)) xCreds.set(org, loadCredential((fn, args) => sb.rpc(fn, args), org, "ads_x").catch(() => null));
+    return xCreds.get(org)!;
+  };
 
   const { data, error } = await sb.rpc("exos_conversions_claim_batch", {
     p_limit: BATCH, p_max_attempts: MAX_ATTEMPTS, p_lease_minutes: LEASE_MINUTES,
@@ -97,6 +117,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (Date.now() - started > RUN_BUDGET_MS) {
       await mark(row, "release");
       counts.released++;
+      continue;
+    }
+    if (row.platform === "x") {
+      const cred = await xCred(row.org_id);
+      const out = await drainXRow(row, cred, {
+        live, app: xApp, env: (k) => Deno.env.get(k), fetch: (u, i) => fetch(u, i),
+        audit: rpcAuditSink((fn, args) => sb.rpc(fn, args), row.org_id), ctx: { appBase, now: new Date() },
+      });
+      const result = out.result === "skipped" && out.error.startsWith("dry-run") ? "dry_run" : out.result;
+      await mark(row, out.result, {
+        error: "error" in out ? out.error : null, status: "status" in out ? out.status : null, planned: out.planned ?? null,
+      });
+      counts[result]++;
       continue;
     }
     if (!row.enabled || !row.secret) {
@@ -150,7 +183,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  return json({ live, google_ads_oauth: !!googleToken, processed: claimed.length, ...counts });
+  return json({ live, google_ads_oauth: !!googleToken, x_app: !!xApp, processed: claimed.length, ...counts });
 });
 
 function json(body: unknown, status = 200): Response {

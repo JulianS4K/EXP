@@ -13,6 +13,7 @@ import { buildGa4 } from "./ga4.ts";
 import { buildReddit } from "./reddit.ts";
 import { buildSnap } from "./snap.ts";
 import { buildGoogleAds } from "./googleAds.ts";
+import { buildX } from "./x.ts";
 
 const BUILDERS: Record<Platform, (row: ConversionRow, cred: Credential, ctx: BuildContext) => BuildResult> = {
   meta: buildMeta,
@@ -21,15 +22,21 @@ const BUILDERS: Record<Platform, (row: ConversionRow, cred: Credential, ctx: Bui
   reddit: buildReddit,
   snap: buildSnap,
   google_ads: buildGoogleAds,
+  x: buildX,
 };
 
 /**
  * Platforms whose request is built and stored but not sent. Google Ads needs
  * the Exos Google OAuth client (GOOGLE_OAUTH_CLIENT_ID / _SECRET) to turn the
  * org's refresh token into an access token; without it, it stays planned only.
+ * X needs Exos's X app keys (X_ADS_CONSUMER_KEY / _SECRET) to sign; and even
+ * then it goes out only through the x_ads adapter's GatedHttp (the org's
+ * switch AND EXOS_X_ADS_WRITES=on), never through sendConversion.
  */
-export function plannedOnly(platform: Platform, opts: { googleOAuthConfigured?: boolean } = {}): boolean {
-  return platform === "google_ads" && !opts.googleOAuthConfigured;
+export function plannedOnly(platform: Platform, opts: { googleOAuthConfigured?: boolean; xConfigured?: boolean } = {}): boolean {
+  if (platform === "google_ads") return !opts.googleOAuthConfigured;
+  if (platform === "x") return !opts.xConfigured;
+  return false;
 }
 
 export function buildConversionRequest(row: ConversionRow, cred: Credential, ctx: BuildContext): BuildResult {

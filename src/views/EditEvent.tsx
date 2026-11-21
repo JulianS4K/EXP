@@ -27,6 +27,7 @@ import TicketBackendPanel from '../components/TicketBackendPanel';
 import LinkOutStatusPanel from '../components/LinkOutStatusPanel';
 import ChannelsPanel from '../components/ChannelsPanel';
 import DiscordEventPanel from '../components/DiscordEventPanel';
+import BoostEventPanel from '../components/BoostEventPanel';
 import PoshPanel from '../components/PoshPanel';
 import TierDistributionPanel from '../components/TierDistributionPanel';
 import { EventPartnerPresale } from '../components/PartnerPresalePanel';
@@ -1904,6 +1905,8 @@ export default function EditEvent() {
         {eventId && <ChannelsPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Discord: a scheduled event on the org's server + the announcement (mig 20261113194000). */}
         {eventId && <DiscordEventPanel eventId={eventId} />}
+        {/* Boost this event: a paid campaign on Meta / Reddit, planned only (dry run, mig 20261121190500). */}
+        {eventId && <BoostEventPanel eventId={eventId} orgId={eventData.orgId} />}
         {/* Near sell-out only the primary sells (mig 20261029100000). */}
         {eventId && <LastCallPanel eventId={eventId} />}
         {/* Posh: a capped tier fed by Posh's webhooks (mig 20261029150000). */}

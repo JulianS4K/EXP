@@ -39,7 +39,7 @@ supabase functions deploy <name> --project-ref <ref> --no-verify-jwt   # see the
 ```
 
 `--no-verify-jwt` (they check auth themselves, or are called by Stripe, PayPal, cron, SMS providers, embeds or
-public feeds): `stripe-webhook`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
+public feeds): `stripe-webhook`, `exos-ads`, `exos-api`, `exos-calendar`, `exos-catalog-feed`, `exos-channel-sync`,
 `exos-commerce`, `exos-conversions-drain`, `exos-discord`, `exos-distribute`, `exos-event-import`, `exos-eventbrite-oauth`,
 `exos-eventbrite-sync`, `exos-geocode-refresh`, `exos-google-feed`, `exos-instant-payouts`, `exos-integrations`,
 `exos-mail-drain`, `exos-marketplace-sales`, `exos-match`, `exos-mcp`, `exos-oauth`, `exos-oauth-google`,
@@ -70,6 +70,8 @@ everything else with `--no-verify-jwt`.
 | `EXOS_DISCORD_ENABLED`, `EXOS_DISCORD_WRITES` | Discord promotion (`docs/discord.md`) | `ENABLED=on` shows it at all (off: hidden, `exos-discord` answers 503); `WRITES=on` lets it post / make Discord events, and each org's owner also switches it on. Otherwise a dry run |
 | `DISCORD_APPLICATION_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` | "Add Exos bot to your server" | your Discord application (`docs/discord.md`). Unset: only the channel webhook is offered. Optional `DISCORD_REDIRECT_URI` (default `<SUPABASE_URL>/functions/v1/exos-discord/callback`) |
 | `EXOS_CONVERSIONS_LIVE` | server-side ad conversions | optional |
+| `X_ADS_CONSUMER_KEY`, `X_ADS_CONSUMER_SECRET`, `EXOS_X_ADS_WRITES` | X conversions (`docs/marketing-conversions.md` "X") | optional; without the keys X rows stay planned only, and they go out only with `EXOS_CONVERSIONS_LIVE=true`, `EXOS_X_ADS_WRITES=on` and the org's switch |
+| `EXOS_ADS_BOOST_PRICE_CENTS` | "Boost this event" (`exos-ads`) | what Exos charges for a boost, in cents; default `0` (free). Every ad write is a dry run whatever the flags (`docs/marketing-conversions.md` "Ads") |
 | `EXOS_SMS_LIVE` | SMS campaigns | `on` to really send; otherwise every due text is recorded as a dry run |
 | `TURNSTILE_SECRET_KEY` | the waiting room's human check (`exos-wroom-join`) | your Cloudflare Turnstile widget's secret key; pair it with `VITE_TURNSTILE_SITE_KEY` below. Unset: organizers can't turn the check on (the toggle is greyed out) and `exos-wroom-join` answers 503 |
 

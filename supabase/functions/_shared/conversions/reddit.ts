@@ -3,20 +3,29 @@
 //   POST https://ads-api.reddit.com/api/v3/pixels/<pixel_id>/conversion_events
 //   Authorization: Bearer <conversion access token>
 //   { data: { test_id?, events: [ { event_at (ms), action_source: "WEBSITE",
-//       type: { tracking_type: "Purchase" }, click_id: <rdt_cid>,
+//       type: { tracking_type: "PURCHASE" }, click_id: <rdt_cid>,
 //       metadata: { conversion_id, currency, value, item_count },
-//       user: { email: sha256, user_agent } } ] } }
+//       user: { email: sha256 (Reddit-normalized), user_agent } } ] } }
 //
-// conversion_id = the Stripe session id, so a Reddit pixel Purchase with the
-// same conversion id (when the browser pixel is added) is deduplicated.
-//
-// NEEDS VERIFICATION before EXOS_CONVERSIONS_LIVE: Reddit's developer docs
-// could not be read from the build environment, and third-party summaries
-// disagree on the v3 path (/pixels/<pixel_id>/conversion_events vs
-// /conversions/events) and on field names (value vs value_decimal). Send a
-// test with test_id first. Reddit has no standard refund event.
+// Confirmed against the v3 reference (operator brief 2026-11-21, ads phase):
+//   * the path is /api/v3/pixels/{pixel_id}/conversion_events;
+//   * tracking_type is the v3 enum in UPPER_SNAKE (PURCHASE, PAGE_VISIT,
+//     ADD_TO_CART, ...); the browser pixel's PascalCase names
+//     (src/lib/pixels.ts redditEvent) are a different API and stay as they are;
+//   * the value is metadata.value (major units);
+//   * at most 1,000 events per request (REDDIT_MAX_EVENTS, redditBatches);
+//   * events up to 7 days old (MAX_AGE_MS.reddit);
+//   * metadata.conversion_id dedupes against the browser pixel's
+//     conversionId (both are the Stripe session id).
+// The email is Reddit's own normalization (lower case, "+tag" and the dots
+// of the local part dropped, every domain): payload.em_reddit, written by the
+// outbox trigger since mig 20261121190500 (_exos_email_sha256_reddit); a row
+// queued before that carries only em, which is sent instead (the same hash
+// for any address without a "+" or a dot before the @).
+// Send a test with test_id before EXOS_CONVERSIONS_LIVE. Reddit has no
+// standard refund event.
 // Docs: https://business.reddithelp.com/s/article/Conversions-API (the Ads
-// API reference it links to is the source to check the v3 request against).
+// API reference it links to).
 
 import {
   type BuildContext, type BuildResult, type ConversionRow, type Credential,
@@ -25,6 +34,30 @@ import {
 
 export const REDDIT_API_BASE = "https://ads-api.reddit.com/api/v3";
 
+/** Reddit takes at most this many events in one conversion_events request. */
+export const REDDIT_MAX_EVENTS = 1000;
+
+/** The v3 tracking types (UPPER_SNAKE), by the canonical event names Exos uses. */
+export const REDDIT_TRACKING_TYPE = {
+  PageVisit: "PAGE_VISIT",
+  ViewContent: "VIEW_CONTENT",
+  Search: "SEARCH",
+  AddToCart: "ADD_TO_CART",
+  AddToWishlist: "ADD_TO_WISHLIST",
+  Purchase: "PURCHASE",
+  Lead: "LEAD",
+  SignUp: "SIGN_UP",
+} as const;
+export type RedditTrackingType = (typeof REDDIT_TRACKING_TYPE)[keyof typeof REDDIT_TRACKING_TYPE];
+
+/** Events split into requests of at most REDDIT_MAX_EVENTS, order kept. */
+export function redditBatches<T>(events: readonly T[], max = REDDIT_MAX_EVENTS): T[][] {
+  const size = Math.max(1, Math.min(Math.floor(max), REDDIT_MAX_EVENTS));
+  const out: T[][] = [];
+  for (let i = 0; i < events.length; i += size) out.push(events.slice(i, i + size));
+  return out;
+}
+
 export function buildReddit(row: ConversionRow, cred: Credential, ctx: BuildContext): BuildResult {
   if (row.event_name !== "Purchase") return skip("reddit: no standard refund event");
   const pixel = cred.config.pixel_id;
@@ -32,14 +65,14 @@ export function buildReddit(row: ConversionRow, cred: Credential, ctx: BuildCont
   const old = tooOld(row, ctx.now);
   if (old) return skip(old);
   const p = row.payload;
-  const em = hashOrUndefined(p.em);
+  const em = hashOrUndefined(p.em_reddit) ?? hashOrUndefined(p.em);
   const clickId = p.ad_ids?.rdt_cid;
   if (!em && !clickId) return skip("reddit: nothing to match on (no email hash or rdt_cid)");
 
   const event = compact({
     event_at: Date.parse(row.occurred_at),
     action_source: "WEBSITE",
-    type: { tracking_type: "Purchase" },
+    type: { tracking_type: REDDIT_TRACKING_TYPE.Purchase },
     click_id: clickId,
     event_source_url: eventSourceUrl(ctx.appBase, p.event),
     metadata: compact({
