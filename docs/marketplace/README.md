@@ -181,6 +181,45 @@ Details per marketplace: [`stubhub/`](stubhub/README.md),
 [`seatgeek/`](seatgeek/README.md), [`gametime/`](gametime/README.md),
 [`gotickets/`](gotickets/README.md), [`vivid/`](vivid/README.md), [`tevo/`](tevo/README.md).
 
+## The channel core (mig `20261121162400`)
+
+New channel code (marketplaces, primaries, promotion) is built on one core in
+`supabase/functions/_shared/channels/`, read only until the operator says
+otherwise (operator 2026-11-21: "build and keep read only till build is
+complete"). The marketplace planners above still run in `exos-distribute`
+and move over one per branch; `registry.ts` lists each with its capabilities
+and where its code lives today.
+
+- **`adapter.ts`**: the `ChannelAdapter` interface. Capability flags
+  (`createEvent`, `ticketTypes`, `setCapacity`, `requestEvent`, `matchEvent`,
+  `list`, `delist`, `deliver[]`, `readAttendees`, `checkin`, `saleWebhook`,
+  `publishPost`, `syncAudience`, `createCampaign`, `readInsights`,
+  `sendConversion`), one optional method per flag, and a registry that refuses
+  an adapter claiming a flag without its method (or the reverse).
+- **`gatedHttp.ts`**: the only way an adapter reaches its platform. A write
+  goes out only when the org's switch AND `EXOS_<ID>_WRITES=on` AND the
+  adapter's method + path allowlist agree; otherwise it is a dry run that
+  records the exact payload. Reads always go out, with bounded retries
+  (`_shared/retry.ts`). Credentials go in headers only. Every request is a
+  step in `exos_channel_audit` (secrets redacted), which the organizer sees as
+  **What we'd send** in Org settings.
+- **`limits.ts`**: the single table of platform limits (one data table per
+  platform: rule, scope, threshold, window, action `block` / `cap` / `warn`,
+  reason, source). For the marketplaces: **a $0 ticket type is never offered**
+  (`<marketplace>_no_free_tiers`, block; StubHub International bans free
+  events); the Marketplaces grid says so under a $0 ticket type. Counted
+  limits (Luma sends, LinkedIn invites, pretix / Ticket Tailor tickets,
+  Eventbrite emails) read `exos_channel_usage` (`usage.ts`), with planned
+  (dry-run) usage kept apart from live, so the preview reads "would use N of
+  M". The promotion work's own listing warnings are to point here once the
+  branches merge.
+- **`credentials.ts`**: the org's credential from the one store
+  (`exos_integration_secret`, docs/security.md "Channel core"). Platform
+  accounts (`STUBHUB_CLIENT_SECRET`, `SEATGEEK_CLIENT_ID`, `VIVID_API_TOKEN`,
+  ...) stay in the function's env.
+- The first path on the core is a read: pretix's credential test in
+  `exos-integrations` (`adapters/pretix.ts`).
+
 ## How StubHub ties into Exos
 
 ### One sync for every marketplace (mig `20260927030000`)

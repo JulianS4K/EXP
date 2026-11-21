@@ -1204,6 +1204,58 @@ Exos adopted.
   `supabase/functions/_shared/channels/channels_test.ts`, `_shared/retry_test.ts`, `_shared/posh/bucket_test.ts`,
   `_shared/partners/sales_test.ts`, `_shared/ssrf_test.ts`.
 
+### Channel core: one credential store, GatedHttp, channel audit, usage (mig 20261121162400)
+
+Nothing new is callable by anon (H3 unchanged), and nothing is sent to a third party: no write path or allowlist is
+added (operator 2026-11-21: "build and keep read only till build is complete"). Tests:
+`tests/exos/test_channel_core.sql` (CC1-CC7), `_shared/channels/gatedHttp_test.ts`, `limits_test.ts`,
+`adapter_test.ts`, `src/components/ChannelAuditPanel.test.tsx`.
+
+- **One credential store.** Every per-org third-party credential is a row of `exos_org_integrations` with its
+  secret in Vault (`exos_integration:<org>:<provider>`). The one decrypt is `exos_integration_secret(org, provider)`
+  (service role only; NULL for nothing connected, a `disabled` row or an unknown provider); it reads the store first
+  and, for a managed provider whose copy is missing, the old table (`source: legacy:<table>`). Vault is reached only
+  through `_exos_vault_put` / `_get` / `_drop` (no client or service-role EXECUTE): an install without Vault
+  redefines those three, and the SQL harness stubs the `vault` schema (`tests/exos/prereq_vault.sql`). The service
+  role can read `vault` on the shared project anyway; the point is one Exos path, not a new boundary.
+- **Managed providers** (`eventbrite`, `dice`, `discord`, `lysted`, `ads_meta` / `ads_tiktok` / `ads_ga4` /
+  `ads_google_ads` / `ads_reddit` / `ads_snap`) keep their own connect flows and tables; their store rows are copies
+  (`copied_from`) kept in step by AFTER triggers on `exos_eventbrite_accounts`, `exos_dice_connections`,
+  `exos_org_ad_credentials` and `exos_discord_links` (each flow writes Vault before its row, so the trigger reads
+  the new secret; DICE and Discord copy only when the credential columns change). A failed copy never fails the
+  connect: the copy is dropped (reads fall back) with a WARNING. The generic save and remove refuse managed
+  providers, and `exos_list_integrations` lists only what Integrations offers. The migration copies existing rows
+  (`_exos_cred_backfill`, re-run safe; prod had none on 2026-11-21).
+- **`exos_org_secrets.distribution` first.** It was plain jsonb (Lysted / Automatiq seller ids), readable by owner
+  and finance. A BEFORE trigger now moves every written value to Vault (provider `lysted`) and leaves a stub
+  `{in_vault, enabled}`; a stub written back keeps the stored secret, NULL removes it. Nothing server-side read it.
+- **The write.** `exos_save_integration` (owner / manager; returns the last four characters, never the secret)
+  writes through `_exos_integration_put`, the same core the copies use, and logs `integration.save` /
+  `integration.remove` to the org audit log: the provider, whether a new credential was given and the setting
+  names, never a value.
+- **What stays in env (platform accounts).** Exos's own marketplace and API keys (`STUBHUB_CLIENT_SECRET`,
+  `SEATGEEK_CLIENT_ID`, `VIVID_API_TOKEN`, `TEVO_OFFICE_ID`, the Eventbrite / Google / Discord OAuth apps, PayPal,
+  Stripe, the SMS pool). Also still in env, and per org: `EXOS_TIXEL_WEBHOOK_SECRETS` (an inbound secret looked up
+  by value; moving it needs a hashed lookup column, later). Posh keeps only SHA-256 hashes of the tokens it issued,
+  not a credential to decrypt, so it stays as it is.
+- **GatedHttp** (`_shared/channels/gatedHttp.ts`): `decideLive` is the one live / dry-run decision: a write goes
+  out only with the org's switch AND `EXOS_<ID>_WRITES=on` AND the adapter's method + path allowlist (reusing
+  `writesLive` from `model.ts`); all default off. A write off the allowlist throws whatever the switches. A dry run
+  sends nothing, records the exact payload and returns a stand-in. Reads are retried under `_shared/retry.ts`; a
+  write is sent once unless its rule is marked idempotent; an SSRF guard's refusal is never retried. Credentials go
+  in headers only: a URL holding a secret value (raw or URL-encoded) or a credential-named query parameter is
+  refused before anything is sent. Every request is an audit step with credential headers, secret-named keys and
+  every secret value redacted.
+- **`exos_channel_audit`**: RLS, SELECT for owner / manager of the row's org (finance, scanners and other orgs read
+  nothing), no client writes. Only `exos_channel_audit_record` (service role) writes: it drops query values from
+  the path, scrubs secret-named keys and auth-looking strings again, caps sizes, skips a malformed step without
+  raising, and keeps 30 days. GatedHttp's database sink writes every write step and a read only when asked (the
+  credential test). The organizer sees the planned writes as **What we'd send** (Org settings).
+- **Limits** (`_shared/channels/limits.ts`, the single table) and **`exos_channel_usage`**: RLS on, no client grant;
+  `exos_channel_usage_reserve` (service role) takes a per-key advisory lock, so two passes can't both spend the
+  last of a budget; planned usage is a separate row per identical request; `exos_channel_usage_summary` answers
+  owner / manager only (42501 otherwise).
+
 ### Search path
 
 ### Hygiene 2026-11-09 (mig 20261109110000)

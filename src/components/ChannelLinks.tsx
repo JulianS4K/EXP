@@ -15,6 +15,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { setChannelAllocation, setChannelPrice, setMarketSplit, type AllocationChannel } from '../lib/marketplace/stubhubStatusApi';
 import { allocationCellStatus, parseMarketplacePrice, poolLine, type MarketplaceRow } from '../lib/marketplace/stubhubStatus';
+import { blockedOn } from './ChannelLimitNotes';
 import { MARKET_SPLITS, MARKET_SPLIT_LABEL, formatSeatRanges, netEqualListPrice, parseSeatRanges, type MarketSplit } from '../lib/marketplace';
 
 export const LABEL: Record<string, string> = {
@@ -387,6 +388,16 @@ export function MarketplaceGrid({
           </tbody>
         </table>
       </div>
+      {/* Platform rules (channel core limits.ts): a $0 ticket type is never offered on a resale marketplace. */}
+      {tiers.filter((t) => Math.round(t.price * 100) === 0).map((t) => {
+        const on = blockedOn(channels, { priceCents: 0 });
+        return on.length ? (
+          <p key={t.id} role="note" data-action="block" className="type text-[11px] text-rose-300 border border-rose-400/40 rounded px-2 py-1">
+            <span className="font-bold">{t.name}</span> is $0, so Exos won&apos;t list it on {on.map((c) => LABEL[c] ?? c).join(', ')}:
+            resale marketplaces don&apos;t take free tickets (StubHub International bans free events).
+          </p>
+        ) : null;
+      })}
       <button type="button" onClick={save} disabled={busy}
         className="px-4 py-2 bg-brand-primary text-black text-[10px] font-black uppercase tracking-widest disabled:opacity-50">
         {busy ? 'Saving…' : 'Save marketplace seats, prices and splits'}
