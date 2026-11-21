@@ -22,7 +22,12 @@
 --       no client writes
 --   CC7 exos_channel_usage: a live reserve spends only under the threshold,
 --       planned usage counts once per identical request and apart from live,
---       rolling windows (a day, a week, a year), the summary's roles
+--       rolling windows (a day, a week, a year), the summary's roles; it refuses
+--       REPEATABLE READ (a snapshot sum would overshoot)
+--   CC8 nothing outlives its row: deleting the exos_org_secrets row drops the
+--       Lysted copy (store row and Vault); an org delete leaves no store
+--       row and no Vault copy (a managed copy, a plain Integrations secret,
+--       the Lysted value); the retention sweep covers every org
 -- Self-contained (cc1 prefix), rolled back.
 -- ============================================================================
 \set ON_ERROR_STOP on
@@ -344,9 +349,14 @@ BEGIN
      "response": {"stand_in": true}, "status": 200, "ok": true,
      "warnings": [{"rule": "luma_sends", "action": "cap"}]},
     {"channel": "BAD CHANNEL", "op": "x", "method": "GET", "path": "/"},
-    {"channel": "pretix", "op": "test_credential", "method": "GET", "path": "/api/v1/organizers/demo/", "live": true, "status": 200, "ok": true}
+    {"channel": "pretix", "op": "test_credential", "method": "GET", "path": "/api/v1/organizers/demo/", "live": true, "status": 200, "ok": true},
+    {"channel": "lysted", "op": "scrub", "method": "POST", "path": "/v1/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTYifQ.sig/x?SECRETBARE&page=2#access_token=FRAG",
+     "live": false, "error": "upstream said: Bearer leakyleakyleaky and api_key=LEAK2",
+     "warnings": [{"reason": "token=WARNLEAK in a reason", "private_key": "PK-LEAK"}],
+     "request": {"body": {"key": "K-LEAK", "private_key": "P-LEAK", "access_key": "A-LEAK", "pass": "PW1", "pwd": "PW2", "jwt": "J-LEAK",
+                          "note": "see sk_live_abcdefghijkl and ghp_abcdefghijklmnopqrstuvwxyz0123", "keep": "monkey=1 stays"}}}
   ]$j$::jsonb);
-  ASSERT n = 2, 'CC6: two good steps written, the bad one skipped, got ' || n;
+  ASSERT n = 3, 'CC6: three good steps written, the bad one skipped, got ' || n;
   n := public.exos_channel_audit_record(pg_temp.org(2), jsonb_build_array(
     jsonb_build_object('channel', 'luma', 'op', 'event.create', 'method', 'POST', 'path', '/v1/event/create', 'live', false)));
   ASSERT public.exos_channel_audit_record(gen_random_uuid(), '[{"channel":"luma","op":"x","method":"GET","path":"/"}]') = 0,
@@ -361,6 +371,13 @@ BEGIN
   ASSERT a.request::text NOT LIKE '%abcdef123456%' AND a.request::text NOT LIKE '%cs_live%' AND a.request::text NOT LIKE '%zzzzzzzzzz%'
          AND a.request -> 'body' ->> 'name' = 'Show' AND a.request -> 'headers' ->> 'Accept' = 'json', 'CC6: secrets scrubbed, got ' || a.request;
   ASSERT a.warnings -> 0 ->> 'rule' = 'luma_sends', 'CC6: warnings kept';
+  SELECT * INTO a FROM public.exos_channel_audit WHERE org_id = pg_temp.org() AND channel = 'lysted';
+  ASSERT a.path = '/v1/[redacted]/x?…&page=…', 'CC6: a JWT path segment, a bare parameter and the fragment dropped, got ' || a.path;
+  ASSERT a.error NOT LIKE '%leakyleakyleaky%' AND a.error NOT LIKE '%LEAK2%' AND a.error LIKE 'upstream said:%', 'CC6: error scrubbed, got ' || a.error;
+  ASSERT a.warnings::text NOT LIKE '%WARNLEAK%' AND a.warnings::text NOT LIKE '%PK-LEAK%', 'CC6: warnings scrubbed, got ' || a.warnings;
+  ASSERT a.request::text !~ '(K-LEAK|P-LEAK|A-LEAK|PW1|PW2|J-LEAK|sk_live_abcdefghijkl|ghp_abcdef)', 'CC6: secret keys and tokens out, got ' || a.request;
+  ASSERT a.request -> 'body' ->> 'keep' = 'monkey=1 stays', 'CC6: ordinary text kept, got ' || a.request;
+  DELETE FROM public.exos_channel_audit WHERE id = a.id;
 END $$;
 SELECT pg_temp.act('cc100000-0000-0000-0000-0000000000a2');
 SET LOCAL ROLE authenticated;
@@ -463,5 +480,82 @@ DO $$ BEGIN
   RAISE NOTICE 'OK  CC7 usage: live spends under the limit, planned apart and deduped, rolling windows, summary roles';
 END $$;
 RESET ROLE;
+-- CC8 ------------------------------------------------------------------------
+-- (a) the exos_org_secrets row deleted: the Lysted copy goes with it.
+INSERT INTO public.exos_org_secrets (org_id, distribution) VALUES (pg_temp.org(), '{"lystedSellerId":"SELLER-cc8-a"}')
+  ON CONFLICT (org_id) DO UPDATE SET distribution = EXCLUDED.distribution;
+DO $$ BEGIN
+  ASSERT pg_temp.cred(pg_temp.org(), 'lysted') ->> 'secret' LIKE '%SELLER-cc8-a%', 'CC8: stored';
+END $$;
+DELETE FROM public.exos_org_secrets WHERE org_id = pg_temp.org();
+DO $$ BEGIN
+  ASSERT pg_temp.cred(pg_temp.org(), 'lysted') IS NULL, 'CC8: a deleted secrets row leaves no Lysted credential';
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_org_integrations WHERE org_id = pg_temp.org() AND provider = 'lysted'), 'CC8: no store row';
+  ASSERT NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name = 'exos_integration:' || pg_temp.org() || ':lysted'), 'CC8: no Vault copy';
+  ASSERT NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets WHERE decrypted_secret LIKE '%SELLER-cc8-a%'), 'CC8: the value is gone';
+END $$;
+-- (b) an org delete: a managed copy (DICE), a plain Integrations secret and the Lysted value.
+INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
+  ('cc100000-0000-0000-0000-000000000003','Gone Org','gone-org-cc8','cc100000-0000-0000-0000-0000000000a5');
+INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
+  ('cc100000-0000-0000-0000-000000000003','cc100000-0000-0000-0000-0000000000a5','owner');
+SET LOCAL ROLE service_role;
+SELECT public.exos_dice_connect(pg_temp.org(3), pg_temp.u('a5'), 'tok_dice_cc8_gone_0123456789', 'v8', 'Gone Promotions');
+RESET ROLE;
+SELECT public._exos_integration_put(pg_temp.org(3), 'pretix', 'PRETIX-cc8-gone-token', '{}'::jsonb, NULL, 'unverified');
+INSERT INTO public.exos_org_secrets (org_id, distribution) VALUES (pg_temp.org(3), '{"lystedSellerId":"SELLER-cc8-b"}');
+DO $$ BEGIN
+  ASSERT (SELECT count(*) FROM public.exos_org_integrations WHERE org_id = pg_temp.org(3)) = 3, 'CC8: three store rows';
+  ASSERT (SELECT count(*) FROM vault.secrets WHERE name LIKE 'exos_integration:' || pg_temp.org(3) || ':%') = 3, 'CC8: three Vault copies';
+END $$;
+DELETE FROM public.exos_orgs WHERE id = pg_temp.org(3);
+DO $$ BEGIN
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_org_integrations WHERE org_id = pg_temp.org(3)), 'CC8: no store row left';
+  ASSERT NOT EXISTS (SELECT 1 FROM vault.secrets WHERE name LIKE 'exos_integration:' || pg_temp.org(3) || ':%'), 'CC8: no Vault copy left';
+  ASSERT NOT EXISTS (SELECT 1 FROM vault.decrypted_secrets
+                      WHERE decrypted_secret LIKE '%PRETIX-cc8-gone%' OR decrypted_secret LIKE '%SELLER-cc8-b%'), 'CC8: the values are gone';
+  ASSERT pg_temp.cred(pg_temp.org(3), 'pretix') IS NULL AND pg_temp.cred(pg_temp.org(3), 'lysted') IS NULL, 'CC8: nothing to read';
+END $$;
+-- The retention sweep: every org's old rows, not only the writer's.
+INSERT INTO public.exos_channel_audit (org_id, channel, op, method, path, live, at)
+  VALUES (pg_temp.org(2), 'luma', 'old', 'GET', '/', true, now() - interval '31 days'),
+         (pg_temp.org(2), 'luma', 'recent', 'GET', '/', true, now() - interval '29 days');
+SET LOCAL ROLE service_role;
+DO $$
+DECLARE r jsonb;
+BEGIN
+  -- A write by ANOTHER org trims org 2's expired row.
+  PERFORM public.exos_channel_audit_record(pg_temp.org(), '[{"channel":"luma","op":"x","method":"GET","path":"/"}]');
+  RESET ROLE;
+  ASSERT NOT EXISTS (SELECT 1 FROM public.exos_channel_audit WHERE op = 'old'), 'CC8: any write trims every org''s expired rows';
+  ASSERT EXISTS (SELECT 1 FROM public.exos_channel_audit WHERE op = 'recent'), 'CC8: 29 days kept';
+  INSERT INTO public.exos_channel_audit (org_id, channel, op, method, path, live, at)
+    VALUES (pg_temp.org(2), 'luma', 'old2', 'GET', '/', true, now() - interval '40 days');
+  SET LOCAL ROLE service_role;
+  r := public.exos_channel_retention_sweep();
+  RESET ROLE;
+  ASSERT (r ->> 'audit')::int = 1 AND NOT EXISTS (SELECT 1 FROM public.exos_channel_audit WHERE op = 'old2'), 'CC8: the sweep, got ' || r;
+END $$;
+SET LOCAL ROLE authenticated;
+DO $$ BEGIN
+  ASSERT pg_temp.refused($q$SELECT public.exos_channel_retention_sweep()$q$, 'permission denied'), 'CC8: no client sweep';
+  RAISE NOTICE 'OK  CC8 no credential outlives its row (secrets row, org delete); retention covers every org';
+END $$;
+RESET ROLE;
 
+ROLLBACK;
+
+-- CC7b: REPEATABLE READ is refused (its snapshot sum would let parallel
+-- reserves overshoot). Its own transaction: the level is set at BEGIN.
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.exos_channel_usage_reserve(gen_random_uuid(), 'luma', 'cal-rr', 'sends', 1, 60, 15, true);
+    RAISE EXCEPTION 'CC7b: a REPEATABLE READ reserve went through';
+  EXCEPTION WHEN feature_not_supported THEN
+    ASSERT SQLERRM LIKE '%needs READ COMMITTED%', 'CC7b: ' || SQLERRM;
+  END;
+  RAISE NOTICE 'OK  CC7b usage reserve refuses REPEATABLE READ';
+END $$;
 ROLLBACK;

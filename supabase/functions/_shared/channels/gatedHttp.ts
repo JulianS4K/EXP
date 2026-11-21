@@ -138,17 +138,22 @@ export interface LiveDecision {
  * switch AND the operator's flag are on AND the method + path is allowed.
  */
 export function decideLive(
-  o: Pick<GatedHttpOptions, "channel" | "env" | "orgWritesEnabled" | "writes">, method: HttpMethod, path: string,
+  o: Pick<GatedHttpOptions, "channel" | "env" | "orgWritesEnabled" | "writes"> & { base?: string }, method: HttpMethod, path: string,
 ): LiveDecision {
   const flag = writeFlagName(o.channel);
   const m = method.toUpperCase();
   if (READS.has(m)) return { read: true, allowed: true, live: true, flag, reasons: [] };
-  const bare = path.split("?")[0];
-  const allowed = o.writes.some((r) => r.method === m && r.path.test(bare));
+  // The allowlist is matched on the path the URL actually resolves to under
+  // the base (resolvedPath: null when resolving would change it), never on
+  // the raw text, so an encoded dot segment can't match one rule and reach
+  // another endpoint.
+  const raw = path.split("?")[0];
+  const bare = o.base === undefined ? (pathProblem(path) ? null : raw) : resolvedPath(o.base, path);
+  const allowed = bare !== null && o.writes.some((r) => r.method === m && r.path.test(bare));
   const org = o.orgWritesEnabled === true;
   const env = o.env(flag) ?? null;
   const reasons: string[] = [];
-  if (!allowed) reasons.push(`${m} ${bare} is not on the ${o.channel} allowlist`);
+  if (!allowed) reasons.push(`${m} ${raw} is not on the ${o.channel} allowlist`);
   if (!org) reasons.push("the organization's switch is off");
   if (env !== "on") reasons.push(`${flag} is not on`);
   return { read: false, allowed, live: allowed && writesLive(org, env), flag, reasons };
@@ -156,10 +161,17 @@ export function decideLive(
 
 // ---- redaction ---------------------------------------------------------------
 
-const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|apikey|x-auth-token|x-access-token|x-shared-key)$/i;
-/** Body keys whose values are never recorded (the SQL writer applies the same rule). */
-export const SECRET_KEY = /(authorization|cookie|token|secret|password|passwd|api[_-]?key|client[_-]?secret|signature|credential)/i;
-const SECRET_QUERY = /^(api[_-]?key|apikey|key|token|access[_-]?token|auth|secret|client[_-]?secret|password|signature|sig)$/i;
+/** Header names whose values are never recorded: anything naming a token, secret, key, auth, signature, cookie, password or session. */
+export const SECRET_HEADER = /(authorization|auth|cookie|token|secret|key|signature|password|passwd|session|credential)/i;
+/**
+ * Body keys whose values are never recorded. The SQL writer
+ * (_exos_channel_audit_scrub, mig 20261121162400) applies the same pattern.
+ */
+export const SECRET_KEY = /(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|^key$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)/i;
+/** Query parameter names refused in a URL: by pattern (api_token, access_key, X-Amz-Signature, ...), not a fixed list. */
+export const SECRET_QUERY = /(token|secret|passw|pwd|signature|credential|jwt|^sig$|^auth$|^key$|apikey|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?key|^x-amz-)/i;
+/** Paging cursors named like a token are not credentials (Google's pageToken, ...). */
+const PAGING_QUERY = /^(page|next[_-]?page|next|continuation|cursor|sync)[_-]?token$/i;
 export const REDACTED = "[redacted]";
 
 const usable = (secrets: readonly (string | null | undefined)[] | undefined): string[] =>
@@ -214,16 +226,53 @@ export function assertNoSecretsInUrl(url: string, secrets: readonly (string | nu
   const q = url.indexOf("?");
   if (q >= 0) {
     for (const part of url.slice(q + 1).split("&")) {
-      const name = decodeURIComponent(part.split("=")[0] ?? "");
-      if (SECRET_QUERY.test(name)) throw new GatedHttpRefused(`gatedHttp: query parameter "${name.slice(0, 40)}" looks like a credential; send it in a header`);
+      let name = part.split("=")[0] ?? "";
+      try { name = decodeURIComponent(name); } catch { /* keep it raw */ }
+      if (SECRET_QUERY.test(name) && !PAGING_QUERY.test(name)) throw new GatedHttpRefused(`gatedHttp: query parameter "${name.slice(0, 40)}" looks like a credential; send it in a header`);
     }
   }
 }
 
-function checkPath(path: string): void {
-  if (typeof path !== "string" || !path.startsWith("/") || path.includes("..") || path.includes("//")
-      || path.includes("\\") || /[\s@#]/.test(path.split("?")[0])) {
-    throw new GatedHttpRefused("gatedHttp: bad path");
+/**
+ * Why a path is refused, or null. A path is plain: it starts with "/", has no
+ * "." / ".." segment, no empty segment, no backslash, whitespace, "@" or
+ * "#", and no percent-encoded ".", "/" or "\\" anywhere (a URL would
+ * resolve %2e%2e as "..").
+ */
+export function pathProblem(path: unknown): string | null {
+  if (typeof path !== "string" || !path.startsWith("/")) return "not an absolute path";
+  if (/%(2e|2f|5c)/i.test(path)) return "an encoded dot, slash or backslash";
+  const bare = path.split("?")[0];
+  if (path.includes("\\") || /[\s@#]/.test(bare)) return "a backslash, space, @ or #";
+  if (bare.includes("//") || bare.split("/").slice(1).some((seg) => seg === "." || seg === "..")) return "a dot or empty segment";
+  return null;
+}
+
+/**
+ * The path (no query) a request on `base` really reaches, relative to the
+ * base's own path, or null when the URL would resolve it to anything else
+ * (another origin, outside the base path, or normalized differently).
+ */
+export function resolvedPath(base: string, path: string): string | null {
+  if (pathProblem(path)) return null;
+  const b = base.replace(/\/+$/, "");
+  let u: URL, bu: URL;
+  try {
+    u = new URL(b + path);
+    bu = new URL(b);
+  } catch {
+    return null;
+  }
+  const prefix = bu.pathname.replace(/\/+$/, "");
+  if (u.origin !== bu.origin || !u.pathname.startsWith(prefix + "/")) return null;
+  const rel = u.pathname.slice(prefix.length);
+  return rel === path.split("?")[0] ? rel : null;
+}
+
+function checkPath(base: string, path: string): void {
+  const why = pathProblem(path);
+  if (why || resolvedPath(base, path) === null) {
+    throw new GatedHttpRefused(`gatedHttp: bad path (${why ?? "it resolves to another path"})`);
   }
 }
 
@@ -281,8 +330,13 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
       return { ok: res.ok, status: res.status, body: parsed as any, error, bytes: text.length, retryAfter: res.headers.get("retry-after"), headers: res.headers };
     } catch (err) {
       // A network failure is fetch's TypeError; anything else (an SSRF
-      // guard's refusal, _shared/ssrf.ts) is final and never retried.
-      const error = (err as Error)?.name === "AbortError" ? "TIMEOUT" : err instanceof TypeError ? "NETWORK" : "REFUSED";
+      // guard's refusal, _shared/ssrf.ts) is final and never retried. So is a
+      // redirect: redirect "error" makes fetch throw a TypeError naming it,
+      // and it would only be refused again.
+      const msg = String((err as Error)?.message ?? "");
+      const error = (err as Error)?.name === "AbortError" ? "TIMEOUT"
+        : err instanceof TypeError && /redirect/i.test(msg) ? "REDIRECT"
+        : err instanceof TypeError ? "NETWORK" : "REFUSED";
       return { ok: false, status: 0, body: null, error, bytes: 0, retryAfter: null, headers: undefined };
     } finally {
       clearTimeout(timer);
@@ -304,17 +358,17 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
   const request = async (methodIn: HttpMethod, path: string, ro: RequestOptions = {}): Promise<GatedResponse> => {
     const method = String(methodIn).toUpperCase() as HttpMethod;
     if (!METHODS.has(method)) throw new GatedHttpRefused(`gatedHttp: method ${method} not supported`);
-    checkPath(path);
+    checkPath(base, path);
     const headers = { ...baseHeaders, ...(ro.headers ?? {}) };
     assertNoSecretsInUrl(base + path, secrets);
-    const d = decideLive(o, method, path);
+    const d = decideLive({ ...o, base }, method, path);
     const op = ro.op ?? (d.read ? "read" : "write");
     const reqRecord = { headers: redactHeaders(headers, secrets), ...(ro.body !== undefined ? { body: redact(ro.body, secrets) } : {}) };
 
     if (d.read) {
       for (let attempt = 1; ; attempt++) {
         const r = await once(method, path, headers, undefined);
-        const wait = r.ok || r.error === "REFUSED" ? null : nextWait(attempt, r.status, r.error, r.retryAfter, policy);
+        const wait = r.ok || r.error === "REFUSED" || r.error === "REDIRECT" ? null : nextWait(attempt, r.status, r.error, r.retryAfter, policy);
         if (wait === null) {
           record({ op, method, path, live: true, request: reqRecord, response: summarize(r.status, r.body, r.bytes),
                    status: r.status, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
@@ -375,10 +429,11 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
       }
       reservation = r.id;
     }
-    const idempotent = o.writes.some((w) => w.method === method && w.path.test(path.split("?")[0]) && w.idempotent === true);
+    const resolved = resolvedPath(base, path);
+    const idempotent = resolved !== null && o.writes.some((w) => w.method === method && w.path.test(resolved) && w.idempotent === true);
     for (let attempt = 1; ; attempt++) {
       const r = await once(method, path, headers, ro.body);
-      const wait = r.ok || !idempotent || r.error === "REFUSED" ? null : nextWait(attempt, r.status, r.error, r.retryAfter, policy);
+      const wait = r.ok || !idempotent || r.error === "REFUSED" || r.error === "REDIRECT" ? null : nextWait(attempt, r.status, r.error, r.retryAfter, policy);
       if (wait === null) {
         if (!r.ok && reservation && r.status >= 400 && r.status < 500) await o.limits!.counter!.release(reservation);
         record({ op, method, path, live: true, request: reqRecord, response: summarize(r.status, r.body, r.bytes),
@@ -392,7 +447,7 @@ export function createGatedHttp(o: GatedHttpOptions): GatedHttp {
   const gated: GatedHttp = {
     channel: o.channel,
     writesLive: writesLive(o.orgWritesEnabled, o.env(writeFlagName(o.channel)) ?? null),
-    decide: (method, path) => decideLive(o, method, path),
+    decide: (method, path) => decideLive({ ...o, base }, method, path),
     request,
     get: (path, ro) => request("GET", path, ro),
     asFetch() {
