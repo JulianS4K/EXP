@@ -20,6 +20,7 @@
 // injected ExosData so this file has no Deno or Supabase imports.
 
 import { allInCents, effectiveTierPrice } from '../pricing.ts';
+import { FREE_TIER_MAX_CAPACITY } from '../platformFee.ts';
 import { parseUnitFees } from '../fees.ts';
 import { exosLeft } from '../catalog/feed.ts';
 import { ToolError, int, isoDate, str, type McpServer, type ToolDefinition } from './protocol.ts';
@@ -149,8 +150,8 @@ export const EXOS_MCP_INSTRUCTIONS =
   'publish_event never publishes: it returns a summary and a review link. Give the person both; they publish ' +
   'by clicking Publish on that page in Exos themselves. Never publish an event without the person\'s explicit ' +
   'confirmation, and never claim it is published until publish_event with request_id says so. Drafts stay ' +
-  'private until published; tell the person the fee line from the result (150 tickets or less is the free tier: ' +
-  'no Exos fee).';
+  'private until published; tell the person the fee line from the result (events under ' +
+  `${FREE_TIER_MAX_CAPACITY + 1} capacity are the free tier: no Exos fee).`;
 
 const money = (cents: number) => Math.round(cents) / 100;
 
