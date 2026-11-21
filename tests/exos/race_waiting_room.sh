@@ -7,7 +7,9 @@
 #   race 1 20 pollers hit the same due round at once (each holds its
 #          transaction open): exactly one round runs, so exactly the round's
 #          budget (60) is admitted, the front of the line, and the clock moves
-#          once
+#          once (the budget is a full minute's credit at 60 a minute, the most a
+#          round carries, so it doesn't grow with however long the pollers
+#          take to start)
 #   race 2 a second due round, 20 pollers again: exactly 60 more, never an
 #          entry admitted twice (admitted_at unchanged for the first 60)
 #   race 3 50 admitted buyers and 10 still waiting each try one ticket of a
@@ -31,8 +33,9 @@
 #   race 8 take-over (B): one buyer's bound Stripe session, then 5 quick
 #          retries by the same buyer at once, each doing what exos-checkout
 #          does (attach -> takeover -> mark the old session expired -> attach
-#          again -> bind): exactly one retry ends bound, the rest XWR02; the
-#          old session is expired and still mapped to the turn
+#          again -> bind; or, for a retry that starts after another one's
+#          take-over, attach -> bind): exactly one retry ends bound, the rest
+#          XWR02; the old session is expired and still mapped to the turn
 #   race 9 one account, two browsers' guest places, two joins at once (each
 #          keeping its transaction open): no error, exactly one place keyed on
 #          the account, the other token left a guest place (23505 handled)
@@ -68,7 +71,7 @@ $P -c "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES ('$A','owner@r
        INSERT INTO exos_ticket_tiers(id,event_id,name,price,capacity,sales_start,visibility)
          VALUES ('$T','$EV','GA',20,30,now() - interval '1 minute','public');
        INSERT INTO exos_wroom_settings(event_id,org_id,enabled,window_minutes,admit_per_minute,admission_minutes,idle_close_minutes,enabled_at)
-         VALUES ('$EV','$O',true,0,120,10,30,now() - interval '2 minutes');" >/dev/null
+         VALUES ('$EV','$O',true,0,60,10,30,now() - interval '2 minutes');" >/dev/null
 # 300 people in line (random places, all seen just now).
 VALUES=""
 for n in $(seq 1 300); do VALUES+="('$(tok $n)'),"; done
@@ -80,9 +83,19 @@ $P -c "INSERT INTO exos_wroom_entries(org_id,event_id,run_id,token_hash,net_hash
         WHERE event_id='$EV';" >/dev/null
 fail=0
 admitted() { $P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND state='admitted'"; }
-due_round() {  # the next round is due, with 30 s of credit at 120 a minute = 60
-  $P -c "UPDATE exos_wroom_settings SET advanced_at = now() - interval '6 seconds', admit_clock = now() - interval '30 seconds'
-          WHERE event_id='$EV'" >/dev/null
+due_round() {  # the next round is due, with a full minute's credit at 60 a minute = 60
+  # (credit is capped at 60 s, so the budget is exactly 60 whenever the pollers
+  # start: 30 s of credit at 120 a minute grew by 2 a second of delay, 61+
+  # admitted on a loaded machine)
+  # Everyone waiting was last seen 10 s ago, so a poller writes nothing to its
+  # own place (the touch writes after 20 s, the cached view within 1 s of a
+  # touch) and holds no row lock the round would skip (SKIP LOCKED): on a
+  # loaded machine setup took 20 s+, the pollers' touches locked their places,
+  # and the round admitted one past the front.
+  $P -c "UPDATE exos_wroom_settings SET advanced_at = now() - interval '6 seconds', admit_clock = now() - interval '2 minutes'
+          WHERE event_id='$EV';
+         UPDATE exos_wroom_entries SET last_seen_at = now() - interval '10 seconds'
+          WHERE event_id='$EV' AND state = 'waiting'" >/dev/null
 }
 POLL="SELECT set_config('request.headers','{\"cf-connecting-ip\":\"198.51.100.7\"}',true);
       SET LOCAL ROLE anon;"
@@ -105,7 +118,7 @@ errs=$(cat "$OUT"/r1.* | grep -c ERROR || true)
 if [[ "$n1" == 60 && "$front" == 60 && "$errs" == 0 ]]; then
   echo "OK   race 1 20 parallel pollers, one round: exactly 60 admitted, the front of the line"
 else
-  echo "FAIL race 1: admitted $n1, front $front, errors $errs"; cat "$OUT"/r1.* | grep ERROR | head -3; fail=1
+  echo "FAIL race 1: admitted $n1, front $front, errors $errs"; cat "$OUT"/r1.* | grep ERROR | head -3 || true; fail=1
 fi
 
 # race 2 ---------------------------------------------------------------------
@@ -153,7 +166,7 @@ used=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND u
 if [[ "$holds" == 30 && "$qty" == 30 && "$ok" == 30 && "$queued" == 10 && "$used" == 30 ]]; then
   echo "OK   race 3 50 admitted + 10 waiting buyers at once on 30 tickets: 30 holds, 10 refused (XWR01), 30 admissions used"
 else
-  echo "FAIL race 3: holds $holds (qty $qty), ok $ok, queued $queued, used $used"; cat "$OUT"/h.* "$OUT"/w.* | grep -v '^t$' | sort | uniq -c | head -5; fail=1
+  echo "FAIL race 3: holds $holds (qty $qty), ok $ok, queued $queued, used $used"; cat "$OUT"/h.* "$OUT"/w.* | grep -v '^t$' | sort | uniq -c | head -5 || true; fail=1
 fi
 
 # race 4 ---------------------------------------------------------------------
@@ -175,7 +188,7 @@ bound=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE token_hash=public._
 if [[ "$ok4" == 1 && $((busy4 + wait4)) == 9 && "$held4" == 1 && "$bound" == 1 ]]; then
   echo "OK   race 4 one token, 10 buyers at once: 1 hold, 9 refused (not theirs), bound to one buyer"
 else
-  echo "FAIL race 4: ok $ok4, busy $busy4, wait $wait4, active holds $held4, bound $bound"; cat "$OUT"/r4.* | grep -v '^t$' | sort | uniq -c | head -5; fail=1
+  echo "FAIL race 4: ok $ok4, busy $busy4, wait $wait4, active holds $held4, bound $bound"; cat "$OUT"/r4.* | grep -v '^t$' | sort | uniq -c | head -5 || true; fail=1
 fi
 
 # race 5 ---------------------------------------------------------------------
@@ -206,12 +219,14 @@ done
 wait
 joined=$(cat "$OUT"/r6.* | grep -c '^waiting$' || true)
 after=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV'")
-$P -c "UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV';
-       SELECT public._exos_wroom_recount('$EV');" >/dev/null
-live=$($P -c "SELECT live_count FROM exos_wroom_settings WHERE event_id='$EV'")
-exact=$($P -c "SELECT count(*) FROM exos_wroom_entries x WHERE x.event_id='$EV'
+# The recount and the exact count in one transaction (one now()): in separate
+# ones a place crossing its 3 minutes in between would count in one only.
+read -r live exact <<< "$($P -F ' ' -c "UPDATE exos_wroom_settings SET counted_at = now() - interval '6 seconds' WHERE event_id='$EV';
+       SELECT count(*) FROM (SELECT public._exos_wroom_recount('$EV')) r;
+       SELECT s.live_count, (SELECT count(*) FROM exos_wroom_entries x WHERE x.event_id='$EV'
                AND ((x.state = 'waiting' AND x.last_seen_at > now() - interval '3 minutes')
-                 OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL))")
+                 OR (x.state = 'admitted' AND x.admit_expires_at > now() AND x.used_at IS NULL)))
+         FROM exos_wroom_settings s WHERE s.event_id='$EV'" | tail -1)"
 if [[ "$joined" == 40 && $((after - before)) == 40 && "$live" == "$exact" ]]; then
   echo "OK   race 6 40 parallel joins: 40 places; live count $live = an exact count of the live line"
 else
@@ -276,16 +291,21 @@ $P -c "UPDATE exos_wroom_entries SET state='admitted', admitted_at=now(), admit_
        INSERT INTO exos_checkout_sessions(session_id,event_id,tier_id,org_id,quantity,amount_cents,status,buyer_email,guest)
          VALUES ('cs_race8_old','$EV','$T','$O',1,2000,'pending','race8@x.com',true);" >/dev/null
 retry8() {  # $1 = worker: the edge's attach / take-over / bind, statement by statement
+  # (wroomCheckout.ts: a take-over is followed by another attach; an attach
+  # that attaches goes on to the bind. Under load a retry can start only after
+  # another's take-over expired the old session: its first attach attaches.)
   local att a2 sv="BEGIN; SET LOCAL ROLE service_role;" args="'$EV','$T','$(tok 272)',NULL,'race8@x.com','e7e00000-0000-0000-0000-00000000080$1'"
+  local bind="$sv SELECT public.exos_wroom_bind('$EV','e7e00000-0000-0000-0000-00000000080$1','cs_race8_$1',NULL,'race8@x.com'); COMMIT;"
   att=$($P -c "$sv SELECT public.exos_wroom_attach($args); COMMIT;" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' || true)
-  if [[ "$att" == *takeover* ]]; then
+  if [[ "$att" == *'"attached": true'* ]]; then
+    $P -c "$bind" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' | sed 's/^t$/BOUND/'
+  elif [[ "$att" == *takeover* ]]; then
     local old; old=$(echo "$att" | sed -E 's/.*"takeover": "([^"]+)".*/\1/')
     # (Stripe expire: mocked as succeeded.)
     $P -c "UPDATE exos_checkout_sessions SET status='expired' WHERE session_id='$old' AND status='pending'" >/dev/null 2>&1
     a2=$($P -c "$sv SELECT public.exos_wroom_attach($args); COMMIT;" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' || true)
     if [[ "$a2" == *'"attached": true'* ]]; then
-      $P -c "$sv SELECT public.exos_wroom_bind('$EV','e7e00000-0000-0000-0000-00000000080$1','cs_race8_$1',NULL,'race8@x.com'); COMMIT;" \
-        2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' | sed 's/^t$/BOUND/'
+      $P -c "$bind" 2>&1 | grep -v '^BEGIN\|^SET\|^COMMIT' | sed 's/^t$/BOUND/'
     elif [[ "$a2" == *takeover* ]]; then echo "XWR02 (second take-over)"
     else echo "$a2"; fi
   else echo "$att"; fi
@@ -300,7 +320,7 @@ cur8=$($P -c "SELECT session_id FROM exos_wroom_entries WHERE event_id='$EV' AND
 if [[ "$bound8" == 1 && "$busy8" == 4 && "$st8" == expired && "$map8" == 2 && "$cur8" == cs_race8_* ]]; then
   echo "OK   race 8 take-over: 5 quick retries by the same buyer, one bound ($cur8), 4 XWR02; the old session expired and still mapped"
 else
-  echo "FAIL race 8: bound $bound8, busy $busy8, old $st8, mapped $map8, current $cur8"; cat "$OUT"/r8.* | sort | uniq -c | head -8; fail=1
+  echo "FAIL race 8: bound $bound8, busy $busy8, old $st8, mapped $map8, current $cur8"; cat "$OUT"/r8.* | sort | uniq -c | head -8 || true; fail=1
 fi
 $P -c "DELETE FROM exos_checkout_sessions WHERE session_id LIKE 'cs_race8_%'; DELETE FROM exos_wroom_sessions WHERE session_id LIKE 'cs_race8_%'" >/dev/null
 
@@ -328,6 +348,6 @@ guest9=$($P -c "SELECT count(*) FROM exos_wroom_entries WHERE event_id='$EV' AND
 if [[ "$err9" == 0 && "$acct9" == 1 && "$guest9" == 1 ]]; then
   echo "OK   race 9 one account, two guest places joined at once: no error, one place keyed on the account, the other left a guest place"
 else
-  echo "FAIL race 9: errors $err9, account places $acct9, guest left $guest9"; cat "$OUT"/r9.* | grep -v '^1$' | head -6; fail=1
+  echo "FAIL race 9: errors $err9, account places $acct9, guest left $guest9"; cat "$OUT"/r9.* | grep -v '^1$' | head -6 || true; fail=1
 fi
 exit $fail
