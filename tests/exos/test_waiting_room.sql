@@ -277,8 +277,13 @@ END $$;
 DO $$
 DECLARE j jsonb; v_front uuid[]; v_adm uuid[]; v_tok text; v_pos int; v_stale uuid;
 BEGIN
-  -- Everyone polled just now.
-  UPDATE public.exos_wroom_entries SET last_seen_at = now() WHERE event_id = pg_temp.u('e1');
+  -- Everyone polled just now, and nobody's cached view is from WR3: a real
+  -- one is minutes old by now, but now() doesn't move inside this one
+  -- transaction, so the two places WR3 polled (tokens 1 and 7: a "waiting"
+  -- view from before any admission, a "lobby" view) would otherwise still
+  -- count as fresh for 5 s and answer below with a stale position, depending
+  -- on where their random places fall.
+  UPDATE public.exos_wroom_entries SET last_seen_at = now(), view_at = NULL WHERE event_id = pg_temp.u('e1');
   SELECT array_agg(id ORDER BY order_key, id) INTO v_front
     FROM (SELECT id, order_key FROM public.exos_wroom_entries WHERE event_id = pg_temp.u('e1') ORDER BY order_key, id LIMIT 6) x;
   -- First round: 60 a minute, six seconds' worth = 6, the front of the line.
