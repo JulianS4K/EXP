@@ -252,17 +252,25 @@ export function discordEvent(e: any, appBase: string): DiscordEvent | null {
   };
 }
 
-/** "Sat, Nov 21, 2026, 8:00 PM EST" in the event's zone (UTC if the zone is unknown). */
+/**
+ * "Sat, Nov 21, 2026, 8:00 PM EST" in the event's zone (UTC if the zone is
+ * unknown). Newer ICU data (CLDR 42+) puts a narrow no-break space before
+ * "PM" and may use other no-break spaces; they are made plain spaces, so the
+ * text is the same whichever ICU the runtime ships (the Deno test compares
+ * it, and failed on a runtime with the newer data).
+ */
 export function formatWhen(startUtc: string, timezone: string): string {
   const d = new Date(startUtc);
   const opts: Intl.DateTimeFormatOptions = {
     weekday: "short", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
   };
+  let out: string;
   try {
-    return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: timezone }).format(d);
+    out = new Intl.DateTimeFormat("en-US", { ...opts, timeZone: timezone }).format(d);
   } catch {
-    return new Intl.DateTimeFormat("en-US", { ...opts, timeZone: "UTC" }).format(d);
+    out = new Intl.DateTimeFormat("en-US", { ...opts, timeZone: "UTC" }).format(d);
   }
+  return out.replace(/[\u00a0\u2007\u202f]/g, " ");
 }
 
 /** Text that Discord shows as written: markdown, mentions and masked links escaped. */

@@ -650,10 +650,13 @@ Create the event once, in Exos, and sell it on Eventbrite as well, with one shar
   Eventbrite (Exos only keeps their capacity at the shared count); the ones Exos adds follow Exos.
 - **One Eventbrite event per Exos event.** If the event is already linked to an Eventbrite event in the door app
   (or its door list comes from pretix, hi.events or another Luma event), Exos refuses to create or link a second
-  one: link that one, or unlink it first. If a link to another event turns up while Exos is syncing, the channel
-  shows a conflict and sends nothing until you unlink one of them and save the channel again.
+  one: link that one, or unlink it first. The other way round too: while Exos sells the event there, the door
+  app won't link it to a different Eventbrite (or Luma) event or unlink it; remove it under **Also sell on** first.
+  If a link to another event turns up while Exos is syncing, the channel shows a conflict and sends nothing until
+  you unlink one of them and save the channel again.
 - **On Eventbrite and Luma at once**: the free tickets are split between the two (each gets half of what Exos has
-  free, less one order's worth), so the same ticket is never on sale twice; the primary also gets its held seats.
+  free, less one order's worth, for each ticket type and for the whole house), so the same ticket is never on sale
+  twice; the primary also gets its held seats.
 - Cancelling in Exos cancels it on Eventbrite (Eventbrite refuses once it has orders: cancel and refund there).
 - **Sending is off until you switch it on**: the org owner turns on Eventbrite writes in the door app, and the
   server setting must allow it. Until then Exos records what it would send, and nothing changes on Eventbrite.

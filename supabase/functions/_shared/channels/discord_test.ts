@@ -126,6 +126,7 @@ Deno.test("announcement: one embed, a Get tickets link, no mentions, the event's
   assertEquals(e.image, { url: ROW.image_url });
   assertEquals(e.footer, { text: "Blue Room Presents" });
   // 01:00 UTC on the 16th is 8 PM on the 15th in New York.
+  assert(!/[\u00a0\u2007\u202f]/.test(e.description), "plain spaces whatever the ICU data (CLDR 42+ uses U+202F before PM)");
   assert(e.description.includes("Fri, Jan 15, 2027, 8:00 PM EST"), e.description);
   assert(e.description.includes("<t:1800061200:R>"));
   assert(e.description.includes("Blue \\[Room\\]\\(https://evil.example\\)"), "masked link escaped");

@@ -229,6 +229,11 @@ SELECT pg_temp.act('c7000000-0000-0000-0000-0000000000a2');
 SELECT set_config('c7.q_exos', pg_temp.refused($$SELECT public.exos_channel_queue_comps(pg_temp.u('e1'), pg_temp.u('d1'), '[{"email":"a@x.com"}]')$$, 'only when Luma is the primary')::text, true);
 
 -- C8 / C9 / C10 -------------------------------------------------------------
+-- The passes above are over (a channel isn't removed while a pass holds its
+-- lease, mig 20261121100000).
+RESET ROLE;
+UPDATE public.exos_channel_mirrors SET lease_id = NULL, lease_until = NULL WHERE event_id = pg_temp.u('e1');
+SET LOCAL ROLE authenticated;
 SELECT pg_temp.act('c7000000-0000-0000-0000-0000000000a1');
 SELECT public.exos_set_resale_options(pg_temp.u('e1'), NULL, 'eventbrite');
 SELECT set_config('c7.rm_primary', pg_temp.refused($$SELECT public.exos_channel_remove(pg_temp.u('e1'), 'eventbrite')$$, 'primary ticketing system')::text, true);
