@@ -135,7 +135,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (!check.ok) return json({ error: check.error }, 400, cors);
       // Luma accepts the public event link too; the link stores the evt- id it resolves to.
       const r = await sbUser.rpc("exos_backend_link", { p_event_id: event, p_provider: provider, p_ref: check.id ?? ref, p_name: check.name ?? null });
+      // Another org's verified Luma event: the same answer as checkRef's
+      // "no event" (mig 20261121100000).
+      if (r.error && /Luma has no event with that id/.test(r.error.message ?? "")) {
+        return json({ error: "Luma has no event with that id." }, 400, cors);
+      }
       if (r.error) return rpcError(r.error, cors);
+      // checkRef read it with the org's own key, and Luma only answers for an
+      // event its calendar manages: the link is the org's. Not pretix /
+      // hi.events: their address is the org's own to set, so a read proves nothing.
+      if (provider === "luma") {
+        await sb.rpc("exos_channel_link_verified", { p_event_id: event, p_provider: provider, p_ref: check.id ?? ref });
+      }
       const sync = await syncOne(sb, event);
       return json({ ...(r.data as object), sync }, 200, cors);
     }

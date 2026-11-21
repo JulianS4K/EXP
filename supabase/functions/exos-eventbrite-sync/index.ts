@@ -66,7 +66,7 @@ import { requireCronSecret } from "../_shared/cron-auth.ts";
 import { redactError } from "../_shared/log.ts";
 import {
   type ApplyRow, type ApplyState, type ClaimedLink, ebErrorMessage, isEbId, isTokenShaped, listTicketClasses,
-  listUpcomingEvents, readEvent, type SyncOutcome, syncLink, unshareableReason, whoAmI,
+  listUpcomingEvents, readEvent, type SyncOutcome, syncLink, unshareableReason, whoAmI, ebOwnsEvent,
 } from "../_shared/eventbrite/client.ts";
 import { planCapacity, planRecord, sendCapacity } from "../_shared/eventbrite/writer.ts";
 import { writesLive } from "../_shared/channels/model.ts";
@@ -151,10 +151,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       if (typeof tok.data !== "string") return json({ error: "Connect Eventbrite first.", reason: "not_connected" }, 409, cors);
       const ev = await readEvent(fetch, tok.data, ebEvent);
       if (!ev.ok || !ev.body) return json({ error: ebErrorMessage(ev), reason: "eventbrite" }, 502, cors);
+      // Only an event of one of the token's organizations (a public event
+      // reads with any token): another organizer's gets the same answer as an
+      // event that doesn't exist (mig 20261121100000).
+      if (!(await ebOwnsEvent(fetch, tok.data, ev.body.id))) {
+        return json({ error: ebErrorMessage({ status: 404 }), reason: "eventbrite" }, 502, cors);
+      }
       const r = await sb.rpc("exos_eventbrite_link", {
         p_event_id: event, p_user_id: user, p_eb_event_id: ev.body.id, p_eb_event_name: ev.body.name,
       });
+      // Another org's verified event: the same answer as one not on this
+      // account, status included (mig 20261121100000).
+      if (r.error && /Eventbrite has no such event for this account/.test(r.error.message ?? "")) {
+        return json({ error: ebErrorMessage({ status: 404 }), reason: "eventbrite" }, 502, cors);
+      }
       if (r.error) return rpcError(r.error, cors);
+      // Shown to be one of the token's organizations' above: the door link
+      // counts as this org's (exos_channel_external_taken).
+      await sb.rpc("exos_channel_link_verified", { p_event_id: event, p_provider: "eventbrite", p_ref: ev.body.id });
       const sync = await syncOne(sb, event, user, MANUAL_PAGES);
       return json({ ...(r.data as object), sync }, 200, cors);
     }

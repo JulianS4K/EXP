@@ -78,6 +78,9 @@ export interface PendingCreate {
   name?: string;
   start?: string;
   slug?: string;
+  /** The venue a pass made for it (Eventbrite), reused by the next try. */
+  venue_id?: string;
+  venue_key?: string;
   tries?: number;
 }
 
@@ -88,6 +91,10 @@ export interface PendingCreate {
  */
 export interface SyncHooks {
   beginCreate(marker: PendingCreate): Promise<{ ok: boolean; reason?: string; pending?: PendingCreate }>;
+  /** Which of these external ids another Exos event already uses (any org); null when it couldn't be checked. */
+  taken?(ids: string[]): Promise<string[] | null>;
+  /** Keep a note with the pending create (the venue made for it); renews the lease. */
+  note?(note: { venue_id: string; venue_key: string }): Promise<boolean>;
 }
 
 /** The pending create in a claimed mirror's external_meta, if any. */
@@ -96,10 +103,19 @@ export function pendingCreate(meta: unknown): PendingCreate | null {
   return p && typeof p === "object" && !Array.isArray(p) ? p as PendingCreate : null;
 }
 
+/**
+ * One answer for "not on this account" and "another Exos org's event" (mig
+ * 20261121100000), so a link says nothing about other orgs' events.
+ */
+export function notOnAccount(provider: "eventbrite" | "luma"): string {
+  return `${provider === "eventbrite" ? "Eventbrite" : "Luma"}: that event wasn't found on this account`;
+}
+
 /** Why a create wasn't started, for the organizer. */
 export function beginRefused(reason: string | undefined): string {
   if (reason === "in-flight") return "an earlier pass is still creating it; checking again shortly";
   if (reason === "has-external") return "it was created meanwhile";
+  if (reason === "conflict") return "this event is already linked to another event there: unlink one of them, then save the channel again";
   return "the sync lost its turn; retrying";
 }
 
@@ -266,6 +282,24 @@ export function makeIo(opts: {
         if (wait === null) return r;
         await sleep(wait);
       }
+    },
+  };
+}
+
+/**
+ * An Io whose live POSTs first renew the pass's lease (exos_channel_lease_renew,
+ * mig 20261121100000), so a long pass is never taken over half-way; a lost
+ * lease refuses the write (LEASE_LOST) instead of sending it. Reads and a
+ * dry run's plan go through as they are.
+ */
+export function leasedIo(io: Io, renew: () => Promise<boolean>): Io {
+  return {
+    live: io.live,
+    async req(method, path, body) {
+      if (method === "POST" && io.live && !(await renew().catch(() => false))) {
+        return { ok: false, status: 0, body: null, error: "LEASE_LOST" };
+      }
+      return io.req(method, path, body);
     },
   };
 }
