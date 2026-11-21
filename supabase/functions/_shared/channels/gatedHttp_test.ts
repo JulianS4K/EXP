@@ -186,6 +186,12 @@ Deno.test("redaction by pattern: body keys, header names, query names", async ()
                         monkey: "kept", keys: ["kept"], passenger: "kept" }),
     { key: "[redacted]", private_key: "[redacted]", access_key: "[redacted]", pass: "[redacted]", pwd: "[redacted]", jwt: "[redacted]",
       passphrase: "[redacted]", monkey: "kept", keys: ["kept"], passenger: "kept" });
+  // A bare "key" keeps a short targeting key (Meta / Reddit geo keys, numeric ids); anything else is redacted.
+  assertEquals(redact({ zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] }),
+    { zips: [{ key: "US:10001" }, { key: "US" }, { key: "2490299" }, { key: 3847 }] });
+  for (const v of ["K-LEAK", "sk_live_abcdefghijklmnop", "AIzaSyA-abcdefghijklmnopqrstuvwxyz012", "us:10001", "US:" + "x".repeat(41), "1234567890123", { a: 1 }, true]) {
+    assertEquals((redact({ key: v }) as Record<string, unknown>).key, "[redacted]", JSON.stringify(v));
+  }
   assertEquals(redactHeaders({ "X-Auth-Key": "a", "X-Shopify-Access-Token": "b", "X-Hub-Signature-256": "c", "X-Session-Id": "d",
                                "Content-Type": "application/json", Accept: "json" }),
     { "X-Auth-Key": "[redacted]", "X-Shopify-Access-Token": "[redacted]", "X-Hub-Signature-256": "[redacted]", "X-Session-Id": "[redacted]",

@@ -167,7 +167,20 @@ export const SECRET_HEADER = /(authorization|auth|cookie|token|secret|key|signat
  * Body keys whose values are never recorded. The SQL writer
  * (_exos_channel_audit_scrub, mig 20261121162400) applies the same pattern.
  */
-export const SECRET_KEY = /(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|^key$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)/i;
+export const SECRET_KEY = /(authorization|cookie|token|secret|password|passwd|passphrase|^pass$|^pwd$|api[_-]?key|private[_-]?key|access[_-]?key|secret[_-]?key|signing[_-]?key|auth[_-]?key|client[_-]?secret|signature|credential|jwt)/i;
+/**
+ * A body field named just "key" is a secret unless its value is a short
+ * targeting key: an ad platform's geo key ("US", "US:10001") or a numeric id
+ * ("2490299"). Anything else under "key" (an API key, "K-LEAK") is redacted.
+ * _exos_channel_audit_scrub applies the same rule in SQL.
+ */
+export const BARE_KEY = /^key$/i;
+export const TARGETING_KEY = /^([A-Z]{2}(:[A-Za-z0-9 ._-]{1,40})?|[0-9]{1,12})$/;
+export function secretEntry(k: string, v: unknown): boolean {
+  if (SECRET_KEY.test(k)) return true;
+  if (!BARE_KEY.test(k)) return false;
+  return !(typeof v === "number" || (typeof v === "string" && TARGETING_KEY.test(v)));
+}
 /** Query parameter names refused in a URL: by pattern (api_token, access_key, X-Amz-Signature, ...), not a fixed list. */
 export const SECRET_QUERY = /(token|secret|passw|pwd|signature|credential|jwt|^sig$|^auth$|^key$|apikey|api[_-]?key|access[_-]?key|private[_-]?key|auth[_-]?key|^x-amz-)/i;
 /** Paging cursors named like a token are not credentials (Google's pageToken, ...). */
@@ -197,7 +210,7 @@ export function redact(value: unknown, secrets: readonly (string | null | undefi
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = SECRET_KEY.test(k) ? REDACTED : redact(v, secs, depth + 1);
+      out[k] = secretEntry(k, v) ? REDACTED : redact(v, secs, depth + 1);
     }
     return out;
   }
