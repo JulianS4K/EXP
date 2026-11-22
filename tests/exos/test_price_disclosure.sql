@@ -6,7 +6,11 @@
 \set ON_ERROR_STOP on
 BEGIN;
 
-INSERT INTO public.exos_orgs (id, name, slug) VALUES ('af000000-0000-0000-0000-0000000002a1', 'AF PD Org', 'af-pd');
+-- Staff accounts first: exos_orgs.owner_uid is NOT NULL (phase-1 schema).
+INSERT INTO auth.users (id, email, email_confirmed_at)
+SELECT ('af000000-0000-0000-0000-00000000020' || n)::uuid, 'af-pd-staff' || n || '@x.com', now()
+  FROM unnest(ARRAY[1, 2, 3, 5]) n;
+INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES ('af000000-0000-0000-0000-0000000002a1', 'AF PD Org', 'af-pd', 'af000000-0000-0000-0000-000000000201');
 INSERT INTO public.exos_org_memberships (org_id, user_id, role) VALUES
   ('af000000-0000-0000-0000-0000000002a1', 'af000000-0000-0000-0000-000000000201', 'owner'),
   ('af000000-0000-0000-0000-0000000002a1', 'af000000-0000-0000-0000-000000000202', 'finance'),

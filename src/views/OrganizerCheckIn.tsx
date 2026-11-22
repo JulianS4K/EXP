@@ -35,11 +35,13 @@ import { describeSkew, getMeasuredOffset, serverNow } from '../lib/serverClock';
 import {
   deviceLabel,
   enqueueScan,
+  hasQueuedScan,
   newClientRef,
   parseQueue,
   removeRefs,
   type QueuedScan,
 } from '../lib/offlineCheckins';
+import { ADDON_UNDO_TEXT, addonUndoAccess, queuedAddonUndo, undoAddonCheckIn } from '../lib/addonUndo';
 import { isFullTicketId, rosterMatches } from '../lib/doorSearch';
 import { getSeatRoster } from '../lib/seatingApi';
 import { joinCheckinChannel, type RemoteCheckin } from '../lib/checkinChannel';
@@ -194,7 +196,9 @@ const VOIDED_TEXT =
 const IN_TRANSFER_TEXT =
   'This ticket is mid-transfer. Ask the holder to either cancel the transfer or have the recipient claim it before scanning.';
 
-type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' | 'OUT' };
+// addon: an add-on's entry code (mig 20261107110000); its undo has its own
+// rules (lib/addonUndo: the scanner within 10 minutes, online or queued offline).
+type ScanRow = { key: string; ticketId: string; name: string; time: Date; status: 'SUCCESS' | 'DENIED' | 'UNDONE' | 'OUT'; addon?: boolean };
 
 export default function OrganizerCheckIn() {
   const { eventId } = useParams();
@@ -232,6 +236,8 @@ export default function OrganizerCheckIn() {
   const [undoKey, setUndoKey] = useState<string | null>(null);
   const [undoReason, setUndoReason] = useState('');
   const [undoing, setUndoing] = useState(false);
+  // Pass ids this device scanned as add-on codes (A-…), for the scan log's undo.
+  const addonIdsRef = useRef<Set<string>>(new Set());
   // A scan during the pre-doors test window: verified, but the ticket stays
   // unused (the server answers reason 'test-scan'), so don't mark it locally.
   const [testScan, setTestScan] = useState(false);
@@ -817,6 +823,8 @@ export default function OrganizerCheckIn() {
       for (const q of pendingUpdates) {
         const cur = merged[q.ticketId];
         if (!cur) continue;
+        // An add-on scan undone offline: usable again (mig 20261108110000).
+        if (q.kind === 'addon-undo') { merged[q.ticketId] = { ...cur, used: false, lists: undefined }; continue; }
         const dir = q.direction ?? 'entry';
         merged[q.ticketId] = {
           ...cur,
@@ -970,10 +978,12 @@ export default function OrganizerCheckIn() {
     }
   };
 
-  const pushScan = (ticketId: string, name: string, scanStatus: ScanRow['status']) =>
+  const pushScan = (ticketId: string, name: string, scanStatus: ScanRow['status']) => {
+    const addon = addonIdsRef.current.has(ticketId) || !!offlineRegistry[ticketId]?.addon;
     setRecentScans((prev) =>
-      [{ key: newClientRef(), ticketId, name: name || '—', time: new Date(), status: scanStatus }, ...prev].slice(0, 8),
+      [{ key: newClientRef(), ticketId, name: name || '—', time: new Date(), status: scanStatus, addon }, ...prev].slice(0, 8),
     );
+  };
 
   const queueScan = (scan: QueuedScan) =>
     setPendingUpdates((prev) => {
@@ -1313,6 +1323,7 @@ export default function OrganizerCheckIn() {
     const now = serverNow();
     const docId = code.ticketId;
     const cached = docId ? offlineRegistry[docId] : undefined;
+    if (docId && isAddonCode(raw)) addonIdsRef.current.add(docId);
     const base: Omit<ScanDecisionInput, 'network' | 'verify'> = {
       code,
       source: src,
@@ -1322,7 +1333,7 @@ export default function OrganizerCheckIn() {
       nameCheckin: nameMode ?? 'off',
       eventId,
       entry: cached,
-      queued: !!docId && pendingUpdates.some((q) => q.ticketId === docId),
+      queued: !!docId && hasQueuedScan(pendingUpdates, docId),
       gate: doorGate(event),
       now,
       canOverride,
@@ -1534,7 +1545,7 @@ export default function OrganizerCheckIn() {
     };
     // Still waiting to upload: just drop it (and any later exit / re-entry of
     // the ticket) from the queue.
-    const queued = pendingUpdates.filter((q) => q.ticketId === row.ticketId);
+    const queued = pendingUpdates.filter((q) => q.ticketId === row.ticketId && q.kind !== 'addon-undo');
     if (queued.length > 0) {
       setPendingUpdates((prev) => {
         const next = removeRefs(prev, queued.map((q) => q.ref));
@@ -1542,6 +1553,35 @@ export default function OrganizerCheckIn() {
         return next;
       });
       finish('Check-in removed before upload.');
+      return;
+    }
+    // An add-on scan (mig 20261108110000): its own RPC; offline, queued with a
+    // ref and the time, replayed by the merge (lib/addonUndo).
+    if (row.addon) {
+      if (effectiveOffline) {
+        const q = queuedAddonUndo(row.ticketId, why, serverNow());
+        setPendingUpdates((prev) => {
+          const next = enqueueScan(prev, q);
+          savePending(eventId, next);
+          return next;
+        });
+        finish('Undone on this device: it uploads when the network is back.');
+        return;
+      }
+      setUndoing(true);
+      try {
+        const r = await undoAddonCheckIn(row.ticketId, eventId, why, { device });
+        if (!r.ok) {
+          toast({ kind: 'error', message: ADDON_UNDO_TEXT[r.reason] ?? 'Could not undo that add-on scan.' });
+          return;
+        }
+        finish('Add-on scan undone. The code can be scanned again.');
+      } catch (err) {
+        console.error('undo add-on scan failed', err);
+        toast({ kind: 'error', message: 'Could not undo that add-on scan (network).' });
+      } finally {
+        setUndoing(false);
+      }
       return;
     }
     setUndoing(true);
@@ -1675,7 +1715,7 @@ export default function OrganizerCheckIn() {
            <button
              type="button"
              onClick={exportAttendeesCsv}
-             aria-label="Export attendees as CSV"
+             aria-label="Export CSV of attendees"
              className="flex items-center space-x-2 px-3 py-2 bg-white text-slate-900 border border-slate-200 rounded text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all shadow-sm"
            >
               <Download className="w-3 h-3" aria-hidden="true" />
@@ -2367,10 +2407,13 @@ export default function OrganizerCheckIn() {
                           <p className="text-sm font-bold text-slate-800 truncate">{ok ? scan.name : out ? `${scan.name} · out` : undone ? `${scan.name} · undone` : 'Rejected'}</p>
                           <p className="text-[11px] text-slate-400 truncate uppercase tracking-tighter">…{scan.ticketId.slice(-6)}</p>
                         </div>
-                        {ok && canOverride && !effectiveOffline && undoKey !== scan.key ? (
+                        {ok && undoKey !== scan.key && (scan.addon
+                          ? addonUndoAccess({ manager: canOverride, scannedByMe: true, scannedAt: scan.time.getTime(), now: Date.now() }) === 'allowed'
+                          : canOverride && !effectiveOffline) ? (
                           <button
                             type="button"
                             onClick={() => { setUndoKey(scan.key); setUndoReason(''); }}
+                            data-testid={scan.addon ? 'addon-undo' : undefined}
                             className="text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-slate-900 shrink-0"
                           >
                             Undo

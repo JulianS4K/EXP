@@ -135,6 +135,7 @@ export default function Dialog({
   const align = sheet ? 'items-end md:items-center' : 'items-center';
   return (
     <div
+      role="presentation"
       className={`fixed inset-0 z-50 flex ${align} justify-center p-4`}
       // A bottom sheet clears the home indicator (viewport-fit=cover).
       style={sheet ? { paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' } : undefined}

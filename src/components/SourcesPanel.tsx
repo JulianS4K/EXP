@@ -47,6 +47,14 @@ async function readSessions(eventId: string, cols: string): Promise<SourceSessio
 
 /** The event's counted checkouts with their sources; null when unreadable. */
 export async function getEventSourceSessions(eventId: string): Promise<{ rows: SourceSessionRow[]; hasAdIds: boolean } | null> {
+  // A $0 order recorded for a free claim or comp (free_kind, mig 20261108100000)
+  // never went through a checkout, so it has no source: left out.
+  try {
+    const rows = await readSessions(eventId, `${BASE_COLS}, ad_ids, free_kind`);
+    return { rows: rows.filter((r) => !(r as { free_kind?: string | null }).free_kind), hasAdIds: true };
+  } catch {
+    // free_kind not on this database yet.
+  }
   try {
     return { rows: await readSessions(eventId, `${BASE_COLS}, ad_ids`), hasAdIds: true };
   } catch {

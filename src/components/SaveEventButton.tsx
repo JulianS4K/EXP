@@ -77,7 +77,6 @@ export default function SaveEventButton({ eventId, initialSaved, variant = 'row'
         onClick={toggle}
         disabled={busy}
         aria-pressed={saved}
-        aria-label={saved ? 'Remove from saved events' : 'Save this event'}
         className={`inline-flex items-center gap-2 px-4 py-2 border font-black uppercase tracking-tighter italic text-[10px] transition-all disabled:opacity-50 ${
           saved
             ? 'bg-brand-primary text-black border-brand-primary'
@@ -97,7 +96,6 @@ export default function SaveEventButton({ eventId, initialSaved, variant = 'row'
       onClick={toggle}
       disabled={busy}
       aria-pressed={saved}
-      aria-label={saved ? 'Remove from saved events' : 'Save this event'}
       className={`flex items-center transition-colors text-left ${
         saved ? 'text-brand-primary' : 'hover:text-brand-primary'
       }`}

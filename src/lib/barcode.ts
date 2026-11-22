@@ -60,10 +60,10 @@
 //     attempts visible in the audit log.
 
 import {
-  doorCodeMac, doorDay, doorDayKey, verifyPrintWithKeys, verifyWalletWithKeys, type DoorKeys,
+  doorCodeMac, doorDay, doorDayKey, verifyAddonWalletWithKeys, verifyPrintWithKeys, verifyWalletWithKeys, type DoorKeys,
 } from '../../supabase/functions/_shared/doorKeys.ts';
 import { printCodeTicketId } from '../../supabase/functions/_shared/print/tickets.ts';
-import { verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
+import { appleAddonWalletCode, verifyWalletCode } from '../../supabase/functions/_shared/wallet/codes.ts';
 
 const BUCKET_MS = 30_000;
 // Accept barcodes from the current bucket or up to N buckets in either
@@ -231,6 +231,33 @@ export async function verifyBarcode(
       : await verifyWalletWithKeys(payload, keys, options);
     if (!w.code) return { ok: false, reason: 'malformed', legacy: false };
     if ('noKey' in w && w.noKey) return { ok: false, reason: 'no-key', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
+    return w.ok
+      ? { ok: true, legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId }
+      : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };
+  }
+  // An add-on's wallet pass (mig 20261108110000): A-{pass}:{owner}:a|g{epoch}:…,
+  // checked like a W- code against the pass's keys (wa / wg / we).
+  if (typeof payload === 'string' && /^A-[^:]+:[^:]+:[ag][0-9]{1,9}:/.test(payload)) {
+    let w;
+    if (typeof keys === 'string') {
+      // Holder-side tools (the secret): Apple compares the whole code; Google
+      // is the ticket TOTP check over the same derived key.
+      const parts = payload.slice(2).split(':');
+      if (parts[2].startsWith('a')) {
+        const expected = keys ? await appleAddonWalletCode(parts[0], parts[1], keys, Number(parts[2].slice(1))) : '';
+        w = { ok: !!keys && timingSafeEqual(expected, payload), code: { ticketId: parts[0], ownerId: parts[1] } };
+      } else {
+        const g = await verifyWalletCode('W-' + payload.slice(2), keys, options);
+        w = { ok: g.ok, code: g.code ? { ticketId: g.code.ticketId, ownerId: g.code.ownerId } : null };
+      }
+    } else {
+      const r = await verifyAddonWalletWithKeys(payload, keys, options);
+      if (r.code && 'noKey' in r && r.noKey) {
+        return { ok: false, reason: 'no-key', legacy: false, ticketId: r.code.ticketId, ownerId: r.code.ownerId };
+      }
+      w = { ok: r.ok, code: r.code ? { ticketId: r.code.ticketId, ownerId: r.code.ownerId } : null };
+    }
+    if (!w.code) return { ok: false, reason: 'malformed', legacy: false };
     return w.ok
       ? { ok: true, legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId }
       : { ok: false, reason: 'signature-mismatch', legacy: false, ticketId: w.code.ticketId, ownerId: w.code.ownerId };

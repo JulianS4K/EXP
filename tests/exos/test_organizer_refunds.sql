@@ -48,7 +48,7 @@ INSERT INTO public.exos_checkout_sessions(session_id,event_id,tier_id,org_id,buy
   ('cs_of4','0f000000-0000-0000-0000-0000000000e1','0f000000-0000-0000-0000-0000000000d1','0f000000-0000-0000-0000-000000000001',
    '0f000000-0000-0000-0000-0000000000b1','ofbuyer@x.com',2,6000,'fulfilled',NULL,NULL),
   ('cs_of5','0f000000-0000-0000-0000-0000000000e1','0f000000-0000-0000-0000-0000000000d1','0f000000-0000-0000-0000-000000000001',
-   '0f000000-0000-0000-0000-0000000000b1','ofbuyer@x.com',0,0,'fulfilled',NULL,NULL);
+   '0f000000-0000-0000-0000-0000000000b1','ofbuyer@x.com',1,0,'fulfilled',NULL,NULL);   -- free (quantity is 1..10, phase-2 CHECK)
 SELECT public.exos_record_payment('cs_of1','pi_of1',10001,'succeeded');
 SELECT public.exos_record_payment('cs_of2','pi_of2',5000,'succeeded');
 SELECT public.exos_record_payment('cs_of3','pi_of3',4000,'succeeded');

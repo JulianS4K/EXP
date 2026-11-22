@@ -35,7 +35,8 @@ INSERT INTO auth.users(id,email,email_confirmed_at) VALUES
   ('fb000000-0000-0000-0000-0000000000a1','fb-manager@x.com',now()),
   ('fb000000-0000-0000-0000-0000000000a2','fb-finance@x.com',now()),
   ('fb000000-0000-0000-0000-0000000000a3','fb-scanner@x.com',now()),
-  ('fb000000-0000-0000-0000-0000000000a4','fb-stranger@x.com',now());
+  ('fb000000-0000-0000-0000-0000000000a4','fb-stranger@x.com',now()),
+  ('fb000000-0000-0000-0000-0000000000a9','fb-holder@x.com',now());   -- holds pg_temp.mint's tickets (buyer_id is NOT NULL)
 INSERT INTO public.exos_orgs(id,name,slug,owner_uid) VALUES
   ('fb000000-0000-0000-0000-000000000001','FB Org','fb-org','fb000000-0000-0000-0000-0000000000a0');
 INSERT INTO public.exos_org_memberships(org_id,user_id,role) VALUES
@@ -79,8 +80,10 @@ CREATE FUNCTION pg_temp.set_block(p_event text, p_blocks jsonb, p_release timest
   SELECT public.exos_set_fixed_block(pg_temp.u(p_event), true, 'DICE', 'https://dice.fm/event/fb-club', p_blocks, p_release)
 $$;
 CREATE FUNCTION pg_temp.mint(p_tier text, p_secret text, p_channel text) RETURNS void LANGUAGE sql AS $$
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
-  VALUES (pg_temp.u('e1'), 'fb000000-0000-0000-0000-000000000001', pg_temp.u(p_tier), 'GA', p_secret || '@x.com', 'active', p_secret, 30, 'ref-' || p_secret, p_channel)
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, buyer_email, status, barcode_secret, price_paid, order_ref, channel_source)
+  VALUES (pg_temp.u('e1'), 'fb000000-0000-0000-0000-000000000001', pg_temp.u(p_tier), 'GA',
+          'fb000000-0000-0000-0000-0000000000a9', 'fb000000-0000-0000-0000-0000000000a9',
+          p_secret || '@x.com', 'active', p_secret, 30, 'ref-' || p_secret, p_channel)
 $$;
 
 -- FB1. Turning it on.

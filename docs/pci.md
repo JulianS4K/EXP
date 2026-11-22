@@ -82,3 +82,52 @@ Sell tab has no card field and loads no script). Before the first live card, re-
 > SAQ A merchant under PCI DSS v4.0.1 (SAQ A and AOC attached, with Stripe's AOC). Pages that host payment
 > fields load only first-party and Stripe scripts under a Content Security Policy, and runtime dependencies are
 > scanned on every change.
+
+## Accessibility conformance (WCAG 2.1 AA)
+
+College and municipal RFPs make WCAG 2.1 AA pass/fail (and ADA Title II applies to public buyers). This section is
+the code-side evidence; GTM turns it into a VPAT 2.5 (WCAG edition). It lives here because it's the same bid kit.
+
+**Checked automatically, on every change (CI):**
+
+| Check | What fails the build | Where |
+|---|---|---|
+| axe-core 4.14 (`@axe-core/playwright`) on the built app, mocked backend | Any `serious` or `critical` violation of the `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` rules. `moderate` / `minor` ones and axe's "needs review" count are printed | `tests/smoke/a11y.mjs`, run by `npm run smoke` (CI job "Browser smoke") |
+| Keyboard, in the same run | The first Tab stop is "Skip to content" and it moves focus into `<main>`; a seat in the seat list is picked with Enter | same |
+| `eslint-plugin-jsx-a11y` (recommended rules) on `src/` | Any error; warnings are capped (`--max-warnings`) so they can only go down | `npm run lint:a11y`, `eslint.config.js` (CI job "TypeScript") |
+
+Lint deviations from the recommended set (`eslint.config.js` says why): `no-autofocus` is off (every autofocus follows
+a user action, such as a dialog or editor opening, or the door's scan box); `aria-role` ignores our components' own
+`role` prop; labels may nest their text up to 4 levels.
+
+**Pages covered by axe:** the event page (`/e/:slug` → `/event/:id`, phone and desktop), the cookie banner, the seat
+picker (map, then list with a seat picked), checkout (the guest email dialog; back from Stripe to the confirmation),
+My Tickets, the ticket (code locked, and with the rotating entry QR live), transfer a ticket, and the Door app
+(`/door`, signed out and signed in).
+
+**Built in for assistive tech:** a skip link and `nav` / `main` / `footer` landmarks; `<html lang>` follows the EN /
+ES switch; the seat picker's list view has one toggle button per seat, named with section, row, seat, price and
+wheelchair / companion / restricted-view flags (the SVG map is `role="img"` and points to the list); errors are
+`role="alert"` (checkout email, checkout questions, seat picker) and toasts are a polite live region; the quantity
+is announced when it changes; the event countdown and the QR's 30-second rotation are `role="timer"`, so they aren't
+read out on every tick; the entry QR has a text name.
+
+**Known exceptions:**
+
+1. **Stripe's card pages.** Stripe Checkout (a redirect) and the Embedded Checkout iframe on the venue embed are
+   Stripe's documents. The axe run excludes `iframe[src*="stripe.com"]` and nothing else. For those, cite Stripe's
+   own Accessibility Conformance Report (VPAT) for Checkout, which Stripe provides on request; add it to the bid
+   kit next to Stripe's AOC. The same goes for PayPal's buttons and windows on `/bridge/pay/paypal`.
+2. **Door scanner (`/checkin/:eventId`, staff only).** Scanned as *advisory* (printed, not failed): its small grey
+   labels (slate-300 / 400, and slate-500 on grey panels) are under 4.5:1. Needs a restyle of the scanner's small
+   text; then drop `advisory: true` in `tests/smoke/a11y.mjs`.
+3. **Create / edit event forms (organizer).** 45 visible labels aren't tied to their inputs with `for` / `id`
+   (most inputs carry an `aria-label` with the same text, so they are named). Warn-only in lint, capped at 45.
+4. **The seat map drawing** isn't operable by keyboard; the list view is the keyboard and screen-reader
+   equivalent, one toggle away.
+5. **What automation can't see** (roughly half of WCAG): a manual pass with VoiceOver (iOS / macOS) and NVDA,
+   200% zoom and 320px reflow, focus order through dialogs, and captions on organizer-supplied event videos. That
+   manual pass, or a third-party audit, is what turns this into a signed VPAT.
+
+**Re-run:** `npm run smoke` (axe after the smoke tests; `SMOKE_PORT=4175` for another port, `SMOKE_CHROMIUM=<path>`
+for a local browser) and `npm run lint:a11y`. To cover a new page, add a `check(...)` to `tests/smoke/a11y.mjs`.

@@ -610,7 +610,8 @@ DECLARE v_pub uuid; v_sold uuid; v_draft uuid;
 BEGIN
   INSERT INTO public.exos_events (org_id, name, status) VALUES ('d7000000-0000-0000-0000-000000000001', 'Pub', 'published') RETURNING id INTO v_pub;
   INSERT INTO public.exos_events (org_id, name, status) VALUES ('d7000000-0000-0000-0000-000000000001', 'Sold', 'draft') RETURNING id INTO v_sold;
-  INSERT INTO public.exos_tickets (event_id, org_id) VALUES (v_sold, 'd7000000-0000-0000-0000-000000000001');
+  INSERT INTO public.exos_tickets (event_id, org_id, buyer_id, owner_id, barcode_secret)
+  VALUES (v_sold, 'd7000000-0000-0000-0000-000000000001', 'd7000000-0000-0000-0000-0000000000a0', 'd7000000-0000-0000-0000-0000000000a0', 'ti6');
   v_draft := (SELECT d7.v FROM d7 WHERE k = 'ev1');
   INSERT INTO d7 VALUES ('pub', v_pub), ('sold', v_sold);
   BEGIN

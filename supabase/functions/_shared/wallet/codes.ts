@@ -73,6 +73,29 @@ export function parseWalletCode(payload: string): WalletCode | null {
   return { kind: "google", ticketId, ownerId, epoch, totp: proof };
 }
 
+// ── Add-on wallet codes (mig 20261108110000) ──────────────────────────────
+//
+// An add-on unit with its own entry code (exos_addon_passes) gets a wallet
+// pass of its own. Same derivations over the pass's own secret, with the
+// add-on prefix (the door reads A- codes as add-ons):
+//   A-{pass}:{owner}:a{epoch}:{mac}    Apple
+//   A-{pass}:{owner}:g{epoch}:{totp}   Google
+// SQL: _exos_addon_wallet_apple_code, _exos_wallet_google_key (the same key).
+
+export async function appleAddonWalletCode(passId: string, ownerId: string, secret: string, epoch: number): Promise<string> {
+  return "A" + (await appleWalletCode(passId, ownerId, secret, epoch)).slice(1);
+}
+
+export function googleAddonValuePattern(passId: string, ownerId: string, epoch: number): string {
+  return `A-${passId}:${ownerId}:g${epoch}:{totp_value_0}`;
+}
+
+/** An add-on wallet code (A-…:a{epoch}:… / A-…:g{epoch}:…), or null; ticketId is the pass id. */
+export function parseAddonWalletCode(payload: string): WalletCode | null {
+  if (typeof payload !== "string" || payload.slice(0, 2).toUpperCase() !== "A-") return null;
+  return parseWalletCode("W-" + payload.slice(2));
+}
+
 export interface WalletVerifyResult {
   ok: boolean;
   reason?: "malformed" | "signature-mismatch";

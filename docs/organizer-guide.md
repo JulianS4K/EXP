@@ -251,6 +251,33 @@ tiers and discount codes, into a series of dates.
 - **Release policy:** whether holders can give back a *free* ticket themselves, and up to how many
   hours before the start. Freed seats go to the waitlist.
 
+### Group buys: friends pay for their own seats
+
+Buyers can bring friends two ways. You don't switch anything on; both use your normal prices, fees,
+codes and limits.
+
+- **Split with friends** (`/split/:sessionId`, after a purchase): the buyer pays for every ticket,
+  sends each friend their ticket, and the friends pay the buyer back by Venmo or Cash App. Exos never
+  touches that money.
+- **Pay separately** (the event page's ticket picker, "Pay separately: up to N friends"; mig
+  `20261108120000`): a signed-in buyer (the host) picks 2 to 10 tickets of one type, at most your
+  max per order. Exos holds that many seats for **30 minutes** and gives the host one link per seat
+  (`/group-pay/seat/<link>`) to text or copy from their own phone.
+  - Each friend opens their link and pays for **that one seat** in the normal checkout (signed in or
+    as a guest). The ticket is theirs, on **its own order**: receipts, refunds and transfers work as
+    for any order, and it shows in your orders like any other sale.
+  - Two friends on the same link: the first one to start paying gets it; the second is told the seat
+    is taken.
+  - The host follows each seat live (`/group-pay/:groupId`: waiting, paying, paid, released) with a
+    countdown. Before the time runs out they can **cover the rest**: one checkout for every unpaid
+    seat, issued to the host, who can then send the tickets on or split the cost. They can also end
+    the group early.
+  - When the 30 minutes are up, unpaid seats **go back on sale** at once. A payment that comes in
+    after that (a checkout page left open) isn't issued and is refunded in full automatically, as is
+    a friend's payment for a seat the host already covered.
+  - Not for reserved seating, timed entry, price steps, hidden (code-only) types or free tickets. One
+    open group per buyer per event; a host can't hold seats for longer than 30 minutes, ever.
+
 ### Changing the date
 
 Move an event from **Edit event** (change the start and save) or from **Reschedule** on the event

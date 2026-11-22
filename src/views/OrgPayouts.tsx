@@ -6,7 +6,8 @@
 // exos_org_payouts / _lines enforces it); a CSV export per line. Below them,
 // the org's chargebacks on Exos checkout orders (DisputesPanel, mig
 // 20261001101000). Above them, the owner's "get paid now" (Stripe Instant
-// Payouts, InstantPayoutPanel, mig 20261102150000).
+// Payouts, InstantPayoutPanel, mig 20261102150000). At the bottom, the org's
+// journal: trial balance, journal CSV, sales tax (JournalPanel, mig 20261108100000).
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -18,6 +19,7 @@ import { csvFileName, downloadCsv, toCsv } from '../lib/csv';
 import { getOrgPayouts } from '../lib/settlementApi';
 import DisputesPanel from '../components/DisputesPanel';
 import InstantPayoutPanel from '../components/InstantPayoutPanel';
+import JournalPanel from '../components/finance/JournalPanel';
 import {
   canSeeMoney,
   groupPayouts,
@@ -191,6 +193,9 @@ export default function OrgPayouts() {
         <div className="mt-10">
           <DisputesPanel orgId={orgId} canView={allowed} />
         </div>
+
+        {/* The org's double-entry journal, trial balance and sales tax (mig 20261108100000). */}
+        <JournalPanel orgId={orgId} orgName={entry?.org.name} canView={allowed} />
       </div>
     </div>
   );

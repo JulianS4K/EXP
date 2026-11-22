@@ -263,9 +263,11 @@ BEGIN
   RAISE NOTICE 'OK SO3 caps validation (tier / partner of another org, bad numbers), owner + manager only, RLS by org';
 END $$;
 
--- ── SO4: invites. Prod's invite table and claim function (the offline chain
--- has neither), then this migration again so its claim patch applies. ──────
-CREATE TABLE public.exos_org_invites (
+-- ── SO4: invites. Prod's invite table and claim function (run_p0.sh builds
+-- both from 20260520120000 on; the table stays as built, the function is put
+-- back to its pre-20261104200000 text), then this migration again so its
+-- claim patch applies. ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.exos_org_invites (
   token       uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id      uuid NOT NULL REFERENCES public.exos_orgs (id) ON DELETE CASCADE,
   email       text NOT NULL,
@@ -526,7 +528,10 @@ BEGIN
   SET LOCAL ROLE authenticated;
   s := pg_temp.err(format($q$UPDATE public.exos_org_memberships SET approved_by = %L WHERE user_id = %L$q$, pg_temp.u('c1'), pg_temp.u('c1')));
   RESET ROLE;
-  ASSERT s LIKE '42501%', 'SO7: self edit ' || s;
+  -- Refused by the guard (42501), or, with phase-1's RLS on the table (only
+  -- owners / managers update), a no-op: either way nothing changes.
+  ASSERT s LIKE '42501%' OR (s = 'ok' AND (SELECT approved_by IS NULL FROM public.exos_org_memberships
+           WHERE org_id = pg_temp.org('01') AND user_id = pg_temp.u('c1'))), 'SO7: self edit ' || s;
   PERFORM pg_temp.act(pg_temp.u('a1'));
   PERFORM public.exos_org_member_reject(pg_temp.org('01'), pg_temp.u('c1'));
   PERFORM pg_temp.act(NULL);

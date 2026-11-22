@@ -389,17 +389,17 @@ BEGIN
   ASSERT (c ->> 'price_cents')::int = 3500 AND c ->> 'source' = 'door' AND c ->> 'step_id' IS NULL, 'PS8 door price at POS: ' || c;
   v_rem := (public.exos_tier_current_price('b5700000-0000-0000-0000-0000000000d1') ->> 'step_remaining')::int;
   -- A door sale at the door price takes no GA place.
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, status, barcode_secret, price_paid, channel_source)
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, status, barcode_secret, price_paid, channel_source)
   VALUES ('b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000d1',
-          'GA', 'active', gen_random_uuid()::text, 35, 'door')
+          'GA', 'b5700000-0000-0000-0000-0000000000a1', 'b5700000-0000-0000-0000-0000000000a1', 'active', gen_random_uuid()::text, 35, 'door')
   RETURNING id INTO v_id;
   ASSERT (SELECT price_step_id FROM public.exos_tickets WHERE id = v_id) IS NULL, 'PS8 a door sale is on no step';
   ASSERT (public.exos_tier_current_price('b5700000-0000-0000-0000-0000000000d1') ->> 'step_remaining')::int = v_rem,
     'PS8 GA places unchanged by the door sale';
   -- A comp takes no step place either.
-  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, status, barcode_secret, price_paid, channel_source)
+  INSERT INTO public.exos_tickets (event_id, org_id, tier_id, tier_name, buyer_id, owner_id, status, barcode_secret, price_paid, channel_source)
   VALUES ('b5700000-0000-0000-0000-0000000000e1', 'b5700000-0000-0000-0000-000000000001', 'b5700000-0000-0000-0000-0000000000d1',
-          'GA', 'active', gen_random_uuid()::text, 0, 'boxoffice')
+          'GA', 'b5700000-0000-0000-0000-0000000000a1', 'b5700000-0000-0000-0000-0000000000a1', 'active', gen_random_uuid()::text, 0, 'boxoffice')
   RETURNING id INTO v_id;
   ASSERT (SELECT price_step_id FROM public.exos_tickets WHERE id = v_id) IS NULL, 'PS8 a comp is on no step';
   RAISE NOTICE 'OK  PS8 advance by time; the door price at POS; door sales and comps use no step places';

@@ -15,7 +15,7 @@ export default function LanguageSwitcher() {
           onClick={() => setLang(l)}
           aria-pressed={lang === l}
           className={`px-2 py-1 text-[10px] font-black uppercase tracking-widest transition-all ${
-            lang === l ? 'bg-white text-black' : 'text-white/40 hover:text-white'
+            lang === l ? 'bg-white text-black' : 'text-white/60 hover:text-white'
           }`}
         >
           {l}

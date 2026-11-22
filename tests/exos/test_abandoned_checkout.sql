@@ -7,9 +7,12 @@
 BEGIN;
 
 -- Orgs: O1 reminders on (default), O2 turned off.
-INSERT INTO public.exos_orgs (id, name, slug) VALUES
-  ('af000000-0000-0000-0000-0000000000a1', 'AF Org', 'af-org'),
-  ('af000000-0000-0000-0000-0000000000a2', 'AF Quiet', 'af-quiet');
+-- exos_orgs.owner_uid is NOT NULL (phase-1 schema).
+INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
+  ('af000000-0000-0000-0000-0000000000b0', 'af-owner@x.com', now());
+INSERT INTO public.exos_orgs (id, name, slug, owner_uid) VALUES
+  ('af000000-0000-0000-0000-0000000000a1', 'AF Org', 'af-org', 'af000000-0000-0000-0000-0000000000b0'),
+  ('af000000-0000-0000-0000-0000000000a2', 'AF Quiet', 'af-quiet', 'af000000-0000-0000-0000-0000000000b0');
 UPDATE public.exos_orgs SET checkout_reminders_enabled = false WHERE id = 'af000000-0000-0000-0000-0000000000a2';
 
 -- Events: E1 upcoming, E2 already started, E3 draft, E4 upcoming in O2.
