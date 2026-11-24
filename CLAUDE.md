@@ -65,9 +65,11 @@ New here? Read `docs/onboarding.md` first. Turning payments on: `docs/payments-g
   `docs/marketplace/`, the vendor tests and re-exports under
   `src/lib/marketplace/`) is **vendored** from the private repo
   `JulianS4K/exos-marketplaces`, the source of truth: change it there, then
-  `bash scripts/sync-marketplaces.sh <commit>`. Never edit the vendored copy
-  here; CI (`node scripts/vendor-marketplaces.mjs check`) fails if it differs
-  from the commit pinned in `vendor/exos-marketplaces.json`. Exos-specific
+  `bash scripts/sync-marketplaces.sh <40-hex commit sha>`. Never edit the
+  vendored copy here; CI (`node scripts/vendor-marketplaces.mjs check`) fails
+  if it differs from the commit pinned in `vendor/exos-marketplaces.json`.
+  Which paths are vendored is `PATHS` in that script, owned here; upstream
+  never chooses what the sync writes. Exos-specific
   marketplace logic (channel splits, fixed blocks, last call, resale gate, S4K)
   stays in this repo. The StubHub write foundation
   (`src/lib/marketplace/stubhub/writer.ts`) is dry-run by default; running it
