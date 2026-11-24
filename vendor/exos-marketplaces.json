@@ -1,0 +1,25 @@
+{
+  "repo": "JulianS4K/exos-marketplaces",
+  "commit": "03c425cdeca6577819cf6235d7a4e9a337b2c4e1",
+  "paths": [
+    "supabase/functions/_shared/marketplace/",
+    "docs/marketplace/",
+    "src/lib/marketplace/index.ts",
+    "src/lib/marketplace/stubhub/",
+    "src/lib/marketplace/seatgeek/",
+    "src/lib/marketplace/vivid/",
+    "src/lib/marketplace/tevo/",
+    "src/lib/marketplace/gametime/",
+    "src/lib/marketplace/gotickets/",
+    "src/lib/marketplace/channels.test.ts",
+    "src/lib/marketplace/eventStandard.test.ts",
+    "src/lib/marketplace/fees.test.ts",
+    "src/lib/marketplace/listingStandard.test.ts",
+    "src/lib/marketplace/netError.test.ts",
+    "src/lib/marketplace/sales.test.ts",
+    "src/lib/marketplace/sync.test.ts",
+    "src/lib/marketplace/transferStock.test.ts"
+  ],
+  "files": 140,
+  "sha256": "107fce1260690f141fca266c5abc5c7528f88884e47a2d1a646e77c114c44902"
+}

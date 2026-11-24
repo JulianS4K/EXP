@@ -21,6 +21,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # The resale marketplace layer is vendored from JulianS4K/exos-marketplaces
+      # (vendor/exos-marketplaces.json): change it there, then sync.
+      # Early, so a failing test step does not hide it.
+      - name: Vendored marketplace layer matches its pinned commit
+        run: node scripts/vendor-marketplaces.mjs check
+
       # PCI DSS 6.3.3 (docs/pci.md): no known high or critical vulnerability
       # ships in a runtime dependency.
       - name: Dependency audit (runtime, high+)
