@@ -35,12 +35,39 @@ else
 fi
 git -C "$TMP/src" rev-parse -q --verify "$SHA^{commit}" >/dev/null \
   || { echo "sync-marketplaces: $SHA is not a commit in the upstream repo" >&2; exit 1; }
-git -c core.symlinks=true -C "$TMP/src" checkout -q --detach "$SHA" --
+# Refuse, from git's own tree listing, any entry that is not a plain
+# non-executable file (symlink 120000, executable 100755, submodule 160000)
+# at a vendored path, inside one, or at any directory above one (a symlinked
+# ancestor such as src/lib would otherwise lead the copy out of the checkout).
+bad="$(git -C "$TMP/src" ls-tree -r -t --full-tree "$SHA" | node -e '
+  const paths = process.argv[1].split("\n").map((p) => p.replace(/\/$/, ""));
+  const near = (f) => paths.some((p) => f === p || f.startsWith(p + "/") || p.startsWith(f + "/"));
+  const out = [];
+  for (const line of require("fs").readFileSync(0, "utf8").split("\n")) {
+    const m = /^(\d{6}) (\w+) [0-9a-f]+\t(.*)$/.exec(line);
+    if (!m || !near(m[3])) continue;
+    const [, mode, type, f] = m;
+    const base = f.split("/").pop();
+    if (!(mode === "100644" || (mode === "040000" && type === "tree")) || base.startsWith(".")) out.push(mode + " " + f);
+  }
+  console.log(out.slice(0, 5).join("\n"));
+' "$(printf '%s\n' "${PATHS[@]}")")"
+if [ -n "$bad" ]; then
+  echo "sync-marketplaces: refusing $SHA, it holds a symlink, executable, submodule or dot file at or above a vendored path:" >&2
+  echo "$bad" >&2; exit 1
+fi
+# Symlinks off as a second layer: any that slipped through check out as plain files.
+git -c core.symlinks=false -C "$TMP/src" checkout -q --detach "$SHA" --
+SRC_REAL="$(realpath "$TMP/src")"
 
-# Refuse anything but plain, non-executable files and directories, before
-# touching the tree. (PATHS themselves are vetted by vendor-marketplaces.mjs:
-# relative, under the marketplace areas, no '..' or dot segments.)
+# Belt and braces on the checked-out tree, before touching ours. (PATHS are
+# vetted by vendor-marketplaces.mjs: relative, under the marketplace areas,
+# no '..' or dot segments.)
 for p in "${PATHS[@]}"; do
+  case "$(realpath -m "$TMP/src/${p%/}")" in
+    "$SRC_REAL"/*) ;;
+    *) echo "sync-marketplaces: upstream $p resolves outside the checkout" >&2; exit 1 ;;
+  esac
   src="$TMP/src/${p%/}"
   if [ -L "$src" ]; then echo "sync-marketplaces: upstream $p is a symlink" >&2; exit 1; fi
   if [[ "$p" == */ ]]; then
