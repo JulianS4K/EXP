@@ -2,6 +2,7 @@
 # Sync the vendored resale marketplace layer from JulianS4K/exos-marketplaces.
 #   bash scripts/sync-marketplaces.sh <40-hex commit sha>
 #   bash scripts/sync-marketplaces.sh <40-hex commit sha> --from <local checkout>
+#   ... --allow-downgrade   (permit a commit that does not descend from the pinned one)
 #
 # Copies the paths EXP lists (PATHS in scripts/vendor-marketplaces.mjs, never
 # a list from upstream) from that exact commit, which must be on upstream's
@@ -16,9 +17,15 @@
 # --from copies from a local repo for trying things out and does NOT stamp:
 # the manifest keeps the old commit, so CI fails until a real sync.
 set -euo pipefail
-SHA="${1:?usage: sync-marketplaces.sh <40-hex commit sha> [--from <dir>]}"; shift
-FROM=""
-if [ "${1:-}" = "--from" ]; then FROM="${2:?--from needs a directory}"; fi
+SHA="${1:?usage: sync-marketplaces.sh <40-hex commit sha> [--from <dir>] [--allow-downgrade]}"; shift
+FROM=""; DOWNGRADE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --from) FROM="${2:?--from needs a directory}"; shift 2 ;;
+    --allow-downgrade) DOWNGRADE=1; shift ;;
+    *) echo "sync-marketplaces: unknown option $1" >&2; exit 2 ;;
+  esac
+done
 if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
   echo "sync-marketplaces: give the full 40-character commit sha, not a branch or tag" >&2; exit 2
 fi
@@ -39,10 +46,16 @@ if [ -n "$FROM" ]; then
 else
   git clone -q --bare https://github.com/JulianS4K/exos-marketplaces.git "$UP"
 fi
-git --git-dir "$UP" rev-parse -q --verify "$SHA^{commit}" >/dev/null \
+# A commit object itself (an annotated tag's sha peels to a different one).
+[ "$(git --git-dir "$UP" rev-parse -q --verify "$SHA^{commit}" 2>/dev/null)" = "$SHA" ] \
   || { echo "sync-marketplaces: $SHA is not a commit in the upstream repo" >&2; exit 1; }
 git --git-dir "$UP" merge-base --is-ancestor "$SHA" HEAD \
   || { echo "sync-marketplaces: $SHA is not on upstream's default branch" >&2; exit 1; }
+# No downgrades: the new commit must descend from the pinned one.
+OLD="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("vendor/exos-marketplaces.json","utf8")).commit)')"
+if [ -z "$DOWNGRADE" ] && ! git --git-dir "$UP" merge-base --is-ancestor "$OLD" "$SHA" 2>/dev/null; then
+  echo "sync-marketplaces: $SHA does not descend from the pinned ${OLD:0:7}; pass --allow-downgrade if that is intended" >&2; exit 1
+fi
 
 STAGE="$TMP/stage"
 node "$VM" extract --git-dir "$UP" --commit "$SHA" --out "$STAGE"

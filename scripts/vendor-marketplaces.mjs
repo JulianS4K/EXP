@@ -50,6 +50,10 @@ const PREFIXES = ['supabase/functions/_shared/marketplace/', 'docs/marketplace/'
 // src/lib/marketplace/ also holds Exos-owned files (resale gate, channel
 // splits), so only entries strictly below it may be vendored.
 const MIXED = 'src/lib/marketplace/';
+// Exos-owned modules in MIXED (and their tests), never vendored.
+const EXOS_OWNED = ['channelSplit', 'channelSplitModel', 'fixedBlock', 'lastCall', 'linksApi', 'orderActions',
+  'resaleConsent', 'resaleGate', 's4kNetwork', 's4kPools', 'stubhubStatus', 'stubhubStatusApi'];
+const exosOwned = (p) => p.startsWith(MIXED) && EXOS_OWNED.includes(p.slice(MIXED.length).split('/')[0].replace(/(\.test)?\.tsx?$/, ''));
 
 function fail(msg) {
   console.error(msg);
@@ -61,7 +65,7 @@ function fail(msg) {
 const SEGMENTED = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\/?$/;
 if (new Set(PATHS).size !== PATHS.length) fail('vendor-marketplaces: PATHS has a duplicate');
 for (const p of PATHS) {
-  if (!SEGMENTED.test(p) || p.split('/').includes('..') || !PREFIXES.some((x) => p.startsWith(x) && (p.length > x.length || x !== MIXED))) {
+  if (!SEGMENTED.test(p) || p.split('/').includes('..') || !PREFIXES.some((x) => p.startsWith(x) && (p.length > x.length || x !== MIXED)) || exosOwned(p)) {
     fail(`vendor-marketplaces: bad path ${JSON.stringify(p)}`);
   }
 }
@@ -131,6 +135,7 @@ if (cmd === 'paths') {
   for (const p of PATHS) {
     const ok = p.endsWith('/') ? entries.some((e) => e.type === 'tree' && e.path === p.slice(0, -1)) : files.some((e) => e.path === p);
     if (!ok) fail(`extract: ${commit} has no ${p}`);
+    if (p.endsWith('/') && !files.some((e) => e.path.startsWith(p))) fail(`extract: ${commit} has no files under ${p}`);
   }
   for (const e of files) {
     if (!SEGMENTED.test(e.path)) fail(`extract: refusing file name ${JSON.stringify(e.path)}`);
