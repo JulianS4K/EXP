@@ -11,6 +11,8 @@
 //       every vendored file is a regular, non-executable file.
 //   node scripts/vendor-marketplaces.mjs paths
 //       Prints PATHS, one per line (used by scripts/sync-marketplaces.sh).
+//   node scripts/vendor-marketplaces.mjs extract --git-dir <dir> --commit <sha> --out <dir>
+//       Writes one upstream commit's vendored files from git blobs (sync).
 //   node scripts/vendor-marketplaces.mjs stamp --commit <sha>
 //       Used by scripts/sync-marketplaces.sh after copying a new commit in.
 //
@@ -19,7 +21,8 @@
 // that; a re-stamp without a sync shows up as a manifest change with no
 // matching upstream commit.
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { posix } from 'node:path';
 
 const MANIFEST = 'vendor/exos-marketplaces.json';
@@ -44,17 +47,23 @@ export const PATHS = [
   'src/lib/marketplace/transferStock.test.ts',
 ];
 const PREFIXES = ['supabase/functions/_shared/marketplace/', 'docs/marketplace/', 'src/lib/marketplace/'];
+// src/lib/marketplace/ also holds Exos-owned files (resale gate, channel
+// splits), so only entries strictly below it may be vendored.
+const MIXED = 'src/lib/marketplace/';
 
 function fail(msg) {
   console.error(msg);
   process.exit(1);
 }
-// Every path stays inside the vendored areas: relative, no '..', no dot
-// segments, under one of PREFIXES.
+// Every path is plain ASCII segments (letters, digits, '.', '_', '-'; no
+// segment starts with '.'), sits under one of PREFIXES (strictly below MIXED)
+// and is unique.
+const SEGMENTED = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*\/?$/;
+if (new Set(PATHS).size !== PATHS.length) fail('vendor-marketplaces: PATHS has a duplicate');
 for (const p of PATHS) {
-  const segs = p.replace(/\/$/, '').split('/');
-  if (p.startsWith('/') || segs.some((s) => s === '' || s === '.' || s === '..' || s.startsWith('.'))
-    || !PREFIXES.some((x) => p.startsWith(x))) fail(`vendor-marketplaces: bad path ${p}`);
+  if (!SEGMENTED.test(p) || p.split('/').includes('..') || !PREFIXES.some((x) => p.startsWith(x) && (p.length > x.length || x !== MIXED))) {
+    fail(`vendor-marketplaces: bad path ${JSON.stringify(p)}`);
+  }
 }
 
 // Walk without following links; anything but a directory or a regular,
@@ -79,6 +88,7 @@ function filesOf(paths) {
       return walk(q);
     }
     if (!st.isFile()) fail(`vendor-marketplaces: ${q} is not a regular file`);
+    if (st.mode & 0o111) fail(`vendor-marketplaces: ${q} is executable; vendored files must not be`);
     return [q];
   }).sort();
 }
@@ -94,6 +104,41 @@ const arg = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1
 
 if (cmd === 'paths') {
   console.log(PATHS.join('\n'));
+} else if (cmd === 'extract') {
+  // Write the vendored files of one upstream commit into --out, straight
+  // from git's blobs: no checkout, so no symlinks, no .gitattributes
+  // filters or eol rewriting, and the bytes are exactly the commit's.
+  // Refuses, before writing anything, any entry at, inside or above a
+  // vendored path that is not a plain 100644 file or a tree (symlink
+  // 120000, executable 100755, submodule 160000), any dot-named entry, and
+  // a vendored path missing from the commit.
+  const gitDir = arg('--git-dir'); const commit = arg('--commit'); const out = arg('--out');
+  if (!gitDir || !/^[0-9a-f]{40}$/.test(commit ?? '') || !out) {
+    console.error('usage: extract --git-dir <dir> --commit <40-hex sha> --out <dir>');
+    process.exit(2);
+  }
+  const git = (...a) => execFileSync('git', ['--git-dir', gitDir, ...a], { maxBuffer: 1 << 30 });
+  const roots = PATHS.map((p) => p.replace(/\/$/, ''));
+  const near = (f) => roots.some((p) => f === p || f.startsWith(p + '/') || p.startsWith(f + '/'));
+  const inside = (f) => PATHS.some((p) => (p.endsWith('/') ? f.startsWith(p) : f === p));
+  const entries = git('ls-tree', '-r', '-t', '-z', '--full-tree', commit).toString('utf8').split('\0').filter(Boolean)
+    .map((e) => { const m = /^(\d{6}) (\w+) ([0-9a-f]{40})\t([\s\S]*)$/.exec(e); if (!m) fail(`extract: unreadable tree entry ${JSON.stringify(e)}`); return { mode: m[1], type: m[2], oid: m[3], path: m[4] }; })
+    .filter((e) => near(e.path));
+  const bad = entries.filter((e) => !((e.mode === '100644' && e.type === 'blob') || (e.mode === '040000' && e.type === 'tree'))
+    || e.path.split('/').some((s) => s.startsWith('.')));
+  if (bad.length) fail(`extract: refusing ${commit}, it holds a symlink, executable, submodule or dot entry at or above a vendored path:\n` + bad.slice(0, 5).map((e) => `  ${e.mode} ${JSON.stringify(e.path)}`).join('\n'));
+  const files = entries.filter((e) => e.type === 'blob' && inside(e.path));
+  for (const p of PATHS) {
+    const ok = p.endsWith('/') ? entries.some((e) => e.type === 'tree' && e.path === p.slice(0, -1)) : files.some((e) => e.path === p);
+    if (!ok) fail(`extract: ${commit} has no ${p}`);
+  }
+  for (const e of files) {
+    if (!SEGMENTED.test(e.path)) fail(`extract: refusing file name ${JSON.stringify(e.path)}`);
+    const dest = posix.join(out, e.path);
+    mkdirSync(posix.dirname(dest), { recursive: true });
+    writeFileSync(dest, git('cat-file', 'blob', e.oid), { mode: 0o644 });
+  }
+  console.log(`extracted ${files.length} files from ${commit.slice(0, 7)}`);
 } else if (cmd === 'stamp') {
   const commit = arg('--commit');
   if (!/^[0-9a-f]{40}$/.test(commit ?? '')) {
@@ -117,6 +162,6 @@ if (cmd === 'paths') {
   }
   console.log(`vendored marketplace layer matches ${m.repo}@${m.commit.slice(0, 7)} (${fp.files} files)`);
 } else {
-  console.error('usage: node scripts/vendor-marketplaces.mjs check | paths | stamp --commit <sha>');
+  console.error('usage: node scripts/vendor-marketplaces.mjs check | paths | stamp --commit <sha> | extract --git-dir <dir> --commit <sha> --out <dir>');
   process.exit(2);
 }
