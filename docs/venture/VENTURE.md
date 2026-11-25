@@ -4,10 +4,10 @@ Stage: 1 Idea
 
 Set up 2026-11-25 from the existing docs and prod data. Exos was built
 before any recorded validation (see Founder overrides). Walking the gates
-against what exists, Gate 1 is the first one the evidence does not pass:
-budget, kill criteria and the 12-month target are not written anywhere.
-Fields marked *(proposed)* are Claude's drafts from the docs. The founder
-confirms or replaces them at Gate 1.
+against what exists, Gate 1 was the first one the evidence did not pass:
+budget, kill criteria and the 12-month target were not written anywhere.
+The founder set them on 2026-11-25. Fields still marked *(proposed)* are
+drafts from the docs that the founder has not changed.
 
 ## One-liner
 
@@ -50,20 +50,19 @@ distribution.
 
 ## Success in 12 months
 
-*(proposed, from the docs/gtm-nyc.md day-90 targets; the founder sets the
-real one)* 25 active NYC organizers (at least one paid event in the last 30
-days), 60% or more running a second event within 60 days. The north star
-is monthly GMV from repeat NYC organizers.
+By 2027-11-25: 25 active NYC organizers (at least one paid event in the
+last 30 days), and 60% or more of them running a second event within 60
+days (founder, 2026-11-25). The north star is monthly GMV from repeat NYC
+organizers.
 
 ## Budget
 
-Not recorded. Founder to give hours per week, cash at risk and a review
-date.
+Part-time: up to about 15 hours a week · under $10k cash at risk · review
+2027-05-31 (founder, 2026-11-25).
 
 ## Kill criteria
 
-*(proposed by Claude 2026-11-25; not agreed. The founder confirms, edits or
-replaces them at Gate 1)*
+Agreed by the founder 2026-11-25.
 
 1. Fewer than 6 of 10 NYC promoters interviewed changed or complained about
    their ticketing setup in the last 6 months, by 2026-12-23.
@@ -90,6 +89,11 @@ replaces them at Gate 1)*
   no fee on events of 150 capacity or less
   (supabase/functions/_shared/platformFee.ts). In the open stack (#137 and
   up): 2%, no fee under 150 capacity.
+
+- **New product scope pauses until Gate 2 is `Go`** (founder, 2026-11-25)
+  — Exos was built without validation, so the next evidence has to come
+  from promoters, not from more features. Security, reliability and
+  go-live work continue. Rules out new features until then.
 
 ## Founder overrides
 

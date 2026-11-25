@@ -16,10 +16,14 @@ records the diff.
   The product is built; prod shows no outside organizer yet (RESEARCH.md).
 - Weakest assumption: that NYC promoters will switch from Posh, DICE or
   Eventbrite at all. No promoter has been interviewed.
-- Open: founder answers Gate 1: hours per week, cash at risk, review date,
-  12-month target, and confirms or replaces the three proposed kill
-  criteria; then run Gate 1.
-- Open: founder decides whether new product scope pauses until Gate 2
-  (validation) passes, or records an override to keep building.
-- Open: phase 2: set the validation bar in VENTURE.md first, then 5–10
-  problem interviews with NYC promoters (Growth's four leads are a start).
+- Founder set the budget (part-time, ~15 h/week, under $10k, review
+  2027-05-31) and the 12-month target (25 active organizers, 60% repeat, by
+  2027-11-25), and agreed the three kill criteria. Decided: new product
+  scope pauses until Gate 2 is `Go`.
+- Gate 1 put to the founder (recommendation `Go`); no decision given yet.
+  Challenge left: a part-time budget against a plan (docs/gtm-nyc.md) that
+  assumes 25 organizers in 90 days and event-night support Thu–Sun.
+- Open: founder decides Gate 1 (Go, Pivot, Park or Kill).
+- Open: on `Go`, phase 2: set the validation bar in VENTURE.md first, then
+  10 problem interviews with NYC promoters by 2026-12-23 (kill criterion 1;
+  Growth's four leads are a start).
